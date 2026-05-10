@@ -164,7 +164,10 @@ class StubHermesRuntimeService implements HermesRuntimeService
             return ['I checked the latest calendar event and changed its start time to '.$event->starts_at->format('Y-m-d H:i').'.', $events];
         }
 
-        $hasExplicitAction = preg_match('/(?:add|create|make)\s+(?:a\s+)?task\b/i', $content) || str_contains($normalized, 'remind me') || str_contains($normalized, 'schedule');
+        $hasExplicitAction = preg_match('/(?:add|create|make)\s+(?:a\s+)?task\b/i', $content)
+            || str_contains($normalized, 'remind me')
+            || str_contains($normalized, 'schedule')
+            || preg_match('/(?:add|create|make)\s+.+?\s+(?:to|on)\s+(?:my\s+)?calendar\b/i', $content);
 
         if ((str_contains($normalized, 'plan my day') && ! $hasExplicitAction) || (str_contains($normalized, 'dashboard') && str_contains($normalized, 'what you did'))) {
             return $this->planDemoDay($session);
@@ -208,9 +211,10 @@ class StubHermesRuntimeService implements HermesRuntimeService
             ], 'reminders.create', 'succeeded'));
         }
 
+        $createdCalendarEvent = null;
         if (preg_match('/schedule\s+([^;\.]+?)(?:\s+tomorrow)?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i', $content, $matches)) {
             $startsAt = $this->demoDateTimeFromText($content, (int) $matches[2], $matches[3] ?? null, $matches[4] ?? null);
-            $calendarEvent = CalendarEvent::create([
+            $createdCalendarEvent = CalendarEvent::create([
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'title' => trim($matches[1]),
@@ -221,14 +225,45 @@ class StubHermesRuntimeService implements HermesRuntimeService
             ]);
 
             $events->push($this->recordEvent($session, 'assistant.calendar_event.created', [
-                'calendar_event_id' => $calendarEvent->id,
-                'title' => $calendarEvent->title,
-                'starts_at' => $calendarEvent->starts_at->toIso8601String(),
+                'calendar_event_id' => $createdCalendarEvent->id,
+                'title' => $createdCalendarEvent->title,
+                'starts_at' => $createdCalendarEvent->starts_at->toIso8601String(),
+            ], 'calendar.create', 'succeeded'));
+        }
+
+        if (preg_match('/(?:please\s+)?(?:add|create|make)\s+(.+?)\s+(?:to|on)\s+(?:my\s+)?calendar\s+from\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|to|–|—)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i', $content, $matches)) {
+            $startMeridiem = $matches[4] ?: ($matches[7] ?? null);
+            $startsAt = $this->demoDateTimeFromText($content, (int) $matches[2], $matches[3] ?? null, $startMeridiem);
+            $endsAt = $this->demoDateTimeFromText($content, (int) $matches[5], $matches[6] ?? null, $matches[7] ?? $startMeridiem);
+
+            if ($endsAt->lessThanOrEqualTo($startsAt)) {
+                $endsAt = $endsAt->addDay();
+            }
+
+            $createdCalendarEvent = CalendarEvent::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'title' => trim($matches[1]),
+                'starts_at' => $startsAt,
+                'ends_at' => $endsAt,
+                'status' => 'scheduled',
+                'metadata' => ['created_by' => 'local_demo_loop'],
+            ]);
+
+            $events->push($this->recordEvent($session, 'assistant.calendar_event.created', [
+                'calendar_event_id' => $createdCalendarEvent->id,
+                'title' => $createdCalendarEvent->title,
+                'starts_at' => $createdCalendarEvent->starts_at->toIso8601String(),
+                'ends_at' => $createdCalendarEvent->ends_at->toIso8601String(),
             ], 'calendar.create', 'succeeded'));
         }
 
         if ($createdTask && $events->count() === 1) {
             return ['Created task: '.$createdTask->title.'.', $events];
+        }
+
+        if ($createdCalendarEvent && $events->count() === 1) {
+            return ['Added calendar event: '.$createdCalendarEvent->title.' from '.$createdCalendarEvent->starts_at->format('H:i').' to '.$createdCalendarEvent->ends_at->format('H:i').'.', $events];
         }
 
         return ['I checked this session and changed tasks, reminders, and calendar events. I recorded each action in the activity feed.', $events];

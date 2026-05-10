@@ -100,6 +100,34 @@ class HermesDemoLoopTest extends TestCase
             ->assertJsonFragment(['title' => 'call the plumber tomorrow']);
     }
 
+    public function test_chat_understands_calendar_range_phrasing_and_persists_visible_event(): void
+    {
+        $token = $this->apiToken();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Simulator calendar creation',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Please add workout to my calendar from 6pm-7pm',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.role', 'assistant')
+            ->assertJsonPath('data.assistant_message.content', 'Added calendar event: workout from 18:00 to 19:00.')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created'])
+            ->assertSee('workout', false);
+
+        $event = CalendarEvent::firstWhere('title', 'workout');
+        $this->assertNotNull($event);
+        $this->assertSame($sessionId, $event->conversation_session_id);
+        $this->assertSame('scheduled', $event->status);
+        $this->assertSame('18:00', $event->starts_at->format('H:i'));
+        $this->assertSame('19:00', $event->ends_at->format('H:i'));
+
+        $this->withToken($token)->getJson('/api/calendar-events')
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'workout']);
+    }
+
     public function test_demo_artisan_command_exercises_domain_activity_and_blocker_flow(): void
     {
         $this->artisan('hermes-bean:demo --reset')
