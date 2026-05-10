@@ -17,7 +17,8 @@ void main() {
             expect(request.body, {
               'name': 'Bean User',
               'email': 'bean@example.com',
-              'password': 'secret123',
+              'password': 'secret123456',
+              'password_confirmation': 'secret123456',
             });
             return HermesApiResponse(
               201,
@@ -73,7 +74,7 @@ void main() {
       final auth = await client.register(
         name: 'Bean User',
         email: 'bean@example.com',
-        password: 'secret123',
+        password: 'secret123456',
       );
       expect(auth.token, 'register-token');
       expect(client.bearerToken, 'register-token');

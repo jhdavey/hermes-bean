@@ -25,11 +25,17 @@ class HermesApiClient {
     required String name,
     required String email,
     required String password,
+    String? passwordConfirmation,
   }) async {
     final data = await _sendJson(
       'POST',
       '/auth/register',
-      body: {'name': name, 'email': email, 'password': password},
+      body: {
+        'name': name,
+        'email': email,
+        'password': password,
+        'password_confirmation': passwordConfirmation ?? password,
+      },
       authenticated: false,
     );
     return _rememberAuth(HermesAuthResult.fromJson(_expectMap(data['data'])));
