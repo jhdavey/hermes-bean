@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\ConversationSession;
+use App\Services\HermesRuntimeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -11,7 +13,9 @@ class HermesRuntimeApiTest extends TestCase
 
     public function test_runtime_can_start_resume_and_send_messages(): void
     {
-        $sessionId = $this->postJson('/api/assistant/sessions', [
+        $token = $this->apiToken();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Kitchen remodel',
             'metadata' => ['source' => 'feature-test'],
         ])->assertCreated()
@@ -19,12 +23,12 @@ class HermesRuntimeApiTest extends TestCase
             ->assertJsonPath('data.title', 'Kitchen remodel')
             ->json('data.id');
 
-        $this->getJson("/api/assistant/sessions/{$sessionId}")
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}")
             ->assertOk()
             ->assertJsonPath('data.id', $sessionId)
             ->assertJsonPath('data.status', 'active');
 
-        $this->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'What should I do first?',
         ])->assertCreated()
             ->assertJsonPath('data.session.id', $sessionId)
@@ -47,16 +51,18 @@ class HermesRuntimeApiTest extends TestCase
 
     public function test_runtime_exposes_explicit_ordered_progress_events_contract(): void
     {
-        $sessionId = $this->postJson('/api/assistant/sessions', [
+        $token = $this->apiToken();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Progress contract',
         ])->assertCreated()->json('data.id');
 
-        $this->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Add task Follow up with Sarah.',
         ])->assertCreated();
 
-        $session = \App\Models\ConversationSession::findOrFail($sessionId);
-        $events = $this->app->make(\App\Services\HermesRuntimeService::class)->progressEvents($session);
+        $session = ConversationSession::findOrFail($sessionId);
+        $events = $this->app->make(HermesRuntimeService::class)->progressEvents($session);
 
         $this->assertSame([
             'runtime.session_started',
@@ -66,7 +72,7 @@ class HermesRuntimeApiTest extends TestCase
             'runtime.message_completed',
         ], $events->pluck('event_type')->all());
 
-        $this->getJson("/api/assistant/sessions/{$sessionId}/events")
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/events")
             ->assertOk()
             ->assertJsonPath('data.0.event_type', 'runtime.session_started')
             ->assertJsonPath('data.4.event_type', 'runtime.message_completed');
@@ -74,12 +80,14 @@ class HermesRuntimeApiTest extends TestCase
 
     public function test_runtime_fails_safe_to_blocker_for_unsupported_real_invocation(): void
     {
-        $sessionId = $this->postJson('/api/assistant/sessions', [
+        $token = $this->apiToken();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Real Hermes request',
             'runtime_mode' => 'external',
         ])->assertCreated()->json('data.id');
 
-        $this->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Use real Hermes to book an appointment',
         ])->assertAccepted()
             ->assertJsonPath('data.session.status', 'blocked')

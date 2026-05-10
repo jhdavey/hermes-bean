@@ -17,11 +17,13 @@ class HermesDemoLoopTest extends TestCase
 
     public function test_chat_demo_loop_creates_and_updates_domain_records_with_visible_grounding(): void
     {
-        $sessionId = $this->postJson('/api/assistant/sessions', [
+        $token = $this->apiToken();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'HB-6 local demo',
         ])->assertCreated()->json('data.id');
 
-        $this->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Demo: add task Replace air filter; remind me tomorrow to take out bins; schedule dentist tomorrow at 3pm.',
         ])->assertCreated()
             ->assertJsonPath('data.assistant_message.role', 'assistant')
@@ -47,7 +49,7 @@ class HermesDemoLoopTest extends TestCase
             'status' => 'scheduled',
         ]);
 
-        $this->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Move that to tomorrow at 4pm.',
         ])->assertCreated()
             ->assertSee('I checked the latest calendar event and changed its start time', false);
@@ -58,14 +60,14 @@ class HermesDemoLoopTest extends TestCase
         ]);
         $this->assertTrue(CalendarEvent::firstWhere('title', 'dentist')->starts_at->format('H:i') === '16:00');
 
-        $this->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'What did you just schedule?',
         ])->assertCreated()
             ->assertSee('dentist', false)
             ->assertSee('16:00', false)
             ->assertSee('I checked the latest calendar event', false);
 
-        $this->getJson("/api/assistant/sessions/{$sessionId}/events")
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/events")
             ->assertOk()
             ->assertJsonFragment(['event_type' => 'assistant.calendar_event.updated']);
     }

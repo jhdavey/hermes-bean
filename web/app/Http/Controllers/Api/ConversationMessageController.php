@@ -12,14 +12,16 @@ class ConversationMessageController extends Controller
 {
     public function __construct(private readonly HermesRuntimeService $runtime) {}
 
-    public function store(Request $request, ConversationSession $session): JsonResponse
+    public function store(Request $request, string $session): JsonResponse
     {
+        $ownedSession = ConversationSession::where('user_id', $request->user()->id)->findOrFail($session);
+
         $data = $request->validate([
             'content' => ['required', 'string'],
             'metadata' => ['nullable', 'array'],
         ]);
 
-        $result = $this->runtime->sendMessage($session, $data['content'], $data['metadata'] ?? []);
+        $result = $this->runtime->sendMessage($ownedSession, $data['content'], $data['metadata'] ?? []);
 
         return response()->json(['data' => $result], $result['status'] === 'blocked' ? 202 : 201);
     }

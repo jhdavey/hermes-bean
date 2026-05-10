@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class CalendarEvent extends Model
 {
-    protected $fillable = ['conversation_session_id', 'title', 'description', 'location', 'starts_at', 'ends_at', 'status', 'metadata'];
+    protected $fillable = ['user_id', 'conversation_session_id', 'title', 'description', 'location', 'starts_at', 'ends_at', 'status', 'metadata'];
 
     protected function casts(): array
     {

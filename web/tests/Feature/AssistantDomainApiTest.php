@@ -11,7 +11,9 @@ class AssistantDomainApiTest extends TestCase
 
     public function test_personal_assistant_domain_resources_can_be_created_via_api(): void
     {
-        $taskResponse = $this->postJson('/api/tasks', [
+        $token = $this->apiToken();
+
+        $taskResponse = $this->withToken($token)->postJson('/api/tasks', [
             'title' => 'Replace air filter',
             'type' => 'maintenance',
             'status' => 'open',
@@ -22,18 +24,18 @@ class AssistantDomainApiTest extends TestCase
         $taskResponse->assertJsonPath('data.type', 'maintenance')
             ->assertJsonPath('data.status', 'open');
 
-        $this->postJson('/api/tasks', [
+        $this->withToken($token)->postJson('/api/tasks', [
             'title' => 'Invalid task type',
             'type' => 'errand',
         ])->assertUnprocessable();
 
-        $this->postJson('/api/reminders', [
+        $this->withToken($token)->postJson('/api/reminders', [
             'title' => 'Take out bins',
             'remind_at' => '2026-05-11T18:30:00Z',
         ])->assertCreated()
             ->assertJsonPath('data.title', 'Take out bins');
 
-        $this->postJson('/api/calendar-events', [
+        $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Dentist',
             'starts_at' => '2026-05-14T15:00:00Z',
             'ends_at' => '2026-05-14T16:00:00Z',
@@ -41,21 +43,21 @@ class AssistantDomainApiTest extends TestCase
         ])->assertCreated()
             ->assertJsonPath('data.location', 'Main Street');
 
-        $this->postJson('/api/approvals', [
+        $this->withToken($token)->postJson('/api/approvals', [
             'title' => 'Confirm booking',
             'status' => 'pending',
             'payload' => ['provider' => 'stub'],
         ])->assertCreated()
             ->assertJsonPath('data.status', 'pending');
 
-        $this->postJson('/api/blockers', [
+        $this->withToken($token)->postJson('/api/blockers', [
             'reason' => 'Needs user credentials',
             'status' => 'open',
             'context' => ['service' => 'calendar'],
         ])->assertCreated()
             ->assertJsonPath('data.reason', 'Needs user credentials');
 
-        $this->postJson('/api/scheduler-jobs', [
+        $this->withToken($token)->postJson('/api/scheduler-jobs', [
             'name' => 'daily-review',
             'status' => 'queued',
             'scheduled_for' => '2026-05-11T07:00:00Z',
@@ -73,15 +75,17 @@ class AssistantDomainApiTest extends TestCase
 
     public function test_activity_events_can_be_polled_for_a_session(): void
     {
-        $sessionId = $this->postJson('/api/assistant/sessions', [
+        $token = $this->apiToken();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Morning planning',
         ])->assertCreated()->json('data.id');
 
-        $this->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Plan my day',
         ])->assertCreated();
 
-        $this->getJson("/api/assistant/sessions/{$sessionId}/events")
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/events")
             ->assertOk()
             ->assertJsonPath('data.0.event_type', 'runtime.session_started')
             ->assertJsonFragment(['event_type' => 'runtime.message_received'])

@@ -19,6 +19,7 @@ class StubHermesRuntimeService implements HermesRuntimeService
     {
         return DB::transaction(function () use ($attributes): ConversationSession {
             $session = ConversationSession::create([
+                'user_id' => $attributes['user_id'] ?? auth()->id(),
                 'title' => $attributes['title'] ?? null,
                 'status' => 'active',
                 'runtime_mode' => $attributes['runtime_mode'] ?? 'stub',
@@ -52,6 +53,7 @@ class StubHermesRuntimeService implements HermesRuntimeService
     {
         return DB::transaction(function () use ($session, $content, $metadata): array {
             $userMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'user',
                 'content' => $content,
@@ -64,6 +66,7 @@ class StubHermesRuntimeService implements HermesRuntimeService
 
             if ($session->runtime_mode !== 'stub') {
                 $blocker = Blocker::create([
+                    'user_id' => $session->user_id,
                     'conversation_session_id' => $session->id,
                     'reason' => 'External Hermes invocation is not configured. User approval or operator setup is required before continuing.',
                     'status' => 'open',
@@ -97,6 +100,7 @@ class StubHermesRuntimeService implements HermesRuntimeService
             ], 'local_stub_runtime', 'succeeded');
 
             $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'assistant',
                 'content' => $assistantContent,
@@ -166,6 +170,7 @@ class StubHermesRuntimeService implements HermesRuntimeService
 
         if (preg_match('/add task\s+([^;\.]+)/i', $content, $matches)) {
             $task = Task::create([
+                'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'title' => trim($matches[1]),
                 'type' => 'todo',
@@ -181,6 +186,7 @@ class StubHermesRuntimeService implements HermesRuntimeService
 
         if (preg_match('/remind me tomorrow to\s+([^;\.]+)/i', $content, $matches)) {
             $reminder = Reminder::create([
+                'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'title' => trim($matches[1]),
                 'remind_at' => now()->addDay()->setTime(9, 0),
@@ -198,6 +204,7 @@ class StubHermesRuntimeService implements HermesRuntimeService
         if (preg_match('/schedule\s+([^;\.]+?)(?:\s+tomorrow)?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i', $content, $matches)) {
             $startsAt = $this->demoDateTimeFromText($content, (int) $matches[2], $matches[3] ?? null, $matches[4] ?? null);
             $calendarEvent = CalendarEvent::create([
+                'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'title' => trim($matches[1]),
                 'starts_at' => $startsAt,
@@ -234,6 +241,7 @@ class StubHermesRuntimeService implements HermesRuntimeService
     private function recordEvent(ConversationSession $session, string $type, array $payload = [], ?string $toolName = null, string $status = 'recorded'): ActivityEvent
     {
         return ActivityEvent::create([
+            'user_id' => $session->user_id,
             'conversation_session_id' => $session->id,
             'event_type' => $type,
             'tool_name' => $toolName,

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ConversationSession extends Model
 {
-    protected $fillable = ['title', 'status', 'runtime_mode', 'metadata', 'last_activity_at'];
+    protected $fillable = ['user_id', 'title', 'status', 'runtime_mode', 'metadata', 'last_activity_at'];
 
     protected function casts(): array
     {

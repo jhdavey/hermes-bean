@@ -7,9 +7,11 @@ use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
 use App\Models\Reminder;
 use App\Models\Task;
+use App\Models\User;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -27,7 +29,13 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
         DB::table('conversation_sessions')->delete();
     }
 
+    $user = User::firstOrCreate(
+        ['email' => 'demo@hermes-bean.local'],
+        ['name' => 'Hermes Bean Demo', 'password' => Hash::make(str()->random(32))]
+    );
+
     $session = ConversationSession::create([
+        'user_id' => $user->id,
         'title' => 'HB-6 local demo loop',
         'status' => 'active',
         'runtime_mode' => 'stub',
@@ -36,12 +44,14 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
     ]);
 
     ActivityEvent::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'event_type' => 'runtime.session_started',
         'payload' => ['runtime_mode' => 'stub', 'source' => 'demo_command'],
     ]);
 
     $task = Task::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'title' => 'Replace air filter',
         'type' => 'todo',
@@ -49,6 +59,7 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
         'metadata' => ['surface' => 'chat'],
     ]);
     ActivityEvent::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'event_type' => 'assistant.task.created',
         'tool_name' => 'tasks.create',
@@ -58,6 +69,7 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
     $this->line('Created task: '.$task->title);
 
     $reminder = Reminder::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'title' => 'take out bins',
         'remind_at' => now()->addDay()->setTime(9, 0),
@@ -65,6 +77,7 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
         'metadata' => ['surface' => 'chat'],
     ]);
     ActivityEvent::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'event_type' => 'assistant.reminder.created',
         'tool_name' => 'reminders.create',
@@ -74,6 +87,7 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
     $this->line('Created reminder: '.$reminder->title);
 
     $calendarEvent = CalendarEvent::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'title' => 'dentist',
         'starts_at' => now()->addDay()->setTime(15, 0),
@@ -82,6 +96,7 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
         'metadata' => ['surface' => 'chat'],
     ]);
     ActivityEvent::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'event_type' => 'assistant.calendar_event.created',
         'tool_name' => 'calendar.create',
@@ -91,12 +106,14 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
     $this->line('Created calendar event: '.$calendarEvent->title);
 
     $blocker = Blocker::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'reason' => 'Needs user approval before contacting an external calendar provider.',
         'status' => 'open',
         'context' => ['requested_action' => 'external_calendar_sync'],
     ]);
     ActivityEvent::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'event_type' => 'runtime.blocked',
         'status' => 'blocked',
@@ -105,6 +122,7 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
     $this->line('Opened blocker: '.$blocker->reason);
 
     $approval = Approval::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'title' => 'Approve external calendar sync',
         'status' => 'approved',
@@ -112,6 +130,7 @@ Artisan::command('hermes-bean:demo {--reset : Clear assistant demo records befor
     ]);
     $blocker->update(['status' => 'resolved']);
     ActivityEvent::create([
+        'user_id' => $user->id,
         'conversation_session_id' => $session->id,
         'event_type' => 'approval.resolved_blocker',
         'status' => 'succeeded',

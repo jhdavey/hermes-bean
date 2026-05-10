@@ -20,11 +20,15 @@ class ConversationSessionController extends Controller
             'metadata' => ['nullable', 'array'],
         ]);
 
+        $data['user_id'] = $request->user()->id;
+
         return response()->json(['data' => $this->runtime->startSession($data)], 201);
     }
 
-    public function show(ConversationSession $session): JsonResponse
+    public function show(Request $request, string $session): JsonResponse
     {
-        return response()->json(['data' => $this->runtime->resumeSession($session)]);
+        $ownedSession = ConversationSession::where('user_id', $request->user()->id)->findOrFail($session);
+
+        return response()->json(['data' => $this->runtime->resumeSession($ownedSession)]);
     }
 }

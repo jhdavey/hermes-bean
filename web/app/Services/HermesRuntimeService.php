@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ActivityEvent;
 use App\Models\ConversationSession;
 use Illuminate\Support\Collection;
 
@@ -12,7 +13,7 @@ interface HermesRuntimeService
     public function resumeSession(ConversationSession $session): ConversationSession;
 
     /**
-     * @return Collection<int, \App\Models\ActivityEvent>
+     * @return Collection<int, ActivityEvent>
      */
     public function progressEvents(ConversationSession $session): Collection;
 

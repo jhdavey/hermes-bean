@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class Approval extends Model
 {
-    protected $fillable = ['conversation_session_id', 'title', 'description', 'status', 'payload'];
+    protected $fillable = ['user_id', 'conversation_session_id', 'title', 'description', 'status', 'payload'];
 
     protected function casts(): array
     {
