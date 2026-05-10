@@ -9,12 +9,20 @@ void main() {
     'starts signed out, logs in, loads live data, sends chat, and exposes delete account',
     (WidgetTester tester) async {
       final api = _FakeHermesApiClient();
-      await tester.pumpWidget(HermesBeanApp(apiClient: api));
+      final tokenStore = _MemoryAuthTokenStore();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: tokenStore),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
       expect(find.byKey(const Key('show-register-mode')), findsOneWidget);
       expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
+      expect(find.byKey(const Key('remember-me-checkbox')), findsOneWidget);
+      expect(find.text('Remember me'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('remember-me-checkbox')));
+      await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('forgot-login-action')));
       await tester.pumpAndSettle();
@@ -78,7 +86,10 @@ void main() {
     'Hermes Bean command center renders chat, progress, surfaces, and approvals',
     (WidgetTester tester) async {
       await tester.pumpWidget(
-        HermesBeanApp(apiClient: _SignedInFakeHermesApiClient()),
+        HermesBeanApp(
+          apiClient: _SignedInFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -104,11 +115,40 @@ void main() {
     },
   );
 
+  testWidgets('remember me saves login token for future launches', (
+    WidgetTester tester,
+  ) async {
+    final api = _FakeHermesApiClient();
+    final tokenStore = _MemoryAuthTokenStore();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: tokenStore),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('auth-email')),
+      'bean@example.com',
+    );
+    await tester.enterText(
+      find.byKey(const Key('auth-password')),
+      'correct-horse-battery-staple',
+    );
+    await tester.tap(find.byKey(const Key('remember-me-checkbox')));
+    await tester.tap(find.byKey(const Key('auth-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Welcome, Bean User'), findsOneWidget);
+    expect(tokenStore.token, 'fake-token');
+  });
+
   testWidgets('uses old HeyBean green Material 3 styling indicators', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      HermesBeanApp(apiClient: _SignedInFakeHermesApiClient()),
+      HermesBeanApp(
+        apiClient: _SignedInFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -124,6 +164,23 @@ void main() {
     expect(find.byKey(const Key('green-glow-left')), findsOneWidget);
     expect(find.byKey(const Key('primary-chat-action')), findsOneWidget);
   });
+}
+
+class _MemoryAuthTokenStore implements AuthTokenStore {
+  String? token;
+
+  @override
+  Future<String?> loadToken() async => token;
+
+  @override
+  Future<void> saveToken(String token) async {
+    this.token = token;
+  }
+
+  @override
+  Future<void> clearToken() async {
+    token = null;
+  }
 }
 
 class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {

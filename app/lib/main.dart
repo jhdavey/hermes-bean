@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'hermes_api_client.dart';
 
@@ -7,11 +8,46 @@ void main() {
   runApp(HermesBeanApp());
 }
 
+abstract class AuthTokenStore {
+  Future<String?> loadToken();
+  Future<void> saveToken(String token);
+  Future<void> clearToken();
+}
+
+class SharedPreferencesAuthTokenStore implements AuthTokenStore {
+  const SharedPreferencesAuthTokenStore();
+
+  static const String _tokenKey = 'auth_token';
+
+  @override
+  Future<String?> loadToken() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getString(_tokenKey);
+  }
+
+  @override
+  Future<void> saveToken(String token) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_tokenKey, token);
+  }
+
+  @override
+  Future<void> clearToken() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_tokenKey);
+  }
+}
+
 class HermesBeanApp extends StatelessWidget {
-  HermesBeanApp({super.key, HermesApiClient? apiClient})
-    : apiClient = apiClient ?? HermesApiClient();
+  HermesBeanApp({
+    super.key,
+    HermesApiClient? apiClient,
+    AuthTokenStore? tokenStore,
+  }) : apiClient = apiClient ?? HermesApiClient(),
+       tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore();
 
   final HermesApiClient apiClient;
+  final AuthTokenStore tokenStore;
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +55,7 @@ class HermesBeanApp extends StatelessWidget {
       title: 'Hermes Bean',
       debugShowCheckedModeBanner: false,
       theme: HeyBeanTheme.lightTheme,
-      home: CommandCenterShell(apiClient: apiClient),
+      home: CommandCenterShell(apiClient: apiClient, tokenStore: tokenStore),
     );
   }
 }
@@ -124,9 +160,14 @@ class HeyBeanTheme {
 enum _AuthPhase { loading, signedOut, signedIn }
 
 class CommandCenterShell extends StatefulWidget {
-  const CommandCenterShell({super.key, required this.apiClient});
+  const CommandCenterShell({
+    super.key,
+    required this.apiClient,
+    required this.tokenStore,
+  });
 
   final HermesApiClient apiClient;
+  final AuthTokenStore tokenStore;
 
   @override
   State<CommandCenterShell> createState() => _CommandCenterShellState();
@@ -157,6 +198,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   }
 
   Future<void> _bootstrap() async {
+    widget.apiClient.bearerToken ??= await widget.tokenStore.loadToken();
     if (widget.apiClient.bearerToken == null) {
       setState(() => _phase = _AuthPhase.signedOut);
       return;
@@ -224,7 +266,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
-  Future<void> _login(String email, String password) async {
+  Future<void> _login(
+    String email,
+    String password, {
+    required bool rememberMe,
+  }) async {
     setState(() {
       _busy = true;
       _error = null;
@@ -234,6 +280,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         email: email,
         password: password,
       );
+      if (rememberMe) {
+        await widget.tokenStore.saveToken(auth.token);
+      } else {
+        await widget.tokenStore.clearToken();
+      }
       await _loadSignedIn(knownUser: auth.user);
     } catch (error) {
       setState(() => _error = 'Sign in failed: $error');
@@ -333,6 +384,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           _phase = _AuthPhase.signedOut;
           _user = null;
         });
+        await widget.tokenStore.clearToken();
       }
     }
   }
@@ -425,7 +477,12 @@ class _SignedOutScreen extends StatefulWidget {
     this.error,
   });
 
-  final Future<void> Function(String email, String password) onLogin;
+  final Future<void> Function(
+    String email,
+    String password, {
+    required bool rememberMe,
+  })
+  onLogin;
   final Future<void> Function(String name, String email, String password)
   onRegister;
   final bool busy;
@@ -440,6 +497,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _registerMode = false;
+  bool _rememberMe = false;
 
   @override
   void dispose() {
@@ -475,7 +533,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
     if (_registerMode) {
       return widget.onRegister(_name.text, _email.text, _password.text);
     }
-    return widget.onLogin(_email.text, _password.text);
+    return widget.onLogin(_email.text, _password.text, rememberMe: _rememberMe);
   }
 
   @override
@@ -531,6 +589,20 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                   helperText: _registerMode ? 'Minimum 12 characters' : null,
                 ),
               ),
+              if (!_registerMode) ...[
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  key: const Key('remember-me-checkbox'),
+                  value: _rememberMe,
+                  onChanged: widget.busy
+                      ? null
+                      : (value) => setState(() => _rememberMe = value ?? false),
+                  title: const Text('Remember me'),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  dense: true,
+                ),
+              ],
               if (widget.error != null) ...[
                 const SizedBox(height: 12),
                 Text(
