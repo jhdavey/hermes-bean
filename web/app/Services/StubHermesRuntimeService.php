@@ -10,6 +10,7 @@ use App\Models\ConversationSession;
 use App\Models\Reminder;
 use App\Models\Task;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class StubHermesRuntimeService implements HermesRuntimeService
@@ -40,6 +41,11 @@ class StubHermesRuntimeService implements HermesRuntimeService
         $this->recordEvent($session, 'runtime.session_resumed');
 
         return $session->refresh();
+    }
+
+    public function progressEvents(ConversationSession $session): Collection
+    {
+        return $session->activityEvents()->orderBy('id')->get();
     }
 
     public function sendMessage(ConversationSession $session, string $content, array $metadata = []): array

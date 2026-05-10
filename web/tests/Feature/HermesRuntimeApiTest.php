@@ -45,6 +45,33 @@ class HermesRuntimeApiTest extends TestCase
         ]);
     }
 
+    public function test_runtime_exposes_explicit_ordered_progress_events_contract(): void
+    {
+        $sessionId = $this->postJson('/api/assistant/sessions', [
+            'title' => 'Progress contract',
+        ])->assertCreated()->json('data.id');
+
+        $this->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Add task Follow up with Sarah.',
+        ])->assertCreated();
+
+        $session = \App\Models\ConversationSession::findOrFail($sessionId);
+        $events = $this->app->make(\App\Services\HermesRuntimeService::class)->progressEvents($session);
+
+        $this->assertSame([
+            'runtime.session_started',
+            'runtime.message_received',
+            'assistant.task.created',
+            'tool.executed',
+            'runtime.message_completed',
+        ], $events->pluck('event_type')->all());
+
+        $this->getJson("/api/assistant/sessions/{$sessionId}/events")
+            ->assertOk()
+            ->assertJsonPath('data.0.event_type', 'runtime.session_started')
+            ->assertJsonPath('data.4.event_type', 'runtime.message_completed');
+    }
+
     public function test_runtime_fails_safe_to_blocker_for_unsupported_real_invocation(): void
     {
         $sessionId = $this->postJson('/api/assistant/sessions', [
