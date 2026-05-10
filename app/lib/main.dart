@@ -261,11 +261,19 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final refreshedEvents = await widget.apiClient
           .pollActivityEvents(session.id)
           .catchError((_) => result.events);
+      final refreshedResources = await Future.wait<Object>([
+        widget.apiClient.listTasks(),
+        widget.apiClient.listReminders(),
+        widget.apiClient.listCalendarEvents(),
+      ]).catchError((_) => <Object>[_tasks, _reminders, _calendar]);
       if (!mounted) return;
       setState(() {
         if (result.assistantMessage != null) {
           _messages.add(result.assistantMessage!);
         }
+        _tasks = refreshedResources[0] as List<HermesTask>;
+        _reminders = refreshedResources[1] as List<HermesReminder>;
+        _calendar = refreshedResources[2] as List<HermesCalendarEvent>;
         _events = _mergeEvents(result.events, refreshedEvents);
       });
     } catch (error) {

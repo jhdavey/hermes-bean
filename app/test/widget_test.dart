@@ -40,6 +40,9 @@ void main() {
       expect(api.sentMessages, ['Schedule dentist tomorrow at 3pm']);
       expect(find.text('Done — I updated your day.'), findsOneWidget);
       expect(find.text('assistant.calendar_event.created'), findsOneWidget);
+      expect(find.text('Generated follow-up task'), findsOneWidget);
+      expect(find.text('Stretch and hydrate'), findsOneWidget);
+      expect(find.text('Updated focus block'), findsWidgets);
 
       expect(find.byKey(const Key('delete-account-action')), findsOneWidget);
       await tester.ensureVisible(
@@ -116,6 +119,7 @@ class _FakeHermesApiClient extends HermesApiClient {
 
   final sentMessages = <String>[];
   bool deletedAccount = false;
+  bool plannedToday = false;
 
   @override
   Future<HermesAuthResult> login({
@@ -141,19 +145,39 @@ class _FakeHermesApiClient extends HermesApiClient {
   }) async => const HermesSession(id: 42, status: 'active', title: 'Today');
 
   @override
-  Future<List<HermesTask>> listTasks() async => const [
-    HermesTask(id: 1, title: 'Plan launch', status: 'open'),
-  ];
+  Future<List<HermesTask>> listTasks() async => plannedToday
+      ? const [
+          HermesTask(id: 10, title: 'Generated follow-up task', status: 'open'),
+        ]
+      : const [HermesTask(id: 1, title: 'Plan launch', status: 'open')];
 
   @override
-  Future<List<HermesReminder>> listReminders() async => const [
-    HermesReminder(id: 2, title: 'Stand up', dueAt: '9:00 AM'),
-  ];
+  Future<List<HermesReminder>> listReminders() async => plannedToday
+      ? const [
+          HermesReminder(
+            id: 20,
+            title: 'Stretch and hydrate',
+            dueAt: '10:00 AM',
+          ),
+        ]
+      : const [HermesReminder(id: 2, title: 'Stand up', dueAt: '9:00 AM')];
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => const [
-    HermesCalendarEvent(id: 3, title: 'Design review', startsAt: '2:30 PM'),
-  ];
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => plannedToday
+      ? const [
+          HermesCalendarEvent(
+            id: 30,
+            title: 'Updated focus block',
+            startsAt: '2:30 PM',
+          ),
+        ]
+      : const [
+          HermesCalendarEvent(
+            id: 3,
+            title: 'Design review',
+            startsAt: '2:30 PM',
+          ),
+        ];
 
   @override
   Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>
@@ -166,6 +190,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     Map<String, Object?>? metadata,
   }) async {
     sentMessages.add(content);
+    plannedToday = true;
     return const HermesMessageResult(
       status: 'completed',
       session: HermesSession(id: 42, status: 'active', title: 'Today'),

@@ -16,6 +16,31 @@ use Illuminate\Validation\Rule;
 
 class DomainResourceController extends Controller
 {
+    public function listTasks(Request $request): JsonResponse
+    {
+        return $this->listed(Task::where('user_id', $request->user()->id)->orderBy('id')->get());
+    }
+
+    public function listReminders(Request $request): JsonResponse
+    {
+        return $this->listed(Reminder::where('user_id', $request->user()->id)->orderBy('remind_at')->orderBy('id')->get());
+    }
+
+    public function listCalendarEvents(Request $request): JsonResponse
+    {
+        return $this->listed(CalendarEvent::where('user_id', $request->user()->id)->orderBy('starts_at')->orderBy('id')->get());
+    }
+
+    public function listApprovals(Request $request): JsonResponse
+    {
+        return $this->listed(Approval::where('user_id', $request->user()->id)->orderBy('id')->get());
+    }
+
+    public function listBlockers(Request $request): JsonResponse
+    {
+        return $this->listed(Blocker::where('user_id', $request->user()->id)->orderBy('id')->get());
+    }
+
     public function storeTask(Request $request): JsonResponse
     {
         return $this->created(Task::create($this->owned($request, $request->validate([
@@ -87,6 +112,11 @@ class DomainResourceController extends Controller
             'payload' => ['nullable', 'array'],
             'last_error' => ['nullable', 'string'],
         ]))));
+    }
+
+    private function listed(mixed $models): JsonResponse
+    {
+        return response()->json(['data' => $models]);
     }
 
     private function created(Model $model): JsonResponse

@@ -68,6 +68,11 @@ class HermesApiClient {
     return _expectMap(data['data']);
   }
 
+  Future<HermesTodaySummary> todaySummary() async {
+    final data = await _sendJson('GET', '/today');
+    return HermesTodaySummary.fromJson(_expectMap(data['data']));
+  }
+
   Future<List<HermesTask>> listTasks() async {
     final data = await _sendJson('GET', '/tasks');
     return _expectList(
@@ -258,6 +263,51 @@ class HermesUser {
   );
 }
 
+class HermesTodaySummary {
+  const HermesTodaySummary({
+    this.session,
+    required this.tasks,
+    required this.reminders,
+    required this.calendarEvents,
+    required this.activityEvents,
+    required this.approvals,
+    required this.blockers,
+  });
+
+  final HermesSession? session;
+  final List<HermesTask> tasks;
+  final List<HermesReminder> reminders;
+  final List<HermesCalendarEvent> calendarEvents;
+  final List<HermesActivityEvent> activityEvents;
+  final List<HermesApproval> approvals;
+  final List<HermesBlocker> blockers;
+
+  factory HermesTodaySummary.fromJson(Map<String, Object?> json) =>
+      HermesTodaySummary(
+        session: json['session'] == null
+            ? null
+            : HermesSession.fromJson(_expectMap(json['session'])),
+        tasks: _expectList(
+          json['tasks'],
+        ).map((task) => HermesTask.fromJson(_expectMap(task))).toList(),
+        reminders: _expectList(json['reminders'])
+            .map((reminder) => HermesReminder.fromJson(_expectMap(reminder)))
+            .toList(),
+        calendarEvents: _expectList(json['calendar_events'])
+            .map((event) => HermesCalendarEvent.fromJson(_expectMap(event)))
+            .toList(),
+        activityEvents: _expectList(json['activity_events'])
+            .map((event) => HermesActivityEvent.fromJson(_expectMap(event)))
+            .toList(),
+        approvals: _expectList(json['approvals'])
+            .map((approval) => HermesApproval.fromJson(_expectMap(approval)))
+            .toList(),
+        blockers: _expectList(json['blockers'])
+            .map((blocker) => HermesBlocker.fromJson(_expectMap(blocker)))
+            .toList(),
+      );
+}
+
 class HermesTask {
   const HermesTask({required this.id, required this.title, this.status});
 
@@ -282,7 +332,7 @@ class HermesReminder {
   factory HermesReminder.fromJson(Map<String, Object?> json) => HermesReminder(
     id: _expectInt(json['id']),
     title: _readTitle(json),
-    dueAt: (json['due_at'] ?? json['dueAt']) as String?,
+    dueAt: (json['due_at'] ?? json['remind_at'] ?? json['dueAt']) as String?,
   );
 }
 
@@ -384,6 +434,34 @@ class HermesActivityEvent {
         eventType: _expectString(json['event_type']),
         status: json['status'] as String?,
       );
+}
+
+class HermesApproval {
+  const HermesApproval({required this.id, required this.title, this.status});
+
+  final int id;
+  final String title;
+  final String? status;
+
+  factory HermesApproval.fromJson(Map<String, Object?> json) => HermesApproval(
+    id: _expectInt(json['id']),
+    title: _readTitle(json),
+    status: json['status'] as String?,
+  );
+}
+
+class HermesBlocker {
+  const HermesBlocker({required this.id, required this.reason, this.status});
+
+  final int id;
+  final String reason;
+  final String? status;
+
+  factory HermesBlocker.fromJson(Map<String, Object?> json) => HermesBlocker(
+    id: _expectInt(json['id']),
+    reason: _expectString(json['reason']),
+    status: json['status'] as String?,
+  );
 }
 
 String _readTitle(Map<String, Object?> json) =>

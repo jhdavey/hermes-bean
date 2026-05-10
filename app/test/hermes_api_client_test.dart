@@ -148,6 +148,62 @@ void main() {
     expect((await client.listCalendarEvents()).single.title, 'Design review');
   });
 
+  test('loads today summary with live surfaces and blockers', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        expect(request.method, 'GET');
+        expect(request.path, '/today');
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'session': {'id': 42, 'status': 'active', 'title': 'Today'},
+              'tasks': [
+                {'id': 1, 'title': 'Review launch notes', 'status': 'open'},
+              ],
+              'reminders': [
+                {
+                  'id': 2,
+                  'title': 'pack laptop',
+                  'remind_at': '2026-05-11T09:00:00Z',
+                },
+              ],
+              'calendar_events': [
+                {
+                  'id': 3,
+                  'title': 'Focus block',
+                  'starts_at': '2026-05-11T09:00:00Z',
+                },
+              ],
+              'activity_events': [
+                {'id': 4, 'event_type': 'assistant.task.created'},
+              ],
+              'approvals': [
+                {'id': 5, 'title': 'Approve draft reply', 'status': 'pending'},
+              ],
+              'blockers': [
+                {'id': 6, 'reason': 'Connect calendar', 'status': 'open'},
+              ],
+              'counts': {'tasks': 1},
+            },
+          }),
+        );
+      },
+    );
+
+    final today = await client.todaySummary();
+    expect(today.session?.id, 42);
+    expect(today.tasks.single.title, 'Review launch notes');
+    expect(today.reminders.single.title, 'pack laptop');
+    expect(today.calendarEvents.single.title, 'Focus block');
+    expect(today.activityEvents.single.eventType, 'assistant.task.created');
+    expect(today.approvals.single.title, 'Approve draft reply');
+    expect(today.blockers.single.reason, 'Connect calendar');
+  });
+
   test(
     'uses injected transport to start, resume, send, and poll activity',
     () async {
