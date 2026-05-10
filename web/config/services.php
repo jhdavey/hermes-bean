@@ -35,4 +35,13 @@ return [
         ],
     ],
 
+    'hermes_runtime' => [
+        'mode' => env('HERMES_RUNTIME_MODE', 'stub'),
+        'cli_path' => env('HERMES_CLI_PATH'),
+        'timeout' => (float) env('HERMES_CLI_TIMEOUT', 30),
+        'workdir' => env('HERMES_CLI_WORKDIR'),
+        'profile' => env('HERMES_CLI_PROFILE'),
+        'environment' => [],
+    ],
+
 ];
