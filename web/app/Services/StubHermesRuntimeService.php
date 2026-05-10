@@ -164,12 +164,13 @@ class StubHermesRuntimeService implements HermesRuntimeService
             return ['I checked the latest calendar event and changed its start time to '.$event->starts_at->format('Y-m-d H:i').'.', $events];
         }
 
-        if (! str_contains($normalized, 'add task') && ! str_contains($normalized, 'remind me') && ! str_contains($normalized, 'schedule')) {
+        if (! preg_match('/(?:add|create|make)\s+(?:a\s+)?task\b/i', $content) && ! str_contains($normalized, 'remind me') && ! str_contains($normalized, 'schedule')) {
             return ['Stub Hermes runtime received: '.$content, $events];
         }
 
-        if (preg_match('/add task\s+([^;\.]+)/i', $content, $matches)) {
-            $task = Task::create([
+        $createdTask = null;
+        if (preg_match('/(?:add|create|make)\s+(?:a\s+)?task(?:\s+to|\s+for|:)?\s+([^;\.]+)/i', $content, $matches)) {
+            $createdTask = Task::create([
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'title' => trim($matches[1]),
@@ -179,8 +180,8 @@ class StubHermesRuntimeService implements HermesRuntimeService
             ]);
 
             $events->push($this->recordEvent($session, 'assistant.task.created', [
-                'task_id' => $task->id,
-                'title' => $task->title,
+                'task_id' => $createdTask->id,
+                'title' => $createdTask->title,
             ], 'tasks.create', 'succeeded'));
         }
 
@@ -218,6 +219,10 @@ class StubHermesRuntimeService implements HermesRuntimeService
                 'title' => $calendarEvent->title,
                 'starts_at' => $calendarEvent->starts_at->toIso8601String(),
             ], 'calendar.create', 'succeeded'));
+        }
+
+        if ($createdTask && $events->count() === 1) {
+            return ['Created task: '.$createdTask->title.'.', $events];
         }
 
         return ['I checked this session and changed tasks, reminders, and calendar events. I recorded each action in the activity feed.', $events];

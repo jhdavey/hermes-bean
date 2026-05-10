@@ -72,6 +72,34 @@ class HermesDemoLoopTest extends TestCase
             ->assertJsonFragment(['event_type' => 'assistant.calendar_event.updated']);
     }
 
+    public function test_chat_understands_create_task_phrasing_and_persists_visible_task(): void
+    {
+        $token = $this->apiToken();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Simulator task creation',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a task to call the plumber tomorrow.',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.role', 'assistant')
+            ->assertJsonPath('data.assistant_message.content', 'Created task: call the plumber tomorrow.')
+            ->assertJsonFragment(['event_type' => 'assistant.task.created'])
+            ->assertSee('call the plumber tomorrow', false);
+
+        $this->assertDatabaseHas('tasks', [
+            'conversation_session_id' => $sessionId,
+            'title' => 'call the plumber tomorrow',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        $this->withToken($token)->getJson('/api/tasks')
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'call the plumber tomorrow']);
+    }
+
     public function test_demo_artisan_command_exercises_domain_activity_and_blocker_flow(): void
     {
         $this->artisan('hermes-bean:demo --reset')
