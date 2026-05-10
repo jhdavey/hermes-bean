@@ -10,12 +10,84 @@ typedef HermesApiTransport =
     Future<HermesApiResponse> Function(HermesApiRequest request);
 
 class HermesApiClient {
-  HermesApiClient({Uri? baseUrl, HermesApiTransport? transport})
-    : baseUrl = baseUrl ?? Uri.parse(hermesApiBaseUrl),
-      _transport = transport ?? _defaultTransport;
+  HermesApiClient({
+    Uri? baseUrl,
+    HermesApiTransport? transport,
+    this.bearerToken,
+  }) : baseUrl = baseUrl ?? Uri.parse(hermesApiBaseUrl),
+       _transport = transport ?? _defaultTransport;
 
   final Uri baseUrl;
   final HermesApiTransport _transport;
+  String? bearerToken;
+
+  Future<HermesAuthResult> register({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/auth/register',
+      body: {'name': name, 'email': email, 'password': password},
+      authenticated: false,
+    );
+    return _rememberAuth(HermesAuthResult.fromJson(_expectMap(data['data'])));
+  }
+
+  Future<HermesAuthResult> login({
+    required String email,
+    required String password,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/auth/login',
+      body: {'email': email, 'password': password},
+      authenticated: false,
+    );
+    return _rememberAuth(HermesAuthResult.fromJson(_expectMap(data['data'])));
+  }
+
+  Future<void> logout() async {
+    await _sendJson('POST', '/auth/logout');
+    bearerToken = null;
+  }
+
+  Future<HermesUser> me() async {
+    final data = await _sendJson('GET', '/auth/me');
+    return HermesUser.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> deleteAccount() async {
+    await _sendJson('DELETE', '/account');
+    bearerToken = null;
+  }
+
+  Future<Map<String, Object?>> exportAccount() async {
+    final data = await _sendJson('GET', '/account/export');
+    return _expectMap(data['data']);
+  }
+
+  Future<List<HermesTask>> listTasks() async {
+    final data = await _sendJson('GET', '/tasks');
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesTask.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<List<HermesReminder>> listReminders() async {
+    final data = await _sendJson('GET', '/reminders');
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesReminder.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final data = await _sendJson('GET', '/calendar-events');
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesCalendarEvent.fromJson(_expectMap(json))).toList();
+  }
 
   Future<HermesSession> startSession({
     String? title,
@@ -62,15 +134,27 @@ class HermesApiClient {
     ).map((json) => HermesActivityEvent.fromJson(_expectMap(json))).toList();
   }
 
+  HermesAuthResult _rememberAuth(HermesAuthResult result) {
+    bearerToken = result.token;
+    return result;
+  }
+
   Future<Map<String, Object?>> _sendJson(
     String method,
     String path, {
     Map<String, Object?>? body,
+    bool authenticated = true,
   }) async {
+    final headers = <String, String>{'Accept': 'application/json'};
+    if (body != null) headers['Content-Type'] = 'application/json';
+    if (authenticated && bearerToken != null) {
+      headers['Authorization'] = 'Bearer $bearerToken';
+    }
     final request = HermesApiRequest(
       method: method,
       uri: _resolveApiPath(path),
       path: path.startsWith('/') ? path : '/$path',
+      headers: headers,
       body: body,
     );
     final response = await _transport(request);
@@ -102,14 +186,8 @@ class HermesApiClient {
     final client = HttpClient();
     try {
       final ioRequest = await client.openUrl(request.method, request.uri);
-      ioRequest.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      if (request.body != null) {
-        ioRequest.headers.set(
-          HttpHeaders.contentTypeHeader,
-          'application/json',
-        );
-        ioRequest.write(jsonEncode(request.body));
-      }
+      request.headers.forEach(ioRequest.headers.set);
+      if (request.body != null) ioRequest.write(jsonEncode(request.body));
 
       final ioResponse = await ioRequest.close();
       final responseBody = await utf8.decoder.bind(ioResponse).join();
@@ -125,12 +203,14 @@ class HermesApiRequest {
     required this.method,
     required this.uri,
     required this.path,
+    this.headers = const {},
     this.body,
   });
 
   final String method;
   final Uri uri;
   final String path;
+  final Map<String, String> headers;
   final Map<String, Object?>? body;
 }
 
@@ -149,6 +229,80 @@ class HermesApiException implements Exception {
 
   @override
   String toString() => 'HermesApiException($statusCode): $body';
+}
+
+class HermesAuthResult {
+  const HermesAuthResult({required this.token, required this.user});
+
+  final String token;
+  final HermesUser user;
+
+  factory HermesAuthResult.fromJson(Map<String, Object?> json) =>
+      HermesAuthResult(
+        token: _expectString(json['token']),
+        user: HermesUser.fromJson(_expectMap(json['user'])),
+      );
+}
+
+class HermesUser {
+  const HermesUser({required this.id, required this.name, required this.email});
+
+  final int id;
+  final String name;
+  final String email;
+
+  factory HermesUser.fromJson(Map<String, Object?> json) => HermesUser(
+    id: _expectInt(json['id']),
+    name: _expectString(json['name']),
+    email: _expectString(json['email']),
+  );
+}
+
+class HermesTask {
+  const HermesTask({required this.id, required this.title, this.status});
+
+  final int id;
+  final String title;
+  final String? status;
+
+  factory HermesTask.fromJson(Map<String, Object?> json) => HermesTask(
+    id: _expectInt(json['id']),
+    title: _readTitle(json),
+    status: json['status'] as String?,
+  );
+}
+
+class HermesReminder {
+  const HermesReminder({required this.id, required this.title, this.dueAt});
+
+  final int id;
+  final String title;
+  final String? dueAt;
+
+  factory HermesReminder.fromJson(Map<String, Object?> json) => HermesReminder(
+    id: _expectInt(json['id']),
+    title: _readTitle(json),
+    dueAt: (json['due_at'] ?? json['dueAt']) as String?,
+  );
+}
+
+class HermesCalendarEvent {
+  const HermesCalendarEvent({
+    required this.id,
+    required this.title,
+    this.startsAt,
+  });
+
+  final int id;
+  final String title;
+  final String? startsAt;
+
+  factory HermesCalendarEvent.fromJson(Map<String, Object?> json) =>
+      HermesCalendarEvent(
+        id: _expectInt(json['id']),
+        title: _readTitle(json),
+        startsAt: (json['starts_at'] ?? json['startsAt']) as String?,
+      );
 }
 
 class HermesSession {
@@ -231,6 +385,9 @@ class HermesActivityEvent {
         status: json['status'] as String?,
       );
 }
+
+String _readTitle(Map<String, Object?> json) =>
+    (json['title'] ?? json['name'] ?? json['content'] ?? 'Untitled').toString();
 
 Map<String, Object?> _expectMap(Object? value) {
   if (value is Map<String, Object?>) return value;

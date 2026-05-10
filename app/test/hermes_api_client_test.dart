@@ -5,6 +5,150 @@ import 'package:hermes_bean_app/hermes_api_client.dart';
 
 void main() {
   test(
+    'registers, logs in, sends bearer token, exports, and deletes account',
+    () async {
+      final requests = <HermesApiRequest>[];
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        transport: (request) async {
+          requests.add(request);
+
+          if (request.method == 'POST' && request.path == '/auth/register') {
+            expect(request.body, {
+              'name': 'Bean User',
+              'email': 'bean@example.com',
+              'password': 'secret123',
+            });
+            return HermesApiResponse(
+              201,
+              jsonEncode({
+                'data': {
+                  'token': 'register-token',
+                  'user': {
+                    'id': 9,
+                    'name': 'Bean User',
+                    'email': 'bean@example.com',
+                  },
+                },
+              }),
+            );
+          }
+
+          if (request.method == 'GET' && request.path == '/auth/me') {
+            expect(request.headers['Authorization'], 'Bearer register-token');
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {
+                  'id': 9,
+                  'name': 'Bean User',
+                  'email': 'bean@example.com',
+                },
+              }),
+            );
+          }
+
+          if (request.method == 'GET' && request.path == '/account/export') {
+            expect(request.headers['Authorization'], 'Bearer register-token');
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {
+                  'user': {'email': 'bean@example.com'},
+                  'tasks': [],
+                },
+              }),
+            );
+          }
+
+          if (request.method == 'DELETE' && request.path == '/account') {
+            expect(request.headers['Authorization'], 'Bearer register-token');
+            return const HermesApiResponse(204, '');
+          }
+
+          fail('Unexpected request: ${request.method} ${request.path}');
+        },
+      );
+
+      final auth = await client.register(
+        name: 'Bean User',
+        email: 'bean@example.com',
+        password: 'secret123',
+      );
+      expect(auth.token, 'register-token');
+      expect(client.bearerToken, 'register-token');
+
+      final me = await client.me();
+      expect(me.email, 'bean@example.com');
+
+      final export = await client.exportAccount();
+      expect(export['tasks'], isEmpty);
+
+      await client.deleteAccount();
+      expect(client.bearerToken, isNull);
+      expect(requests.map((r) => '${r.method} ${r.path}'), [
+        'POST /auth/register',
+        'GET /auth/me',
+        'GET /account/export',
+        'DELETE /account',
+      ]);
+    },
+  );
+
+  test('lists live assistant resources with bearer token', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        if (request.path == '/tasks') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': [
+                {'id': 1, 'title': 'Plan launch', 'status': 'open'},
+              ],
+            }),
+          );
+        }
+        if (request.path == '/reminders') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': [
+                {
+                  'id': 2,
+                  'title': 'Stand up',
+                  'due_at': '2026-05-10T09:00:00Z',
+                },
+              ],
+            }),
+          );
+        }
+        if (request.path == '/calendar-events') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': [
+                {
+                  'id': 3,
+                  'title': 'Design review',
+                  'starts_at': '2026-05-10T14:30:00Z',
+                },
+              ],
+            }),
+          );
+        }
+        fail('Unexpected request: ${request.path}');
+      },
+    );
+
+    expect((await client.listTasks()).single.title, 'Plan launch');
+    expect((await client.listReminders()).single.title, 'Stand up');
+    expect((await client.listCalendarEvents()).single.title, 'Design review');
+  });
+
+  test(
     'uses injected transport to start, resume, send, and poll activity',
     () async {
       final requests = <HermesApiRequest>[];
