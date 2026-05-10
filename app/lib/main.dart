@@ -242,6 +242,25 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
+  Future<void> _register(String name, String email, String password) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final auth = await widget.apiClient.register(
+        name: name,
+        email: email,
+        password: password,
+      );
+      await _loadSignedIn(knownUser: auth.user);
+    } catch (error) {
+      setState(() => _error = 'Registration failed: $error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _sendChat(String content) async {
     final trimmed = content.trim();
     final session = _session;
@@ -373,7 +392,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_phase == _AuthPhase.signedOut) {
-      return _SignedOutScreen(onSubmit: _login, busy: _busy, error: _error);
+      return _SignedOutScreen(
+        onLogin: _login,
+        onRegister: _register,
+        busy: _busy,
+        error: _error,
+      );
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -395,12 +419,15 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
 
 class _SignedOutScreen extends StatefulWidget {
   const _SignedOutScreen({
-    required this.onSubmit,
+    required this.onLogin,
+    required this.onRegister,
     required this.busy,
     this.error,
   });
 
-  final Future<void> Function(String email, String password) onSubmit;
+  final Future<void> Function(String email, String password) onLogin;
+  final Future<void> Function(String name, String email, String password)
+  onRegister;
   final bool busy;
   final String? error;
 
@@ -409,18 +436,57 @@ class _SignedOutScreen extends StatefulWidget {
 }
 
 class _SignedOutScreenState extends State<_SignedOutScreen> {
+  final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  bool _registerMode = false;
 
   @override
   void dispose() {
+    _name.dispose();
     _email.dispose();
     _password.dispose();
     super.dispose();
   }
 
+  Future<void> _showForgotLoginDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Forgot login?'),
+        content: const Text(
+          'Password reset is not wired yet. For local testing, create a new test account from this screen with any email and a 12+ character password.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleMode() {
+    setState(() => _registerMode = !_registerMode);
+  }
+
+  Future<void> _submit() {
+    if (_registerMode) {
+      return widget.onRegister(_name.text, _email.text, _password.text);
+    }
+    return widget.onLogin(_email.text, _password.text);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final title = _registerMode
+        ? 'Create your Hermes Bean account'
+        : 'Sign in to Hermes Bean';
+    final subtitle = _registerMode
+        ? 'Use any test email and a 12+ character password'
+        : 'Live API-backed personal assistant';
+
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 440),
@@ -429,16 +495,28 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const _SectionTitle(
-                icon: Icons.lock_rounded,
-                title: 'Sign in to Hermes Bean',
-                subtitle: 'Live API-backed personal assistant',
+              _SectionTitle(
+                icon: _registerMode
+                    ? Icons.person_add_alt_1_rounded
+                    : Icons.lock_rounded,
+                title: title,
+                subtitle: subtitle,
               ),
               const SizedBox(height: 16),
+              if (_registerMode) ...[
+                TextField(
+                  key: const Key('auth-name'),
+                  controller: _name,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                ),
+                const SizedBox(height: 12),
+              ],
               TextField(
                 key: const Key('auth-email'),
                 controller: _email,
                 keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(labelText: 'Email'),
               ),
               const SizedBox(height: 12),
@@ -446,7 +524,12 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                 key: const Key('auth-password'),
                 controller: _password,
                 obscureText: true,
-                decoration: const InputDecoration(labelText: 'Password'),
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => widget.busy ? null : _submit(),
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  helperText: _registerMode ? 'Minimum 12 characters' : null,
+                ),
               ),
               if (widget.error != null) ...[
                 const SizedBox(height: 12),
@@ -458,10 +541,37 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
               const SizedBox(height: 16),
               FilledButton(
                 key: const Key('auth-submit'),
-                onPressed: widget.busy
-                    ? null
-                    : () => widget.onSubmit(_email.text, _password.text),
-                child: Text(widget.busy ? 'Signing in…' : 'Sign in'),
+                onPressed: widget.busy ? null : _submit,
+                child: Text(
+                  widget.busy
+                      ? (_registerMode ? 'Creating account…' : 'Signing in…')
+                      : (_registerMode ? 'Create account' : 'Sign in'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  TextButton(
+                    key: Key(
+                      _registerMode ? 'show-login-mode' : 'show-register-mode',
+                    ),
+                    onPressed: widget.busy ? null : _toggleMode,
+                    child: Text(
+                      _registerMode
+                          ? 'Already have an account? Sign in'
+                          : 'Create an account',
+                    ),
+                  ),
+                  TextButton(
+                    key: const Key('forgot-login-action'),
+                    onPressed: widget.busy ? null : _showForgotLoginDialog,
+                    child: const Text('Forgot login?'),
+                  ),
+                ],
               ),
             ],
           ),

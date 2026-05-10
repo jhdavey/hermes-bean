@@ -13,13 +13,32 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
+      expect(find.byKey(const Key('show-register-mode')), findsOneWidget);
+      expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('forgot-login-action')));
+      await tester.pumpAndSettle();
+      expect(find.text('Forgot login?'), findsWidgets);
+      expect(
+        find.textContaining('Password reset is not wired yet'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('show-register-mode')));
+      await tester.pumpAndSettle();
+      expect(find.text('Create your Hermes Bean account'), findsOneWidget);
+      expect(find.byKey(const Key('auth-name')), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('auth-name')), 'Bean User');
       await tester.enterText(
         find.byKey(const Key('auth-email')),
         'bean@example.com',
       );
       await tester.enterText(
         find.byKey(const Key('auth-password')),
-        'secret123',
+        'correct-horse-battery-staple',
       );
       await tester.tap(find.byKey(const Key('auth-submit')));
       await tester.pumpAndSettle();
@@ -130,6 +149,20 @@ class _FakeHermesApiClient extends HermesApiClient {
     return const HermesAuthResult(
       token: 'fake-token',
       user: HermesUser(id: 1, name: 'Bean User', email: 'bean@example.com'),
+    );
+  }
+
+  @override
+  Future<HermesAuthResult> register({
+    required String name,
+    required String email,
+    required String password,
+    String? passwordConfirmation,
+  }) async {
+    bearerToken = 'fake-token';
+    return HermesAuthResult(
+      token: 'fake-token',
+      user: HermesUser(id: 1, name: name, email: email),
     );
   }
 
