@@ -14,7 +14,10 @@ class AuthenticateBearerToken
         $plainToken = $request->bearerToken();
 
         if (! $plainToken) {
-            return response()->json(['message' => 'Unauthenticated.'], 401);
+            return response()->json(['error' => [
+                'code' => 'unauthenticated',
+                'message' => 'Unauthenticated.',
+            ]], 401);
         }
 
         $accessToken = PersonalAccessToken::query()
@@ -26,7 +29,10 @@ class AuthenticateBearerToken
             ->first();
 
         if (! $accessToken?->user) {
-            return response()->json(['message' => 'Unauthenticated.'], 401);
+            return response()->json(['error' => [
+                'code' => 'unauthenticated',
+                'message' => 'Unauthenticated.',
+            ]], 401);
         }
 
         $accessToken->forceFill(['last_used_at' => now()])->save();
