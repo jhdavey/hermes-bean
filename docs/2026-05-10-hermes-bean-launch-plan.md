@@ -117,7 +117,7 @@ Hermes Agent runtime
 
 ### HB-1 Scaffold monorepo
 
-Status: in progress
+Status: done
 
 - Create root repo at `/Users/joshuadavey/development/projects/hermes-bean`.
 - Create Flutter app in `app/`.
@@ -129,7 +129,7 @@ Status: in progress
 
 ### HB-2 Laravel domain foundation
 
-Status: backlog
+Status: done
 
 - Conversation sessions/messages.
 - Activity/tool event log.
@@ -142,7 +142,7 @@ Status: backlog
 
 ### HB-3 Hermes runtime adapter
 
-Status: backlog
+Status: done
 
 - `HermesRuntimeService` boundary.
 - Start/resume session contract.
@@ -153,7 +153,7 @@ Status: backlog
 
 ### HB-4 Flutter command-center shell
 
-Status: backlog
+Status: done
 
 - Use the old HeyBean app styling: light green/natural palette, white and soft-green surfaces, rounded cards/inputs, subtle green background glows/gradients, Material 3 polish.
 - Chat screen with visible progress/action events.
@@ -164,7 +164,7 @@ Status: backlog
 
 ### HB-5 Perceived-intelligence evaluation harness
 
-Status: backlog
+Status: done
 
 - Prompt suite for personal assistant behavior.
 - Score generic vs action-taking responses.
@@ -173,7 +173,7 @@ Status: backlog
 
 ### HB-6 Local demo loop
 
-Status: backlog
+Status: done
 
 - Laravel + Flutter local demo.
 - Chat creates/updates tasks/reminders/calendar events.
