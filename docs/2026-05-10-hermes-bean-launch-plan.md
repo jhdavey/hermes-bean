@@ -155,7 +155,7 @@ Status: backlog
 
 Status: backlog
 
-- Premium simple assistant UI.
+- Use the old HeyBean app styling: light green/natural palette, white and soft-green surfaces, rounded cards/inputs, subtle green background glows/gradients, Material 3 polish.
 - Chat screen with visible progress/action events.
 - Today dashboard.
 - Tasks/reminders/calendar tabs.
@@ -181,6 +181,14 @@ Status: backlog
 - Approval/blocker flow works.
 - No project management surfaces exposed.
 
-## Open design assumption
+## Design direction
 
-No explicit visual style was provided in the creation request. Default style for MVP: polished, calm, consumer-friendly dark/neutral UI with warm accent color and visible “agent is working” progress states.
+Use the same visual direction as the old HeyBean Flutter app, especially `heybeanapp/lib/core/theme/app_theme.dart`:
+
+- light green/natural background palette (`#F8FBF6`, `#F1F7EE`, `#EAF2E6`)
+- white and soft-green surfaces
+- green primary/accent actions (`#16A34A`, `#15803D`)
+- rounded 12–16px inputs, buttons, dialogs, and cards
+- subtle green radial glows/background gradients
+- Material 3 polish with calm, friendly, consumer-assistant feel
+- visible Hermes agent progress/activity states throughout chat, Today, approvals, and Activity views

@@ -22,6 +22,10 @@ Included for MVP:
 - Scheduled/background jobs
 - Human approval/blocker states
 
+## Design direction
+
+Use the same visual style as the old HeyBean app: light green/natural background palette, white and soft-green surfaces, green primary actions, rounded cards/inputs, subtle green glow/gradient backgrounds, and Material 3 polish. The UI should make Hermes feel visibly active with progress/action/activity states rather than hiding work behind plain chatbot responses.
+
 Deferred until after MVP:
 
 - Project management/Kanban for end users
