@@ -164,7 +164,13 @@ class StubHermesRuntimeService implements HermesRuntimeService
             return ['I checked the latest calendar event and changed its start time to '.$event->starts_at->format('Y-m-d H:i').'.', $events];
         }
 
-        if (! preg_match('/(?:add|create|make)\s+(?:a\s+)?task\b/i', $content) && ! str_contains($normalized, 'remind me') && ! str_contains($normalized, 'schedule')) {
+        $hasExplicitAction = preg_match('/(?:add|create|make)\s+(?:a\s+)?task\b/i', $content) || str_contains($normalized, 'remind me') || str_contains($normalized, 'schedule');
+
+        if ((str_contains($normalized, 'plan my day') && ! $hasExplicitAction) || (str_contains($normalized, 'dashboard') && str_contains($normalized, 'what you did'))) {
+            return $this->planDemoDay($session);
+        }
+
+        if (! $hasExplicitAction) {
             return ['Stub Hermes runtime received: '.$content, $events];
         }
 
@@ -226,6 +232,71 @@ class StubHermesRuntimeService implements HermesRuntimeService
         }
 
         return ['I checked this session and changed tasks, reminders, and calendar events. I recorded each action in the activity feed.', $events];
+    }
+
+    private function planDemoDay(ConversationSession $session): array
+    {
+        $events = collect();
+        $source = ['created_by' => 'local_demo_planner'];
+
+        $deepWork = Task::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'title' => 'Pick the top priority for today',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->setTime(10, 0),
+            'metadata' => $source,
+        ]);
+        $events->push($this->recordEvent($session, 'assistant.task.created', [
+            'task_id' => $deepWork->id,
+            'title' => $deepWork->title,
+        ], 'tasks.create', 'succeeded'));
+
+        $followUp = Task::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'title' => 'Review and close one loose end',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->setTime(16, 30),
+            'metadata' => $source,
+        ]);
+        $events->push($this->recordEvent($session, 'assistant.task.created', [
+            'task_id' => $followUp->id,
+            'title' => $followUp->title,
+        ], 'tasks.create', 'succeeded'));
+
+        $reminder = Reminder::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'title' => 'Check the dashboard after the focus block',
+            'remind_at' => now()->setTime(11, 45),
+            'status' => 'scheduled',
+            'metadata' => $source,
+        ]);
+        $events->push($this->recordEvent($session, 'assistant.reminder.created', [
+            'reminder_id' => $reminder->id,
+            'title' => $reminder->title,
+            'remind_at' => $reminder->remind_at->toIso8601String(),
+        ], 'reminders.create', 'succeeded'));
+
+        $focusBlock = CalendarEvent::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'title' => 'Focus block',
+            'starts_at' => now()->setTime(10, 30),
+            'ends_at' => now()->setTime(11, 30),
+            'status' => 'scheduled',
+            'metadata' => $source,
+        ]);
+        $events->push($this->recordEvent($session, 'assistant.calendar_event.created', [
+            'calendar_event_id' => $focusBlock->id,
+            'title' => $focusBlock->title,
+            'starts_at' => $focusBlock->starts_at->toIso8601String(),
+        ], 'calendar.create', 'succeeded'));
+
+        return ['I planned your day and updated the dashboard: created 2 tasks, scheduled 1 reminder, and added 1 focus block. The activity feed records each change.', $events];
     }
 
     private function demoDateTimeFromText(string $content, int $hour, ?string $minute = null, ?string $meridiem = null): Carbon

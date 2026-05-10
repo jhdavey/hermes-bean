@@ -78,6 +78,30 @@ class HermesRuntimeApiTest extends TestCase
             ->assertJsonPath('data.4.event_type', 'runtime.message_completed');
     }
 
+    public function test_broad_planning_prompt_creates_dashboard_resources_instead_of_stub_echo(): void
+    {
+        $token = $this->apiToken();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Plan my day',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you plan my day and then update my dashboard with what you did?',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonMissing(['content' => 'Stub Hermes runtime received: Can you plan my day and then update my dashboard with what you did?'])
+            ->assertJsonFragment(['event_type' => 'assistant.task.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.reminder.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $this->withToken($token)->getJson('/api/today')
+            ->assertOk()
+            ->assertJsonCount(2, 'data.tasks')
+            ->assertJsonCount(1, 'data.reminders')
+            ->assertJsonCount(1, 'data.calendar_events');
+    }
+
     public function test_runtime_fails_safe_to_blocker_for_unsupported_real_invocation(): void
     {
         $token = $this->apiToken();
