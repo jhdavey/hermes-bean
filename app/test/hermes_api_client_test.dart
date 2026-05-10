@@ -4,6 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_bean_app/hermes_api_client.dart';
 
 void main() {
+  test('defaults to the production HeyBean API', () {
+    expect(hermesApiBaseUrl, 'https://heybean.org/api');
+    expect(HermesApiClient().baseUrl, Uri.parse('https://heybean.org/api'));
+  });
+
   test(
     'registers, logs in, sends bearer token, exports, and deletes account',
     () async {
