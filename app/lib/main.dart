@@ -446,6 +446,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                 ],
               ),
               body: SafeArea(child: _body()),
+              bottomNavigationBar: _phase == _AuthPhase.signedIn
+                  ? const _HeyBeanBottomMenu()
+                  : null,
             ),
           ],
         ),
@@ -466,7 +469,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       );
     }
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
       child: _CommandCenterContent(
         user: _user!,
         tasks: _tasks,
@@ -768,13 +771,13 @@ class _BrandHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Hermes Bean',
+            'HeyBean',
             style: Theme.of(
               context,
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           Text(
-            'Command center',
+            'Bean assistant',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: HeyBeanTheme.muted,
               fontWeight: FontWeight.w600,
@@ -817,9 +820,11 @@ class _HeroChatCardState extends State<_HeroChatCard> {
       children: [
         const _SectionTitle(
           icon: Icons.chat_bubble_rounded,
-          title: 'Hermes Bean',
-          subtitle: 'Chat-first planning for your day',
+          title: 'Bean',
+          subtitle: 'Chat-first command center for your household',
         ),
+        const SizedBox(height: 14),
+        const _QuickPromptRail(),
         const SizedBox(height: 18),
         for (final message in widget.messages) ...[
           _MessageBubble(
@@ -829,14 +834,41 @@ class _HeroChatCardState extends State<_HeroChatCard> {
           ),
           const SizedBox(height: 10),
         ],
-        TextField(
-          key: const Key('chat-input'),
-          controller: _controller,
-          decoration: InputDecoration(
-            hintText: 'Ask Hermes to plan, schedule, or follow up...',
-            suffixIcon: Padding(
-              padding: const EdgeInsets.all(6),
-              child: FilledButton(
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: HeyBeanTheme.surface2,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: HeyBeanTheme.border),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('chat-input'),
+                  controller: _controller,
+                  minLines: 1,
+                  maxLines: 4,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: widget.busy
+                      ? null
+                      : (text) {
+                          _controller.clear();
+                          widget.onSend(text);
+                        },
+                  decoration: const InputDecoration(
+                    hintText:
+                        'Ask Bean to create tasks, reminders, or calendar events...',
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
                 key: const Key('primary-chat-action'),
                 onPressed: widget.busy
                     ? null
@@ -847,12 +879,48 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                       },
                 child: const Icon(Icons.arrow_upward_rounded, size: 18),
               ),
-            ),
+            ],
           ),
         ),
       ],
     ),
   );
+}
+
+class _QuickPromptRail extends StatelessWidget {
+  const _QuickPromptRail();
+
+  @override
+  Widget build(BuildContext context) {
+    const prompts = <({IconData icon, String label})>[
+      (icon: Icons.today_rounded, label: 'Plan today'),
+      (icon: Icons.task_alt_rounded, label: 'Add task'),
+      (icon: Icons.notifications_active_rounded, label: 'Set reminder'),
+      (icon: Icons.calendar_month_rounded, label: 'Schedule event'),
+    ];
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final prompt in prompts)
+          Chip(
+            avatar: Icon(
+              prompt.icon,
+              size: 16,
+              color: HeyBeanTheme.accentStrong,
+            ),
+            label: Text(prompt.label),
+            backgroundColor: const Color(0x1416A34A),
+            side: const BorderSide(color: HeyBeanTheme.border),
+            labelStyle: const TextStyle(
+              color: HeyBeanTheme.text,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class _MessageBubble extends StatelessWidget {
@@ -951,10 +1019,7 @@ class _ApprovalBanner extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        FilledButton(
-          onPressed: () {},
-          child: const Text('Review'),
-        ),
+        FilledButton(onPressed: () {}, child: const Text('Review')),
       ],
     ),
   );
@@ -985,7 +1050,8 @@ class _ApprovalCard extends StatelessWidget {
           if (hasApprovals)
             for (final approval in approvals.take(3)) ...[
               _ApprovalListTile(approval: approval),
-              if (approval != approvals.take(3).last) const SizedBox(height: 10),
+              if (approval != approvals.take(3).last)
+                const SizedBox(height: 10),
             ]
           else
             Container(
@@ -1221,8 +1287,8 @@ class _AccountCard extends StatelessWidget {
       children: [
         const _SectionTitle(
           icon: Icons.settings_rounded,
-          title: 'Account settings',
-          subtitle: 'Privacy and App Store compliance',
+          title: 'Profile',
+          subtitle: 'Account and app settings',
         ),
         const SizedBox(height: 10),
         Text(user.email),
@@ -1338,6 +1404,145 @@ class _MiniSurface extends StatelessWidget {
         ),
       ],
     ),
+  );
+}
+
+class _HeyBeanBottomMenu extends StatelessWidget {
+  const _HeyBeanBottomMenu();
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final dockBottomPadding = bottomInset > 0 ? bottomInset + 2 : 6.0;
+
+    return SizedBox(
+      key: const Key('heybean-bottom-menu'),
+      height: 78 + dockBottomPadding,
+      child: Stack(
+        alignment: Alignment.topCenter,
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(
+            top: 22,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: HeyBeanTheme.surface.withValues(alpha: .94),
+                border: const Border(
+                  top: BorderSide(color: HeyBeanTheme.border),
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x1A020617),
+                    blurRadius: 18,
+                    offset: Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(10, 7, 10, dockBottomPadding),
+                child: const Row(
+                  children: [
+                    Expanded(
+                      child: _MenuIconButton(
+                        icon: Icons.today_rounded,
+                        label: 'Today',
+                        selected: true,
+                      ),
+                    ),
+                    Expanded(
+                      child: _MenuIconButton(
+                        icon: Icons.task_alt_rounded,
+                        label: 'Tasks',
+                      ),
+                    ),
+                    SizedBox(width: 84),
+                    Expanded(
+                      child: _MenuIconButton(
+                        icon: Icons.calendar_month_rounded,
+                        label: 'Calendar',
+                      ),
+                    ),
+                    Expanded(
+                      child: _MenuIconButton(
+                        icon: Icons.more_vert_rounded,
+                        label: 'More',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(top: 15, child: _BeanFab(selected: true)),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuIconButton extends StatelessWidget {
+  const _MenuIconButton({
+    required this.icon,
+    required this.label,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisAlignment: MainAxisAlignment.center,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        icon,
+        color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
+        size: 22,
+      ),
+      const SizedBox(height: 3),
+      Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
+          fontSize: 11,
+          fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+        ),
+      ),
+    ],
+  );
+}
+
+class _BeanFab extends StatelessWidget {
+  const _BeanFab({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('heybean-center-bean-button'),
+    width: 64,
+    height: 64,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF22C55E), Color(0xFF16A34A), Color(0xFF15803D)],
+      ),
+      border: Border.all(color: Colors.white, width: 4),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x3D16A34A),
+          blurRadius: 24,
+          offset: Offset(0, 10),
+        ),
+      ],
+    ),
+    child: const Icon(Icons.eco_rounded, color: Colors.white, size: 30),
   );
 }
 

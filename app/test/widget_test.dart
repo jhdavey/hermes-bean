@@ -61,7 +61,7 @@ void main() {
         find.byKey(const Key('chat-input')),
         'Schedule dentist tomorrow at 3pm',
       );
-      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pumpAndSettle();
 
       expect(api.sentMessages, ['Schedule dentist tomorrow at 3pm']);
@@ -93,10 +93,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Hermes Bean'), findsWidgets);
-      expect(find.text('Command center'), findsOneWidget);
+      expect(find.text('HeyBean'), findsWidgets);
+      expect(find.text('Bean assistant'), findsOneWidget);
       expect(
-        find.text('Ask Hermes to plan, schedule, or follow up...'),
+        find.text('Ask Bean to create tasks, reminders, or calendar events...'),
         findsOneWidget,
       );
       expect(find.text('Agent progress'), findsOneWidget);
@@ -163,6 +163,8 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const Key('green-glow-left')), findsOneWidget);
+    expect(find.byKey(const Key('heybean-bottom-menu')), findsOneWidget);
+    expect(find.byKey(const Key('heybean-center-bean-button')), findsOneWidget);
     expect(find.byKey(const Key('primary-chat-action')), findsOneWidget);
   });
 }
