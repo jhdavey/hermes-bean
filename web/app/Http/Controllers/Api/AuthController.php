@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ActivityEvent;
 use App\Models\Approval;
 use App\Models\Blocker;
+use App\Models\AgentProfile;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
 use App\Models\PersonalAccessToken;
@@ -13,6 +14,7 @@ use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\AgentProfileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +32,8 @@ class AuthController extends Controller
         ]);
 
         $user = User::create($data);
+        app(AgentProfileService::class)->ensureForUser($user);
+        $user->load('agentProfile');
 
         return response()->json(['data' => [
             'user' => $user,
@@ -50,6 +54,8 @@ class AuthController extends Controller
             return response()->json(['message' => 'Invalid credentials.'], 422);
         }
 
+        $user->loadMissing('agentProfile');
+
         return response()->json(['data' => [
             'user' => $user,
             'token' => $this->issueToken($user),
@@ -58,7 +64,9 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json(['data' => $request->user()]);
+        $user = $request->user()->loadMissing('agentProfile');
+
+        return response()->json(['data' => $user]);
     }
 
     public function logout(Request $request): JsonResponse
@@ -78,6 +86,7 @@ class AuthController extends Controller
 
         return response()->json(['data' => [
             'user' => $user,
+            'agent_profile' => AgentProfile::where('user_id', $user->id)->first(),
             'conversation_sessions' => ConversationSession::where('user_id', $user->id)->with(['messages', 'activityEvents', 'blockers'])->orderBy('id')->get(),
             'tasks' => Task::where('user_id', $user->id)->orderBy('id')->get(),
             'reminders' => Reminder::where('user_id', $user->id)->orderBy('id')->get(),

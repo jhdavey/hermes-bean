@@ -37,6 +37,10 @@ return [
 
     'hermes_runtime' => [
         'mode' => env('HERMES_RUNTIME_MODE', 'stub'),
+        'default_provider' => env('HERMES_DEFAULT_PROVIDER', 'openrouter'),
+        'default_model' => env('HERMES_DEFAULT_MODEL', 'gpt-5.5'),
+        'router_mode' => env('HERMES_ROUTER_MODE', 'fixed'),
+        'users_home' => env('HERMES_USERS_HOME', storage_path('app/hermes-users')),
         'cli_path' => env('HERMES_CLI_PATH'),
         'timeout' => (float) env('HERMES_CLI_TIMEOUT', 30),
         'workdir' => env('HERMES_CLI_WORKDIR'),

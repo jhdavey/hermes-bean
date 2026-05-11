@@ -101,7 +101,8 @@ void main() {
       );
       expect(find.text('Agent progress'), findsOneWidget);
       expect(find.text('Activity feed'), findsOneWidget);
-      expect(find.text('Approve draft reply'), findsOneWidget);
+      expect(find.text('Pending approvals'), findsOneWidget);
+      expect(find.text('Approval needed'), findsOneWidget);
 
       for (final label in <String>[
         'Today',
@@ -268,6 +269,22 @@ class _FakeHermesApiClient extends HermesApiClient {
             startsAt: '2:30 PM',
           ),
         ];
+
+  @override
+  Future<HermesTodaySummary> todaySummary() async => HermesTodaySummary(
+    tasks: await listTasks(),
+    reminders: await listReminders(),
+    calendarEvents: await listCalendarEvents(),
+    activityEvents: await pollActivityEvents(42),
+    approvals: const [
+      HermesApproval(
+        id: 7,
+        title: 'Review outgoing email before Hermes sends it',
+        status: 'pending',
+      ),
+    ],
+    blockers: const [],
+  );
 
   @override
   Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>

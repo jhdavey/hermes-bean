@@ -180,6 +180,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   List<HermesTask> _tasks = const [];
   List<HermesReminder> _reminders = const [];
   List<HermesCalendarEvent> _calendar = const [];
+  List<HermesApproval> _approvals = const [];
   List<HermesActivityEvent> _events = const [];
   final List<HermesMessage> _messages = const [
     HermesMessage(
@@ -218,19 +219,19 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         metadata: {'source': 'flutter'},
       );
       final results = await Future.wait<Object>([
-        widget.apiClient.listTasks(),
-        widget.apiClient.listReminders(),
-        widget.apiClient.listCalendarEvents(),
+        widget.apiClient.todaySummary(),
         widget.apiClient.pollActivityEvents(session.id),
       ]);
+      final summary = results[0] as HermesTodaySummary;
       if (!mounted) return;
       setState(() {
         _user = user;
         _session = session;
-        _tasks = results[0] as List<HermesTask>;
-        _reminders = results[1] as List<HermesReminder>;
-        _calendar = results[2] as List<HermesCalendarEvent>;
-        _events = results[3] as List<HermesActivityEvent>;
+        _tasks = summary.tasks;
+        _reminders = summary.reminders;
+        _calendar = summary.calendarEvents;
+        _approvals = summary.approvals;
+        _events = results[1] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
       });
     } catch (error) {
@@ -256,6 +257,13 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
             id: 3,
             title: 'Design review',
             startsAt: '2:30 PM',
+          ),
+        ];
+        _approvals = const [
+          HermesApproval(
+            id: 5,
+            title: 'Review outgoing email before Hermes sends it',
+            status: 'pending',
           ),
         ];
         _events = const [
@@ -331,19 +339,25 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final refreshedEvents = await widget.apiClient
           .pollActivityEvents(session.id)
           .catchError((_) => result.events);
-      final refreshedResources = await Future.wait<Object>([
-        widget.apiClient.listTasks(),
-        widget.apiClient.listReminders(),
-        widget.apiClient.listCalendarEvents(),
-      ]).catchError((_) => <Object>[_tasks, _reminders, _calendar]);
+      final refreshedSummary = await widget.apiClient.todaySummary().catchError(
+        (_) => HermesTodaySummary(
+          tasks: _tasks,
+          reminders: _reminders,
+          calendarEvents: _calendar,
+          activityEvents: _events,
+          approvals: _approvals,
+          blockers: const [],
+        ),
+      );
       if (!mounted) return;
       setState(() {
         if (result.assistantMessage != null) {
           _messages.add(result.assistantMessage!);
         }
-        _tasks = refreshedResources[0] as List<HermesTask>;
-        _reminders = refreshedResources[1] as List<HermesReminder>;
-        _calendar = refreshedResources[2] as List<HermesCalendarEvent>;
+        _tasks = refreshedSummary.tasks;
+        _reminders = refreshedSummary.reminders;
+        _calendar = refreshedSummary.calendarEvents;
+        _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
       });
     } catch (error) {
@@ -458,6 +472,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         tasks: _tasks,
         reminders: _reminders,
         calendar: _calendar,
+        approvals: _approvals,
         events: _events,
         messages: _messages,
         busy: _busy,
@@ -659,6 +674,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.tasks,
     required this.reminders,
     required this.calendar,
+    required this.approvals,
     required this.events,
     required this.messages,
     required this.busy,
@@ -671,6 +687,7 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesTask> tasks;
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
+  final List<HermesApproval> approvals;
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
   final bool busy;
@@ -682,11 +699,18 @@ class _CommandCenterContent extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final pendingApprovals = approvals
+            .where((approval) => (approval.status ?? 'pending') == 'pending')
+            .toList();
         final left = Column(
           children: [
+            if (pendingApprovals.isNotEmpty) ...[
+              _ApprovalBanner(approval: pendingApprovals.first),
+              const SizedBox(height: 16),
+            ],
             _HeroChatCard(messages: messages, busy: busy, onSend: onSend),
             const SizedBox(height: 16),
-            const _ApprovalCard(),
+            _ApprovalCard(approvals: pendingApprovals),
             const SizedBox(height: 16),
             _TabSurface(
               tasks: tasks,
@@ -871,30 +895,144 @@ class _MessageBubble extends StatelessWidget {
   );
 }
 
-class _ApprovalCard extends StatelessWidget {
-  const _ApprovalCard();
+class _ApprovalBanner extends StatelessWidget {
+  const _ApprovalBanner({required this.approval});
+
+  final HermesApproval approval;
 
   @override
-  Widget build(BuildContext context) => _ShellCard(
-    glow: true,
-    child: Column(
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFFBEB),
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: .42)),
+      boxShadow: [
+        BoxShadow(
+          color: const Color(0xFFF59E0B).withValues(alpha: .12),
+          blurRadius: 22,
+          offset: const Offset(0, 12),
+        ),
+      ],
+    ),
+    child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle(
-          icon: Icons.verified_user_rounded,
-          title: 'Approve draft reply',
-          subtitle: 'Hermes needs your confirmation before sending',
-        ),
-        const SizedBox(height: 14),
         Container(
-          padding: const EdgeInsets.all(14),
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
-            color: HeyBeanTheme.surface2,
+            color: HeyBeanTheme.warning,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: HeyBeanTheme.border),
           ),
-          child: const Text(
-            '“Thanks Morgan — I can confirm Thursday at 11 AM.”',
+          child: const Icon(Icons.priority_high_rounded, color: Colors.white),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Approval needed',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: HeyBeanTheme.text,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                approval.title,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: HeyBeanTheme.muted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        FilledButton(
+          onPressed: () {},
+          child: const Text('Review'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ApprovalCard extends StatelessWidget {
+  const _ApprovalCard({required this.approvals});
+
+  final List<HermesApproval> approvals;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasApprovals = approvals.isNotEmpty;
+
+    return _ShellCard(
+      glow: hasApprovals,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionTitle(
+            icon: Icons.verified_user_rounded,
+            title: hasApprovals ? 'Pending approvals' : 'Approval queue clear',
+            subtitle: hasApprovals
+                ? 'Hermes will wait before risky/destructive actions'
+                : 'Low-risk internal actions can run automatically',
+          ),
+          const SizedBox(height: 14),
+          if (hasApprovals)
+            for (final approval in approvals.take(3)) ...[
+              _ApprovalListTile(approval: approval),
+              if (approval != approvals.take(3).last) const SizedBox(height: 10),
+            ]
+          else
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: HeyBeanTheme.surface2,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: HeyBeanTheme.border),
+              ),
+              child: const Text(
+                'Hermes Bean asks first for mail, payments, destructive edits, deployments, and other risky requests.',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ApprovalListTile extends StatelessWidget {
+  const _ApprovalListTile({required this.approval});
+
+  final HermesApproval approval;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.shield_rounded, color: HeyBeanTheme.warning),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            approval.title,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        Text(
+          approval.status ?? 'pending',
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: HeyBeanTheme.muted,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ],

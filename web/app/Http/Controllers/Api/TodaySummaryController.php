@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityEvent;
+use App\Models\AgentProfile;
 use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
@@ -24,6 +25,7 @@ class TodaySummaryController extends Controller
             ->first();
 
         $tasks = Task::where('user_id', $user->id)->latest('updated_at')->get();
+        $agentProfile = AgentProfile::where('user_id', $user->id)->first();
         $reminders = Reminder::where('user_id', $user->id)->latest('remind_at')->get();
         $calendarEvents = CalendarEvent::where('user_id', $user->id)->orderBy('starts_at')->get();
         $activityEvents = ActivityEvent::where('user_id', $user->id)->orderBy('id')->get();
@@ -33,6 +35,7 @@ class TodaySummaryController extends Controller
         return response()->json([
             'data' => [
                 'user' => $user,
+                'agent_profile' => $agentProfile,
                 'session' => $session,
                 'tasks' => $tasks,
                 'reminders' => $reminders,
