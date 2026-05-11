@@ -159,6 +159,8 @@ class HeyBeanTheme {
 
 enum _AuthPhase { loading, signedOut, signedIn }
 
+enum _HomeDestination { today, tasks, bean, calendar, more }
+
 class CommandCenterShell extends StatefulWidget {
   const CommandCenterShell({
     super.key,
@@ -191,6 +193,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   ].toList();
   String? _error;
   bool _busy = false;
+  _HomeDestination _selectedDestination = _HomeDestination.bean;
 
   @override
   void initState() {
@@ -236,40 +239,19 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       });
     } catch (error) {
       if (!mounted) return;
+      await widget.tokenStore.clearToken();
+      widget.apiClient.bearerToken = null;
       setState(() {
-        _error = 'Using demo fallback while offline.';
-        _user =
-            knownUser ??
-            const HermesUser(
-              id: 0,
-              name: 'Demo Bean',
-              email: 'demo@example.com',
-            );
-        _session = const HermesSession(id: 0, status: 'offline', title: 'Demo');
-        _tasks = const [
-          HermesTask(id: 1, title: 'Review launch plan', status: 'open'),
-        ];
-        _reminders = const [
-          HermesReminder(id: 2, title: 'Stand up', dueAt: '9:00 AM'),
-        ];
-        _calendar = const [
-          HermesCalendarEvent(
-            id: 3,
-            title: 'Design review',
-            startsAt: '2:30 PM',
-          ),
-        ];
-        _approvals = const [
-          HermesApproval(
-            id: 5,
-            title: 'Review outgoing email before Hermes sends it',
-            status: 'pending',
-          ),
-        ];
-        _events = const [
-          HermesActivityEvent(id: 4, eventType: 'offline.demo_fallback'),
-        ];
-        _phase = _AuthPhase.signedIn;
+        _error =
+            'Session expired or the API could not be reached. Please sign in again.';
+        _user = null;
+        _session = null;
+        _tasks = const [];
+        _reminders = const [];
+        _calendar = const [];
+        _approvals = const [];
+        _events = const [];
+        _phase = _AuthPhase.signedOut;
       });
     }
   }
@@ -447,7 +429,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               ),
               body: SafeArea(child: _body()),
               bottomNavigationBar: _phase == _AuthPhase.signedIn
-                  ? const _HeyBeanBottomMenu()
+                  ? _HeyBeanBottomMenu(
+                      selected: _selectedDestination,
+                      onSelected: (destination) =>
+                          setState(() => _selectedDestination = destination),
+                    )
                   : null,
             ),
           ],
@@ -480,6 +466,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         messages: _messages,
         busy: _busy,
         error: _error,
+        selectedDestination: _selectedDestination,
+        onSelectDestination: (destination) =>
+            setState(() => _selectedDestination = destination),
         onSend: _sendChat,
         onDeleteAccount: _deleteAccount,
       ),
@@ -681,6 +670,8 @@ class _CommandCenterContent extends StatelessWidget {
     required this.events,
     required this.messages,
     required this.busy,
+    required this.selectedDestination,
+    required this.onSelectDestination,
     required this.onSend,
     required this.onDeleteAccount,
     this.error,
@@ -694,6 +685,8 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
   final bool busy;
+  final _HomeDestination selectedDestination;
+  final ValueChanged<_HomeDestination> onSelectDestination;
   final Future<void> Function(String content) onSend;
   final Future<void> Function() onDeleteAccount;
   final String? error;
@@ -705,7 +698,7 @@ class _CommandCenterContent extends StatelessWidget {
         final pendingApprovals = approvals
             .where((approval) => (approval.status ?? 'pending') == 'pending')
             .toList();
-        final left = Column(
+        final beanPanel = Column(
           children: [
             if (pendingApprovals.isNotEmpty) ...[
               _ApprovalBanner(approval: pendingApprovals.first),
@@ -715,14 +708,49 @@ class _CommandCenterContent extends StatelessWidget {
             const SizedBox(height: 16),
             _ApprovalCard(approvals: pendingApprovals),
             const SizedBox(height: 16),
+            _ProgressCard(user: user, error: error, taskCount: tasks.length),
+            const SizedBox(height: 16),
             _TabSurface(
               tasks: tasks,
               reminders: reminders,
               calendar: calendar,
               events: events,
             ),
+            const SizedBox(height: 16),
+            _ActivityCard(events: events),
+            const SizedBox(height: 16),
+            _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
           ],
         );
+        final overviewPanel = Column(
+          children: [
+            _ProgressCard(user: user, error: error, taskCount: tasks.length),
+            const SizedBox(height: 16),
+            _TabSurface(
+              tasks: tasks,
+              reminders: reminders,
+              calendar: calendar,
+              events: events,
+            ),
+            const SizedBox(height: 16),
+            _ActivityCard(events: events),
+          ],
+        );
+        final selectedPanel = switch (selectedDestination) {
+          _HomeDestination.today => overviewPanel,
+          _HomeDestination.tasks => _TaskListCard(tasks: tasks),
+          _HomeDestination.bean => beanPanel,
+          _HomeDestination.calendar => _CalendarCard(calendar: calendar),
+          _HomeDestination.more => Column(
+            children: [
+              _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
+              const SizedBox(height: 16),
+              _ApprovalCard(approvals: pendingApprovals),
+              const SizedBox(height: 16),
+              _ActivityCard(events: events),
+            ],
+          ),
+        };
         final right = Column(
           children: [
             _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
@@ -734,13 +762,14 @@ class _CommandCenterContent extends StatelessWidget {
             _CalendarCard(calendar: calendar),
           ],
         );
-        if (constraints.maxWidth < 900) {
-          return Column(children: [left, const SizedBox(height: 16), right]);
+        if (constraints.maxWidth < 900 ||
+            selectedDestination != _HomeDestination.bean) {
+          return selectedPanel;
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(flex: 7, child: left),
+            Expanded(flex: 7, child: beanPanel),
             const SizedBox(width: 16),
             Expanded(flex: 5, child: right),
           ],
@@ -824,7 +853,7 @@ class _HeroChatCardState extends State<_HeroChatCard> {
           subtitle: 'Chat-first command center for your household',
         ),
         const SizedBox(height: 14),
-        const _QuickPromptRail(),
+        _QuickPromptRail(onPrompt: widget.onSend),
         const SizedBox(height: 18),
         for (final message in widget.messages) ...[
           _MessageBubble(
@@ -888,15 +917,37 @@ class _HeroChatCardState extends State<_HeroChatCard> {
 }
 
 class _QuickPromptRail extends StatelessWidget {
-  const _QuickPromptRail();
+  const _QuickPromptRail({required this.onPrompt});
+
+  final Future<void> Function(String content) onPrompt;
 
   @override
   Widget build(BuildContext context) {
-    const prompts = <({IconData icon, String label})>[
-      (icon: Icons.today_rounded, label: 'Plan today'),
-      (icon: Icons.task_alt_rounded, label: 'Add task'),
-      (icon: Icons.notifications_active_rounded, label: 'Set reminder'),
-      (icon: Icons.calendar_month_rounded, label: 'Schedule event'),
+    const prompts = <({IconData icon, String label, String prompt, Key key})>[
+      (
+        icon: Icons.today_rounded,
+        label: 'Plan today',
+        prompt: 'Help me plan today',
+        key: Key('quick-plan-today'),
+      ),
+      (
+        icon: Icons.task_alt_rounded,
+        label: 'Add task',
+        prompt: 'Add a task',
+        key: Key('quick-add-task'),
+      ),
+      (
+        icon: Icons.notifications_active_rounded,
+        label: 'Set reminder',
+        prompt: 'Set a reminder',
+        key: Key('quick-set-reminder'),
+      ),
+      (
+        icon: Icons.calendar_month_rounded,
+        label: 'Schedule event',
+        prompt: 'Schedule an event',
+        key: Key('quick-schedule-event'),
+      ),
     ];
 
     return Wrap(
@@ -904,13 +955,15 @@ class _QuickPromptRail extends StatelessWidget {
       runSpacing: 8,
       children: [
         for (final prompt in prompts)
-          Chip(
+          ActionChip(
+            key: prompt.key,
             avatar: Icon(
               prompt.icon,
               size: 16,
               color: HeyBeanTheme.accentStrong,
             ),
             label: Text(prompt.label),
+            onPressed: () => onPrompt(prompt.prompt),
             backgroundColor: const Color(0x1416A34A),
             side: const BorderSide(color: HeyBeanTheme.border),
             labelStyle: const TextStyle(
@@ -1019,7 +1072,23 @@ class _ApprovalBanner extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        FilledButton(onPressed: () {}, child: const Text('Review')),
+        FilledButton(
+          key: const Key('review-approval-action'),
+          onPressed: () => showDialog<void>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Pending approval'),
+              content: Text(approval.title),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          ),
+          child: const Text('Review'),
+        ),
       ],
     ),
   );
@@ -1247,6 +1316,37 @@ class _ActivityCard extends StatelessWidget {
   );
 }
 
+class _TaskListCard extends StatelessWidget {
+  const _TaskListCard({required this.tasks});
+
+  final List<HermesTask> tasks;
+
+  @override
+  Widget build(BuildContext context) => _ShellCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionTitle(
+          icon: Icons.task_alt_rounded,
+          title: 'Task list',
+          subtitle: 'Open household and assistant tasks',
+        ),
+        const SizedBox(height: 12),
+        if (tasks.isEmpty)
+          const Text('No open tasks')
+        else
+          for (final task in tasks)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.check_circle_outline_rounded),
+              title: Text(task.title),
+              subtitle: task.status == null ? null : Text(task.status!),
+            ),
+      ],
+    ),
+  );
+}
+
 class _CalendarCard extends StatelessWidget {
   const _CalendarCard({required this.calendar});
 
@@ -1408,7 +1508,10 @@ class _MiniSurface extends StatelessWidget {
 }
 
 class _HeyBeanBottomMenu extends StatelessWidget {
-  const _HeyBeanBottomMenu();
+  const _HeyBeanBottomMenu({required this.selected, required this.onSelected});
+
+  final _HomeDestination selected;
+  final ValueChanged<_HomeDestination> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -1440,32 +1543,43 @@ class _HeyBeanBottomMenu extends StatelessWidget {
               ),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(10, 7, 10, dockBottomPadding),
-                child: const Row(
+                child: Row(
                   children: [
                     Expanded(
                       child: _MenuIconButton(
+                        key: const Key('nav-today'),
                         icon: Icons.today_rounded,
                         label: 'Today',
-                        selected: true,
+                        selected: selected == _HomeDestination.today,
+                        onPressed: () => onSelected(_HomeDestination.today),
                       ),
                     ),
                     Expanded(
                       child: _MenuIconButton(
+                        key: const Key('nav-tasks'),
                         icon: Icons.task_alt_rounded,
                         label: 'Tasks',
+                        selected: selected == _HomeDestination.tasks,
+                        onPressed: () => onSelected(_HomeDestination.tasks),
                       ),
                     ),
-                    SizedBox(width: 84),
+                    const SizedBox(width: 84),
                     Expanded(
                       child: _MenuIconButton(
+                        key: const Key('nav-calendar'),
                         icon: Icons.calendar_month_rounded,
                         label: 'Calendar',
+                        selected: selected == _HomeDestination.calendar,
+                        onPressed: () => onSelected(_HomeDestination.calendar),
                       ),
                     ),
                     Expanded(
                       child: _MenuIconButton(
+                        key: const Key('nav-more'),
                         icon: Icons.more_vert_rounded,
                         label: 'More',
+                        selected: selected == _HomeDestination.more,
+                        onPressed: () => onSelected(_HomeDestination.more),
                       ),
                     ),
                   ],
@@ -1473,7 +1587,13 @@ class _HeyBeanBottomMenu extends StatelessWidget {
               ),
             ),
           ),
-          Positioned(top: 15, child: _BeanFab(selected: true)),
+          Positioned(
+            top: 15,
+            child: _BeanFab(
+              selected: selected == _HomeDestination.bean,
+              onPressed: () => onSelected(_HomeDestination.bean),
+            ),
+          ),
         ],
       ),
     );
@@ -1482,67 +1602,94 @@ class _HeyBeanBottomMenu extends StatelessWidget {
 
 class _MenuIconButton extends StatelessWidget {
   const _MenuIconButton({
+    super.key,
     required this.icon,
     required this.label,
+    required this.onPressed,
     this.selected = false,
   });
 
   final IconData icon;
   final String label;
+  final VoidCallback onPressed;
   final bool selected;
 
   @override
-  Widget build(BuildContext context) => Column(
-    mainAxisAlignment: MainAxisAlignment.center,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(
-        icon,
-        color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
-        size: 22,
-      ),
-      const SizedBox(height: 3),
-      Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
-          fontSize: 11,
-          fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onPressed,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 1),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
+              size: 20,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: selected
+                    ? HeyBeanTheme.accentStrong
+                    : HeyBeanTheme.muted,
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       ),
-    ],
+    ),
   );
 }
 
 class _BeanFab extends StatelessWidget {
-  const _BeanFab({required this.selected});
+  const _BeanFab({required this.selected, required this.onPressed});
 
   final bool selected;
+  final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => Container(
-    key: const Key('heybean-center-bean-button'),
-    width: 64,
-    height: 64,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      gradient: const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF22C55E), Color(0xFF16A34A), Color(0xFF15803D)],
-      ),
-      border: Border.all(color: Colors.white, width: 4),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x3D16A34A),
-          blurRadius: 24,
-          offset: Offset(0, 10),
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      key: const Key('nav-bean'),
+      customBorder: const CircleBorder(),
+      onTap: onPressed,
+      child: Container(
+        key: const Key('heybean-center-bean-button'),
+        width: 64,
+        height: 64,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF22C55E), Color(0xFF16A34A), Color(0xFF15803D)],
+          ),
+          border: Border.all(
+            color: selected ? Colors.white : const Color(0xFFE2E8F0),
+            width: 4,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x3D16A34A),
+              blurRadius: 24,
+              offset: Offset(0, 10),
+            ),
+          ],
         ),
-      ],
+        child: const Icon(Icons.eco_rounded, color: Colors.white, size: 30),
+      ),
     ),
-    child: const Icon(Icons.eco_rounded, color: Colors.white, size: 30),
   );
 }
 

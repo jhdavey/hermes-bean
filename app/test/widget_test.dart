@@ -116,6 +116,63 @@ void main() {
     },
   );
 
+  testWidgets(
+    'bottom nav, quick prompts, and approval review are interactive',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('nav-tasks')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('nav-tasks')));
+      await tester.pumpAndSettle();
+      expect(find.text('Task list'), findsOneWidget);
+      expect(find.text('Plan launch'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('nav-calendar')));
+      await tester.pumpAndSettle();
+      expect(find.text('Calendar'), findsWidgets);
+      expect(find.text('Design review'), findsWidgets);
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('quick-plan-today')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('quick-plan-today')));
+      await tester.pumpAndSettle();
+      expect(api.sentMessages, ['Help me plan today']);
+      expect(find.text('Done — I updated your day.'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('review-approval-action')));
+      await tester.pumpAndSettle();
+      expect(find.text('Pending approval'), findsOneWidget);
+      expect(find.textContaining('Review outgoing email'), findsWidgets);
+    },
+  );
+
+  testWidgets(
+    'invalid remembered tokens return to sign in instead of offline chat',
+    (WidgetTester tester) async {
+      final tokenStore = _MemoryAuthTokenStore()..token = 'expired-token';
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _ExpiredTokenHermesApiClient(),
+          tokenStore: tokenStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tokenStore.token, isNull);
+      expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
+      expect(find.textContaining('Session expired'), findsOneWidget);
+      expect(
+        find.text('I could not reach the API. Try again soon.'),
+        findsNothing,
+      );
+    },
+  );
+
   testWidgets('remember me saves login token for future launches', (
     WidgetTester tester,
   ) async {
@@ -190,6 +247,15 @@ class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {
   _SignedInFakeHermesApiClient() {
     bearerToken = 'existing-token';
   }
+}
+
+class _ExpiredTokenHermesApiClient extends HermesApiClient {
+  _ExpiredTokenHermesApiClient()
+    : super(transport: (_) async => const HermesApiResponse(500, 'unused'));
+
+  @override
+  Future<HermesUser> me() async =>
+      throw const HermesApiException(401, '{"message":"Unauthenticated."}');
 }
 
 class _FakeHermesApiClient extends HermesApiClient {
