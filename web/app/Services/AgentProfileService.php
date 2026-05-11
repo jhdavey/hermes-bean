@@ -4,16 +4,21 @@ namespace App\Services;
 
 use App\Models\AgentProfile;
 use App\Models\User;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
 class AgentProfileService
 {
     public function ensureForUser(User $user): AgentProfile
     {
-        return AgentProfile::firstOrCreate(
+        $profile = AgentProfile::firstOrCreate(
             ['user_id' => $user->id],
             $this->defaultsFor($user)
         );
+
+        $this->bootstrapRuntimeHome($profile);
+
+        return $profile;
     }
 
     public function defaultsFor(User $user): array
@@ -58,5 +63,38 @@ class AgentProfileService
                 'runtime_strategy' => 'server_hosted_unique_agent',
             ],
         ];
+    }
+
+    private function bootstrapRuntimeHome(AgentProfile $profile): void
+    {
+        if (! $profile->runtime_home) {
+            return;
+        }
+
+        File::ensureDirectoryExists($profile->runtime_home);
+        File::ensureDirectoryExists($profile->runtime_home.'/sessions');
+        File::ensureDirectoryExists($profile->runtime_home.'/logs');
+
+        $baseHome = (string) config('services.hermes_runtime.base_home', '');
+        if ($baseHome === '') {
+            return;
+        }
+
+        foreach (['.env', 'config.yaml'] as $file) {
+            $source = rtrim($baseHome, '/').'/'.$file;
+            $target = rtrim($profile->runtime_home, '/').'/'.$file;
+
+            if (! File::exists($source) || File::exists($target) || is_link($target)) {
+                continue;
+            }
+
+            if (function_exists('symlink')) {
+                @symlink($source, $target);
+            }
+
+            if (! File::exists($target) && ! is_link($target)) {
+                File::copy($source, $target);
+            }
+        }
     }
 }

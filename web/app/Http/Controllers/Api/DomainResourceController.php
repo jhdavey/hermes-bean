@@ -9,13 +9,17 @@ use App\Models\CalendarEvent;
 use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
+use App\Services\StructuredHermesActionService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use InvalidArgumentException;
 
 class DomainResourceController extends Controller
 {
+    public function __construct(private readonly StructuredHermesActionService $actions) {}
+
     public function listTasks(Request $request): JsonResponse
     {
         return $this->listed(Task::where('user_id', $request->user()->id)->orderBy('id')->get());
@@ -89,6 +93,32 @@ class DomainResourceController extends Controller
             'status' => ['nullable', 'string', 'max:50'],
             'payload' => ['nullable', 'array'],
         ]))));
+    }
+
+    public function approveApproval(Request $request, string $approval): JsonResponse
+    {
+        $ownedApproval = Approval::where('user_id', $request->user()->id)->findOrFail($approval);
+
+        try {
+            $result = $this->actions->approve($ownedApproval);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
+
+        return response()->json(['data' => $result]);
+    }
+
+    public function denyApproval(Request $request, string $approval): JsonResponse
+    {
+        $ownedApproval = Approval::where('user_id', $request->user()->id)->findOrFail($approval);
+
+        try {
+            $approval = $this->actions->deny($ownedApproval);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
+
+        return response()->json(['data' => ['approval' => $approval]]);
     }
 
     public function storeBlocker(Request $request): JsonResponse

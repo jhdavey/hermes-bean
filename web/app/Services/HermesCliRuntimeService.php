@@ -3,9 +3,14 @@
 namespace App\Services;
 
 use App\Models\ActivityEvent;
+use App\Models\AgentProfile;
+use App\Models\Approval;
 use App\Models\Blocker;
+use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\Reminder;
+use App\Models\Task;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +19,8 @@ use Symfony\Component\Process\Process;
 
 class HermesCliRuntimeService implements HermesRuntimeService
 {
+    public function __construct(private readonly StructuredHermesActionService $actionService) {}
+
     public function startSession(array $attributes = []): ConversationSession
     {
         return DB::transaction(function () use ($attributes): ConversationSession {
@@ -74,12 +81,8 @@ class HermesCliRuntimeService implements HermesRuntimeService
             ]);
         }
 
-        $command = [$cliPath];
+        $command = $this->commandFor($cliPath, $session, $userMessage);
         $profile = config('services.hermes_runtime.profile');
-        if (filled($profile)) {
-            $command[] = '--profile';
-            $command[] = (string) $profile;
-        }
 
         $started = $this->recordEvent($session, 'runtime.hermes_cli_started', [
             'message_id' => $userMessage->id,
@@ -91,8 +94,8 @@ class HermesCliRuntimeService implements HermesRuntimeService
         $process = new Process(
             $command,
             $this->configuredWorkdir(),
-            $this->configuredEnvironment(),
-            $this->payloadFor($session, $userMessage),
+            $this->configuredEnvironment($session),
+            null,
             (float) config('services.hermes_runtime.timeout', 30)
         );
 
@@ -115,13 +118,16 @@ class HermesCliRuntimeService implements HermesRuntimeService
         }
 
         return DB::transaction(function () use ($session, $userMessage, $received, $started, $process): array {
-            $assistantContent = $this->assistantContentFrom($process->getOutput());
+            $structuredOutput = $this->structuredOutputFrom($process->getOutput());
+            $assistantContent = $this->assistantContentFrom($process->getOutput(), $structuredOutput);
 
             $completed = $this->recordEvent($session, 'runtime.hermes_cli_completed', [
                 'message_id' => $userMessage->id,
                 'stdout_bytes' => strlen($process->getOutput()),
                 'stderr_bytes' => strlen($process->getErrorOutput()),
             ], 'hermes.cli', 'succeeded');
+
+            $domainEvents = $structuredOutput ? $this->actionService->applyEnvelope($session, $structuredOutput) : collect();
 
             $assistantMessage = ConversationMessage::create([
                 'user_id' => $session->user_id,
@@ -145,10 +151,39 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 'session' => $session->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
-                'events' => collect([$received, $started, $completed, $messageCompleted]),
+                'events' => collect([$received, $started, $completed])->concat($domainEvents)->push($messageCompleted),
                 'blocker' => null,
             ];
         });
+    }
+
+    private function commandFor(string $cliPath, ConversationSession $session, ConversationMessage $message): array
+    {
+        $command = [$cliPath];
+        $profile = config('services.hermes_runtime.profile');
+        if (filled($profile)) {
+            $command[] = '--profile';
+            $command[] = (string) $profile;
+        }
+
+        $command[] = 'chat';
+        $command[] = '-q';
+        $command[] = $this->promptFor($session, $message);
+        $command[] = '-Q';
+
+        $provider = config('services.hermes_runtime.default_provider');
+        if (filled($provider)) {
+            $command[] = '--provider';
+            $command[] = (string) $provider;
+        }
+
+        $model = config('services.hermes_runtime.default_model');
+        if (filled($model)) {
+            $command[] = '-m';
+            $command[] = (string) $model;
+        }
+
+        return $command;
     }
 
     private function configuredWorkdir(): ?string
@@ -158,7 +193,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
         return filled($workdir) ? (string) $workdir : null;
     }
 
-    private function configuredEnvironment(): array
+    private function configuredEnvironment(ConversationSession $session): array
     {
         $environment = [
             'HERMES_RUNTIME_MODE' => 'cli',
@@ -178,12 +213,47 @@ class HermesCliRuntimeService implements HermesRuntimeService
             }
         }
 
+        $profile = AgentProfile::where('user_id', $session->user_id)->first();
+        if ($profile?->runtime_home) {
+            $environment['HERMES_HOME'] = (string) $profile->runtime_home;
+        }
+
         return $environment;
+    }
+
+    private function promptFor(ConversationSession $session, ConversationMessage $message): string
+    {
+        return <<<'PROMPT'
+You are the server-hosted Hermes runtime for Hey Bean. Respond only as strict JSON, with no markdown or prose outside the JSON object.
+
+Schema:
+{
+  "message": "short user-facing summary",
+  "actions": [
+    {
+      "type": "task.create|reminder.create|calendar_event.create|email.send|payment.create|deployment.run|account.delete",
+      "risk": "low|medium|high",
+      "title": "approval title for risky actions",
+      "description": "optional approval description",
+      "parameters": {}
+    }
+  ]
+}
+
+Rules:
+- Low-risk internal dashboard actions may be emitted with risk "low": task.create, reminder.create, calendar_event.create.
+- Risky, external, destructive, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
+- If no concrete action is needed, return an empty actions array.
+- Use ISO-8601 timestamps for dates when you create reminders or calendar events.
+
+Runtime payload:
+PROMPT.$this->payloadFor($session, $message);
     }
 
     private function payloadFor(ConversationSession $session, ConversationMessage $message): string
     {
         $user = User::find($session->user_id);
+        $profile = AgentProfile::where('user_id', $session->user_id)->first();
 
         return json_encode([
             'session' => [
@@ -197,6 +267,25 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 'email' => $user?->email,
                 'name' => $user?->name,
             ],
+            'agent_profile' => $profile ? [
+                'id' => $profile->id,
+                'slug' => $profile->slug,
+                'provider' => $profile->provider,
+                'model' => $profile->model,
+                'runtime_home' => $profile->runtime_home,
+                'tool_policy' => $profile->tool_policy,
+                'approval_policy' => $profile->approval_policy,
+            ] : null,
+            'dashboard_state' => [
+                'tasks' => Task::where('user_id', $session->user_id)->latest('updated_at')->limit(20)->get(['id', 'title', 'type', 'status', 'due_at']),
+                'reminders' => Reminder::where('user_id', $session->user_id)->latest('updated_at')->limit(20)->get(['id', 'title', 'status', 'remind_at']),
+                'calendar_events' => CalendarEvent::where('user_id', $session->user_id)->latest('updated_at')->limit(20)->get(['id', 'title', 'status', 'starts_at', 'ends_at']),
+                'approvals' => Approval::where('user_id', $session->user_id)->latest('updated_at')->limit(20)->get(['id', 'title', 'status', 'description']),
+            ],
+            'allowed_action_schema' => [
+                'low_risk' => ['task.create', 'reminder.create', 'calendar_event.create'],
+                'approval_required' => ['email.send', 'payment.create', 'deployment.run', 'account.delete', 'destructive_actions'],
+            ],
             'message' => [
                 'id' => $message->id,
                 'content' => $message->content,
@@ -205,24 +294,44 @@ class HermesCliRuntimeService implements HermesRuntimeService
         ], JSON_THROW_ON_ERROR);
     }
 
-    private function assistantContentFrom(string $stdout): string
+    private function structuredOutputFrom(string $stdout): ?array
+    {
+        $trimmed = trim($stdout);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        try {
+            $decoded = json_decode($trimmed, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return null;
+        }
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private function assistantContentFrom(string $stdout, ?array $structuredOutput = null): string
     {
         $trimmed = trim($stdout);
         if ($trimmed === '') {
             return '';
         }
 
-        try {
-            $decoded = json_decode($trimmed, true, flags: JSON_THROW_ON_ERROR);
-            if (is_array($decoded)) {
-                foreach (['content', 'message', 'assistant_message', 'response'] as $key) {
-                    if (isset($decoded[$key]) && is_string($decoded[$key])) {
-                        return $decoded[$key];
-                    }
+        $decoded = $structuredOutput;
+        if ($decoded === null) {
+            try {
+                $decoded = json_decode($trimmed, true, flags: JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                return $trimmed;
+            }
+        }
+
+        if (is_array($decoded)) {
+            foreach (['content', 'message', 'assistant_message', 'response'] as $key) {
+                if (isset($decoded[$key]) && is_string($decoded[$key])) {
+                    return $decoded[$key];
                 }
             }
-        } catch (\JsonException) {
-            // Plain-text CLI output is a valid assistant response.
         }
 
         return $trimmed;

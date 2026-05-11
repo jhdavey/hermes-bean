@@ -33,6 +33,8 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/calendar-events', [DomainResourceController::class, 'storeCalendarEvent']);
         Route::get('/approvals', [DomainResourceController::class, 'listApprovals']);
         Route::post('/approvals', [DomainResourceController::class, 'storeApproval']);
+        Route::post('/approvals/{approval}/approve', [DomainResourceController::class, 'approveApproval']);
+        Route::post('/approvals/{approval}/deny', [DomainResourceController::class, 'denyApproval']);
         Route::get('/blockers', [DomainResourceController::class, 'listBlockers']);
         Route::post('/blockers', [DomainResourceController::class, 'storeBlocker']);
         Route::post('/scheduler-jobs', [DomainResourceController::class, 'storeSchedulerJob']);

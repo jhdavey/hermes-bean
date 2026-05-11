@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Models\ActivityEvent;
+use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\Task;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -38,7 +40,9 @@ class HermesCliRuntimeServiceTest extends TestCase
         $script = $this->writeExecutable('fake-hermes.php', <<<'PHP'
 #!/usr/bin/env php
 <?php
-$payload = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR);
+$prompt = $argv[array_search('-q', $argv, true) + 1] ?? '';
+$payloadJson = trim(substr($prompt, strpos($prompt, "Runtime payload:") + strlen("Runtime payload:")));
+$payload = json_decode($payloadJson, true, flags: JSON_THROW_ON_ERROR);
 file_put_contents(getenv('HERMES_FAKE_LOG'), json_encode([
     'argv' => $argv,
     'cwd' => getcwd(),
@@ -91,7 +95,11 @@ PHP);
         ], ActivityEvent::where('conversation_session_id', $sessionId)->orderBy('id')->pluck('event_type')->all());
 
         $invocation = json_decode(File::get($this->tempDir.'/invocation.json'), true, flags: JSON_THROW_ON_ERROR);
-        $this->assertSame([$script, '--profile', 'test-profile'], $invocation['argv']);
+        $this->assertSame($script, $invocation['argv'][0]);
+        $this->assertContains('--profile', $invocation['argv']);
+        $this->assertContains('test-profile', $invocation['argv']);
+        $this->assertContains('chat', $invocation['argv']);
+        $this->assertContains('-q', $invocation['argv']);
         $this->assertSame(realpath($this->tempDir), $invocation['cwd']);
         $this->assertSame('Plan my day', $invocation['payload']['message']['content']);
         $this->assertSame('cli-owner@example.com', $invocation['payload']['user']['email']);
@@ -203,6 +211,103 @@ PHP);
         ActivityEvent::where('conversation_session_id', $sessionId)->get()->each(
             fn (ActivityEvent $event) => $this->assertSame($session->user_id, $event->user_id)
         );
+    }
+
+    public function test_structured_cli_output_executes_low_risk_actions_and_queues_risky_actions_for_approval(): void
+    {
+        $script = $this->writeExecutable('structured-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'I created the launch task and queued the email for approval.',
+    'actions' => [
+        [
+            'type' => 'task.create',
+            'risk' => 'low',
+            'parameters' => ['title' => 'Review launch plan', 'type' => 'todo'],
+        ],
+        [
+            'type' => 'email.send',
+            'risk' => 'high',
+            'title' => 'Send launch email',
+            'description' => 'Send the launch note to Lauren.',
+            'parameters' => ['to' => 'lauren@example.com', 'subject' => 'Launch'],
+        ],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('structured-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a launch task and send Lauren the launch email.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I created the launch task and queued the email for approval.')
+            ->assertJsonFragment(['event_type' => 'assistant.task.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.approval.created']);
+
+        $this->assertDatabaseHas('tasks', [
+            'conversation_session_id' => $sessionId,
+            'title' => 'Review launch plan',
+            'status' => 'open',
+        ]);
+        $this->assertDatabaseHas('approvals', [
+            'conversation_session_id' => $sessionId,
+            'title' => 'Send launch email',
+            'status' => 'pending',
+        ]);
+        $approval = Approval::where('conversation_session_id', $sessionId)->firstOrFail();
+        $this->assertSame('email.send', $approval->payload['action']['type']);
+        $this->assertSame('high', $approval->payload['action']['risk']);
+    }
+
+    public function test_approving_a_queued_structured_action_executes_it_once(): void
+    {
+        $script = $this->writeExecutable('approval-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'This needs approval before changing tasks.',
+    'actions' => [[
+        'type' => 'task.create',
+        'risk' => 'high',
+        'title' => 'Approve task creation',
+        'parameters' => ['title' => 'Book flights', 'type' => 'todo'],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('approve-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Add a task, but ask me first.',
+        ])->assertCreated()
+            ->assertJsonFragment(['event_type' => 'assistant.approval.created']);
+
+        $approval = Approval::where('conversation_session_id', $sessionId)->firstOrFail();
+        $this->assertSame(0, Task::where('conversation_session_id', $sessionId)->where('title', 'Book flights')->count());
+
+        $this->withToken($token)->postJson("/api/approvals/{$approval->id}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.approval.status', 'approved')
+            ->assertJsonFragment(['event_type' => 'assistant.task.created']);
+
+        $this->assertSame(1, Task::where('conversation_session_id', $sessionId)->where('title', 'Book flights')->count());
+
+        $this->withToken($token)->postJson("/api/approvals/{$approval->id}/approve")
+            ->assertStatus(409);
+        $this->assertSame(1, Task::where('conversation_session_id', $sessionId)->where('title', 'Book flights')->count());
     }
 
     private function writeExecutable(string $name, string $contents): string
