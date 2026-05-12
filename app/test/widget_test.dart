@@ -140,8 +140,21 @@ void main() {
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
       expect(find.text('2'), findsWidgets);
       expect(find.text('Today'), findsWidgets);
-      expect(find.text('Tomorrow'), findsOneWidget);
-      expect(find.byKey(const Key('apple-style-day-strip')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
+      expect(
+        find.byKey(const Key('apple-style-week-date-header')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('apple-style-day-timeline')), findsOneWidget);
+      expect(
+        find.byKey(const Key('calendar-current-time-marker')),
+        findsOneWidget,
+      );
+      expect(find.text('9 AM'), findsOneWidget);
+      expect(find.text('Noon'), findsOneWidget);
+      expect(find.text('10 PM'), findsOneWidget);
+      expect(find.byKey(const Key('apple-style-day-strip')), findsNothing);
+      expect(find.text('Today / upcoming'), findsNothing);
       expect(find.text('Tasks for today'), findsOneWidget);
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Design review'), findsWidgets);

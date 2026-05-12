@@ -1364,9 +1364,10 @@ class _TodayHomeViewState extends State<_TodayHomeView> {
                 calendar: widget.calendar,
               ),
             ] else ...[
-              _AppleStyleDayStrip(calendar: widget.calendar),
-              const SizedBox(height: 16),
-              _CalendarAgenda(calendar: widget.calendar),
+              _AppleStyleTodayTimeline(
+                calendar: widget.calendar,
+                onMonthTap: () => setState(() => _showMonth = true),
+              ),
             ],
           ],
         ),
@@ -1531,68 +1532,428 @@ class _CriticalTaskBadge extends StatelessWidget {
   );
 }
 
-class _AppleStyleDayStrip extends StatelessWidget {
-  const _AppleStyleDayStrip({required this.calendar});
+class _AppleStyleTodayTimeline extends StatelessWidget {
+  const _AppleStyleTodayTimeline({
+    required this.calendar,
+    required this.onMonthTap,
+  });
 
   final List<HermesCalendarEvent> calendar;
+  final VoidCallback onMonthTap;
+
+  static const _hourHeight = 42.0;
+  static const _timeColumnWidth = 48.0;
+  static const _timelineHours = <int>[
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+  ];
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final days = List<DateTime>.generate(
-      2,
-      (index) => now.add(Duration(days: index)),
-    );
+    final startOfWeek = now.subtract(Duration(days: now.weekday % 7));
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final markerOffset =
+        ((now.hour + (now.minute / 60)) - _timelineHours.first).clamp(
+          0.0,
+          _timelineHours.length.toDouble(),
+        ) *
+        _hourHeight;
+
     return Column(
-      key: const Key('apple-style-day-strip'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            for (final day in days)
-              Expanded(
-                child: Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: _isCalendarToday(day)
-                        ? HeyBeanTheme.accent
-                        : HeyBeanTheme.surface2,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: HeyBeanTheme.border),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        _isCalendarToday(day) ? 'Today' : 'Tomorrow',
-                        style: TextStyle(
-                          color: _isCalendarToday(day)
-                              ? Colors.white
-                              : HeyBeanTheme.muted,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${day.day}',
-                        style: TextStyle(
-                          color: _isCalendarToday(day)
-                              ? Colors.white
-                              : HeyBeanTheme.text,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
+            InkWell(
+              key: const Key('calendar-month-chevron'),
+              borderRadius: BorderRadius.circular(22),
+              onTap: onMonthTap,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: HeyBeanTheme.border),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x12000000),
+                      blurRadius: 14,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.chevron_left_rounded, size: 20),
+                    const SizedBox(width: 2),
+                    Text(
+                      _monthName(now.month),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ],
                 ),
               ),
+            ),
+            const Spacer(),
+            _CalendarToolbarIcon(icon: Icons.qr_code_scanner_rounded),
+            const SizedBox(width: 8),
+            _CalendarToolbarIcon(icon: Icons.search_rounded),
+            const SizedBox(width: 8),
+            _CalendarToolbarIcon(icon: Icons.add_rounded),
           ],
+        ),
+        const SizedBox(height: 14),
+        _WeekDateHeader(startOfWeek: startOfWeek, today: today),
+        const SizedBox(height: 10),
+        Container(
+          key: const Key('apple-style-day-timeline'),
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  const SizedBox(width: _timeColumnWidth),
+                  Expanded(
+                    child: _DayColumnHeading(date: today, isToday: true),
+                  ),
+                  Expanded(
+                    child: _DayColumnHeading(date: tomorrow, isToday: false),
+                  ),
+                ],
+              ),
+              SizedBox(
+                height: _timelineHours.length * _hourHeight,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Column(
+                      children: [
+                        for (final hour in _timelineHours)
+                          _TimelineHourRow(hour: hour),
+                      ],
+                    ),
+                    Positioned(
+                      key: const Key('calendar-current-time-marker'),
+                      top: markerOffset,
+                      left: 0,
+                      right: 0,
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: HeyBeanTheme.accent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              _clockLabel(now),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Container(
+                              height: 2,
+                              color: HeyBeanTheme.accent,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    for (final event in calendar)
+                      if (event.startsAt != null)
+                        _TimelineEventBlock(event: event),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
 }
+
+class _CalendarToolbarIcon extends StatelessWidget {
+  const _CalendarToolbarIcon({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 34,
+    height: 34,
+    decoration: BoxDecoration(
+      color: Colors.white,
+      shape: BoxShape.circle,
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: Icon(icon, size: 20, color: HeyBeanTheme.text),
+  );
+}
+
+class _WeekDateHeader extends StatelessWidget {
+  const _WeekDateHeader({required this.startOfWeek, required this.today});
+
+  final DateTime startOfWeek;
+  final DateTime today;
+
+  @override
+  Widget build(BuildContext context) {
+    const weekdayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    return Row(
+      key: const Key('apple-style-week-date-header'),
+      children: [
+        for (var index = 0; index < 7; index++)
+          Expanded(
+            child: Column(
+              children: [
+                Text(
+                  weekdayLetters[index],
+                  style: const TextStyle(
+                    color: HeyBeanTheme.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                _WeekDateNumber(
+                  date: startOfWeek.add(Duration(days: index)),
+                  today: today,
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _WeekDateNumber extends StatelessWidget {
+  const _WeekDateNumber({required this.date, required this.today});
+
+  final DateTime date;
+  final DateTime today;
+
+  @override
+  Widget build(BuildContext context) {
+    final isToday = _sameCalendarDay(date, today);
+    final isTomorrow = _sameCalendarDay(
+      date,
+      today.add(const Duration(days: 1)),
+    );
+    return Container(
+      width: isToday || isTomorrow ? 38 : null,
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: isToday
+            ? HeyBeanTheme.accent
+            : isTomorrow
+            ? const Color(0xFFE5E7EB)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Text(
+        '${date.day}',
+        style: TextStyle(
+          color: isToday ? Colors.white : HeyBeanTheme.text,
+          fontSize: 18,
+          fontWeight: isToday || isTomorrow ? FontWeight.w900 : FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _DayColumnHeading extends StatelessWidget {
+  const _DayColumnHeading({required this.date, required this.isToday});
+
+  final DateTime date;
+  final bool isToday;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 48,
+    alignment: Alignment.center,
+    decoration: const BoxDecoration(
+      border: Border(
+        left: BorderSide(color: HeyBeanTheme.border),
+        bottom: BorderSide(color: HeyBeanTheme.border),
+      ),
+    ),
+    child: Text(
+      '${_shortWeekdayName(date.weekday)} — ${_monthName(date.month)} ${date.day}',
+      style: TextStyle(
+        color: isToday ? HeyBeanTheme.accentStrong : HeyBeanTheme.text,
+        fontWeight: FontWeight.w900,
+      ),
+    ),
+  );
+}
+
+class _TimelineHourRow extends StatelessWidget {
+  const _TimelineHourRow({required this.hour});
+
+  final int hour;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: _AppleStyleTodayTimeline._hourHeight,
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: _AppleStyleTodayTimeline._timeColumnWidth,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4, right: 6),
+            child: Text(
+              _hourLabel(hour),
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: HeyBeanTheme.muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+        for (var column = 0; column < 2; column++)
+          Expanded(
+            child: Container(
+              decoration: const BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: HeyBeanTheme.border),
+                  left: BorderSide(color: HeyBeanTheme.border),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class _TimelineEventBlock extends StatelessWidget {
+  const _TimelineEventBlock({required this.event});
+
+  final HermesCalendarEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final parsed = _parseCalendarEventDateTime(event.startsAt);
+    if (parsed == null) return const SizedBox.shrink();
+    final hourPosition =
+        ((parsed.hour + (parsed.minute / 60)) -
+                _AppleStyleTodayTimeline._timelineHours.first)
+            .clamp(
+              0.0,
+              _AppleStyleTodayTimeline._timelineHours.length.toDouble(),
+            ) *
+        _AppleStyleTodayTimeline._hourHeight;
+    return Positioned(
+      top: hourPosition + 50,
+      left: _AppleStyleTodayTimeline._timeColumnWidth + 8,
+      right: 8,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0x2416A34A),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0x5516A34A)),
+        ),
+        child: Text(
+          event.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: HeyBeanTheme.accentStrong,
+            fontWeight: FontWeight.w800,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _hourLabel(int hour) {
+  if (hour == 12) return 'Noon';
+  if (hour < 12) return '$hour AM';
+  return '${hour - 12} PM';
+}
+
+String _clockLabel(DateTime time) {
+  final hour = time.hour % 12 == 0 ? 12 : time.hour % 12;
+  final minute = time.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
+String _monthName(int month) => const [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+][month - 1];
+
+String _shortWeekdayName(int weekday) =>
+    const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
+
+DateTime? _parseCalendarEventDateTime(String? value) {
+  if (value == null || value.trim().isEmpty) return null;
+  final parsed = DateTime.tryParse(value);
+  if (parsed != null) return parsed;
+
+  final match = RegExp(
+    r'^(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
+    caseSensitive: false,
+  ).firstMatch(value.trim());
+  if (match == null) return null;
+  var hour = int.parse(match.group(1)!);
+  final minute = int.tryParse(match.group(2) ?? '0') ?? 0;
+  final meridiem = match.group(3)!.toUpperCase();
+  if (meridiem == 'PM' && hour != 12) hour += 12;
+  if (meridiem == 'AM' && hour == 12) hour = 0;
+  final now = DateTime.now();
+  return DateTime(now.year, now.month, now.day, hour, minute);
+}
+
+bool _sameCalendarDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
 
 class _CalendarMonthTaskList extends StatelessWidget {
   const _CalendarMonthTaskList({
@@ -1640,11 +2001,6 @@ class _CalendarMonthTaskList extends StatelessWidget {
       ],
     ],
   );
-}
-
-bool _isCalendarToday(DateTime day) {
-  final now = DateTime.now();
-  return day.year == now.year && day.month == now.month && day.day == now.day;
 }
 
 class _MonthGrid extends StatelessWidget {
