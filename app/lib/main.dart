@@ -159,7 +159,7 @@ class HeyBeanTheme {
 
 enum _AuthPhase { loading, signedOut, signedIn }
 
-enum _HomeDestination { today, tasks, bean, calendar, more }
+enum _HomeDestination { today, tasks, bean, reminders, settings }
 
 class CommandCenterShell extends StatefulWidget {
   const CommandCenterShell({
@@ -193,7 +193,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   ].toList();
   String? _error;
   bool _busy = false;
-  _HomeDestination _selectedDestination = _HomeDestination.bean;
+  _HomeDestination _selectedDestination = _HomeDestination.today;
 
   @override
   void initState() {
@@ -722,33 +722,21 @@ class _CommandCenterContent extends StatelessWidget {
             _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
           ],
         );
-        final overviewPanel = Column(
-          children: [
-            _ProgressCard(user: user, error: error, taskCount: tasks.length),
-            const SizedBox(height: 16),
-            _TabSurface(
-              tasks: tasks,
-              reminders: reminders,
-              calendar: calendar,
-              events: events,
-            ),
-            const SizedBox(height: 16),
-            _ActivityCard(events: events),
-          ],
-        );
         final selectedPanel = switch (selectedDestination) {
-          _HomeDestination.today => overviewPanel,
+          _HomeDestination.today => _TodayHomeView(
+            user: user,
+            tasks: tasks,
+            reminders: reminders,
+            calendar: calendar,
+            approvals: pendingApprovals,
+          ),
           _HomeDestination.tasks => _TaskListCard(tasks: tasks),
           _HomeDestination.bean => beanPanel,
-          _HomeDestination.calendar => _CalendarCard(calendar: calendar),
-          _HomeDestination.more => Column(
-            children: [
-              _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
-              const SizedBox(height: 16),
-              _ApprovalCard(approvals: pendingApprovals),
-              const SizedBox(height: 16),
-              _ActivityCard(events: events),
-            ],
+          _HomeDestination.reminders => _ReminderListCard(reminders: reminders),
+          _HomeDestination.settings => _SettingsView(
+            user: user,
+            approvals: pendingApprovals,
+            onDeleteAccount: onDeleteAccount,
           ),
         };
         final right = Column(
@@ -759,7 +747,7 @@ class _CommandCenterContent extends StatelessWidget {
             const SizedBox(height: 16),
             _ActivityCard(events: events),
             const SizedBox(height: 16),
-            _CalendarCard(calendar: calendar),
+            _ShellCard(child: _CalendarAgenda(calendar: calendar)),
           ],
         );
         if (constraints.maxWidth < 900 ||
@@ -844,6 +832,7 @@ class _HeroChatCardState extends State<_HeroChatCard> {
 
   @override
   Widget build(BuildContext context) => _ShellCard(
+    key: const Key('chat-view'),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1316,6 +1305,256 @@ class _ActivityCard extends StatelessWidget {
   );
 }
 
+class _TodayHomeView extends StatelessWidget {
+  const _TodayHomeView({
+    required this.user,
+    required this.tasks,
+    required this.reminders,
+    required this.calendar,
+    required this.approvals,
+  });
+
+  final HermesUser user;
+  final List<HermesTask> tasks;
+  final List<HermesReminder> reminders;
+  final List<HermesCalendarEvent> calendar;
+  final List<HermesApproval> approvals;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const Key('today-view'),
+    children: [
+      if (approvals.isNotEmpty) ...[
+        _ApprovalBanner(approval: approvals.first),
+        const SizedBox(height: 16),
+      ],
+      _ShellCard(
+        key: const Key('today-month-calendar'),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Welcome, ${user.name}',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Expanded(
+                  child: _SectionTitle(
+                    icon: Icons.calendar_month_rounded,
+                    title: 'Today',
+                    subtitle: 'This month',
+                  ),
+                ),
+                _StatusPill(
+                  label: '${calendar.length} events',
+                  icon: Icons.event_rounded,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _MonthGrid(calendar: calendar),
+            const SizedBox(height: 16),
+            _CalendarAgenda(calendar: calendar),
+          ],
+        ),
+      ),
+      const SizedBox(height: 16),
+      _ShellCard(
+        key: const Key('today-task-list'),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionTitle(
+              icon: Icons.task_alt_rounded,
+              title: 'Tasks for today',
+              subtitle: '${tasks.length} tasks · ${reminders.length} reminders',
+            ),
+            const SizedBox(height: 12),
+            if (tasks.isEmpty && reminders.isEmpty)
+              const _EmptySurface(label: 'Nothing scheduled for today')
+            else ...[
+              for (final task in tasks)
+                _CompactItemTile(
+                  icon: Icons.radio_button_unchecked_rounded,
+                  title: task.title,
+                  subtitle: _statusLabel(task.status),
+                ),
+              for (final reminder in reminders)
+                _CompactItemTile(
+                  icon: Icons.notifications_active_outlined,
+                  title: reminder.title,
+                  subtitle: reminder.dueAt ?? 'Reminder',
+                ),
+            ],
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+class _MonthGrid extends StatelessWidget {
+  const _MonthGrid({required this.calendar});
+
+  final List<HermesCalendarEvent> calendar;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final first = DateTime(now.year, now.month);
+    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+    final leadingBlanks = first.weekday % 7;
+    final totalCells = leadingBlanks + daysInMonth;
+    final rowCount = (totalCells / 7).ceil();
+    final eventDays = <int>{};
+    for (final event in calendar) {
+      final parsed = DateTime.tryParse(event.startsAt ?? '');
+      if (parsed != null &&
+          parsed.month == now.month &&
+          parsed.year == now.year) {
+        eventDays.add(parsed.day);
+      }
+    }
+
+    const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    return Column(
+      children: [
+        Row(
+          children: [
+            for (final weekday in weekdays)
+              Expanded(
+                child: Center(
+                  child: Text(
+                    weekday,
+                    style: const TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        for (var row = 0; row < rowCount; row++) ...[
+          Row(
+            children: [
+              for (var column = 0; column < 7; column++)
+                Expanded(
+                  child: _MonthDayCell(
+                    day: _dayForCell(
+                      row * 7 + column,
+                      leadingBlanks,
+                      daysInMonth,
+                    ),
+                    isToday:
+                        _dayForCell(
+                          row * 7 + column,
+                          leadingBlanks,
+                          daysInMonth,
+                        ) ==
+                        now.day,
+                    hasEvent: eventDays.contains(
+                      _dayForCell(row * 7 + column, leadingBlanks, daysInMonth),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+        ],
+      ],
+    );
+  }
+
+  int? _dayForCell(int cell, int leadingBlanks, int daysInMonth) {
+    final day = cell - leadingBlanks + 1;
+    if (day < 1 || day > daysInMonth) return null;
+    return day;
+  }
+}
+
+class _MonthDayCell extends StatelessWidget {
+  const _MonthDayCell({
+    required this.day,
+    required this.isToday,
+    required this.hasEvent,
+  });
+
+  final int? day;
+  final bool isToday;
+  final bool hasEvent;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 42,
+    margin: const EdgeInsets.symmetric(horizontal: 2),
+    decoration: BoxDecoration(
+      color: isToday ? HeyBeanTheme.accent : HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(
+        color: isToday ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
+      ),
+    ),
+    child: day == null
+        ? const SizedBox.shrink()
+        : Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '$day',
+                style: TextStyle(
+                  color: isToday ? Colors.white : HeyBeanTheme.text,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              if (hasEvent)
+                Container(
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: isToday ? Colors.white : HeyBeanTheme.accent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+            ],
+          ),
+  );
+}
+
+class _CalendarAgenda extends StatelessWidget {
+  const _CalendarAgenda({required this.calendar});
+
+  final List<HermesCalendarEvent> calendar;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        'Today / upcoming',
+        style: Theme.of(
+          context,
+        ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 8),
+      if (calendar.isEmpty)
+        const _EmptySurface(label: 'No calendar events')
+      else
+        for (final event in calendar)
+          _CompactItemTile(
+            icon: Icons.event_available_rounded,
+            title: event.title,
+            subtitle: event.startsAt ?? 'Unscheduled',
+          ),
+    ],
+  );
+}
+
 class _TaskListCard extends StatelessWidget {
   const _TaskListCard({required this.tasks});
 
@@ -1323,55 +1562,191 @@ class _TaskListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _ShellCard(
+    key: const Key('tasks-view'),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _SectionTitle(
           icon: Icons.task_alt_rounded,
           title: 'Task list',
-          subtitle: 'Open household and assistant tasks',
+          subtitle: 'Only open assistant tasks in this app',
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: const [
+            ChoiceChip(label: Text('Open'), selected: true),
+            ChoiceChip(label: Text('Done'), selected: false),
+          ],
         ),
         const SizedBox(height: 12),
         if (tasks.isEmpty)
-          const Text('No open tasks')
+          const _EmptySurface(label: 'No open tasks')
         else
           for (final task in tasks)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.check_circle_outline_rounded),
-              title: Text(task.title),
-              subtitle: task.status == null ? null : Text(task.status!),
+            _CompactItemTile(
+              icon: Icons.check_circle_outline_rounded,
+              title: task.title,
+              subtitle: _statusLabel(task.status),
             ),
       ],
     ),
   );
 }
 
-class _CalendarCard extends StatelessWidget {
-  const _CalendarCard({required this.calendar});
+class _ReminderListCard extends StatelessWidget {
+  const _ReminderListCard({required this.reminders});
 
-  final List<HermesCalendarEvent> calendar;
+  final List<HermesReminder> reminders;
 
   @override
   Widget build(BuildContext context) => _ShellCard(
+    key: const Key('reminders-view'),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _SectionTitle(
-          icon: Icons.calendar_month_rounded,
-          title: 'Calendar',
-          subtitle: 'Live schedule',
+          icon: Icons.notifications_active_rounded,
+          title: 'Reminders',
+          subtitle: 'Upcoming reminders from Bean',
         ),
         const SizedBox(height: 12),
-        for (final event in calendar)
-          ListTile(
-            dense: true,
-            title: Text(event.title),
-            subtitle: Text(event.startsAt ?? 'Unscheduled'),
-          ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: const [
+            ChoiceChip(label: Text('Pending'), selected: true),
+            ChoiceChip(label: Text('Completed'), selected: false),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (reminders.isEmpty)
+          const _EmptySurface(label: 'No reminders')
+        else
+          for (final reminder in reminders)
+            _CompactItemTile(
+              icon: Icons.notifications_none_rounded,
+              title: reminder.title,
+              subtitle: reminder.dueAt ?? 'No time set',
+            ),
       ],
     ),
   );
+}
+
+class _SettingsView extends StatelessWidget {
+  const _SettingsView({
+    required this.user,
+    required this.approvals,
+    required this.onDeleteAccount,
+  });
+
+  final HermesUser user;
+  final List<HermesApproval> approvals;
+  final Future<void> Function() onDeleteAccount;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const Key('settings-view'),
+    children: [
+      _ShellCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _SectionTitle(
+              icon: Icons.settings_rounded,
+              title: 'Settings',
+              subtitle: 'Focused Hermes Bean preferences',
+            ),
+            const SizedBox(height: 12),
+            _CompactItemTile(
+              icon: Icons.person_outline_rounded,
+              title: user.name,
+              subtitle: user.email,
+            ),
+            const _CompactItemTile(
+              icon: Icons.tune_rounded,
+              title: 'Bean preferences',
+              subtitle:
+                  'Chat guidance and assistant behavior are managed by Hermes Bean',
+            ),
+            _CompactItemTile(
+              icon: Icons.verified_user_outlined,
+              title: 'Approval rules',
+              subtitle: approvals.isEmpty
+                  ? 'No pending approvals'
+                  : '${approvals.length} pending approval needs review',
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 16),
+      _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
+    ],
+  );
+}
+
+class _CompactItemTile extends StatelessWidget {
+  const _CompactItemTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: Row(
+      children: [
+        Icon(icon, color: HeyBeanTheme.accentStrong),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+              Text(subtitle, style: const TextStyle(color: HeyBeanTheme.muted)),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _EmptySurface extends StatelessWidget {
+  const _EmptySurface({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: Text(label, style: const TextStyle(color: HeyBeanTheme.muted)),
+  );
+}
+
+String _statusLabel(String? status) {
+  final normalized = (status ?? 'open').replaceAll('_', ' ');
+  if (normalized.isEmpty) return 'Open';
+  return '${normalized[0].toUpperCase()}${normalized.substring(1)}';
 }
 
 class _AccountCard extends StatelessWidget {
@@ -1444,7 +1819,7 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _ShellCard extends StatelessWidget {
-  const _ShellCard({required this.child, this.glow = false});
+  const _ShellCard({super.key, required this.child, this.glow = false});
 
   final Widget child;
   final bool glow;
@@ -1566,20 +1941,20 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                     const SizedBox(width: 84),
                     Expanded(
                       child: _MenuIconButton(
-                        key: const Key('nav-calendar'),
-                        icon: Icons.calendar_month_rounded,
-                        label: 'Calendar',
-                        selected: selected == _HomeDestination.calendar,
-                        onPressed: () => onSelected(_HomeDestination.calendar),
+                        key: const Key('nav-reminders'),
+                        icon: Icons.notifications_active_rounded,
+                        label: 'Reminders',
+                        selected: selected == _HomeDestination.reminders,
+                        onPressed: () => onSelected(_HomeDestination.reminders),
                       ),
                     ),
                     Expanded(
                       child: _MenuIconButton(
-                        key: const Key('nav-more'),
-                        icon: Icons.more_vert_rounded,
-                        label: 'More',
-                        selected: selected == _HomeDestination.more,
-                        onPressed: () => onSelected(_HomeDestination.more),
+                        key: const Key('nav-settings'),
+                        icon: Icons.settings_rounded,
+                        label: 'Settings',
+                        selected: selected == _HomeDestination.settings,
+                        onPressed: () => onSelected(_HomeDestination.settings),
                       ),
                     ),
                   ],

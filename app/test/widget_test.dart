@@ -55,7 +55,10 @@ void main() {
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Stand up'), findsOneWidget);
       expect(find.text('Design review'), findsWidgets);
-      expect(find.text('assistant.ready'), findsOneWidget);
+      expect(find.text('assistant.ready'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
 
       await tester.enterText(
         find.byKey(const Key('chat-input')),
@@ -95,6 +98,10 @@ void main() {
 
       expect(find.text('HeyBean'), findsWidgets);
       expect(find.text('Bean assistant'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+
       expect(
         find.text('Ask Bean to create tasks, reminders, or calendar events...'),
         findsOneWidget,
@@ -108,8 +115,8 @@ void main() {
         'Today',
         'Tasks',
         'Reminders',
-        'Calendar',
-        'Activity',
+        'Bean',
+        'Settings',
       ]) {
         expect(find.text(label), findsWidgets);
       }
@@ -117,7 +124,7 @@ void main() {
   );
 
   testWidgets(
-    'bottom nav, quick prompts, and approval review are interactive',
+    'focused old HeyBean views render home calendar, tasks, reminders, chat, and settings',
     (WidgetTester tester) async {
       final api = _SignedInFakeHermesApiClient();
       await tester.pumpWidget(
@@ -125,19 +132,30 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(find.byKey(const Key('today-month-calendar')), findsOneWidget);
+      expect(find.text('Today'), findsWidgets);
+      expect(find.text('This month'), findsOneWidget);
+      expect(find.text('Tasks for today'), findsOneWidget);
+      expect(find.text('Plan launch'), findsOneWidget);
+      expect(find.text('Design review'), findsWidgets);
+
       expect(find.byKey(const Key('nav-tasks')), findsOneWidget);
       await tester.tap(find.byKey(const Key('nav-tasks')));
       await tester.pumpAndSettle();
+      expect(find.byKey(const Key('tasks-view')), findsOneWidget);
       expect(find.text('Task list'), findsOneWidget);
-      expect(find.text('Plan launch'), findsOneWidget);
+      expect(find.text('Open'), findsWidgets);
 
-      await tester.tap(find.byKey(const Key('nav-calendar')));
+      await tester.tap(find.byKey(const Key('nav-reminders')));
       await tester.pumpAndSettle();
-      expect(find.text('Calendar'), findsWidgets);
-      expect(find.text('Design review'), findsWidgets);
+      expect(find.byKey(const Key('reminders-view')), findsOneWidget);
+      expect(find.text('Reminders'), findsWidgets);
+      expect(find.text('Stand up'), findsOneWidget);
+      expect(find.text('Pending'), findsWidgets);
 
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
+      expect(find.byKey(const Key('chat-view')), findsOneWidget);
       expect(find.byKey(const Key('quick-plan-today')), findsOneWidget);
       await tester.tap(find.byKey(const Key('quick-plan-today')));
       await tester.pumpAndSettle();
@@ -148,6 +166,16 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Pending approval'), findsOneWidget);
       expect(find.textContaining('Review outgoing email'), findsWidgets);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('settings-view')), findsOneWidget);
+      expect(find.text('Settings'), findsWidgets);
+      expect(find.text('Bean preferences'), findsOneWidget);
+      expect(find.text('Approval rules'), findsOneWidget);
+      expect(find.byKey(const Key('delete-account-action')), findsOneWidget);
     },
   );
 
@@ -222,6 +250,10 @@ void main() {
     expect(find.byKey(const Key('green-glow-left')), findsOneWidget);
     expect(find.byKey(const Key('heybean-bottom-menu')), findsOneWidget);
     expect(find.byKey(const Key('heybean-center-bean-button')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+
     expect(find.byKey(const Key('primary-chat-action')), findsOneWidget);
   });
 }
