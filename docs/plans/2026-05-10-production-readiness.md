@@ -48,7 +48,7 @@
 
 **Steps:**
 1. Write failing tests using a fake executable/script or injected command runner.
-2. Add env config: `HERMES_RUNTIME_MODE=stub|cli`, `HERMES_CLI_PATH`, timeout, workdir, profile.
+2. Add env config: `HERMES_RUNTIME_MODE=cli`, `HERMES_CLI_PATH`, timeout, workdir, profile.
 3. Implement CLI invocation with timeout, sanitized environment, no shell interpolation, captured stdout/stderr.
 4. Persist user message, assistant message, `runtime.hermes_cli_started`, `runtime.hermes_cli_completed` or `runtime.hermes_cli_failed` events.
 5. On missing CLI, timeout, or non-zero exit, create blocker instead of generic response.
@@ -114,7 +114,7 @@
 Run:
 
 ```bash
-cd web && php artisan test && php artisan hermes-bean:demo --reset
+cd web && php artisan test
 cd ../app && flutter test && flutter analyze
 cd .. && git status --short && git push origin main
 ```

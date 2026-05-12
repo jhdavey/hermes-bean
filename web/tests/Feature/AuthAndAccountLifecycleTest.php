@@ -67,6 +67,8 @@ class AuthAndAccountLifecycleTest extends TestCase
             'content' => 'Try to write into Alice session',
         ])->assertNotFound();
 
+        $this->configureTaskCreatingHermesRuntime();
+
         $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Add task Follow up with Sam.',
         ])->assertCreated();
@@ -113,6 +115,7 @@ class AuthAndAccountLifecycleTest extends TestCase
 
         $aliceSessionId = $this->withToken($aliceToken)->postJson('/api/assistant/sessions', ['title' => 'Alice export'])
             ->assertCreated()->json('data.id');
+        $this->configureTaskCreatingHermesRuntime();
         $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$aliceSessionId}/messages", [
             'content' => 'Add task Export Alice task.',
         ])->assertCreated();
@@ -139,6 +142,28 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseMissing('tasks', ['user_id' => $aliceId]);
         $this->assertDatabaseHas('users', ['email' => 'bob@example.com']);
         $this->assertDatabaseHas('tasks', ['title' => 'Bob private task']);
+    }
+
+    private function configureTaskCreatingHermesRuntime(): void
+    {
+        $this->configureFakeHermesRuntime(<<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = $argv[array_search('-q', $argv, true) + 1] ?? '';
+$payloadJson = trim(substr($prompt, strpos($prompt, "Runtime payload:") + strlen("Runtime payload:")));
+$payload = json_decode($payloadJson, true, flags: JSON_THROW_ON_ERROR);
+$content = $payload['message']['content'] ?? '';
+$title = preg_replace('/^Add task\s+/i', '', $content);
+$title = trim((string) $title, " .\t\n\r\0\x0B");
+echo json_encode([
+    'message' => 'Created task: '.$title,
+    'actions' => [[
+        'type' => 'task.create',
+        'risk' => 'low',
+        'parameters' => ['title' => $title, 'type' => 'todo'],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
     }
 
     private function registerToken(string $email): string

@@ -52,6 +52,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+      expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
+      expect(find.text('Agent online'), findsNothing);
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Stand up'), findsOneWidget);
       expect(find.text('Design review'), findsWidgets);
@@ -96,8 +98,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('HeyBean'), findsWidgets);
-      expect(find.text('Bean assistant'), findsOneWidget);
+      expect(find.text('HeyBean'), findsNothing);
+      expect(find.text('Bean assistant'), findsNothing);
+      expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
+      expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
@@ -133,13 +138,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('calendar-view')), findsOneWidget);
-      expect(find.byKey(const Key('calendar-mode-today')), findsOneWidget);
-      expect(find.byKey(const Key('calendar-mode-month')), findsOneWidget);
-      expect(find.text('Welcome, Bean User'), findsNothing);
-      expect(find.text('Calendar'), findsWidgets);
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
+      expect(find.text('Today'), findsOneWidget);
       expect(find.text('2'), findsWidgets);
-      expect(find.text('Today'), findsWidgets);
       expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
       expect(
         find.byKey(const Key('apple-style-week-date-header')),
@@ -159,12 +161,16 @@ void main() {
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Design review'), findsWidgets);
 
-      await tester.tap(find.byKey(const Key('calendar-mode-month')));
+      await tester.tap(find.byKey(const Key('calendar-month-chevron')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-day-chevron')), findsOneWidget);
       expect(find.text('Rest of month'), findsOneWidget);
       expect(find.text('Plan launch'), findsWidgets);
       expect(find.text('Stand up'), findsWidgets);
+      await tester.tap(find.text('1').first);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('apple-style-day-timeline')), findsOneWidget);
 
       expect(find.byKey(const Key('nav-tasks')), findsOneWidget);
       await tester.tap(find.byKey(const Key('nav-tasks')));
@@ -201,8 +207,30 @@ void main() {
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
       expect(find.text('Settings'), findsWidgets);
       expect(find.text('Bean preferences'), findsOneWidget);
+      expect(find.text('Calendar preferences'), findsOneWidget);
+      expect(find.text('Start hour'), findsOneWidget);
+      expect(find.text('End hour'), findsOneWidget);
       expect(find.text('Approval rules'), findsOneWidget);
       expect(find.byKey(const Key('delete-account-action')), findsOneWidget);
+
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-start-hour-setting')),
+      );
+      await tester.tap(find.byKey(const Key('calendar-start-hour-setting')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('10 AM').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('calendar-end-hour-setting')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('9 PM').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-today')));
+      await tester.pumpAndSettle();
+      expect(find.text('10 AM'), findsOneWidget);
+      expect(find.text('9 PM'), findsOneWidget);
+      expect(find.text('9 AM'), findsNothing);
+      expect(find.text('10 PM'), findsNothing);
     },
   );
 
@@ -283,6 +311,65 @@ void main() {
 
     expect(find.byKey(const Key('primary-chat-action')), findsOneWidget);
   });
+
+  testWidgets(
+    'chat explains blocked Hermes requests with the backend reason and blocked state',
+    (WidgetTester tester) async {
+      final api = _BlockedRequestHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Send the contract to Lauren',
+      );
+      await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle();
+
+      expect(api.sentMessages, ['Send the contract to Lauren']);
+      expect(find.text('Blocked'), findsOneWidget);
+      expect(
+        find.text('Hermes is blocked: Gmail OAuth is not connected.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'chat failure message tells the user why Hermes could not complete the request',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _FailingRequestHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Book a plumber for tomorrow',
+      );
+      await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Failed'), findsOneWidget);
+      expect(
+        find.text(
+          'I could not complete that request because Hermes timed out. Please try again, or clarify any missing details so I can continue.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 }
 
 class _MemoryAuthTokenStore implements AuthTokenStore {
@@ -446,5 +533,33 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<void> deleteAccount() async {
     deletedAccount = true;
     bearerToken = null;
+  }
+}
+
+class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sentMessages.add(content);
+    return const HermesMessageResult(
+      status: 'blocked',
+      session: HermesSession(id: 42, status: 'blocked', title: 'Session blocked'),
+      events: [],
+      blocker: {'reason': 'Gmail OAuth is not connected.'},
+    );
+  }
+}
+
+class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    throw const HermesApiException(504, '{"message":"Hermes timed out."}');
   }
 }

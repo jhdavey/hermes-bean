@@ -36,7 +36,7 @@ return [
     ],
 
     'hermes_runtime' => [
-        'mode' => env('HERMES_RUNTIME_MODE', 'stub'),
+        'mode' => env('HERMES_RUNTIME_MODE', 'cli'),
         'default_provider' => env('HERMES_DEFAULT_PROVIDER', 'openrouter'),
         'default_model' => env('HERMES_DEFAULT_MODEL', 'gpt-5.5'),
         'router_mode' => env('HERMES_ROUTER_MODE', 'fixed'),

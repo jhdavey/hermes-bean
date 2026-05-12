@@ -27,16 +27,28 @@ Route::middleware('api.rate_limit')->group(function (): void {
 
         Route::get('/tasks', [DomainResourceController::class, 'listTasks']);
         Route::post('/tasks', [DomainResourceController::class, 'storeTask']);
+        Route::patch('/tasks/{task}', [DomainResourceController::class, 'updateTask']);
+        Route::delete('/tasks/{task}', [DomainResourceController::class, 'destroyTask']);
         Route::get('/reminders', [DomainResourceController::class, 'listReminders']);
         Route::post('/reminders', [DomainResourceController::class, 'storeReminder']);
+        Route::patch('/reminders/{reminder}', [DomainResourceController::class, 'updateReminder']);
+        Route::delete('/reminders/{reminder}', [DomainResourceController::class, 'destroyReminder']);
         Route::get('/calendar-events', [DomainResourceController::class, 'listCalendarEvents']);
         Route::post('/calendar-events', [DomainResourceController::class, 'storeCalendarEvent']);
+        Route::patch('/calendar-events/{calendarEvent}', [DomainResourceController::class, 'updateCalendarEvent']);
+        Route::delete('/calendar-events/{calendarEvent}', [DomainResourceController::class, 'destroyCalendarEvent']);
         Route::get('/approvals', [DomainResourceController::class, 'listApprovals']);
         Route::post('/approvals', [DomainResourceController::class, 'storeApproval']);
+        Route::patch('/approvals/{approval}', [DomainResourceController::class, 'updateApproval']);
+        Route::delete('/approvals/{approval}', [DomainResourceController::class, 'destroyApproval']);
         Route::post('/approvals/{approval}/approve', [DomainResourceController::class, 'approveApproval']);
         Route::post('/approvals/{approval}/deny', [DomainResourceController::class, 'denyApproval']);
         Route::get('/blockers', [DomainResourceController::class, 'listBlockers']);
         Route::post('/blockers', [DomainResourceController::class, 'storeBlocker']);
+        Route::patch('/blockers/{blocker}', [DomainResourceController::class, 'updateBlocker']);
+        Route::delete('/blockers/{blocker}', [DomainResourceController::class, 'destroyBlocker']);
         Route::post('/scheduler-jobs', [DomainResourceController::class, 'storeSchedulerJob']);
+        Route::patch('/scheduler-jobs/{schedulerJob}', [DomainResourceController::class, 'updateSchedulerJob']);
+        Route::delete('/scheduler-jobs/{schedulerJob}', [DomainResourceController::class, 'destroySchedulerJob']);
     });
 });

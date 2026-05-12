@@ -58,6 +58,26 @@ class DomainResourceController extends Controller
         ]))));
     }
 
+    public function updateTask(Request $request, string $task): JsonResponse
+    {
+        $model = Task::where('user_id', $request->user()->id)->findOrFail($task);
+        $model->update($request->validate([
+            'title' => ['sometimes', 'required', 'string', 'max:255'],
+            'type' => ['sometimes', 'required', Rule::in(['todo', 'chore', 'maintenance'])],
+            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'notes' => ['sometimes', 'nullable', 'string'],
+            'due_at' => ['sometimes', 'nullable', 'date'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+        ]));
+
+        return response()->json(['data' => $model->refresh()]);
+    }
+
+    public function destroyTask(Request $request, string $task): JsonResponse
+    {
+        return $this->destroyed(Task::where('user_id', $request->user()->id)->findOrFail($task));
+    }
+
     public function storeReminder(Request $request): JsonResponse
     {
         return $this->created(Reminder::create($this->owned($request, $request->validate([
@@ -68,6 +88,25 @@ class DomainResourceController extends Controller
             'status' => ['nullable', 'string', 'max:50'],
             'metadata' => ['nullable', 'array'],
         ]))));
+    }
+
+    public function updateReminder(Request $request, string $reminder): JsonResponse
+    {
+        $model = Reminder::where('user_id', $request->user()->id)->findOrFail($reminder);
+        $model->update($request->validate([
+            'title' => ['sometimes', 'required', 'string', 'max:255'],
+            'notes' => ['sometimes', 'nullable', 'string'],
+            'remind_at' => ['sometimes', 'required', 'date'],
+            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+        ]));
+
+        return response()->json(['data' => $model->refresh()]);
+    }
+
+    public function destroyReminder(Request $request, string $reminder): JsonResponse
+    {
+        return $this->destroyed(Reminder::where('user_id', $request->user()->id)->findOrFail($reminder));
     }
 
     public function storeCalendarEvent(Request $request): JsonResponse
@@ -84,6 +123,27 @@ class DomainResourceController extends Controller
         ]))));
     }
 
+    public function updateCalendarEvent(Request $request, string $calendarEvent): JsonResponse
+    {
+        $model = CalendarEvent::where('user_id', $request->user()->id)->findOrFail($calendarEvent);
+        $model->update($request->validate([
+            'title' => ['sometimes', 'required', 'string', 'max:255'],
+            'description' => ['sometimes', 'nullable', 'string'],
+            'location' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'starts_at' => ['sometimes', 'required', 'date'],
+            'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],
+            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+        ]));
+
+        return response()->json(['data' => $model->refresh()]);
+    }
+
+    public function destroyCalendarEvent(Request $request, string $calendarEvent): JsonResponse
+    {
+        return $this->destroyed(CalendarEvent::where('user_id', $request->user()->id)->findOrFail($calendarEvent));
+    }
+
     public function storeApproval(Request $request): JsonResponse
     {
         return $this->created(Approval::create($this->owned($request, $request->validate([
@@ -93,6 +153,24 @@ class DomainResourceController extends Controller
             'status' => ['nullable', 'string', 'max:50'],
             'payload' => ['nullable', 'array'],
         ]))));
+    }
+
+    public function updateApproval(Request $request, string $approval): JsonResponse
+    {
+        $model = Approval::where('user_id', $request->user()->id)->findOrFail($approval);
+        $model->update($request->validate([
+            'title' => ['sometimes', 'required', 'string', 'max:255'],
+            'description' => ['sometimes', 'nullable', 'string'],
+            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'payload' => ['sometimes', 'nullable', 'array'],
+        ]));
+
+        return response()->json(['data' => $model->refresh()]);
+    }
+
+    public function destroyApproval(Request $request, string $approval): JsonResponse
+    {
+        return $this->destroyed(Approval::where('user_id', $request->user()->id)->findOrFail($approval));
     }
 
     public function approveApproval(Request $request, string $approval): JsonResponse
@@ -131,6 +209,23 @@ class DomainResourceController extends Controller
         ]))));
     }
 
+    public function updateBlocker(Request $request, string $blocker): JsonResponse
+    {
+        $model = Blocker::where('user_id', $request->user()->id)->findOrFail($blocker);
+        $model->update($request->validate([
+            'reason' => ['sometimes', 'required', 'string'],
+            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'context' => ['sometimes', 'nullable', 'array'],
+        ]));
+
+        return response()->json(['data' => $model->refresh()]);
+    }
+
+    public function destroyBlocker(Request $request, string $blocker): JsonResponse
+    {
+        return $this->destroyed(Blocker::where('user_id', $request->user()->id)->findOrFail($blocker));
+    }
+
     public function storeSchedulerJob(Request $request): JsonResponse
     {
         return $this->created(SchedulerJobRecord::create($this->owned($request, $request->validate([
@@ -144,6 +239,27 @@ class DomainResourceController extends Controller
         ]))));
     }
 
+    public function updateSchedulerJob(Request $request, string $schedulerJob): JsonResponse
+    {
+        $model = SchedulerJobRecord::where('user_id', $request->user()->id)->findOrFail($schedulerJob);
+        $model->update($request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'scheduled_for' => ['sometimes', 'nullable', 'date'],
+            'started_at' => ['sometimes', 'nullable', 'date'],
+            'finished_at' => ['sometimes', 'nullable', 'date'],
+            'payload' => ['sometimes', 'nullable', 'array'],
+            'last_error' => ['sometimes', 'nullable', 'string'],
+        ]));
+
+        return response()->json(['data' => $model->refresh()]);
+    }
+
+    public function destroySchedulerJob(Request $request, string $schedulerJob): JsonResponse
+    {
+        return $this->destroyed(SchedulerJobRecord::where('user_id', $request->user()->id)->findOrFail($schedulerJob));
+    }
+
     private function listed(mixed $models): JsonResponse
     {
         return response()->json(['data' => $models]);
@@ -152,6 +268,13 @@ class DomainResourceController extends Controller
     private function created(Model $model): JsonResponse
     {
         return response()->json(['data' => $model], 201);
+    }
+
+    private function destroyed(Model $model): JsonResponse
+    {
+        $model->delete();
+
+        return response()->json(status: 204);
     }
 
     /**

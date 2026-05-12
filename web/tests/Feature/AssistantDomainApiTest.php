@@ -3,11 +3,31 @@
 namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
 class AssistantDomainApiTest extends TestCase
 {
     use RefreshDatabase;
+
+    private string $tempDir;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->tempDir = sys_get_temp_dir().'/assistant-domain-api-test-'.bin2hex(random_bytes(6));
+        File::makeDirectory($this->tempDir, 0755, true);
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->tempDir) && File::isDirectory($this->tempDir)) {
+            File::deleteDirectory($this->tempDir);
+        }
+
+        parent::tearDown();
+    }
 
     public function test_personal_assistant_domain_resources_can_be_created_via_api(): void
     {
@@ -46,7 +66,7 @@ class AssistantDomainApiTest extends TestCase
         $this->withToken($token)->postJson('/api/approvals', [
             'title' => 'Confirm booking',
             'status' => 'pending',
-            'payload' => ['provider' => 'stub'],
+            'payload' => ['provider' => 'server_hermes'],
         ])->assertCreated()
             ->assertJsonPath('data.status', 'pending');
 
@@ -75,6 +95,12 @@ class AssistantDomainApiTest extends TestCase
 
     public function test_activity_events_can_be_polled_for_a_session(): void
     {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode(['message' => 'Planning complete.'], JSON_THROW_ON_ERROR);
+PHP);
+
         $token = $this->apiToken();
 
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
@@ -89,6 +115,18 @@ class AssistantDomainApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.event_type', 'runtime.session_started')
             ->assertJsonFragment(['event_type' => 'runtime.message_received'])
-            ->assertJsonFragment(['event_type' => 'tool.executed']);
+            ->assertJsonFragment(['event_type' => 'runtime.hermes_cli_started'])
+            ->assertJsonFragment(['event_type' => 'runtime.hermes_cli_completed']);
+    }
+
+    private function configureFakeHermes(string $contents): void
+    {
+        $path = $this->tempDir.'/fake-hermes.php';
+        File::put($path, $contents);
+        chmod($path, 0755);
+
+        config()->set('services.hermes_runtime.cli_path', $path);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.workdir', $this->tempDir);
     }
 }

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -193,7 +195,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   ].toList();
   String? _error;
   bool _busy = false;
+  String _chatRunState = 'Ready';
   _HomeDestination _selectedDestination = _HomeDestination.today;
+  bool _showCalendarMonth = false;
+  DateTime _selectedCalendarDay = _dateOnly(DateTime.now());
+  int _calendarStartHour = _defaultCalendarStartHour;
+  int _calendarEndHour = _defaultCalendarEndHour;
 
   @override
   void initState() {
@@ -308,6 +315,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     if (trimmed.isEmpty || session == null) return;
     setState(() {
       _busy = true;
+      _chatRunState = 'Hermes is working…';
       _messages.add(
         HermesMessage(id: _messages.length + 1, role: 'user', content: trimmed),
       );
@@ -333,9 +341,31 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       );
       if (!mounted) return;
       setState(() {
+        _session = result.session;
         if (result.assistantMessage != null) {
           _messages.add(result.assistantMessage!);
+        } else if (result.status == 'blocked' && result.blocker != null) {
+          final reason = _readBlockerReason(result.blocker);
+          _messages.add(
+            HermesMessage(
+              id: _messages.length + 1,
+              role: 'assistant',
+              content: reason == null || reason.isEmpty
+                  ? 'Hermes is blocked and needs attention before it can continue.'
+                  : 'Hermes is blocked: $reason',
+            ),
+          );
+        } else if (result.assistantMessage == null) {
+          _messages.add(
+            HermesMessage(
+              id: _messages.length + 1,
+              role: 'assistant',
+              content:
+                  'Hermes finished, but did not return a response. Please clarify what you want me to do next and I will continue.',
+            ),
+          );
         }
+        _chatRunState = result.status == 'blocked' ? 'Blocked' : 'Updated';
         _tasks = refreshedSummary.tasks;
         _reminders = refreshedSummary.reminders;
         _calendar = refreshedSummary.calendarEvents;
@@ -344,11 +374,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       });
     } catch (error) {
       setState(() {
+        _chatRunState = 'Failed';
         _messages.add(
           HermesMessage(
             id: _messages.length + 1,
             role: 'assistant',
-            content: 'I could not reach the API. Try again soon.',
+            content: _chatFailureMessage(error),
           ),
         );
         _error = 'Send failed: $error';
@@ -356,6 +387,53 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  String? _readBlockerReason(Map<String, Object?>? blocker) {
+    if (blocker == null) return null;
+    for (final key in ['reason', 'message', 'title', 'description']) {
+      final value = blocker[key];
+      if (value is String && value.trim().isNotEmpty) return value.trim();
+    }
+    final context = blocker['context'];
+    if (context is Map<String, Object?>) {
+      final detail = context['message'] ?? context['error'] ?? context['failure_type'];
+      if (detail is String && detail.trim().isNotEmpty) return detail.trim();
+    }
+    return null;
+  }
+
+  String _chatFailureMessage(Object error) {
+    final reason = _extractFailureReason(error);
+    return reason == null || reason.isEmpty
+        ? 'I could not complete that request because the Hermes API could not be reached. Please try again, or clarify any missing details so I can continue.'
+        : 'I could not complete that request because $reason Please try again, or clarify any missing details so I can continue.';
+  }
+
+  String? _extractFailureReason(Object error) {
+    if (error is HermesApiException) {
+      try {
+        final decoded = jsonDecode(error.body);
+        if (decoded is Map<String, Object?>) {
+          final message = decoded['message'] ?? decoded['error'] ?? decoded['reason'];
+          if (message is String && message.trim().isNotEmpty) {
+            return _sentenceFragment(message);
+          }
+        }
+      } catch (_) {
+        // Fall through to the exception status below.
+      }
+      return 'the API returned HTTP ${error.statusCode}.';
+    }
+    return null;
+  }
+
+  String _sentenceFragment(String message) {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) return trimmed;
+    return trimmed.endsWith('.') || trimmed.endsWith('!') || trimmed.endsWith('?')
+        ? trimmed
+        : '$trimmed.';
   }
 
   List<HermesActivityEvent> _mergeEvents(
@@ -367,6 +445,47 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       byKey['${event.id}:${event.eventType}'] = event;
     }
     return byKey.values.toList();
+  }
+
+  void _returnToToday() {
+    setState(() {
+      _selectedDestination = _HomeDestination.today;
+      _selectedCalendarDay = _dateOnly(DateTime.now());
+      _showCalendarMonth = false;
+    });
+  }
+
+  void _openCalendarMonth() {
+    setState(() {
+      _selectedDestination = _HomeDestination.today;
+      _showCalendarMonth = true;
+    });
+  }
+
+  void _returnToCalendarDay() {
+    setState(() => _showCalendarMonth = false);
+  }
+
+  void _selectCalendarDay(DateTime date) {
+    setState(() {
+      _selectedCalendarDay = _dateOnly(date);
+      _showCalendarMonth = false;
+    });
+  }
+
+  void _setCalendarStartHour(int hour) {
+    setState(() {
+      _calendarStartHour = hour.clamp(0, 22);
+      if (_calendarEndHour <= _calendarStartHour) {
+        _calendarEndHour = (_calendarStartHour + 1).clamp(1, 23);
+      }
+    });
+  }
+
+  void _setCalendarEndHour(int hour) {
+    setState(() {
+      _calendarEndHour = hour.clamp(_calendarStartHour + 1, 23);
+    });
   }
 
   Future<void> _deleteAccount() async {
@@ -416,14 +535,34 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
             Scaffold(
               appBar: AppBar(
                 titleSpacing: 20,
-                title: const _BrandHeader(),
+                title: _phase == _AuthPhase.signedIn
+                    ? _CalendarHeaderButton(
+                        key: const Key('calendar-today-button'),
+                        label: 'Today',
+                        icon: Icons.today_rounded,
+                        iconSize: 16,
+                        horizontalPadding: 10,
+                        verticalPadding: 7,
+                        labelStyle: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        onTap: _returnToToday,
+                      )
+                    : null,
                 actions: [
-                  _StatusPill(
-                    label: _phase == _AuthPhase.signedIn
-                        ? 'Agent online'
-                        : 'Signed out',
-                    icon: Icons.bolt_rounded,
-                  ),
+                  if (_phase == _AuthPhase.signedIn) ...[
+                    _CalendarHeaderButton(
+                      key: const Key('calendar-month-chevron'),
+                      label: _monthName(_selectedCalendarDay.month),
+                      icon: Icons.chevron_left_rounded,
+                      onTap: _openCalendarMonth,
+                    ),
+                    const SizedBox(width: 8),
+                    _CriticalTaskBadge(
+                      count: _tasks.length + _reminders.length,
+                    ),
+                  ],
                   const SizedBox(width: 16),
                 ],
               ),
@@ -465,8 +604,17 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         events: _events,
         messages: _messages,
         busy: _busy,
+        chatRunState: _chatRunState,
         error: _error,
         selectedDestination: _selectedDestination,
+        selectedCalendarDay: _selectedCalendarDay,
+        showCalendarMonth: _showCalendarMonth,
+        calendarStartHour: _calendarStartHour,
+        calendarEndHour: _calendarEndHour,
+        onCalendarDaySelected: _selectCalendarDay,
+        onBackToCalendarDay: _returnToCalendarDay,
+        onCalendarStartHourChanged: _setCalendarStartHour,
+        onCalendarEndHourChanged: _setCalendarEndHour,
         onSelectDestination: (destination) =>
             setState(() => _selectedDestination = destination),
         onSend: _sendChat,
@@ -670,7 +818,16 @@ class _CommandCenterContent extends StatelessWidget {
     required this.events,
     required this.messages,
     required this.busy,
+    required this.chatRunState,
     required this.selectedDestination,
+    required this.selectedCalendarDay,
+    required this.showCalendarMonth,
+    required this.calendarStartHour,
+    required this.calendarEndHour,
+    required this.onCalendarDaySelected,
+    required this.onBackToCalendarDay,
+    required this.onCalendarStartHourChanged,
+    required this.onCalendarEndHourChanged,
     required this.onSelectDestination,
     required this.onSend,
     required this.onDeleteAccount,
@@ -685,7 +842,16 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
   final bool busy;
+  final String chatRunState;
   final _HomeDestination selectedDestination;
+  final DateTime selectedCalendarDay;
+  final bool showCalendarMonth;
+  final int calendarStartHour;
+  final int calendarEndHour;
+  final ValueChanged<DateTime> onCalendarDaySelected;
+  final VoidCallback onBackToCalendarDay;
+  final ValueChanged<int> onCalendarStartHourChanged;
+  final ValueChanged<int> onCalendarEndHourChanged;
   final ValueChanged<_HomeDestination> onSelectDestination;
   final Future<void> Function(String content) onSend;
   final Future<void> Function() onDeleteAccount;
@@ -704,7 +870,12 @@ class _CommandCenterContent extends StatelessWidget {
               _ApprovalBanner(approval: pendingApprovals.first),
               const SizedBox(height: 16),
             ],
-            _HeroChatCard(messages: messages, busy: busy, onSend: onSend),
+            _HeroChatCard(
+              messages: messages,
+              busy: busy,
+              runState: chatRunState,
+              onSend: onSend,
+            ),
             const SizedBox(height: 16),
             _ApprovalCard(approvals: pendingApprovals),
             const SizedBox(height: 16),
@@ -729,6 +900,12 @@ class _CommandCenterContent extends StatelessWidget {
             reminders: reminders,
             calendar: calendar,
             approvals: pendingApprovals,
+            selectedDay: selectedCalendarDay,
+            showMonth: showCalendarMonth,
+            startHour: calendarStartHour,
+            endHour: calendarEndHour,
+            onDateSelected: onCalendarDaySelected,
+            onBackToDay: onBackToCalendarDay,
           ),
           _HomeDestination.tasks => _TaskListCard(tasks: tasks),
           _HomeDestination.bean => beanPanel,
@@ -736,6 +913,10 @@ class _CommandCenterContent extends StatelessWidget {
           _HomeDestination.settings => _SettingsView(
             user: user,
             approvals: pendingApprovals,
+            calendarStartHour: calendarStartHour,
+            calendarEndHour: calendarEndHour,
+            onCalendarStartHourChanged: onCalendarStartHourChanged,
+            onCalendarEndHourChanged: onCalendarEndHourChanged,
             onDeleteAccount: onDeleteAccount,
           ),
         };
@@ -767,54 +948,17 @@ class _CommandCenterContent extends StatelessWidget {
   }
 }
 
-class _BrandHeader extends StatelessWidget {
-  const _BrandHeader();
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: HeyBeanTheme.accent,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const Icon(Icons.eco_rounded, color: Colors.white),
-      ),
-      const SizedBox(width: 12),
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'HeyBean',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          Text(
-            'Bean assistant',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: HeyBeanTheme.muted,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    ],
-  );
-}
-
 class _HeroChatCard extends StatefulWidget {
   const _HeroChatCard({
     required this.messages,
     required this.busy,
+    required this.runState,
     required this.onSend,
   });
 
   final List<HermesMessage> messages;
   final bool busy;
+  final String runState;
   final Future<void> Function(String content) onSend;
 
   @override
@@ -841,6 +985,8 @@ class _HeroChatCardState extends State<_HeroChatCard> {
           title: 'Bean',
           subtitle: 'Chat-first command center for your household',
         ),
+        const SizedBox(height: 10),
+        _ChatRunStatePill(label: widget.runState),
         const SizedBox(height: 14),
         _QuickPromptRail(onPrompt: widget.onSend),
         const SizedBox(height: 18),
@@ -903,6 +1049,52 @@ class _HeroChatCardState extends State<_HeroChatCard> {
       ],
     ),
   );
+}
+
+class _ChatRunStatePill extends StatelessWidget {
+  const _ChatRunStatePill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalized = label.toLowerCase();
+    final color =
+        normalized.contains('blocked') || normalized.contains('failed')
+        ? HeyBeanTheme.warning
+        : normalized.contains('working')
+        ? HeyBeanTheme.accentStrong
+        : HeyBeanTheme.muted;
+
+    return Container(
+      key: const Key('chat-run-state'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: .24)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _QuickPromptRail extends StatelessWidget {
@@ -1305,13 +1497,19 @@ class _ActivityCard extends StatelessWidget {
   );
 }
 
-class _TodayHomeView extends StatefulWidget {
+class _TodayHomeView extends StatelessWidget {
   const _TodayHomeView({
     required this.user,
     required this.tasks,
     required this.reminders,
     required this.calendar,
     required this.approvals,
+    required this.selectedDay,
+    required this.showMonth,
+    required this.startHour,
+    required this.endHour,
+    required this.onDateSelected,
+    required this.onBackToDay,
   });
 
   final HermesUser user;
@@ -1319,22 +1517,19 @@ class _TodayHomeView extends StatefulWidget {
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
   final List<HermesApproval> approvals;
-
-  @override
-  State<_TodayHomeView> createState() => _TodayHomeViewState();
-}
-
-class _TodayHomeViewState extends State<_TodayHomeView> {
-  bool _showMonth = false;
-
-  int get _criticalTaskCount => widget.tasks.length + widget.reminders.length;
+  final DateTime selectedDay;
+  final bool showMonth;
+  final int startHour;
+  final int endHour;
+  final ValueChanged<DateTime> onDateSelected;
+  final VoidCallback onBackToDay;
 
   @override
   Widget build(BuildContext context) => Column(
     key: const Key('today-view'),
     children: [
-      if (widget.approvals.isNotEmpty) ...[
-        _ApprovalBanner(approval: widget.approvals.first),
+      if (approvals.isNotEmpty) ...[
+        _ApprovalBanner(approval: approvals.first),
         const SizedBox(height: 16),
       ],
       _ShellCard(
@@ -1342,31 +1537,30 @@ class _TodayHomeViewState extends State<_TodayHomeView> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: _CalendarModeSwitcher(
-                    showMonth: _showMonth,
-                    onChanged: (showMonth) =>
-                        setState(() => _showMonth = showMonth),
-                  ),
-                ),
-                _CriticalTaskBadge(count: _criticalTaskCount),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (_showMonth) ...[
-              _MonthGrid(calendar: widget.calendar),
+            if (showMonth) ...[
+              _MonthCalendarHeader(
+                month: selectedDay,
+                onBackToDay: onBackToDay,
+              ),
+              const SizedBox(height: 16),
+              _MonthGrid(
+                calendar: calendar,
+                selectedDay: selectedDay,
+                onDateSelected: onDateSelected,
+              ),
               const SizedBox(height: 16),
               _CalendarMonthTaskList(
-                tasks: widget.tasks,
-                reminders: widget.reminders,
-                calendar: widget.calendar,
+                tasks: tasks,
+                reminders: reminders,
+                calendar: calendar,
               ),
             ] else ...[
               _AppleStyleTodayTimeline(
-                calendar: widget.calendar,
-                onMonthTap: () => setState(() => _showMonth = true),
+                calendar: calendar,
+                selectedDay: selectedDay,
+                startHour: startHour,
+                endHour: endHour,
+                onDayChanged: onDateSelected,
               ),
             ],
           ],
@@ -1381,20 +1575,19 @@ class _TodayHomeViewState extends State<_TodayHomeView> {
             _SectionTitle(
               icon: Icons.task_alt_rounded,
               title: 'Tasks for today',
-              subtitle:
-                  '${widget.tasks.length} tasks · ${widget.reminders.length} reminders',
+              subtitle: '${tasks.length} tasks · ${reminders.length} reminders',
             ),
             const SizedBox(height: 12),
-            if (widget.tasks.isEmpty && widget.reminders.isEmpty)
+            if (tasks.isEmpty && reminders.isEmpty)
               const _EmptySurface(label: 'Nothing scheduled for today')
             else ...[
-              for (final task in widget.tasks)
+              for (final task in tasks)
                 _CompactItemTile(
                   icon: Icons.radio_button_unchecked_rounded,
                   title: task.title,
                   subtitle: _statusLabel(task.status),
                 ),
-              for (final reminder in widget.reminders)
+              for (final reminder in reminders)
                 _CompactItemTile(
                   icon: Icons.notifications_active_outlined,
                   title: reminder.title,
@@ -1405,102 +1598,6 @@ class _TodayHomeViewState extends State<_TodayHomeView> {
         ),
       ),
     ],
-  );
-}
-
-class _CalendarModeSwitcher extends StatelessWidget {
-  const _CalendarModeSwitcher({
-    required this.showMonth,
-    required this.onChanged,
-  });
-
-  final bool showMonth;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(4),
-    decoration: BoxDecoration(
-      color: HeyBeanTheme.surface2,
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: HeyBeanTheme.border),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _CalendarModeChip(
-          key: const Key('calendar-mode-today'),
-          label: 'Today',
-          icon: Icons.view_day_outlined,
-          selected: !showMonth,
-          onTap: () => onChanged(false),
-        ),
-        _CalendarModeChip(
-          key: const Key('calendar-mode-month'),
-          label: 'Month',
-          icon: Icons.calendar_view_month_outlined,
-          selected: showMonth,
-          onTap: () => onChanged(true),
-        ),
-      ],
-    ),
-  );
-}
-
-class _CalendarModeChip extends StatelessWidget {
-  const _CalendarModeChip({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    borderRadius: BorderRadius.circular(18),
-    onTap: onTap,
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 160),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: selected ? Colors.white : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: selected
-            ? const [
-                BoxShadow(
-                  color: Color(0x14000000),
-                  blurRadius: 12,
-                  offset: Offset(0, 4),
-                ),
-              ]
-            : null,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 18,
-            color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-              color: selected ? HeyBeanTheme.text : HeyBeanTheme.muted,
-            ),
-          ),
-        ],
-      ),
-    ),
   );
 }
 
@@ -1532,261 +1629,325 @@ class _CriticalTaskBadge extends StatelessWidget {
   );
 }
 
-class _AppleStyleTodayTimeline extends StatelessWidget {
+const _defaultCalendarStartHour = 9;
+const _defaultCalendarEndHour = 22;
+const _calendarHourHeight = 42.0;
+const _calendarTimeColumnWidth = 48.0;
+
+class _AppleStyleTodayTimeline extends StatefulWidget {
   const _AppleStyleTodayTimeline({
     required this.calendar,
-    required this.onMonthTap,
+    required this.selectedDay,
+    required this.startHour,
+    required this.endHour,
+    required this.onDayChanged,
   });
 
   final List<HermesCalendarEvent> calendar;
-  final VoidCallback onMonthTap;
+  final DateTime selectedDay;
+  final int startHour;
+  final int endHour;
+  final ValueChanged<DateTime> onDayChanged;
 
-  static const _hourHeight = 42.0;
-  static const _timeColumnWidth = 48.0;
-  static const _timelineHours = <int>[
-    9,
-    10,
-    11,
-    12,
-    13,
-    14,
-    15,
-    16,
-    17,
-    18,
-    19,
-    20,
-    21,
-    22,
-  ];
+  @override
+  State<_AppleStyleTodayTimeline> createState() =>
+      _AppleStyleTodayTimelineState();
+}
+
+class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
+  void _handleHorizontalDayScroll(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < 80) return;
+    final delta = velocity < 0 ? 1 : -1;
+    widget.onDayChanged(
+      _dateOnly(widget.selectedDay).add(Duration(days: delta)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final startOfWeek = now.subtract(Duration(days: now.weekday % 7));
-    final today = DateTime(now.year, now.month, now.day);
-    final tomorrow = today.add(const Duration(days: 1));
+    final today = _dateOnly(now);
+    final selectedDay = _dateOnly(widget.selectedDay);
+    final selectedNextDay = selectedDay.add(const Duration(days: 1));
+    final visibleHours = _calendarVisibleHours(
+      widget.startHour,
+      widget.endHour,
+    );
+    final firstVisibleHour = visibleHours.first;
     final markerOffset =
-        ((now.hour + (now.minute / 60)) - _timelineHours.first).clamp(
+        ((now.hour + (now.minute / 60)) - firstVisibleHour).clamp(
           0.0,
-          _timelineHours.length.toDouble(),
+          visibleHours.length.toDouble(),
         ) *
-        _hourHeight;
+        _calendarHourHeight;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            InkWell(
-              key: const Key('calendar-month-chevron'),
-              borderRadius: BorderRadius.circular(22),
-              onTap: onMonthTap,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: HeyBeanTheme.border),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x12000000),
-                      blurRadius: 14,
-                      offset: Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.chevron_left_rounded, size: 20),
-                    const SizedBox(width: 2),
-                    Text(
-                      _monthName(now.month),
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const Spacer(),
-            _CalendarToolbarIcon(icon: Icons.qr_code_scanner_rounded),
-            const SizedBox(width: 8),
-            _CalendarToolbarIcon(icon: Icons.search_rounded),
-            const SizedBox(width: 8),
-            _CalendarToolbarIcon(icon: Icons.add_rounded),
-          ],
+        _WeekDateHeader(
+          today: today,
+          visibleStartDay: selectedDay,
+          visibleEndDay: selectedNextDay,
+          onDateSelected: widget.onDayChanged,
+          onHorizontalDayScroll: _handleHorizontalDayScroll,
         ),
-        const SizedBox(height: 14),
-        _WeekDateHeader(startOfWeek: startOfWeek, today: today),
         const SizedBox(height: 10),
-        Container(
+        GestureDetector(
           key: const Key('apple-style-day-timeline'),
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: HeyBeanTheme.border)),
-          ),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  const SizedBox(width: _timeColumnWidth),
-                  Expanded(
-                    child: _DayColumnHeading(date: today, isToday: true),
-                  ),
-                  Expanded(
-                    child: _DayColumnHeading(date: tomorrow, isToday: false),
-                  ),
-                ],
-              ),
-              SizedBox(
-                height: _timelineHours.length * _hourHeight,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Column(
-                      children: [
-                        for (final hour in _timelineHours)
-                          _TimelineHourRow(hour: hour),
-                      ],
-                    ),
-                    Positioned(
-                      key: const Key('calendar-current-time-marker'),
-                      top: markerOffset,
-                      left: 0,
-                      right: 0,
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: HeyBeanTheme.accent,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              _clockLabel(now),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Container(
-                              height: 2,
-                              color: HeyBeanTheme.accent,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    for (final event in calendar)
-                      if (event.startsAt != null)
-                        _TimelineEventBlock(event: event),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _CalendarToolbarIcon extends StatelessWidget {
-  const _CalendarToolbarIcon({required this.icon});
-
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 34,
-    height: 34,
-    decoration: BoxDecoration(
-      color: Colors.white,
-      shape: BoxShape.circle,
-      border: Border.all(color: HeyBeanTheme.border),
-    ),
-    child: Icon(icon, size: 20, color: HeyBeanTheme.text),
-  );
-}
-
-class _WeekDateHeader extends StatelessWidget {
-  const _WeekDateHeader({required this.startOfWeek, required this.today});
-
-  final DateTime startOfWeek;
-  final DateTime today;
-
-  @override
-  Widget build(BuildContext context) {
-    const weekdayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-    return Row(
-      key: const Key('apple-style-week-date-header'),
-      children: [
-        for (var index = 0; index < 7; index++)
-          Expanded(
+          onHorizontalDragEnd: _handleHorizontalDayScroll,
+          child: Container(
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+            ),
             child: Column(
               children: [
-                Text(
-                  weekdayLetters[index],
-                  style: const TextStyle(
-                    color: HeyBeanTheme.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
+                Row(
+                  children: [
+                    const SizedBox(width: _calendarTimeColumnWidth),
+                    Expanded(
+                      child: _DayColumnHeading(
+                        date: selectedDay,
+                        isToday: _sameCalendarDay(selectedDay, today),
+                      ),
+                    ),
+                    Expanded(
+                      child: _DayColumnHeading(
+                        date: selectedNextDay,
+                        isToday: _sameCalendarDay(selectedNextDay, today),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 5),
-                _WeekDateNumber(
-                  date: startOfWeek.add(Duration(days: index)),
-                  today: today,
+                SizedBox(
+                  height: visibleHours.length * _calendarHourHeight,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Column(
+                        children: [
+                          for (final hour in visibleHours)
+                            _TimelineHourRow(hour: hour),
+                        ],
+                      ),
+                      Positioned(
+                        key: const Key('calendar-current-time-marker'),
+                        top: markerOffset,
+                        left: 0,
+                        right: 0,
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: HeyBeanTheme.accent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                _clockLabel(now),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Container(
+                                height: 2,
+                                color: HeyBeanTheme.accent,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      for (final event in widget.calendar)
+                        if ((_eventFallsOnDay(event, selectedDay) ||
+                                _eventFallsOnDay(event, selectedNextDay)) &&
+                            _eventFallsWithinHours(
+                              event,
+                              widget.startHour,
+                              widget.endHour,
+                            ))
+                          _TimelineEventBlock(
+                            event: event,
+                            startHour: widget.startHour,
+                            endHour: widget.endHour,
+                          ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
+        ),
       ],
     );
   }
 }
 
-class _WeekDateNumber extends StatelessWidget {
-  const _WeekDateNumber({required this.date, required this.today});
+class _CalendarHeaderButton extends StatelessWidget {
+  const _CalendarHeaderButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.iconSize = 20,
+    this.horizontalPadding = 12,
+    this.verticalPadding = 8,
+    this.labelStyle = const TextStyle(fontWeight: FontWeight.w800),
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final double iconSize;
+  final double horizontalPadding;
+  final double verticalPadding;
+  final TextStyle labelStyle;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    borderRadius: BorderRadius.circular(22),
+    onTap: onTap,
+    child: Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: horizontalPadding,
+        vertical: verticalPadding,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: HeyBeanTheme.border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: iconSize),
+          const SizedBox(width: 4),
+          Text(label, style: labelStyle),
+        ],
+      ),
+    ),
+  );
+}
+
+class _WeekDateHeader extends StatelessWidget {
+  const _WeekDateHeader({
+    required this.today,
+    required this.visibleStartDay,
+    required this.visibleEndDay,
+    required this.onDateSelected,
+    required this.onHorizontalDayScroll,
+  });
+
+  final DateTime today;
+  final DateTime visibleStartDay;
+  final DateTime visibleEndDay;
+  final ValueChanged<DateTime> onDateSelected;
+  final GestureDragEndCallback onHorizontalDayScroll;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onHorizontalDragEnd: onHorizontalDayScroll,
+    child: Row(
+      key: const Key('apple-style-week-date-header'),
+      children: [
+        const SizedBox(width: _calendarTimeColumnWidth),
+        Expanded(
+          child: _WeekDateHeaderCell(
+            date: visibleStartDay,
+            today: today,
+            highlight: _VisibleDateHighlight.primary,
+            onTap: () => onDateSelected(visibleStartDay),
+          ),
+        ),
+        Expanded(
+          child: _WeekDateHeaderCell(
+            date: visibleEndDay,
+            today: today,
+            highlight: _VisibleDateHighlight.secondary,
+            onTap: () => onDateSelected(visibleEndDay),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+enum _VisibleDateHighlight { primary, secondary }
+
+class _WeekDateHeaderCell extends StatelessWidget {
+  const _WeekDateHeaderCell({
+    required this.date,
+    required this.today,
+    required this.highlight,
+    required this.onTap,
+  });
 
   final DateTime date;
   final DateTime today;
+  final _VisibleDateHighlight highlight;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final isPrimary = highlight == _VisibleDateHighlight.primary;
     final isToday = _sameCalendarDay(date, today);
-    final isTomorrow = _sameCalendarDay(
-      date,
-      today.add(const Duration(days: 1)),
-    );
-    return Container(
-      width: isToday || isTomorrow ? 38 : null,
-      height: 34,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: isToday
-            ? HeyBeanTheme.accent
-            : isTomorrow
-            ? const Color(0xFFE5E7EB)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Text(
-        '${date.day}',
-        style: TextStyle(
-          color: isToday ? Colors.white : HeyBeanTheme.text,
-          fontSize: 18,
-          fontWeight: isToday || isTomorrow ? FontWeight.w900 : FontWeight.w600,
-        ),
+    final backgroundColor = isPrimary
+        ? HeyBeanTheme.accent
+        : isToday
+        ? const Color(0xFFDFF3E5)
+        : const Color(0xFFE5E7EB);
+    final textColor = isPrimary ? Colors.white : HeyBeanTheme.text;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Column(
+        children: [
+          Text(
+            _weekdayLetter(date.weekday),
+            style: const TextStyle(
+              color: HeyBeanTheme.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Container(
+            width: 42,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: isToday && !isPrimary
+                    ? HeyBeanTheme.accentStrong
+                    : HeyBeanTheme.border,
+              ),
+            ),
+            child: Text(
+              '${date.day}',
+              style: TextStyle(
+                color: textColor,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1825,12 +1986,12 @@ class _TimelineHourRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: _AppleStyleTodayTimeline._hourHeight,
+    height: _calendarHourHeight,
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: _AppleStyleTodayTimeline._timeColumnWidth,
+          width: _calendarTimeColumnWidth,
           child: Padding(
             padding: const EdgeInsets.only(top: 4, right: 6),
             child: Text(
@@ -1861,25 +2022,30 @@ class _TimelineHourRow extends StatelessWidget {
 }
 
 class _TimelineEventBlock extends StatelessWidget {
-  const _TimelineEventBlock({required this.event});
+  const _TimelineEventBlock({
+    required this.event,
+    required this.startHour,
+    required this.endHour,
+  });
 
   final HermesCalendarEvent event;
+  final int startHour;
+  final int endHour;
 
   @override
   Widget build(BuildContext context) {
     final parsed = _parseCalendarEventDateTime(event.startsAt);
     if (parsed == null) return const SizedBox.shrink();
+    final visibleHours = _calendarVisibleHours(startHour, endHour);
     final hourPosition =
-        ((parsed.hour + (parsed.minute / 60)) -
-                _AppleStyleTodayTimeline._timelineHours.first)
-            .clamp(
-              0.0,
-              _AppleStyleTodayTimeline._timelineHours.length.toDouble(),
-            ) *
-        _AppleStyleTodayTimeline._hourHeight;
+        ((parsed.hour + (parsed.minute / 60)) - visibleHours.first).clamp(
+          0.0,
+          visibleHours.length.toDouble(),
+        ) *
+        _calendarHourHeight;
     return Positioned(
       top: hourPosition + 50,
-      left: _AppleStyleTodayTimeline._timeColumnWidth + 8,
+      left: _calendarTimeColumnWidth + 8,
       right: 8,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -1901,6 +2067,22 @@ class _TimelineEventBlock extends StatelessWidget {
       ),
     );
   }
+}
+
+List<int> _calendarVisibleHours(int startHour, int endHour) {
+  final start = startHour.clamp(0, 22);
+  final end = endHour.clamp(start + 1, 23);
+  return [for (var hour = start; hour <= end; hour++) hour];
+}
+
+bool _eventFallsWithinHours(
+  HermesCalendarEvent event,
+  int startHour,
+  int endHour,
+) {
+  final parsed = _parseCalendarEventDateTime(event.startsAt);
+  if (parsed == null) return false;
+  return parsed.hour >= startHour && parsed.hour <= endHour;
 }
 
 String _hourLabel(int hour) {
@@ -1930,6 +2112,9 @@ String _monthName(int month) => const [
   'December',
 ][month - 1];
 
+String _weekdayLetter(int weekday) =>
+    const ['M', 'T', 'W', 'T', 'F', 'S', 'S'][weekday - 1];
+
 String _shortWeekdayName(int weekday) =>
     const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
 
@@ -1954,6 +2139,14 @@ DateTime? _parseCalendarEventDateTime(String? value) {
 
 bool _sameCalendarDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
+
+DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
+
+bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
+  final parsed = _parseCalendarEventDateTime(event.startsAt);
+  if (parsed == null) return false;
+  return _sameCalendarDay(parsed, day);
+}
 
 class _CalendarMonthTaskList extends StatelessWidget {
   const _CalendarMonthTaskList({
@@ -2003,25 +2196,81 @@ class _CalendarMonthTaskList extends StatelessWidget {
   );
 }
 
+class _MonthCalendarHeader extends StatelessWidget {
+  const _MonthCalendarHeader({required this.month, required this.onBackToDay});
+
+  final DateTime month;
+  final VoidCallback onBackToDay;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      InkWell(
+        key: const Key('calendar-day-chevron'),
+        borderRadius: BorderRadius.circular(22),
+        onTap: onBackToDay,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: HeyBeanTheme.border),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x12000000),
+                blurRadius: 14,
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.chevron_right_rounded, size: 20),
+              const SizedBox(width: 4),
+              Text(
+                _monthName(month.month),
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+        ),
+      ),
+      const Spacer(),
+    ],
+  );
+}
+
 class _MonthGrid extends StatelessWidget {
-  const _MonthGrid({required this.calendar});
+  const _MonthGrid({
+    required this.calendar,
+    required this.selectedDay,
+    required this.onDateSelected,
+  });
 
   final List<HermesCalendarEvent> calendar;
+  final DateTime selectedDay;
+  final ValueChanged<DateTime> onDateSelected;
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final first = DateTime(now.year, now.month);
-    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+    final today = _dateOnly(DateTime.now());
+    final visibleMonth = _dateOnly(selectedDay);
+    final first = DateTime(visibleMonth.year, visibleMonth.month);
+    final daysInMonth = DateTime(
+      visibleMonth.year,
+      visibleMonth.month + 1,
+      0,
+    ).day;
     final leadingBlanks = first.weekday % 7;
     final totalCells = leadingBlanks + daysInMonth;
     final rowCount = (totalCells / 7).ceil();
     final eventDays = <int>{};
     for (final event in calendar) {
-      final parsed = DateTime.tryParse(event.startsAt ?? '');
+      final parsed = _parseCalendarEventDateTime(event.startsAt);
       if (parsed != null &&
-          parsed.month == now.month &&
-          parsed.year == now.year) {
+          parsed.month == visibleMonth.month &&
+          parsed.year == visibleMonth.year) {
         eventDays.add(parsed.day);
       }
     }
@@ -2052,22 +2301,29 @@ class _MonthGrid extends StatelessWidget {
             children: [
               for (var column = 0; column < 7; column++)
                 Expanded(
-                  child: _MonthDayCell(
-                    day: _dayForCell(
-                      row * 7 + column,
-                      leadingBlanks,
-                      daysInMonth,
-                    ),
-                    isToday:
-                        _dayForCell(
-                          row * 7 + column,
-                          leadingBlanks,
-                          daysInMonth,
-                        ) ==
-                        now.day,
-                    hasEvent: eventDays.contains(
-                      _dayForCell(row * 7 + column, leadingBlanks, daysInMonth),
-                    ),
+                  child: Builder(
+                    builder: (context) {
+                      final day = _dayForCell(
+                        row * 7 + column,
+                        leadingBlanks,
+                        daysInMonth,
+                      );
+                      final date = day == null
+                          ? null
+                          : DateTime(
+                              visibleMonth.year,
+                              visibleMonth.month,
+                              day,
+                            );
+                      return _MonthDayCell(
+                        day: day,
+                        isToday: date != null && _sameCalendarDay(date, today),
+                        isSelected:
+                            date != null && _sameCalendarDay(date, selectedDay),
+                        hasEvent: day != null && eventDays.contains(day),
+                        onTap: date == null ? null : () => onDateSelected(date),
+                      );
+                    },
                   ),
                 ),
             ],
@@ -2089,48 +2345,65 @@ class _MonthDayCell extends StatelessWidget {
   const _MonthDayCell({
     required this.day,
     required this.isToday,
+    required this.isSelected,
     required this.hasEvent,
+    required this.onTap,
   });
 
   final int? day;
   final bool isToday;
+  final bool isSelected;
   final bool hasEvent;
+  final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 42,
-    margin: const EdgeInsets.symmetric(horizontal: 2),
-    decoration: BoxDecoration(
-      color: isToday ? HeyBeanTheme.accent : HeyBeanTheme.surface2,
+  Widget build(BuildContext context) {
+    final backgroundColor = isToday
+        ? HeyBeanTheme.accent
+        : isSelected
+        ? const Color(0xFFE8F5E9)
+        : HeyBeanTheme.surface2;
+    final borderColor = isToday || isSelected
+        ? HeyBeanTheme.accentStrong
+        : HeyBeanTheme.border;
+
+    return InkWell(
       borderRadius: BorderRadius.circular(14),
-      border: Border.all(
-        color: isToday ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
-      ),
-    ),
-    child: day == null
-        ? const SizedBox.shrink()
-        : Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '$day',
-                style: TextStyle(
-                  color: isToday ? Colors.white : HeyBeanTheme.text,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              if (hasEvent)
-                Container(
-                  width: 5,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: isToday ? Colors.white : HeyBeanTheme.accent,
-                    shape: BoxShape.circle,
+      onTap: onTap,
+      child: Container(
+        height: 42,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor),
+        ),
+        child: day == null
+            ? const SizedBox.shrink()
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '$day',
+                    style: TextStyle(
+                      color: isToday ? Colors.white : HeyBeanTheme.text,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                ),
-            ],
-          ),
-  );
+                  if (hasEvent)
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: isToday ? Colors.white : HeyBeanTheme.accent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
 }
 
 class _CalendarAgenda extends StatelessWidget {
@@ -2246,11 +2519,19 @@ class _SettingsView extends StatelessWidget {
   const _SettingsView({
     required this.user,
     required this.approvals,
+    required this.calendarStartHour,
+    required this.calendarEndHour,
+    required this.onCalendarStartHourChanged,
+    required this.onCalendarEndHourChanged,
     required this.onDeleteAccount,
   });
 
   final HermesUser user;
   final List<HermesApproval> approvals;
+  final int calendarStartHour;
+  final int calendarEndHour;
+  final ValueChanged<int> onCalendarStartHourChanged;
+  final ValueChanged<int> onCalendarEndHourChanged;
   final Future<void> Function() onDeleteAccount;
 
   @override
@@ -2278,6 +2559,12 @@ class _SettingsView extends StatelessWidget {
               subtitle:
                   'Chat guidance and assistant behavior are managed by Hermes Bean',
             ),
+            _CalendarPreferencesCard(
+              startHour: calendarStartHour,
+              endHour: calendarEndHour,
+              onStartHourChanged: onCalendarStartHourChanged,
+              onEndHourChanged: onCalendarEndHourChanged,
+            ),
             _CompactItemTile(
               icon: Icons.verified_user_outlined,
               title: 'Approval rules',
@@ -2292,6 +2579,114 @@ class _SettingsView extends StatelessWidget {
       _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
     ],
   );
+}
+
+class _CalendarPreferencesCard extends StatelessWidget {
+  const _CalendarPreferencesCard({
+    required this.startHour,
+    required this.endHour,
+    required this.onStartHourChanged,
+    required this.onEndHourChanged,
+  });
+
+  final int startHour;
+  final int endHour;
+  final ValueChanged<int> onStartHourChanged;
+  final ValueChanged<int> onEndHourChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final startOptions = [for (var hour = 0; hour <= 22; hour++) hour];
+    final endOptions = [
+      for (var hour = startHour + 1; hour <= 23; hour++) hour,
+    ];
+
+    return Container(
+      key: const Key('calendar-preferences-settings'),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.calendar_view_day_rounded,
+                color: HeyBeanTheme.accentStrong,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Calendar preferences',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    Text(
+                      'Day view visible hours: ${_hourLabel(startHour)} – ${_hourLabel(endHour)}',
+                      style: const TextStyle(color: HeyBeanTheme.muted),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<int>(
+                  key: const Key('calendar-start-hour-setting'),
+                  initialValue: startHour,
+                  decoration: const InputDecoration(
+                    labelText: 'Start hour',
+                    isDense: true,
+                  ),
+                  items: [
+                    for (final hour in startOptions)
+                      DropdownMenuItem(
+                        value: hour,
+                        child: Text(_hourLabel(hour)),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) onStartHourChanged(value);
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<int>(
+                  key: const Key('calendar-end-hour-setting'),
+                  initialValue: endHour,
+                  decoration: const InputDecoration(
+                    labelText: 'End hour',
+                    isDense: true,
+                  ),
+                  items: [
+                    for (final hour in endOptions)
+                      DropdownMenuItem(
+                        value: hour,
+                        child: Text(_hourLabel(hour)),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) onEndHourChanged(value);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CompactItemTile extends StatelessWidget {
@@ -2671,31 +3066,6 @@ class _BeanFab extends StatelessWidget {
         ),
         child: const Icon(Icons.eco_rounded, color: Colors.white, size: 30),
       ),
-    ),
-  );
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.icon});
-
-  final String label;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    decoration: BoxDecoration(
-      color: const Color(0x1F16A34A),
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(color: HeyBeanTheme.border),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16, color: HeyBeanTheme.accentStrong),
-        const SizedBox(width: 6),
-        Text(label),
-      ],
     ),
   );
 }

@@ -20,6 +20,31 @@ class DailyAssistantFlowTest extends TestCase
             'metadata' => ['intent' => 'daily_planning'],
         ])->assertCreated()->json('data.id');
 
+        $this->configureFakeHermesRuntime(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Planned your day.',
+    'actions' => [
+        [
+            'type' => 'task.create',
+            'risk' => 'low',
+            'parameters' => ['title' => 'Review launch notes', 'type' => 'todo'],
+        ],
+        [
+            'type' => 'reminder.create',
+            'risk' => 'low',
+            'parameters' => ['title' => 'pack laptop', 'remind_at' => '2026-05-13T09:00:00Z'],
+        ],
+        [
+            'type' => 'calendar_event.create',
+            'risk' => 'low',
+            'parameters' => ['title' => 'Focus block', 'starts_at' => '2026-05-13T09:00:00Z', 'ends_at' => '2026-05-13T10:00:00Z'],
+        ],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
         $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Plan my day: add task Review launch notes; remind me tomorrow to pack laptop; schedule Focus block tomorrow at 9am.',
         ])->assertCreated()
@@ -34,7 +59,7 @@ class DailyAssistantFlowTest extends TestCase
             ->assertJsonPath('data.counts.tasks', 1)
             ->assertJsonPath('data.counts.reminders', 1)
             ->assertJsonPath('data.counts.calendar_events', 1)
-            ->assertJsonPath('data.counts.activity_events', 7)
+            ->assertJsonPath('data.counts.activity_events', 8)
             ->assertJsonFragment(['title' => 'Review launch notes'])
             ->assertJsonFragment(['title' => 'pack laptop'])
             ->assertJsonFragment(['title' => 'Focus block'])

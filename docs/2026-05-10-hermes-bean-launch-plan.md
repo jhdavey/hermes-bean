@@ -171,14 +171,14 @@ Status: done
 - Test multi-turn context: “move that,” “remind me tomorrow,” “what did you just schedule?”
 - Require visible grounding: assistant names what it checked/changed.
 
-### HB-6 Local demo loop
+### HB-6 Server-hosted runtime loop
 
-Status: done
+Status: updated target
 
-- Laravel + Flutter local demo.
-- Chat creates/updates tasks/reminders/calendar events.
-- Activity feed shows Hermes actions.
-- Approval/blocker flow works.
+- Laravel + Flutter app connected to the real server-hosted Hermes runtime adapter.
+- Chat creates/updates tasks/reminders/calendar events only through Hermes structured actions.
+- Activity feed shows real Hermes runtime/tool events.
+- Approval/blocker flow works without parser/demo fallback.
 - No project management surfaces exposed.
 
 ## Design direction

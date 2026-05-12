@@ -231,7 +231,7 @@ Schema:
   "message": "short user-facing summary",
   "actions": [
     {
-      "type": "task.create|reminder.create|calendar_event.create|email.send|payment.create|deployment.run|account.delete",
+      "type": "task.create|task.update|task.delete|reminder.create|reminder.update|reminder.delete|calendar_event.create|calendar_event.update|calendar_event.delete|approval.create|approval.update|approval.approve|approval.deny|approval.delete|blocker.create|blocker.update|blocker.resolve|blocker.delete|scheduler_job.create|scheduler_job.update|scheduler_job.delete|agent_profile.update|conversation_session.update|activity_event.create|email.send|payment.create|deployment.run|account.delete",
       "risk": "low|medium|high",
       "title": "approval title for risky actions",
       "description": "optional approval description",
@@ -241,10 +241,12 @@ Schema:
 }
 
 Rules:
-- Low-risk internal dashboard actions may be emitted with risk "low": task.create, reminder.create, calendar_event.create.
-- Risky, external, destructive, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
+- You are allowed to complete complex multi-step app-control requests by emitting multiple ordered actions in one response.
+- Low-risk internal dashboard CRUD/control actions may be emitted with risk "low": tasks, reminders, calendar events, approvals, blockers, scheduler job records, agent profile settings, conversation session metadata, and activity events.
+- Existing dashboard resources are listed in dashboard_state; use their numeric id when updating, deleting, approving, denying, or resolving them.
+- Risky external, destructive outside the dashboard, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
 - If no concrete action is needed, return an empty actions array.
-- Use ISO-8601 timestamps for dates when you create reminders or calendar events.
+- Use ISO-8601 timestamps for dates when you create or update reminders, calendar events, and scheduler jobs.
 
 Runtime payload:
 PROMPT.$this->payloadFor($session, $message);
@@ -277,14 +279,23 @@ PROMPT.$this->payloadFor($session, $message);
                 'approval_policy' => $profile->approval_policy,
             ] : null,
             'dashboard_state' => [
-                'tasks' => Task::where('user_id', $session->user_id)->latest('updated_at')->limit(20)->get(['id', 'title', 'type', 'status', 'due_at']),
-                'reminders' => Reminder::where('user_id', $session->user_id)->latest('updated_at')->limit(20)->get(['id', 'title', 'status', 'remind_at']),
-                'calendar_events' => CalendarEvent::where('user_id', $session->user_id)->latest('updated_at')->limit(20)->get(['id', 'title', 'status', 'starts_at', 'ends_at']),
-                'approvals' => Approval::where('user_id', $session->user_id)->latest('updated_at')->limit(20)->get(['id', 'title', 'status', 'description']),
+                'tasks' => Task::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'type', 'status', 'notes', 'due_at', 'metadata']),
+                'reminders' => Reminder::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'notes', 'status', 'remind_at', 'metadata']),
+                'calendar_events' => CalendarEvent::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'description', 'location', 'status', 'starts_at', 'ends_at', 'metadata']),
+                'approvals' => Approval::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'status', 'description', 'payload']),
+                'blockers' => Blocker::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'reason', 'status', 'context']),
             ],
             'allowed_action_schema' => [
-                'low_risk' => ['task.create', 'reminder.create', 'calendar_event.create'],
-                'approval_required' => ['email.send', 'payment.create', 'deployment.run', 'account.delete', 'destructive_actions'],
+                'low_risk' => [
+                    'task.create', 'task.update', 'task.delete',
+                    'reminder.create', 'reminder.update', 'reminder.delete',
+                    'calendar_event.create', 'calendar_event.update', 'calendar_event.delete',
+                    'approval.create', 'approval.update', 'approval.approve', 'approval.deny', 'approval.delete',
+                    'blocker.create', 'blocker.update', 'blocker.resolve', 'blocker.delete',
+                    'scheduler_job.create', 'scheduler_job.update', 'scheduler_job.delete',
+                    'agent_profile.update', 'conversation_session.update', 'activity_event.create',
+                ],
+                'approval_required' => ['email.send', 'payment.create', 'deployment.run', 'account.delete', 'destructive_actions_outside_dashboard'],
             ],
             'message' => [
                 'id' => $message->id,

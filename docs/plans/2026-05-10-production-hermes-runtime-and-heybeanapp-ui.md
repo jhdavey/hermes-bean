@@ -102,7 +102,7 @@ php artisan test --filter=AgentProfileTest
 **Implementation details:**
 
 - Runtime start resolves the authenticated user's `AgentProfile`.
-- Session `runtime_mode` should become `server_hermes` when configured; `stub` remains test/demo fallback only.
+- Session `runtime_mode` should be `cli` for the current server-hosted adapter and later `server_hermes` when the persistent runtime manager lands; no parser fallback remains.
 - Runtime payload includes user profile, current dashboard state, allowed action schema, and approval policy.
 - CLI output parser should look for JSON envelope first, then plain-text fallback.
 
