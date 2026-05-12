@@ -343,7 +343,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       setState(() {
         _session = result.session;
         if (result.assistantMessage != null) {
-          _messages.add(result.assistantMessage!);
+          _messages.add(_displayableAssistantMessage(result.assistantMessage!));
         } else if (result.status == 'blocked' && result.blocker != null) {
           final reason = _readBlockerReason(result.blocker);
           _messages.add(
@@ -387,6 +387,33 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  HermesMessage _displayableAssistantMessage(HermesMessage message) {
+    return HermesMessage(
+      id: message.id,
+      role: message.role,
+      content: _naturalLanguageContent(message.content),
+    );
+  }
+
+  String? _naturalLanguageContent(String? content) {
+    final trimmed = content?.trim();
+    if (trimmed == null || trimmed.isEmpty) return content;
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map<String, Object?>) {
+        for (final key in ['message', 'content', 'assistant_message', 'response']) {
+          final value = decoded[key];
+          if (value is String && value.trim().isNotEmpty) {
+            return value.trim();
+          }
+        }
+      }
+    } catch (_) {
+      // Plain-text assistant messages are already displayable.
+    }
+    return content;
   }
 
   String? _readBlockerReason(Map<String, Object?>? blocker) {
@@ -486,6 +513,30 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     setState(() {
       _calendarEndHour = hour.clamp(_calendarStartHour + 1, 23);
     });
+  }
+
+  Future<void> _refreshSignedInViews() async {
+    final session = _session;
+    if (_phase != _AuthPhase.signedIn || session == null) return;
+    try {
+      final results = await Future.wait<Object>([
+        widget.apiClient.todaySummary(),
+        widget.apiClient.pollActivityEvents(session.id),
+      ]);
+      final summary = results[0] as HermesTodaySummary;
+      if (!mounted) return;
+      setState(() {
+        _tasks = summary.tasks;
+        _reminders = summary.reminders;
+        _calendar = summary.calendarEvents;
+        _approvals = summary.approvals;
+        _events = results[1] as List<HermesActivityEvent>;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = 'Refresh failed: $error');
+    }
   }
 
   Future<void> _deleteAccount() async {
@@ -593,32 +644,38 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         error: _error,
       );
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
-      child: _CommandCenterContent(
-        user: _user!,
-        tasks: _tasks,
-        reminders: _reminders,
-        calendar: _calendar,
-        approvals: _approvals,
-        events: _events,
-        messages: _messages,
-        busy: _busy,
-        chatRunState: _chatRunState,
-        error: _error,
-        selectedDestination: _selectedDestination,
-        selectedCalendarDay: _selectedCalendarDay,
-        showCalendarMonth: _showCalendarMonth,
-        calendarStartHour: _calendarStartHour,
-        calendarEndHour: _calendarEndHour,
-        onCalendarDaySelected: _selectCalendarDay,
-        onBackToCalendarDay: _returnToCalendarDay,
-        onCalendarStartHourChanged: _setCalendarStartHour,
-        onCalendarEndHourChanged: _setCalendarEndHour,
-        onSelectDestination: (destination) =>
-            setState(() => _selectedDestination = destination),
-        onSend: _sendChat,
-        onDeleteAccount: _deleteAccount,
+    return RefreshIndicator(
+      key: const Key('signed-in-refresh-indicator'),
+      onRefresh: _refreshSignedInViews,
+      child: SingleChildScrollView(
+        key: const Key('signed-in-refresh-scroll'),
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
+        child: _CommandCenterContent(
+          user: _user!,
+          tasks: _tasks,
+          reminders: _reminders,
+          calendar: _calendar,
+          approvals: _approvals,
+          events: _events,
+          messages: _messages,
+          busy: _busy,
+          chatRunState: _chatRunState,
+          error: _error,
+          selectedDestination: _selectedDestination,
+          selectedCalendarDay: _selectedCalendarDay,
+          showCalendarMonth: _showCalendarMonth,
+          calendarStartHour: _calendarStartHour,
+          calendarEndHour: _calendarEndHour,
+          onCalendarDaySelected: _selectCalendarDay,
+          onBackToCalendarDay: _returnToCalendarDay,
+          onCalendarStartHourChanged: _setCalendarStartHour,
+          onCalendarEndHourChanged: _setCalendarEndHour,
+          onSelectDestination: (destination) =>
+              setState(() => _selectedDestination = destination),
+          onSend: _sendChat,
+          onDeleteAccount: _deleteAccount,
+        ),
       ),
     );
   }
@@ -1669,6 +1726,9 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     final now = DateTime.now();
     final today = _dateOnly(now);
     final selectedDay = _dateOnly(widget.selectedDay);
+    final weekStartDay = selectedDay.subtract(
+      Duration(days: selectedDay.weekday - DateTime.monday),
+    );
     final selectedNextDay = selectedDay.add(const Duration(days: 1));
     final visibleHours = _calendarVisibleHours(
       widget.startHour,
@@ -1687,8 +1747,8 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
       children: [
         _WeekDateHeader(
           today: today,
-          visibleStartDay: selectedDay,
-          visibleEndDay: selectedNextDay,
+          weekStartDay: weekStartDay,
+          selectedDay: selectedDay,
           onDateSelected: widget.onDayChanged,
           onHorizontalDayScroll: _handleHorizontalDayScroll,
         ),
@@ -1845,15 +1905,15 @@ class _CalendarHeaderButton extends StatelessWidget {
 class _WeekDateHeader extends StatelessWidget {
   const _WeekDateHeader({
     required this.today,
-    required this.visibleStartDay,
-    required this.visibleEndDay,
+    required this.weekStartDay,
+    required this.selectedDay,
     required this.onDateSelected,
     required this.onHorizontalDayScroll,
   });
 
   final DateTime today;
-  final DateTime visibleStartDay;
-  final DateTime visibleEndDay;
+  final DateTime weekStartDay;
+  final DateTime selectedDay;
   final ValueChanged<DateTime> onDateSelected;
   final GestureDragEndCallback onHorizontalDayScroll;
 
@@ -1864,52 +1924,47 @@ class _WeekDateHeader extends StatelessWidget {
       key: const Key('apple-style-week-date-header'),
       children: [
         const SizedBox(width: _calendarTimeColumnWidth),
-        Expanded(
-          child: _WeekDateHeaderCell(
-            date: visibleStartDay,
-            today: today,
-            highlight: _VisibleDateHighlight.primary,
-            onTap: () => onDateSelected(visibleStartDay),
+        for (var index = 0; index < 7; index++)
+          Expanded(
+            child: _WeekDateHeaderCell(
+              key: Key('week-date-cell-$index'),
+              date: weekStartDay.add(Duration(days: index)),
+              today: today,
+              selectedDay: selectedDay,
+              onTap: () => onDateSelected(
+                weekStartDay.add(Duration(days: index)),
+              ),
+            ),
           ),
-        ),
-        Expanded(
-          child: _WeekDateHeaderCell(
-            date: visibleEndDay,
-            today: today,
-            highlight: _VisibleDateHighlight.secondary,
-            onTap: () => onDateSelected(visibleEndDay),
-          ),
-        ),
       ],
     ),
   );
 }
 
-enum _VisibleDateHighlight { primary, secondary }
-
 class _WeekDateHeaderCell extends StatelessWidget {
   const _WeekDateHeaderCell({
+    super.key,
     required this.date,
     required this.today,
-    required this.highlight,
+    required this.selectedDay,
     required this.onTap,
   });
 
   final DateTime date;
   final DateTime today;
-  final _VisibleDateHighlight highlight;
+  final DateTime selectedDay;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final isPrimary = highlight == _VisibleDateHighlight.primary;
+    final isSelected = _sameCalendarDay(date, selectedDay);
     final isToday = _sameCalendarDay(date, today);
-    final backgroundColor = isPrimary
+    final backgroundColor = isSelected
         ? HeyBeanTheme.accent
         : isToday
         ? const Color(0xFFDFF3E5)
         : const Color(0xFFE5E7EB);
-    final textColor = isPrimary ? Colors.white : HeyBeanTheme.text;
+    final textColor = isSelected ? Colors.white : HeyBeanTheme.text;
 
     return InkWell(
       borderRadius: BorderRadius.circular(20),
@@ -1926,14 +1981,14 @@ class _WeekDateHeaderCell extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Container(
-            width: 42,
-            height: 34,
+            width: 36,
+            height: 32,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: backgroundColor,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: isToday && !isPrimary
+                color: isToday && !isSelected
                     ? HeyBeanTheme.accentStrong
                     : HeyBeanTheme.border,
               ),
@@ -1942,7 +1997,7 @@ class _WeekDateHeaderCell extends StatelessWidget {
               '${date.day}',
               style: TextStyle(
                 color: textColor,
-                fontSize: 18,
+                fontSize: 16,
                 fontWeight: FontWeight.w900,
               ),
             ),

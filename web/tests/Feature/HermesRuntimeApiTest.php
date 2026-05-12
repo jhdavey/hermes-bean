@@ -181,7 +181,7 @@ PHP);
 #!/usr/bin/env php
 <?php
 $prompt = implode(' ', $argv);
-$required = ['task.update', 'task.delete', 'reminder.update', 'calendar_event.delete', 'approval.approve', 'blocker.resolve', 'agent_profile.update'];
+$required = ['task.update', 'task.delete', 'reminder.update', 'calendar_event.delete', 'approval.approve', 'blocker.resolve', 'agent_profile.update', 'ask a follow-up about whether it should recur'];
 $missing = array_values(array_filter($required, fn ($needle) => ! str_contains($prompt, $needle)));
 echo json_encode([
     'message' => empty($missing) ? 'Schema includes universal dashboard controls.' : 'Missing schema controls: '.implode(', ', $missing),
@@ -198,6 +198,28 @@ PHP);
             'content' => 'What can you control?',
         ])->assertCreated()
             ->assertJsonPath('data.assistant_message.content', 'Schema includes universal dashboard controls.');
+    }
+
+    public function test_runtime_normalizes_nested_json_assistant_message_to_natural_language(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => json_encode(['message' => 'Added Workout to this week. Should I make it repeat every week?'], JSON_THROW_ON_ERROR),
+    'actions' => [],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Nested JSON response',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Add Workout to my calendar for monday wednesday friday 9-10am',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Added Workout to this week. Should I make it repeat every week?');
     }
 
     public function test_runtime_fails_safe_to_blocker_when_real_hermes_cli_is_not_configured(): void

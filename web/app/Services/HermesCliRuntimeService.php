@@ -247,6 +247,7 @@ Rules:
 - Risky external, destructive outside the dashboard, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
 - If no concrete action is needed, return an empty actions array.
 - Use ISO-8601 timestamps for dates when you create or update reminders, calendar events, and scheduler jobs.
+- If the user asks for a named event on multiple weekdays without explicitly saying recurring, weekly, every week, repeats, or recurrence: create one-off calendar events for the next matching days in the current week, then ask a follow-up about whether it should recur. Only set recurrence metadata when the user explicitly requests recurrence.
 
 Runtime payload:
 PROMPT.$this->payloadFor($session, $message);
@@ -340,7 +341,31 @@ PROMPT.$this->payloadFor($session, $message);
         if (is_array($decoded)) {
             foreach (['content', 'message', 'assistant_message', 'response'] as $key) {
                 if (isset($decoded[$key]) && is_string($decoded[$key])) {
-                    return $decoded[$key];
+                    return $this->normalizeAssistantContent($decoded[$key]);
+                }
+            }
+        }
+
+        return $this->normalizeAssistantContent($trimmed);
+    }
+
+    private function normalizeAssistantContent(string $content): string
+    {
+        $trimmed = trim($content);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        try {
+            $decoded = json_decode($trimmed, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return $trimmed;
+        }
+
+        if (is_array($decoded)) {
+            foreach (['content', 'message', 'assistant_message', 'response'] as $key) {
+                if (isset($decoded[$key]) && is_string($decoded[$key]) && trim($decoded[$key]) !== '') {
+                    return $this->normalizeAssistantContent($decoded[$key]);
                 }
             }
         }

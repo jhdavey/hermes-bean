@@ -147,6 +147,9 @@ void main() {
         find.byKey(const Key('apple-style-week-date-header')),
         findsOneWidget,
       );
+      for (var index = 0; index < 7; index++) {
+        expect(find.byKey(Key('week-date-cell-$index')), findsOneWidget);
+      }
       expect(find.byKey(const Key('apple-style-day-timeline')), findsOneWidget);
       expect(
         find.byKey(const Key('calendar-current-time-marker')),
@@ -370,6 +373,60 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'pull to refresh reloads signed-in views',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      expect(api.todaySummaryCalls, 1);
+      expect(find.byKey(const Key('signed-in-refresh-indicator')), findsOneWidget);
+
+      await tester.fling(
+        find.byKey(const Key('signed-in-refresh-scroll')),
+        const Offset(0, 320),
+        1000,
+      );
+      await tester.pumpAndSettle();
+
+      expect(api.todaySummaryCalls, greaterThan(1));
+    },
+  );
+
+  testWidgets(
+    'chat renders backend JSON message envelopes as natural language',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _JsonEnvelopeMessageHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Add Workout to my calendar Monday Wednesday and Friday 9-10am',
+      );
+      await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Added Workout to this week on Monday, Wednesday, and Friday from 9:00 AM to 10:00 AM. Should I make it repeat every week?',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('{"message"'), findsNothing);
+    },
+  );
 }
 
 class _MemoryAuthTokenStore implements AuthTokenStore {
@@ -411,6 +468,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   final sentMessages = <String>[];
   bool deletedAccount = false;
   bool plannedToday = false;
+  int todaySummaryCalls = 0;
 
   @override
   Future<HermesAuthResult> login({
@@ -485,20 +543,23 @@ class _FakeHermesApiClient extends HermesApiClient {
         ];
 
   @override
-  Future<HermesTodaySummary> todaySummary() async => HermesTodaySummary(
-    tasks: await listTasks(),
-    reminders: await listReminders(),
-    calendarEvents: await listCalendarEvents(),
-    activityEvents: await pollActivityEvents(42),
-    approvals: const [
-      HermesApproval(
-        id: 7,
-        title: 'Review outgoing email before Hermes sends it',
-        status: 'pending',
-      ),
-    ],
-    blockers: const [],
-  );
+  Future<HermesTodaySummary> todaySummary() async {
+    todaySummaryCalls++;
+    return HermesTodaySummary(
+      tasks: await listTasks(),
+      reminders: await listReminders(),
+      calendarEvents: await listCalendarEvents(),
+      activityEvents: await pollActivityEvents(42),
+      approvals: const [
+        HermesApproval(
+          id: 7,
+          title: 'Review outgoing email before Hermes sends it',
+          status: 'pending',
+        ),
+      ],
+      blockers: const [],
+    );
+  }
 
   @override
   Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>
@@ -549,6 +610,28 @@ class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
       session: HermesSession(id: 42, status: 'blocked', title: 'Session blocked'),
       events: [],
       blocker: {'reason': 'Gmail OAuth is not connected.'},
+    );
+  }
+}
+
+class _JsonEnvelopeMessageHermesApiClient extends _SignedInFakeHermesApiClient {
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sentMessages.add(content);
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      assistantMessage: HermesMessage(
+        id: 9,
+        role: 'assistant',
+        content:
+            '{"message":"Added Workout to this week on Monday, Wednesday, and Friday from 9:00 AM to 10:00 AM. Should I make it repeat every week?"}',
+      ),
+      events: [],
     );
   }
 }
