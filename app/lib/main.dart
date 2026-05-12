@@ -1305,7 +1305,7 @@ class _ActivityCard extends StatelessWidget {
   );
 }
 
-class _TodayHomeView extends StatelessWidget {
+class _TodayHomeView extends StatefulWidget {
   const _TodayHomeView({
     required this.user,
     required this.tasks,
@@ -1321,44 +1321,53 @@ class _TodayHomeView extends StatelessWidget {
   final List<HermesApproval> approvals;
 
   @override
+  State<_TodayHomeView> createState() => _TodayHomeViewState();
+}
+
+class _TodayHomeViewState extends State<_TodayHomeView> {
+  bool _showMonth = false;
+
+  int get _criticalTaskCount => widget.tasks.length + widget.reminders.length;
+
+  @override
   Widget build(BuildContext context) => Column(
     key: const Key('today-view'),
     children: [
-      if (approvals.isNotEmpty) ...[
-        _ApprovalBanner(approval: approvals.first),
+      if (widget.approvals.isNotEmpty) ...[
+        _ApprovalBanner(approval: widget.approvals.first),
         const SizedBox(height: 16),
       ],
       _ShellCard(
-        key: const Key('today-month-calendar'),
+        key: const Key('calendar-view'),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Welcome, ${user.name}',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 14),
             Row(
               children: [
-                const Expanded(
-                  child: _SectionTitle(
-                    icon: Icons.calendar_month_rounded,
-                    title: 'Today',
-                    subtitle: 'This month',
+                Expanded(
+                  child: _CalendarModeSwitcher(
+                    showMonth: _showMonth,
+                    onChanged: (showMonth) =>
+                        setState(() => _showMonth = showMonth),
                   ),
                 ),
-                _StatusPill(
-                  label: '${calendar.length} events',
-                  icon: Icons.event_rounded,
-                ),
+                _CriticalTaskBadge(count: _criticalTaskCount),
               ],
             ),
             const SizedBox(height: 16),
-            _MonthGrid(calendar: calendar),
-            const SizedBox(height: 16),
-            _CalendarAgenda(calendar: calendar),
+            if (_showMonth) ...[
+              _MonthGrid(calendar: widget.calendar),
+              const SizedBox(height: 16),
+              _CalendarMonthTaskList(
+                tasks: widget.tasks,
+                reminders: widget.reminders,
+                calendar: widget.calendar,
+              ),
+            ] else ...[
+              _AppleStyleDayStrip(calendar: widget.calendar),
+              const SizedBox(height: 16),
+              _CalendarAgenda(calendar: widget.calendar),
+            ],
           ],
         ),
       ),
@@ -1371,19 +1380,20 @@ class _TodayHomeView extends StatelessWidget {
             _SectionTitle(
               icon: Icons.task_alt_rounded,
               title: 'Tasks for today',
-              subtitle: '${tasks.length} tasks · ${reminders.length} reminders',
+              subtitle:
+                  '${widget.tasks.length} tasks · ${widget.reminders.length} reminders',
             ),
             const SizedBox(height: 12),
-            if (tasks.isEmpty && reminders.isEmpty)
+            if (widget.tasks.isEmpty && widget.reminders.isEmpty)
               const _EmptySurface(label: 'Nothing scheduled for today')
             else ...[
-              for (final task in tasks)
+              for (final task in widget.tasks)
                 _CompactItemTile(
                   icon: Icons.radio_button_unchecked_rounded,
                   title: task.title,
                   subtitle: _statusLabel(task.status),
                 ),
-              for (final reminder in reminders)
+              for (final reminder in widget.reminders)
                 _CompactItemTile(
                   icon: Icons.notifications_active_outlined,
                   title: reminder.title,
@@ -1395,6 +1405,246 @@ class _TodayHomeView extends StatelessWidget {
       ),
     ],
   );
+}
+
+class _CalendarModeSwitcher extends StatelessWidget {
+  const _CalendarModeSwitcher({
+    required this.showMonth,
+    required this.onChanged,
+  });
+
+  final bool showMonth;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(4),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _CalendarModeChip(
+          key: const Key('calendar-mode-today'),
+          label: 'Today',
+          icon: Icons.view_day_outlined,
+          selected: !showMonth,
+          onTap: () => onChanged(false),
+        ),
+        _CalendarModeChip(
+          key: const Key('calendar-mode-month'),
+          label: 'Month',
+          icon: Icons.calendar_view_month_outlined,
+          selected: showMonth,
+          onTap: () => onChanged(true),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CalendarModeChip extends StatelessWidget {
+  const _CalendarModeChip({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    borderRadius: BorderRadius.circular(18),
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: selected ? Colors.white : Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: selected
+            ? const [
+                BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 12,
+                  offset: Offset(0, 4),
+                ),
+              ]
+            : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+              color: selected ? HeyBeanTheme.text : HeyBeanTheme.muted,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _CriticalTaskBadge extends StatelessWidget {
+  const _CriticalTaskBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: 'Critical tasks',
+    child: Container(
+      key: const Key('critical-task-count'),
+      width: 36,
+      height: 36,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        color: HeyBeanTheme.accent,
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    ),
+  );
+}
+
+class _AppleStyleDayStrip extends StatelessWidget {
+  const _AppleStyleDayStrip({required this.calendar});
+
+  final List<HermesCalendarEvent> calendar;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final days = List<DateTime>.generate(
+      2,
+      (index) => now.add(Duration(days: index)),
+    );
+    return Column(
+      key: const Key('apple-style-day-strip'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            for (final day in days)
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _isCalendarToday(day)
+                        ? HeyBeanTheme.accent
+                        : HeyBeanTheme.surface2,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: HeyBeanTheme.border),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        _isCalendarToday(day) ? 'Today' : 'Tomorrow',
+                        style: TextStyle(
+                          color: _isCalendarToday(day)
+                              ? Colors.white
+                              : HeyBeanTheme.muted,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${day.day}',
+                        style: TextStyle(
+                          color: _isCalendarToday(day)
+                              ? Colors.white
+                              : HeyBeanTheme.text,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _CalendarMonthTaskList extends StatelessWidget {
+  const _CalendarMonthTaskList({
+    required this.tasks,
+    required this.reminders,
+    required this.calendar,
+  });
+
+  final List<HermesTask> tasks;
+  final List<HermesReminder> reminders;
+  final List<HermesCalendarEvent> calendar;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        'Rest of month',
+        style: Theme.of(
+          context,
+        ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 8),
+      if (tasks.isEmpty && reminders.isEmpty && calendar.isEmpty)
+        const _EmptySurface(label: 'No tasks for the rest of the month')
+      else ...[
+        for (final task in tasks)
+          _CompactItemTile(
+            icon: Icons.radio_button_unchecked_rounded,
+            title: task.title,
+            subtitle: 'Today · ${_statusLabel(task.status)}',
+          ),
+        for (final reminder in reminders)
+          _CompactItemTile(
+            icon: Icons.notifications_active_outlined,
+            title: reminder.title,
+            subtitle: reminder.dueAt ?? 'Today',
+          ),
+        for (final event in calendar)
+          _CompactItemTile(
+            icon: Icons.event_available_rounded,
+            title: event.title,
+            subtitle: event.startsAt ?? 'This month',
+          ),
+      ],
+    ],
+  );
+}
+
+bool _isCalendarToday(DateTime day) {
+  final now = DateTime.now();
+  return day.year == now.year && day.month == now.month && day.day == now.day;
 }
 
 class _MonthGrid extends StatelessWidget {
@@ -1422,6 +1672,7 @@ class _MonthGrid extends StatelessWidget {
 
     const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
     return Column(
+      key: const Key('apple-style-month-grid'),
       children: [
         Row(
           children: [
@@ -1924,7 +2175,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                       child: _MenuIconButton(
                         key: const Key('nav-today'),
                         icon: Icons.today_rounded,
-                        label: 'Today',
+                        label: 'Calendar',
                         selected: selected == _HomeDestination.today,
                         onPressed: () => onSelected(_HomeDestination.today),
                       ),

@@ -51,7 +51,7 @@ void main() {
       await tester.tap(find.byKey(const Key('auth-submit')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Welcome, Bean User'), findsOneWidget);
+      expect(find.byKey(const Key('calendar-view')), findsOneWidget);
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Stand up'), findsOneWidget);
       expect(find.text('Design review'), findsWidgets);
@@ -112,7 +112,7 @@ void main() {
       expect(find.text('Approval needed'), findsOneWidget);
 
       for (final label in <String>[
-        'Today',
+        'Calendar',
         'Tasks',
         'Reminders',
         'Bean',
@@ -132,12 +132,26 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('today-month-calendar')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-mode-today')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-mode-month')), findsOneWidget);
+      expect(find.text('Welcome, Bean User'), findsNothing);
+      expect(find.text('Calendar'), findsWidgets);
+      expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
+      expect(find.text('2'), findsWidgets);
       expect(find.text('Today'), findsWidgets);
-      expect(find.text('This month'), findsOneWidget);
+      expect(find.text('Tomorrow'), findsOneWidget);
+      expect(find.byKey(const Key('apple-style-day-strip')), findsOneWidget);
       expect(find.text('Tasks for today'), findsOneWidget);
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Design review'), findsWidgets);
+
+      await tester.tap(find.byKey(const Key('calendar-mode-month')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
+      expect(find.text('Rest of month'), findsOneWidget);
+      expect(find.text('Plan launch'), findsWidgets);
+      expect(find.text('Stand up'), findsWidgets);
 
       expect(find.byKey(const Key('nav-tasks')), findsOneWidget);
       await tester.tap(find.byKey(const Key('nav-tasks')));
@@ -223,7 +237,7 @@ void main() {
     await tester.tap(find.byKey(const Key('auth-submit')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome, Bean User'), findsOneWidget);
+    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
     expect(tokenStore.token, 'fake-token');
   });
 
