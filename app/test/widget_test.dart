@@ -254,6 +254,36 @@ void main() {
     },
   );
 
+  testWidgets('calendar events stay inside their selected or next day column', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _TwoDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final selectedHeading = tester.getRect(
+      find.byKey(const Key('day-column-heading-selected')),
+    );
+    final nextHeading = tester.getRect(
+      find.byKey(const Key('day-column-heading-next')),
+    );
+    final todayEvent = tester.getRect(
+      find.byKey(const Key('calendar-event-block-today-workout')),
+    );
+    final tomorrowEvent = tester.getRect(
+      find.byKey(const Key('calendar-event-block-tomorrow-workout')),
+    );
+
+    expect(todayEvent.left, greaterThanOrEqualTo(selectedHeading.left));
+    expect(todayEvent.right, lessThanOrEqualTo(selectedHeading.right));
+    expect(tomorrowEvent.left, greaterThanOrEqualTo(nextHeading.left));
+    expect(tomorrowEvent.right, lessThanOrEqualTo(nextHeading.right));
+  });
+
   testWidgets(
     'invalid remembered tokens return to sign in instead of offline chat',
     (WidgetTester tester) async {
@@ -612,6 +642,36 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<void> deleteAccount() async {
     deletedAccount = true;
     bearerToken = null;
+  }
+}
+
+class _TwoDayCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final selectedDay = DateTime.now();
+    final tomorrow = selectedDay.add(const Duration(days: 1));
+    return [
+      HermesCalendarEvent(
+        id: 101,
+        title: 'Today workout',
+        startsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          10,
+        ).toIso8601String(),
+      ),
+      HermesCalendarEvent(
+        id: 102,
+        title: 'Tomorrow workout',
+        startsAt: DateTime(
+          tomorrow.year,
+          tomorrow.month,
+          tomorrow.day,
+          10,
+        ).toIso8601String(),
+      ),
+    ];
   }
 }
 

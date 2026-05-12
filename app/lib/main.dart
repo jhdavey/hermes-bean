@@ -1776,12 +1776,14 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                     const SizedBox(width: _calendarTimeColumnWidth),
                     Expanded(
                       child: _DayColumnHeading(
+                        key: const Key('day-column-heading-selected'),
                         date: selectedDay,
                         isToday: _sameCalendarDay(selectedDay, today),
                       ),
                     ),
                     Expanded(
                       child: _DayColumnHeading(
+                        key: const Key('day-column-heading-next'),
                         date: selectedNextDay,
                         isToday: _sameCalendarDay(selectedNextDay, today),
                       ),
@@ -1790,63 +1792,80 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                 ),
                 SizedBox(
                   height: visibleHours.length * _calendarHourHeight,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Column(
-                        children: [
-                          for (final hour in visibleHours)
-                            _TimelineHourRow(hour: hour),
-                        ],
-                      ),
-                      Positioned(
-                        key: const Key('calendar-current-time-marker'),
-                        top: markerOffset,
-                        left: 0,
-                        right: 0,
-                        child: Row(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Column(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 5,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: HeyBeanTheme.accent,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                _clockLabel(now),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Container(
-                                height: 2,
-                                color: HeyBeanTheme.accent,
-                              ),
-                            ),
+                            for (final hour in visibleHours)
+                              _TimelineHourRow(hour: hour),
                           ],
                         ),
-                      ),
-                      for (final event in widget.calendar)
-                        if ((_eventFallsOnDay(event, selectedDay) ||
-                                _eventFallsOnDay(event, selectedNextDay)) &&
-                            _eventFallsWithinHours(
-                              event,
-                              widget.startHour,
-                              widget.endHour,
-                            ))
-                          _TimelineEventBlock(
-                            event: event,
-                            startHour: widget.startHour,
-                            endHour: widget.endHour,
+                        Positioned(
+                          key: const Key('calendar-current-time-marker'),
+                          top: markerOffset,
+                          left: 0,
+                          right: 0,
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: HeyBeanTheme.accent,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  _clockLabel(now),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Container(
+                                  height: 2,
+                                  color: HeyBeanTheme.accent,
+                                ),
+                              ),
+                            ],
                           ),
-                    ],
+                        ),
+                        for (final event in widget.calendar) ...[
+                          if (_eventFallsOnDay(event, selectedDay) &&
+                              _eventFallsWithinHours(
+                                event,
+                                widget.startHour,
+                                widget.endHour,
+                              ))
+                            _TimelineEventBlock(
+                              event: event,
+                              startHour: widget.startHour,
+                              endHour: widget.endHour,
+                              columnIndex: 0,
+                              timelineWidth: constraints.maxWidth,
+                            ),
+                          if (_eventFallsOnDay(event, selectedNextDay) &&
+                              _eventFallsWithinHours(
+                                event,
+                                widget.startHour,
+                                widget.endHour,
+                              ))
+                            _TimelineEventBlock(
+                              event: event,
+                              startHour: widget.startHour,
+                              endHour: widget.endHour,
+                              columnIndex: 1,
+                              timelineWidth: constraints.maxWidth,
+                            ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -2051,7 +2070,11 @@ class _WeekDateHeaderCell extends StatelessWidget {
 }
 
 class _DayColumnHeading extends StatelessWidget {
-  const _DayColumnHeading({required this.date, required this.isToday});
+  const _DayColumnHeading({
+    super.key,
+    required this.date,
+    required this.isToday,
+  });
 
   final DateTime date;
   final bool isToday;
@@ -2123,11 +2146,15 @@ class _TimelineEventBlock extends StatelessWidget {
     required this.event,
     required this.startHour,
     required this.endHour,
+    required this.columnIndex,
+    required this.timelineWidth,
   });
 
   final HermesCalendarEvent event;
   final int startHour;
   final int endHour;
+  final int columnIndex;
+  final double timelineWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -2140,10 +2167,14 @@ class _TimelineEventBlock extends StatelessWidget {
           visibleHours.length.toDouble(),
         ) *
         _calendarHourHeight;
+    final dayColumnWidth = (timelineWidth - _calendarTimeColumnWidth) / 2;
+    final left = _calendarTimeColumnWidth + (dayColumnWidth * columnIndex) + 8;
+    final width = (dayColumnWidth - 16).clamp(0.0, double.infinity);
     return Positioned(
+      key: Key(_calendarEventBlockKey(event)),
       top: hourPosition + 50,
-      left: _calendarTimeColumnWidth + 8,
-      right: 8,
+      left: left,
+      width: width,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
@@ -2164,6 +2195,14 @@ class _TimelineEventBlock extends StatelessWidget {
       ),
     );
   }
+}
+
+String _calendarEventBlockKey(HermesCalendarEvent event) {
+  final slug = event.title
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+  return 'calendar-event-block-${slug.isEmpty ? event.id : slug}';
 }
 
 List<int> _calendarVisibleHours(int startHour, int endHour) {
