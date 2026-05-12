@@ -274,8 +274,10 @@ class StructuredHermesActionService
 
     private function createCalendarEvent(ConversationSession $session, array $parameters): ActivityEvent
     {
-        $startsAt = Carbon::parse((string) ($parameters['starts_at'] ?? now()->toIso8601String()));
-        $endsAt = isset($parameters['ends_at']) ? Carbon::parse((string) $parameters['ends_at']) : null;
+        $startsAtValue = $parameters['starts_at'] ?? $parameters['start_at'] ?? now()->toIso8601String();
+        $endsAtValue = $parameters['ends_at'] ?? $parameters['end_at'] ?? null;
+        $startsAt = Carbon::parse((string) $startsAtValue);
+        $endsAt = $endsAtValue !== null ? Carbon::parse((string) $endsAtValue) : null;
 
         $calendarEvent = CalendarEvent::create([
             'user_id' => $session->user_id,
@@ -286,7 +288,10 @@ class StructuredHermesActionService
             'starts_at' => $startsAt,
             'ends_at' => $endsAt,
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
-            'metadata' => ['created_by' => 'structured_hermes_action'],
+            'metadata' => array_filter([
+                'created_by' => 'structured_hermes_action',
+                'recurrence' => $parameters['recurrence'] ?? null,
+            ], static fn ($value) => $value !== null),
         ]);
 
         return $this->recordEvent($session, 'assistant.calendar_event.created', [

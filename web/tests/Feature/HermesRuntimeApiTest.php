@@ -200,18 +200,29 @@ PHP);
             ->assertJsonPath('data.assistant_message.content', 'Schema includes universal dashboard controls.');
     }
 
-    public function test_runtime_normalizes_nested_json_assistant_message_to_natural_language(): void
+    public function test_runtime_normalizes_nested_json_assistant_message_and_applies_nested_actions(): void
     {
         $this->configureFakeHermes(<<<'PHP'
 #!/usr/bin/env php
 <?php
 echo json_encode([
-    'message' => json_encode(['message' => 'Added Workout to this week. Should I make it repeat every week?'], JSON_THROW_ON_ERROR),
-    'actions' => [],
+    'message' => json_encode([
+        'message' => 'Added Workout to this week. Should I make it repeat every week?',
+        'actions' => [[
+            'type' => 'calendar_event.create',
+            'risk' => 'low',
+            'parameters' => [
+                'title' => 'Workout',
+                'start_at' => '2026-05-13T09:00:00Z',
+                'end_at' => '2026-05-13T10:00:00Z',
+            ],
+        ]],
+    ], JSON_THROW_ON_ERROR),
 ], JSON_THROW_ON_ERROR);
 PHP);
 
         $token = $this->apiToken();
+        $userId = \App\Models\User::where('email', 'test@example.com')->value('id');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Nested JSON response',
         ])->assertCreated()->json('data.id');
@@ -219,7 +230,16 @@ PHP);
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Add Workout to my calendar for monday wednesday friday 9-10am',
         ])->assertCreated()
-            ->assertJsonPath('data.assistant_message.content', 'Added Workout to this week. Should I make it repeat every week?');
+            ->assertJsonPath('data.assistant_message.content', 'Added Workout to this week. Should I make it repeat every week?')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $this->assertDatabaseHas('calendar_events', [
+            'user_id' => $userId,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Workout',
+            'starts_at' => '2026-05-13 09:00:00',
+            'ends_at' => '2026-05-13 10:00:00',
+        ]);
     }
 
     public function test_runtime_fails_safe_to_blocker_when_real_hermes_cli_is_not_configured(): void

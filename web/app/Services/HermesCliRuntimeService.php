@@ -319,7 +319,30 @@ PROMPT.$this->payloadFor($session, $message);
             return null;
         }
 
-        return is_array($decoded) ? $decoded : null;
+        if (! is_array($decoded)) {
+            return null;
+        }
+
+        foreach (['content', 'message', 'assistant_message', 'response'] as $key) {
+            if (isset($decoded[$key]) && is_string($decoded[$key])) {
+                $nested = trim($decoded[$key]);
+                if ($nested === '') {
+                    continue;
+                }
+
+                try {
+                    $nestedDecoded = json_decode($nested, true, flags: JSON_THROW_ON_ERROR);
+                } catch (\JsonException) {
+                    continue;
+                }
+
+                if (is_array($nestedDecoded) && array_key_exists('actions', $nestedDecoded)) {
+                    return $nestedDecoded;
+                }
+            }
+        }
+
+        return $decoded;
     }
 
     private function assistantContentFrom(string $stdout, ?array $structuredOutput = null): string
