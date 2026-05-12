@@ -403,7 +403,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     try {
       final decoded = jsonDecode(trimmed);
       if (decoded is Map<String, Object?>) {
-        for (final key in ['message', 'content', 'assistant_message', 'response']) {
+        for (final key in [
+          'message',
+          'content',
+          'assistant_message',
+          'response',
+        ]) {
           final value = decoded[key];
           if (value is String && value.trim().isNotEmpty) {
             return value.trim();
@@ -424,7 +429,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
     final context = blocker['context'];
     if (context is Map<String, Object?>) {
-      final detail = context['message'] ?? context['error'] ?? context['failure_type'];
+      final detail =
+          context['message'] ?? context['error'] ?? context['failure_type'];
       if (detail is String && detail.trim().isNotEmpty) return detail.trim();
     }
     return null;
@@ -442,7 +448,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       try {
         final decoded = jsonDecode(error.body);
         if (decoded is Map<String, Object?>) {
-          final message = decoded['message'] ?? decoded['error'] ?? decoded['reason'];
+          final message =
+              decoded['message'] ?? decoded['error'] ?? decoded['reason'];
           if (message is String && message.trim().isNotEmpty) {
             return _sentenceFragment(message);
           }
@@ -458,7 +465,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   String _sentenceFragment(String message) {
     final trimmed = message.trim();
     if (trimmed.isEmpty) return trimmed;
-    return trimmed.endsWith('.') || trimmed.endsWith('!') || trimmed.endsWith('?')
+    return trimmed.endsWith('.') ||
+            trimmed.endsWith('!') ||
+            trimmed.endsWith('?')
         ? trimmed
         : '$trimmed.';
   }
@@ -588,26 +597,26 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                 titleSpacing: 20,
                 title: _phase == _AuthPhase.signedIn
                     ? _CalendarHeaderButton(
-                        key: const Key('calendar-today-button'),
-                        label: 'Today',
-                        icon: Icons.today_rounded,
-                        iconSize: 16,
-                        horizontalPadding: 10,
-                        verticalPadding: 7,
-                        labelStyle: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
-                        onTap: _returnToToday,
+                        key: const Key('calendar-month-chevron'),
+                        label: _monthName(_selectedCalendarDay.month),
+                        icon: Icons.chevron_left_rounded,
+                        onTap: _openCalendarMonth,
                       )
                     : null,
                 actions: [
                   if (_phase == _AuthPhase.signedIn) ...[
                     _CalendarHeaderButton(
-                      key: const Key('calendar-month-chevron'),
-                      label: _monthName(_selectedCalendarDay.month),
-                      icon: Icons.chevron_left_rounded,
-                      onTap: _openCalendarMonth,
+                      key: const Key('calendar-today-button'),
+                      label: 'Today',
+                      icon: Icons.today_rounded,
+                      iconSize: 16,
+                      horizontalPadding: 10,
+                      verticalPadding: 7,
+                      labelStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      onTap: _returnToToday,
                     ),
                     const SizedBox(width: 8),
                     _CriticalTaskBadge(
@@ -1918,27 +1927,46 @@ class _WeekDateHeader extends StatelessWidget {
   final GestureDragEndCallback onHorizontalDayScroll;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onHorizontalDragEnd: onHorizontalDayScroll,
-    child: Row(
-      key: const Key('apple-style-week-date-header'),
-      children: [
-        const SizedBox(width: _calendarTimeColumnWidth),
-        for (var index = 0; index < 7; index++)
-          Expanded(
-            child: _WeekDateHeaderCell(
-              key: Key('week-date-cell-$index'),
-              date: weekStartDay.add(Duration(days: index)),
-              today: today,
-              selectedDay: selectedDay,
-              onTap: () => onDateSelected(
-                weekStartDay.add(Duration(days: index)),
+  Widget build(BuildContext context) {
+    var neutralPillIndex = 0;
+    return GestureDetector(
+      onHorizontalDragEnd: onHorizontalDayScroll,
+      child: Row(
+        key: const Key('apple-style-week-date-header'),
+        children: [
+          const SizedBox(width: _calendarTimeColumnWidth),
+          for (var index = 0; index < 7; index++)
+            Expanded(
+              child: Builder(
+                builder: (context) {
+                  final date = weekStartDay.add(Duration(days: index));
+                  final isSelected = _sameCalendarDay(date, selectedDay);
+                  final isNextVisible = _sameCalendarDay(
+                    date,
+                    selectedDay.add(const Duration(days: 1)),
+                  );
+                  final pillKey = isSelected
+                      ? 'week-date-pill-selected'
+                      : isNextVisible
+                      ? 'week-date-pill-next-visible'
+                      : 'week-date-pill-neutral-${neutralPillIndex++}';
+
+                  return _WeekDateHeaderCell(
+                    key: Key('week-date-cell-$index'),
+                    date: date,
+                    today: today,
+                    selectedDay: selectedDay,
+                    isNextVisibleDay: isNextVisible,
+                    pillKey: Key(pillKey),
+                    onTap: () => onDateSelected(date),
+                  );
+                },
               ),
             ),
-          ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _WeekDateHeaderCell extends StatelessWidget {
@@ -1947,12 +1975,16 @@ class _WeekDateHeaderCell extends StatelessWidget {
     required this.date,
     required this.today,
     required this.selectedDay,
+    required this.isNextVisibleDay,
+    required this.pillKey,
     required this.onTap,
   });
 
   final DateTime date;
   final DateTime today;
   final DateTime selectedDay;
+  final bool isNextVisibleDay;
+  final Key pillKey;
   final VoidCallback onTap;
 
   @override
@@ -1961,10 +1993,17 @@ class _WeekDateHeaderCell extends StatelessWidget {
     final isToday = _sameCalendarDay(date, today);
     final backgroundColor = isSelected
         ? HeyBeanTheme.accent
-        : isToday
-        ? const Color(0xFFDFF3E5)
-        : const Color(0xFFE5E7EB);
+        : isNextVisibleDay
+        ? const Color(0xFFE5E7EB)
+        : null;
     final textColor = isSelected ? Colors.white : HeyBeanTheme.text;
+    final borderRadius = isSelected && isNextVisibleDay
+        ? BorderRadius.circular(18)
+        : isSelected
+        ? const BorderRadius.horizontal(left: Radius.circular(18))
+        : isNextVisibleDay
+        ? const BorderRadius.horizontal(right: Radius.circular(18))
+        : BorderRadius.circular(18);
 
     return InkWell(
       borderRadius: BorderRadius.circular(20),
@@ -1981,15 +2020,18 @@ class _WeekDateHeaderCell extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Container(
-            width: 36,
+            key: pillKey,
+            width: double.infinity,
             height: 32,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: backgroundColor,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: borderRadius,
               border: Border.all(
                 color: isToday && !isSelected
                     ? HeyBeanTheme.accentStrong
+                    : backgroundColor == null
+                    ? Colors.transparent
                     : HeyBeanTheme.border,
               ),
             ),

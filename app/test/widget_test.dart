@@ -144,9 +144,26 @@ void main() {
       expect(find.text('2'), findsWidgets);
       expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
       expect(
+        tester.getTopLeft(find.byKey(const Key('calendar-month-chevron'))).dx,
+        lessThan(
+          tester.getTopLeft(find.byKey(const Key('calendar-today-button'))).dx,
+        ),
+      );
+      expect(
         find.byKey(const Key('apple-style-week-date-header')),
         findsOneWidget,
       );
+      expect(
+        _datePillColor(tester, 'week-date-pill-selected'),
+        HeyBeanTheme.accent,
+      );
+      expect(
+        _datePillColor(tester, 'week-date-pill-next-visible'),
+        const Color(0xFFE5E7EB),
+      );
+      for (var index = 0; index < 5; index++) {
+        expect(_datePillColor(tester, 'week-date-pill-neutral-$index'), isNull);
+      }
       for (var index = 0; index < 7; index++) {
         expect(find.byKey(Key('week-date-cell-$index')), findsOneWidget);
       }
@@ -374,59 +391,60 @@ void main() {
     },
   );
 
-  testWidgets(
-    'pull to refresh reloads signed-in views',
-    (WidgetTester tester) async {
-      final api = _SignedInFakeHermesApiClient();
-      await tester.pumpWidget(
-        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('pull to refresh reloads signed-in views', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
 
-      expect(api.todaySummaryCalls, 1);
-      expect(find.byKey(const Key('signed-in-refresh-indicator')), findsOneWidget);
+    expect(api.todaySummaryCalls, 1);
+    expect(
+      find.byKey(const Key('signed-in-refresh-indicator')),
+      findsOneWidget,
+    );
 
-      await tester.fling(
-        find.byKey(const Key('signed-in-refresh-scroll')),
-        const Offset(0, 320),
-        1000,
-      );
-      await tester.pumpAndSettle();
+    await tester.fling(
+      find.byKey(const Key('signed-in-refresh-scroll')),
+      const Offset(0, 320),
+      1000,
+    );
+    await tester.pumpAndSettle();
 
-      expect(api.todaySummaryCalls, greaterThan(1));
-    },
-  );
+    expect(api.todaySummaryCalls, greaterThan(1));
+  });
 
-  testWidgets(
-    'chat renders backend JSON message envelopes as natural language',
-    (WidgetTester tester) async {
-      await tester.pumpWidget(
-        HermesBeanApp(
-          apiClient: _JsonEnvelopeMessageHermesApiClient(),
-          tokenStore: _MemoryAuthTokenStore(),
-        ),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('chat renders backend JSON message envelopes as natural language', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _JsonEnvelopeMessageHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-bean')));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const Key('chat-input')),
-        'Add Workout to my calendar Monday Wednesday and Friday 9-10am',
-      );
-      await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
-      await tester.tap(find.byKey(const Key('primary-chat-action')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Add Workout to my calendar Monday Wednesday and Friday 9-10am',
+    );
+    await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle();
 
-      expect(
-        find.text(
-          'Added Workout to this week on Monday, Wednesday, and Friday from 9:00 AM to 10:00 AM. Should I make it repeat every week?',
-        ),
-        findsOneWidget,
-      );
-      expect(find.textContaining('{"message"'), findsNothing);
-    },
-  );
+    expect(
+      find.text(
+        'Added Workout to this week on Monday, Wednesday, and Friday from 9:00 AM to 10:00 AM. Should I make it repeat every week?',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('{"message"'), findsNothing);
+  });
 }
 
 class _MemoryAuthTokenStore implements AuthTokenStore {
@@ -607,7 +625,11 @@ class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
     sentMessages.add(content);
     return const HermesMessageResult(
       status: 'blocked',
-      session: HermesSession(id: 42, status: 'blocked', title: 'Session blocked'),
+      session: HermesSession(
+        id: 42,
+        status: 'blocked',
+        title: 'Session blocked',
+      ),
       events: [],
       blocker: {'reason': 'Gmail OAuth is not connected.'},
     );
@@ -634,6 +656,12 @@ class _JsonEnvelopeMessageHermesApiClient extends _SignedInFakeHermesApiClient {
       events: [],
     );
   }
+}
+
+Color? _datePillColor(WidgetTester tester, String key) {
+  final container = tester.widget<Container>(find.byKey(Key(key)));
+  final decoration = container.decoration as BoxDecoration?;
+  return decoration?.color;
 }
 
 class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {
