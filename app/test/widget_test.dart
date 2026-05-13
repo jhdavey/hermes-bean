@@ -282,6 +282,58 @@ void main() {
     expect(todayEvent.right, lessThanOrEqualTo(selectedHeading.right));
     expect(tomorrowEvent.left, greaterThanOrEqualTo(nextHeading.left));
     expect(tomorrowEvent.right, lessThanOrEqualTo(nextHeading.right));
+    expect(
+      find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
+      findsOneWidget,
+    );
+    final fixedHourColumn = tester.getRect(
+      find.byKey(const Key('calendar-fixed-hours-column')),
+    );
+    final scrollingDayColumns = tester.getRect(
+      find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
+    );
+    expect(
+      scrollingDayColumns.left,
+      greaterThanOrEqualTo(fixedHourColumn.right),
+    );
+
+    final headingBeforeSwipe = _activeSelectedDayHeading(tester);
+    final pageViewTopLeft = tester.getTopLeft(
+      find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
+    );
+    await tester.dragFrom(
+      pageViewTopLeft + const Offset(360, 120),
+      const Offset(-420, 0),
+    );
+    await tester.pumpAndSettle();
+    final headingAfterSwipe = _activeSelectedDayHeading(tester);
+
+    expect(headingAfterSwipe, _headingDaysAfter(headingBeforeSwipe, 2));
+  });
+
+  testWidgets('week header horizontal scroll jumps by whole weeks', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _TwoDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final before = _activeSelectedDayHeading(tester);
+    final headerTopLeft = tester.getTopLeft(
+      find.byKey(const Key('apple-style-week-date-header')),
+    );
+    await tester.dragFrom(
+      headerTopLeft + const Offset(360, 24),
+      const Offset(-420, 0),
+    );
+    await tester.pumpAndSettle();
+    final after = _activeSelectedDayHeading(tester);
+
+    expect(after, _headingDaysAfter(before, 7));
   });
 
   testWidgets(
@@ -723,6 +775,52 @@ Color? _datePillColor(WidgetTester tester, String key) {
   final decoration = container.decoration as BoxDecoration?;
   return decoration?.color;
 }
+
+String? _activeSelectedDayHeading(WidgetTester tester) {
+  final headingText = find.descendant(
+    of: find.byKey(const Key('day-column-heading-selected')),
+    matching: find.byType(Text),
+  );
+  return tester.widget<Text>(headingText).data;
+}
+
+String? _headingDaysAfter(String? heading, int days) {
+  if (heading == null) return null;
+  final parts = heading.split(' — ');
+  if (parts.length != 2) return null;
+  final monthAndDay = parts.last.split(' ');
+  if (monthAndDay.length != 2) return null;
+  final month = _testMonthNames.indexOf(monthAndDay.first) + 1;
+  final day = int.tryParse(monthAndDay.last);
+  if (month <= 0 || day == null) return null;
+  final date = DateTime(2026, month, day).add(Duration(days: days));
+  return '${_testShortWeekdayNames[date.weekday - 1]} — ${_testMonthNames[date.month - 1]} ${date.day}';
+}
+
+const _testMonthNames = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+const _testShortWeekdayNames = [
+  'Mon',
+  'Tue',
+  'Wed',
+  'Thu',
+  'Fri',
+  'Sat',
+  'Sun',
+];
 
 class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {
   @override

@@ -10,16 +10,14 @@ Route::get('/', function () {
 
 Route::post('/early-access', function (Request $request) {
     $validated = $request->validate([
-        'name' => ['nullable', 'string', 'max:120'],
         'email' => ['required', 'email:rfc', 'max:255'],
-        'use_case' => ['nullable', 'string', 'max:2000'],
     ]);
 
     EarlyAccessSignup::updateOrCreate(
         ['email' => strtolower($validated['email'])],
         [
-            'name' => $validated['name'] ?? null,
-            'use_case' => $validated['use_case'] ?? null,
+            'name' => null,
+            'use_case' => null,
             'source' => 'landing',
         ],
     );

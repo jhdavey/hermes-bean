@@ -1721,13 +1721,75 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
 }
 
 class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
-  void _handleHorizontalDayScroll(DragEndDetails details) {
+  static const int _initialDayPage = 10000;
+  static const int _daysPerTimelinePage = 2;
+
+  late final PageController _dayPageController;
+  late DateTime _pageAnchorDay;
+  int _visibleDayPage = _initialDayPage;
+  double _headerHorizontalDrag = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageAnchorDay = _dateOnly(widget.selectedDay);
+    _dayPageController = PageController(initialPage: _initialDayPage);
+  }
+
+  @override
+  void didUpdateWidget(covariant _AppleStyleTodayTimeline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final selectedDay = _dateOnly(widget.selectedDay);
+    final visiblePage = _dayPageController.hasClients
+        ? _dayPageController.page?.round() ?? _initialDayPage
+        : _initialDayPage;
+    final visibleDay = _dateForPage(visiblePage);
+
+    if (!_sameCalendarDay(selectedDay, visibleDay)) {
+      _pageAnchorDay = selectedDay;
+      _visibleDayPage = _initialDayPage;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_dayPageController.hasClients) return;
+        _dayPageController.jumpToPage(_initialDayPage);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _dayPageController.dispose();
+    super.dispose();
+  }
+
+  DateTime _dateForPage(int page) => _pageAnchorDay.add(
+    Duration(days: (page - _initialDayPage) * _daysPerTimelinePage),
+  );
+
+  void _handleHeaderWeekDragStart(DragStartDetails details) {
+    _headerHorizontalDrag = 0;
+  }
+
+  void _handleHeaderWeekDragUpdate(DragUpdateDetails details) {
+    _headerHorizontalDrag += details.primaryDelta ?? 0;
+  }
+
+  void _handleHeaderWeekScroll(DragEndDetails details) {
     final velocity = details.primaryVelocity ?? 0;
-    if (velocity.abs() < 80) return;
-    final delta = velocity < 0 ? 1 : -1;
-    widget.onDayChanged(
-      _dateOnly(widget.selectedDay).add(Duration(days: delta)),
-    );
+    final distance = _headerHorizontalDrag;
+    if (velocity.abs() < 80 && distance.abs() < 48) return;
+    final direction = velocity.abs() >= 80 ? velocity : distance;
+    if (!_dayPageController.hasClients) return;
+    final currentPage = _dayPageController.page?.round() ?? _initialDayPage;
+    final visibleDay = _dateForPage(currentPage);
+    widget.onDayChanged(visibleDay.add(Duration(days: direction < 0 ? 7 : -7)));
+  }
+
+  void _handlePageChanged(int page) {
+    setState(() => _visibleDayPage = page);
+    final nextSelectedDay = _dateForPage(page);
+    if (!_sameCalendarDay(nextSelectedDay, widget.selectedDay)) {
+      widget.onDayChanged(nextSelectedDay);
+    }
   }
 
   @override
@@ -1738,18 +1800,11 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     final weekStartDay = selectedDay.subtract(
       Duration(days: selectedDay.weekday - DateTime.monday),
     );
-    final selectedNextDay = selectedDay.add(const Duration(days: 1));
     final visibleHours = _calendarVisibleHours(
       widget.startHour,
       widget.endHour,
     );
-    final firstVisibleHour = visibleHours.first;
-    final markerOffset =
-        ((now.hour + (now.minute / 60)) - firstVisibleHour).clamp(
-          0.0,
-          visibleHours.length.toDouble(),
-        ) *
-        _calendarHourHeight;
+    final timelineHeight = 49 + (visibleHours.length * _calendarHourHeight);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1759,115 +1814,165 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
           weekStartDay: weekStartDay,
           selectedDay: selectedDay,
           onDateSelected: widget.onDayChanged,
-          onHorizontalDayScroll: _handleHorizontalDayScroll,
+          onHorizontalDayScrollStart: _handleHeaderWeekDragStart,
+          onHorizontalDayScrollUpdate: _handleHeaderWeekDragUpdate,
+          onHorizontalDayScrollEnd: _handleHeaderWeekScroll,
         ),
         const SizedBox(height: 10),
-        GestureDetector(
+        Container(
           key: const Key('apple-style-day-timeline'),
-          onHorizontalDragEnd: _handleHorizontalDayScroll,
-          child: Container(
-            decoration: const BoxDecoration(
-              border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+          ),
+          height: timelineHeight,
+          child: Row(
+            children: [
+              _FixedTimelineHoursColumn(visibleHours: visibleHours),
+              Expanded(
+                child: PageView.builder(
+                  key: const PageStorageKey<String>(
+                    'apple-style-day-page-view',
+                  ),
+                  controller: _dayPageController,
+                  physics: const BouncingScrollPhysics(
+                    parent: PageScrollPhysics(),
+                  ),
+                  allowImplicitScrolling: true,
+                  onPageChanged: _handlePageChanged,
+                  itemBuilder: (context, page) => _TwoDayTimelinePage(
+                    key: ValueKey('two-day-timeline-page-$page'),
+                    calendar: widget.calendar,
+                    selectedDay: _dateForPage(page),
+                    today: today,
+                    now: now,
+                    startHour: widget.startHour,
+                    endHour: widget.endHour,
+                    visibleHours: visibleHours,
+                    isActivePage: page == _visibleDayPage,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TwoDayTimelinePage extends StatelessWidget {
+  const _TwoDayTimelinePage({
+    super.key,
+    required this.calendar,
+    required this.selectedDay,
+    required this.today,
+    required this.now,
+    required this.startHour,
+    required this.endHour,
+    required this.visibleHours,
+    required this.isActivePage,
+  });
+
+  final List<HermesCalendarEvent> calendar;
+  final DateTime selectedDay;
+  final DateTime today;
+  final DateTime now;
+  final int startHour;
+  final int endHour;
+  final List<int> visibleHours;
+  final bool isActivePage;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedNextDay = selectedDay.add(const Duration(days: 1));
+    final firstVisibleHour = visibleHours.first;
+    final markerOffset =
+        48 +
+        ((now.hour + (now.minute / 60)) - firstVisibleHour).clamp(
+              0.0,
+              visibleHours.length.toDouble(),
+            ) *
+            _calendarHourHeight;
+    final showCurrentTimeMarker =
+        _sameCalendarDay(selectedDay, today) ||
+        _sameCalendarDay(selectedNextDay, today);
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _DayColumnHeading(
+                key: isActivePage
+                    ? const Key('day-column-heading-selected')
+                    : ValueKey(
+                        'day-column-heading-selected-${selectedDay.toIso8601String()}',
+                      ),
+                date: selectedDay,
+                isToday: _sameCalendarDay(selectedDay, today),
+              ),
             ),
-            child: Column(
+            Expanded(
+              child: _DayColumnHeading(
+                key: isActivePage
+                    ? const Key('day-column-heading-next')
+                    : ValueKey(
+                        'day-column-heading-next-${selectedNextDay.toIso8601String()}',
+                      ),
+                date: selectedNextDay,
+                isToday: _sameCalendarDay(selectedNextDay, today),
+              ),
+            ),
+          ],
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) => Stack(
+              clipBehavior: Clip.none,
               children: [
-                Row(
+                Column(
                   children: [
-                    const SizedBox(width: _calendarTimeColumnWidth),
-                    Expanded(
-                      child: _DayColumnHeading(
-                        key: const Key('day-column-heading-selected'),
-                        date: selectedDay,
-                        isToday: _sameCalendarDay(selectedDay, today),
-                      ),
-                    ),
-                    Expanded(
-                      child: _DayColumnHeading(
-                        key: const Key('day-column-heading-next'),
-                        date: selectedNextDay,
-                        isToday: _sameCalendarDay(selectedNextDay, today),
-                      ),
-                    ),
+                    for (var index = 0; index < visibleHours.length; index++)
+                      const _TimelineDayGridRow(),
                   ],
                 ),
-                SizedBox(
-                  height: visibleHours.length * _calendarHourHeight,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => Stack(
-                      clipBehavior: Clip.none,
+                if (showCurrentTimeMarker)
+                  Positioned(
+                    key: const Key('calendar-current-time-marker'),
+                    top: markerOffset - 48,
+                    left: 0,
+                    right: 0,
+                    child: Row(
                       children: [
-                        Column(
-                          children: [
-                            for (final hour in visibleHours)
-                              _TimelineHourRow(hour: hour),
-                          ],
-                        ),
-                        Positioned(
-                          key: const Key('calendar-current-time-marker'),
-                          top: markerOffset,
-                          left: 0,
-                          right: 0,
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: HeyBeanTheme.accent,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  _clockLabel(now),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Container(
-                                  height: 2,
-                                  color: HeyBeanTheme.accent,
-                                ),
-                              ),
-                            ],
+                        Expanded(
+                          child: Container(
+                            height: 2,
+                            color: HeyBeanTheme.accent,
                           ),
                         ),
-                        for (final event in widget.calendar) ...[
-                          if (_eventFallsOnDay(event, selectedDay) &&
-                              _eventFallsWithinHours(
-                                event,
-                                widget.startHour,
-                                widget.endHour,
-                              ))
-                            _TimelineEventBlock(
-                              event: event,
-                              startHour: widget.startHour,
-                              endHour: widget.endHour,
-                              columnIndex: 0,
-                              timelineWidth: constraints.maxWidth,
-                            ),
-                          if (_eventFallsOnDay(event, selectedNextDay) &&
-                              _eventFallsWithinHours(
-                                event,
-                                widget.startHour,
-                                widget.endHour,
-                              ))
-                            _TimelineEventBlock(
-                              event: event,
-                              startHour: widget.startHour,
-                              endHour: widget.endHour,
-                              columnIndex: 1,
-                              timelineWidth: constraints.maxWidth,
-                            ),
-                        ],
                       ],
                     ),
                   ),
-                ),
+                for (final event in calendar) ...[
+                  if (_eventFallsOnDay(event, selectedDay) &&
+                      _eventFallsWithinHours(event, startHour, endHour))
+                    _TimelineEventBlock(
+                      event: event,
+                      startHour: startHour,
+                      endHour: endHour,
+                      columnIndex: 0,
+                      timelineWidth: constraints.maxWidth,
+                    ),
+                  if (_eventFallsOnDay(event, selectedNextDay) &&
+                      _eventFallsWithinHours(event, startHour, endHour))
+                    _TimelineEventBlock(
+                      event: event,
+                      startHour: startHour,
+                      endHour: endHour,
+                      columnIndex: 1,
+                      timelineWidth: constraints.maxWidth,
+                    ),
+                ],
               ],
             ),
           ),
@@ -1936,20 +2041,27 @@ class _WeekDateHeader extends StatelessWidget {
     required this.weekStartDay,
     required this.selectedDay,
     required this.onDateSelected,
-    required this.onHorizontalDayScroll,
+    required this.onHorizontalDayScrollStart,
+    required this.onHorizontalDayScrollUpdate,
+    required this.onHorizontalDayScrollEnd,
   });
 
   final DateTime today;
   final DateTime weekStartDay;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onDateSelected;
-  final GestureDragEndCallback onHorizontalDayScroll;
+  final GestureDragStartCallback onHorizontalDayScrollStart;
+  final GestureDragUpdateCallback onHorizontalDayScrollUpdate;
+  final GestureDragEndCallback onHorizontalDayScrollEnd;
 
   @override
   Widget build(BuildContext context) {
     var neutralPillIndex = 0;
     return GestureDetector(
-      onHorizontalDragEnd: onHorizontalDayScroll,
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: onHorizontalDayScrollStart,
+      onHorizontalDragUpdate: onHorizontalDayScrollUpdate,
+      onHorizontalDragEnd: onHorizontalDayScrollEnd,
       child: Row(
         key: const Key('apple-style-week-date-header'),
         children: [
@@ -2099,32 +2211,50 @@ class _DayColumnHeading extends StatelessWidget {
   );
 }
 
-class _TimelineHourRow extends StatelessWidget {
-  const _TimelineHourRow({required this.hour});
+class _FixedTimelineHoursColumn extends StatelessWidget {
+  const _FixedTimelineHoursColumn({required this.visibleHours});
 
-  final int hour;
+  final List<int> visibleHours;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    key: const Key('calendar-fixed-hours-column'),
+    width: _calendarTimeColumnWidth,
+    child: Column(
+      children: [
+        const SizedBox(height: 48),
+        for (final hour in visibleHours)
+          SizedBox(
+            height: _calendarHourHeight,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4, right: 6),
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Text(
+                  _hourLabel(hour),
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    color: HeyBeanTheme.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class _TimelineDayGridRow extends StatelessWidget {
+  const _TimelineDayGridRow();
 
   @override
   Widget build(BuildContext context) => SizedBox(
     height: _calendarHourHeight,
     child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: _calendarTimeColumnWidth,
-          child: Padding(
-            padding: const EdgeInsets.only(top: 4, right: 6),
-            child: Text(
-              _hourLabel(hour),
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: HeyBeanTheme.muted,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
         for (var column = 0; column < 2; column++)
           Expanded(
             child: Container(
@@ -2167,12 +2297,12 @@ class _TimelineEventBlock extends StatelessWidget {
           visibleHours.length.toDouble(),
         ) *
         _calendarHourHeight;
-    final dayColumnWidth = (timelineWidth - _calendarTimeColumnWidth) / 2;
-    final left = _calendarTimeColumnWidth + (dayColumnWidth * columnIndex) + 8;
+    final dayColumnWidth = timelineWidth / 2;
+    final left = (dayColumnWidth * columnIndex) + 8;
     final width = (dayColumnWidth - 16).clamp(0.0, double.infinity);
     return Positioned(
       key: Key(_calendarEventBlockKey(event)),
-      top: hourPosition + 50,
+      top: hourPosition + 2,
       left: left,
       width: width,
       child: Container(
@@ -2225,12 +2355,6 @@ String _hourLabel(int hour) {
   if (hour == 12) return 'Noon';
   if (hour < 12) return '$hour AM';
   return '${hour - 12} PM';
-}
-
-String _clockLabel(DateTime time) {
-  final hour = time.hour % 12 == 0 ? 12 : time.hour % 12;
-  final minute = time.minute.toString().padLeft(2, '0');
-  return '$hour:$minute';
 }
 
 String _monthName(int month) => const [

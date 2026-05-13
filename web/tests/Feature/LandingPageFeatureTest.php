@@ -17,8 +17,14 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('HeyBean', false)
             ->assertSee('A real-world usable AI agent for your day', false)
             ->assertSee('Ask Bean to schedule workouts, create reminders, plan your calendar, and keep risky actions waiting for your approval.', false)
-            ->assertSee('Join the beta', false)
+            ->assertSee('Get Early Access', false)
+            ->assertSee('type="email"', false)
+            ->assertSee('name="email"', false)
             ->assertSee(route('early-access.store'), false)
+            ->assertDontSee('See what Bean can do', false)
+            ->assertDontSee('Join the beta', false)
+            ->assertDontSee('name="name"', false)
+            ->assertDontSee('name="use_case"', false)
             ->assertDontSee('Agent command center', false)
             ->assertDontSee('Flutter + Laravel', false)
             ->assertDontSee('Preview the Laravel screen', false);
@@ -27,18 +33,16 @@ class LandingPageFeatureTest extends TestCase
     public function test_visitors_can_request_early_access(): void
     {
         $response = $this->post(route('early-access.store'), [
-            'name' => 'Harley Davey',
             'email' => 'harley@example.com',
-            'use_case' => 'I want Bean to help run tasks, reminders, calendar events, and approvals for my household.',
         ]);
 
         $response->assertRedirect('/#early-access');
         $response->assertSessionHas('early_access_status', 'You are on the HeyBean early access list. We will reach out when your invite is ready.');
 
         $this->assertDatabaseHas('early_access_signups', [
-            'name' => 'Harley Davey',
             'email' => 'harley@example.com',
-            'use_case' => 'I want Bean to help run tasks, reminders, calendar events, and approvals for my household.',
+            'name' => null,
+            'use_case' => null,
         ]);
     }
 }
