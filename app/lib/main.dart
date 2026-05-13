@@ -2573,114 +2573,8 @@ Future<void> _showCalendarEventDetails(
   })
   onSave,
 ) async {
-  final title = TextEditingController(text: event.title);
-  final startsAt = TextEditingController(text: event.startsAt ?? '');
-  final endsAt = TextEditingController(text: event.endsAt ?? '');
-  final category = TextEditingController(text: event.category ?? 'Personal');
-  final reminder = TextEditingController();
-  var color = event.color ?? '#34C759';
-  var recurrence = event.recurrence ?? 'none';
-
-  final result = await showDialog<Map<String, Object?>>(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
-        key: const Key('calendar-event-detail-view'),
-        title: const Text('Event details'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                key: const Key('event-title-field'),
-                controller: title,
-                decoration: const InputDecoration(labelText: 'Title'),
-              ),
-              TextField(
-                key: const Key('event-start-field'),
-                controller: startsAt,
-                decoration: const InputDecoration(labelText: 'Start time'),
-              ),
-              TextField(
-                key: const Key('event-end-field'),
-                controller: endsAt,
-                decoration: const InputDecoration(labelText: 'End time'),
-              ),
-              TextField(
-                key: const Key('event-category-field'),
-                controller: category,
-                decoration: const InputDecoration(labelText: 'Category'),
-              ),
-              DropdownButtonFormField<String>(
-                key: const Key('event-color-field'),
-                initialValue: color,
-                decoration: const InputDecoration(labelText: 'Color'),
-                items: const [
-                  DropdownMenuItem(value: '#34C759', child: Text('Green')),
-                  DropdownMenuItem(value: '#007AFF', child: Text('Blue')),
-                  DropdownMenuItem(value: '#FF9500', child: Text('Orange')),
-                  DropdownMenuItem(value: '#AF52DE', child: Text('Purple')),
-                  DropdownMenuItem(value: '#FF3B30', child: Text('Red')),
-                ],
-                onChanged: (value) => setDialogState(() {
-                  color = value ?? color;
-                }),
-              ),
-              DropdownButtonFormField<String>(
-                key: const Key('event-recurrence-field'),
-                initialValue: recurrence,
-                decoration: const InputDecoration(labelText: 'Recurrence'),
-                items: const [
-                  DropdownMenuItem(value: 'none', child: Text('None')),
-                  DropdownMenuItem(value: 'daily', child: Text('Daily')),
-                  DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
-                  DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-                  DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
-                ],
-                onChanged: (value) => setDialogState(() {
-                  recurrence = value ?? recurrence;
-                }),
-              ),
-              TextField(
-                key: const Key('event-reminder-minutes-field'),
-                controller: reminder,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Reminder minutes before',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const Key('event-save-action'),
-            onPressed: () {
-              Navigator.of(context).pop(<String, Object?>{
-                'title': title.text.trim().isEmpty
-                    ? event.title
-                    : title.text.trim(),
-                'startsAt': startsAt.text.trim(),
-                'endsAt': endsAt.text.trim().isEmpty
-                    ? null
-                    : endsAt.text.trim(),
-                'category': category.text.trim().isEmpty
-                    ? null
-                    : category.text.trim(),
-                'color': color,
-                'recurrence': recurrence,
-                'reminderMinutesBefore': int.tryParse(reminder.text.trim()),
-              });
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    ),
+  final result = await Navigator.of(context).push<Map<String, Object?>>(
+    MaterialPageRoute(builder: (_) => _CalendarEventDetailPage(event: event)),
   );
 
   if (result != null) {
@@ -2695,6 +2589,466 @@ Future<void> _showCalendarEventDetails(
       reminderMinutesBefore: result['reminderMinutesBefore'] as int?,
     );
   }
+}
+
+class _CalendarEventDetailPage extends StatefulWidget {
+  const _CalendarEventDetailPage({required this.event});
+
+  final HermesCalendarEvent event;
+
+  @override
+  State<_CalendarEventDetailPage> createState() =>
+      _CalendarEventDetailPageState();
+}
+
+class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
+  late final TextEditingController _title;
+  late final TextEditingController _startsAt;
+  late final TextEditingController _endsAt;
+  late final TextEditingController _category;
+  late final TextEditingController _reminder;
+  late String _color;
+  late String _recurrence;
+
+  static const _colors = <({String value, String label})>[
+    (value: '#34C759', label: 'Green'),
+    (value: '#007AFF', label: 'Blue'),
+    (value: '#FF9500', label: 'Orange'),
+    (value: '#AF52DE', label: 'Purple'),
+    (value: '#FF3B30', label: 'Red'),
+  ];
+
+  static const _recurrences = <({String value, String label})>[
+    (value: 'none', label: 'None'),
+    (value: 'daily', label: 'Daily'),
+    (value: 'weekly', label: 'Weekly'),
+    (value: 'monthly', label: 'Monthly'),
+    (value: 'yearly', label: 'Yearly'),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final event = widget.event;
+    _title = TextEditingController(text: event.title);
+    _startsAt = TextEditingController(text: event.startsAt ?? '');
+    _endsAt = TextEditingController(text: event.endsAt ?? '');
+    _category = TextEditingController(text: event.category ?? 'Personal');
+    _reminder = TextEditingController();
+    _color = _colors.any((color) => color.value == event.color)
+        ? event.color!
+        : '#34C759';
+    _recurrence =
+        _recurrences.any((recurrence) => recurrence.value == event.recurrence)
+        ? event.recurrence!
+        : 'none';
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _startsAt.dispose();
+    _endsAt.dispose();
+    _category.dispose();
+    _reminder.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    Navigator.of(context).pop(<String, Object?>{
+      'title': _title.text.trim().isEmpty
+          ? widget.event.title
+          : _title.text.trim(),
+      'startsAt': _startsAt.text.trim(),
+      'endsAt': _endsAt.text.trim().isEmpty ? null : _endsAt.text.trim(),
+      'category': _category.text.trim().isEmpty ? null : _category.text.trim(),
+      'color': _color,
+      'recurrence': _recurrence,
+      'reminderMinutesBefore': int.tryParse(_reminder.text.trim()),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final eventColor = _calendarEventColor(
+      HermesCalendarEvent(
+        id: widget.event.id,
+        title: widget.event.title,
+        startsAt: widget.event.startsAt,
+        endsAt: widget.event.endsAt,
+        category: widget.event.category,
+        color: _color,
+        recurrence: widget.event.recurrence,
+      ),
+    );
+
+    return Scaffold(
+      key: const Key('calendar-event-detail-page'),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [HeyBeanTheme.bg0, HeyBeanTheme.bg1],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                child: Row(
+                  children: [
+                    IconButton.filledTonal(
+                      key: const Key('event-detail-back-action'),
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Event settings',
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  color: HeyBeanTheme.text,
+                                  letterSpacing: -.4,
+                                ),
+                          ),
+                          Text(
+                            'Schedule, category, recurrence, and reminders',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: HeyBeanTheme.muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _EventDetailHero(
+                        title: widget.event.title,
+                        startsAt: widget.event.startsAt,
+                        endsAt: widget.event.endsAt,
+                        color: eventColor,
+                      ),
+                      const SizedBox(height: 14),
+                      _ShellCard(
+                        glow: true,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle(
+                              icon: Icons.edit_calendar_rounded,
+                              title: 'Details',
+                              subtitle:
+                                  'Keep this event readable for you and the agent.',
+                            ),
+                            const SizedBox(height: 18),
+                            TextField(
+                              key: const Key('event-title-field'),
+                              controller: _title,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Title',
+                                prefixIcon: Icon(Icons.title_rounded),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              key: const Key('event-category-field'),
+                              controller: _category,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Category',
+                                prefixIcon: Icon(Icons.sell_outlined),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Column(
+                              key: const Key('event-color-field'),
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _EventFieldLabel(
+                                  icon: Icons.palette_outlined,
+                                  label: 'Color',
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final color in _colors)
+                                      ChoiceChip(
+                                        label: Text(color.label),
+                                        selected: _color == color.value,
+                                        avatar: CircleAvatar(
+                                          radius: 6,
+                                          backgroundColor: Color(
+                                            int.parse(
+                                              'FF${color.value.substring(1)}',
+                                              radix: 16,
+                                            ),
+                                          ),
+                                        ),
+                                        onSelected: (_) => setState(() {
+                                          _color = color.value;
+                                        }),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _ShellCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle(
+                              icon: Icons.schedule_rounded,
+                              title: 'Schedule',
+                              subtitle:
+                                  'Use exact times or natural entries from the agent.',
+                            ),
+                            const SizedBox(height: 18),
+                            TextField(
+                              key: const Key('event-start-field'),
+                              controller: _startsAt,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Start time',
+                                prefixIcon: Icon(Icons.play_arrow_rounded),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              key: const Key('event-end-field'),
+                              controller: _endsAt,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'End time',
+                                prefixIcon: Icon(Icons.stop_rounded),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Column(
+                              key: const Key('event-recurrence-field'),
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _EventFieldLabel(
+                                  icon: Icons.repeat_rounded,
+                                  label: 'Recurrence',
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final recurrence in _recurrences)
+                                      ChoiceChip(
+                                        label: Text(recurrence.label),
+                                        selected:
+                                            _recurrence == recurrence.value,
+                                        onSelected: (_) => setState(() {
+                                          _recurrence = recurrence.value;
+                                        }),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _ShellCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle(
+                              icon: Icons.notifications_active_outlined,
+                              title: 'Reminder',
+                              subtitle:
+                                  'Add a reminder relative to this event.',
+                            ),
+                            const SizedBox(height: 18),
+                            TextField(
+                              key: const Key('event-reminder-minutes-field'),
+                              controller: _reminder,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Minutes before',
+                                hintText: '15',
+                                prefixIcon: Icon(Icons.alarm_rounded),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          decoration: const BoxDecoration(
+            color: Color(0xEEF8FBF6),
+            border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton.icon(
+                  key: const Key('event-save-action'),
+                  onPressed: _save,
+                  icon: const Icon(Icons.check_rounded),
+                  label: const Text('Save event'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EventFieldLabel extends StatelessWidget {
+  const _EventFieldLabel({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
+      const SizedBox(width: 8),
+      Text(
+        label,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: HeyBeanTheme.text,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ],
+  );
+}
+
+class _EventDetailHero extends StatelessWidget {
+  const _EventDetailHero({
+    required this.title,
+    required this.startsAt,
+    required this.endsAt,
+    required this.color,
+  });
+
+  final String title;
+  final String? startsAt;
+  final String? endsAt;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(24),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [color.withValues(alpha: .20), HeyBeanTheme.surface],
+      ),
+      border: Border.all(color: color.withValues(alpha: .28)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x14000000),
+          blurRadius: 30,
+          offset: Offset(0, 18),
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: .28),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: const Icon(Icons.event_rounded, color: Colors.white),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: HeyBeanTheme.text,
+                  letterSpacing: -.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                [
+                      if (startsAt != null && startsAt!.isNotEmpty) startsAt!,
+                      if (endsAt != null && endsAt!.isNotEmpty) endsAt!,
+                    ].join(' → ').isEmpty
+                    ? 'Unscheduled'
+                    : [
+                        if (startsAt != null && startsAt!.isNotEmpty) startsAt!,
+                        if (endsAt != null && endsAt!.isNotEmpty) endsAt!,
+                      ].join(' → '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: HeyBeanTheme.muted,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 Color _calendarEventColor(HermesCalendarEvent event) {

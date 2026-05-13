@@ -642,20 +642,21 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const Key('calendar-event-detail-view')),
+        find.byKey(const Key('calendar-event-detail-page')),
         findsOneWidget,
       );
-      expect(find.text('Event details'), findsOneWidget);
+      expect(find.byKey(const Key('calendar-event-detail-view')), findsNothing);
+      expect(find.text('Event settings'), findsOneWidget);
+      expect(
+        find.text('Schedule, category, recurrence, and reminders'),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('event-title-field')), findsOneWidget);
       expect(find.byKey(const Key('event-start-field')), findsOneWidget);
       expect(find.byKey(const Key('event-end-field')), findsOneWidget);
       expect(find.byKey(const Key('event-category-field')), findsOneWidget);
       expect(find.byKey(const Key('event-color-field')), findsOneWidget);
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
-      expect(
-        find.byKey(const Key('event-reminder-minutes-field')),
-        findsOneWidget,
-      );
 
       await tester.enterText(
         find.byKey(const Key('event-title-field')),
@@ -673,14 +674,30 @@ void main() {
         find.byKey(const Key('event-category-field')),
         'Work',
       );
-      await tester.tap(find.byKey(const Key('event-color-field')));
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Orange'))
+          .onSelected
+          ?.call(true);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Orange').last);
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('event-reminder-minutes-field')),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('event-recurrence-field')));
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Weekly'))
+          .onSelected
+          ?.call(true);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Weekly').last);
+      await tester.ensureVisible(
+        find.byKey(const Key('event-reminder-minutes-field')),
+      );
       await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('event-reminder-minutes-field')),
+        findsOneWidget,
+      );
       await tester.enterText(
         find.byKey(const Key('event-reminder-minutes-field')),
         '15',
