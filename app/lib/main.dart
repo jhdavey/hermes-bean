@@ -2631,8 +2631,12 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     super.initState();
     final event = widget.event;
     _title = TextEditingController(text: event.title);
-    _startsAt = TextEditingController(text: event.startsAt ?? '');
-    _endsAt = TextEditingController(text: event.endsAt ?? '');
+    _startsAt = TextEditingController(
+      text: _formatCalendarEventDateTime(event.startsAt),
+    );
+    _endsAt = TextEditingController(
+      text: _formatCalendarEventDateTime(event.endsAt),
+    );
     _category = TextEditingController(text: event.category ?? 'Personal');
     _reminder = TextEditingController();
     _color = _colors.any((color) => color.value == event.color)
@@ -2655,12 +2659,22 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   }
 
   void _save() {
+    final startsAt = _calendarEventInputToWireValue(
+      _startsAt.text,
+      originalValue: widget.event.startsAt,
+    );
+    final endsAt = _calendarEventInputToWireValue(
+      _endsAt.text,
+      originalValue: widget.event.endsAt,
+      allowEmpty: true,
+    );
+
     Navigator.of(context).pop(<String, Object?>{
       'title': _title.text.trim().isEmpty
           ? widget.event.title
           : _title.text.trim(),
-      'startsAt': _startsAt.text.trim(),
-      'endsAt': _endsAt.text.trim().isEmpty ? null : _endsAt.text.trim(),
+      'startsAt': startsAt,
+      'endsAt': endsAt,
       'category': _category.text.trim().isEmpty ? null : _category.text.trim(),
       'color': _color,
       'recurrence': _recurrence,
@@ -3027,15 +3041,7 @@ class _EventDetailHero extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                [
-                      if (startsAt != null && startsAt!.isNotEmpty) startsAt!,
-                      if (endsAt != null && endsAt!.isNotEmpty) endsAt!,
-                    ].join(' → ').isEmpty
-                    ? 'Unscheduled'
-                    : [
-                        if (startsAt != null && startsAt!.isNotEmpty) startsAt!,
-                        if (endsAt != null && endsAt!.isNotEmpty) endsAt!,
-                      ].join(' → '),
+                _eventDateRangeLabel(startsAt: startsAt, endsAt: endsAt),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -3061,7 +3067,7 @@ Color _calendarEventColor(HermesCalendarEvent event) {
 
 String _eventSubtitle(HermesCalendarEvent event) {
   final parts = <String>[
-    if (event.startsAt != null) event.startsAt!,
+    if (event.startsAt != null) _formatCalendarEventDateTime(event.startsAt),
     if (event.category != null && event.category!.isNotEmpty) event.category!,
     if (event.recurrence != null && event.recurrence != 'none')
       event.recurrence!,
@@ -3120,15 +3126,101 @@ String _weekdayLetter(int weekday) =>
 String _shortWeekdayName(int weekday) =>
     const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
 
-DateTime? _parseCalendarEventDateTime(String? value) {
+String _shortMonthName(int month) => const [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+][month - 1];
+
+int? _monthNumber(String name) {
+  final normalized = name.toLowerCase();
+  for (var index = 1; index <= 12; index++) {
+    final full = _monthName(index).toLowerCase();
+    final short = _shortMonthName(index).toLowerCase();
+    if (normalized == full || normalized == short) return index;
+  }
+  return null;
+}
+
+String _formatCalendarEventDateTime(String? value) {
+  if (value == null || value.trim().isEmpty) return '';
+  final parsed = _parseCalendarEventDateTime(value);
+  if (parsed == null) return value.trim();
+  final local = parsed.toLocal();
+  var hour = local.hour % 12;
+  if (hour == 0) hour = 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final meridiem = local.hour >= 12 ? 'pm' : 'am';
+  return '${_shortWeekdayName(local.weekday)} ${_shortMonthName(local.month)} '
+      '${local.day} @ $hour:$minute$meridiem';
+}
+
+String _eventDateRangeLabel({String? startsAt, String? endsAt}) {
+  final parts = <String>[
+    if (startsAt != null && startsAt.trim().isNotEmpty)
+      _formatCalendarEventDateTime(startsAt),
+    if (endsAt != null && endsAt.trim().isNotEmpty)
+      _formatCalendarEventDateTime(endsAt),
+  ].where((part) => part.isNotEmpty).toList();
+  return parts.isEmpty ? 'Unscheduled' : parts.join(' → ');
+}
+
+String? _calendarEventInputToWireValue(
+  String value, {
+  required String? originalValue,
+  bool allowEmpty = false,
+}) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return allowEmpty ? null : trimmed;
+
+  final originalDisplay = _formatCalendarEventDateTime(originalValue);
+  if (originalValue != null && trimmed == originalDisplay) {
+    return originalValue;
+  }
+
+  final parsed = _parseCalendarEventDateTime(trimmed, originalValue);
+  return parsed?.toIso8601String() ?? trimmed;
+}
+
+DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
   if (value == null || value.trim().isEmpty) return null;
   final parsed = DateTime.tryParse(value);
   if (parsed != null) return parsed;
 
+  final trimmed = value.trim();
+  final friendlyMatch = RegExp(
+    r'^(?:[A-Za-z]{3,9}\s+)?([A-Za-z]{3,9})\s+(\d{1,2})\s*@\s*'
+    r'(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
+    caseSensitive: false,
+  ).firstMatch(trimmed);
+  if (friendlyMatch != null) {
+    final month = _monthNumber(friendlyMatch.group(1)!);
+    final day = int.tryParse(friendlyMatch.group(2)!);
+    var hour = int.tryParse(friendlyMatch.group(3)!);
+    final minute = int.tryParse(friendlyMatch.group(4) ?? '0') ?? 0;
+    final meridiem = friendlyMatch.group(5)!.toUpperCase();
+    if (month != null && day != null && hour != null) {
+      if (meridiem == 'PM' && hour != 12) hour += 12;
+      if (meridiem == 'AM' && hour == 12) hour = 0;
+      final reference = _parseCalendarEventDateTime(referenceValue);
+      final year = reference?.toLocal().year ?? DateTime.now().year;
+      return DateTime(year, month, day, hour, minute);
+    }
+  }
+
   final match = RegExp(
     r'^(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
     caseSensitive: false,
-  ).firstMatch(value.trim());
+  ).firstMatch(trimmed);
   if (match == null) return null;
   var hour = int.parse(match.group(1)!);
   final minute = int.tryParse(match.group(2) ?? '0') ?? 0;

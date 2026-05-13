@@ -624,7 +624,7 @@ void main() {
   });
 
   testWidgets(
-    'calendar events open an editable detail sheet with category color recurrence and event reminders',
+    'calendar events open an editable detail page with friendly date times category color recurrence and event reminders',
     (WidgetTester tester) async {
       final api = _EditableCalendarFakeHermesApiClient();
       await tester.pumpWidget(
@@ -657,18 +657,27 @@ void main() {
       expect(find.byKey(const Key('event-category-field')), findsOneWidget);
       expect(find.byKey(const Key('event-color-field')), findsOneWidget);
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
+      final startEditor = tester.widget<EditableText>(
+        find.descendant(
+          of: find.byKey(const Key('event-start-field')),
+          matching: find.byType(EditableText),
+        ),
+      );
+      expect(startEditor.controller.text, contains('@ 2:30pm'));
+      expect(startEditor.controller.text, isNot(contains('T14:30')));
 
       await tester.enterText(
         find.byKey(const Key('event-title-field')),
         'Design sync',
       );
+      final eventYear = DateTime.now().year;
       await tester.enterText(
         find.byKey(const Key('event-start-field')),
-        '2026-05-14T16:00:00Z',
+        'Thu May 14 @ 4:00pm',
       );
       await tester.enterText(
         find.byKey(const Key('event-end-field')),
-        '2026-05-14T17:00:00Z',
+        'Thu May 14 @ 5:00pm',
       );
       await tester.enterText(
         find.byKey(const Key('event-category-field')),
@@ -706,6 +715,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.updatedEvent?.title, 'Design sync');
+      expect(
+        api.updatedEvent?.startsAt,
+        DateTime(eventYear, 5, 14, 16).toIso8601String(),
+      );
+      expect(
+        api.updatedEvent?.endsAt,
+        DateTime(eventYear, 5, 14, 17).toIso8601String(),
+      );
       expect(api.updatedEvent?.category, 'Work');
       expect(api.updatedEvent?.color, '#FF9500');
       expect(api.updatedEvent?.recurrence, 'weekly');
