@@ -12,7 +12,9 @@ void main() {
 
 abstract class AuthTokenStore {
   Future<String?> loadToken();
+  Future<bool> loadRememberMe();
   Future<void> saveToken(String token);
+  Future<void> saveRememberMe(bool rememberMe);
   Future<void> clearToken();
 }
 
@@ -20,23 +22,44 @@ class SharedPreferencesAuthTokenStore implements AuthTokenStore {
   const SharedPreferencesAuthTokenStore();
 
   static const String _tokenKey = 'auth_token';
+  static const String _rememberMeKey = 'remember_me';
+  static const String _tokenSavedAtKey = 'auth_token_saved_at';
 
   @override
   Future<String?> loadToken() async {
     final preferences = await SharedPreferences.getInstance();
-    return preferences.getString(_tokenKey);
+    return preferences.getBool(_rememberMeKey) == true
+        ? preferences.getString(_tokenKey)
+        : null;
+  }
+
+  @override
+  Future<bool> loadRememberMe() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getBool(_rememberMeKey) ?? false;
   }
 
   @override
   Future<void> saveToken(String token) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_tokenKey, token);
+    await preferences.setString(
+      _tokenSavedAtKey,
+      DateTime.now().toUtc().toIso8601String(),
+    );
+  }
+
+  @override
+  Future<void> saveRememberMe(bool rememberMe) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_rememberMeKey, rememberMe);
   }
 
   @override
   Future<void> clearToken() async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_tokenKey);
+    await preferences.remove(_tokenSavedAtKey);
   }
 }
 
@@ -212,15 +235,23 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   }
 
   Future<void> _bootstrap() async {
-    widget.apiClient.bearerToken ??= await widget.tokenStore.loadToken();
+    final rememberedToken = await widget.tokenStore.loadToken();
+    widget.apiClient.bearerToken ??= rememberedToken;
     if (widget.apiClient.bearerToken == null) {
       setState(() => _phase = _AuthPhase.signedOut);
       return;
     }
-    await _loadSignedIn();
+    await _loadSignedIn(launchedFromRememberedToken: rememberedToken != null);
   }
 
-  Future<void> _loadSignedIn({HermesUser? knownUser}) async {
+  bool _isInvalidTokenError(Object error) =>
+      error is HermesApiException &&
+      (error.statusCode == 401 || error.statusCode == 403);
+
+  Future<void> _loadSignedIn({
+    HermesUser? knownUser,
+    bool launchedFromRememberedToken = false,
+  }) async {
     setState(() {
       _phase = _AuthPhase.loading;
       _error = null;
@@ -257,11 +288,17 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       });
     } catch (error) {
       if (!mounted) return;
-      await widget.tokenStore.clearToken();
-      widget.apiClient.bearerToken = null;
+      final invalidToken = _isInvalidTokenError(error);
+      if (invalidToken) {
+        await widget.tokenStore.clearToken();
+        widget.apiClient.bearerToken = null;
+      }
       setState(() {
-        _error =
-            'Session expired or the API could not be reached. Please sign in again.';
+        _error = invalidToken
+            ? 'Session expired or the saved sign-in is no longer valid. Please sign in again.'
+            : launchedFromRememberedToken
+            ? 'Could not refresh your saved sign-in. Your Remember me token is still saved, so try again when the connection is back.'
+            : 'Session expired or the API could not be reached. Please sign in again.';
         _user = null;
         _session = null;
         _tasks = const [];
@@ -291,8 +328,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         password: password,
       );
       if (rememberMe) {
+        await widget.tokenStore.saveRememberMe(true);
         await widget.tokenStore.saveToken(auth.token);
       } else {
+        await widget.tokenStore.saveRememberMe(false);
         await widget.tokenStore.clearToken();
       }
       await _loadSignedIn(knownUser: auth.user);
@@ -314,6 +353,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         email: email,
         password: password,
       );
+      await widget.tokenStore.saveRememberMe(true);
+      await widget.tokenStore.saveToken(auth.token);
       await _loadSignedIn(knownUser: auth.user);
     } catch (error) {
       setState(() => _error = 'Registration failed: $error');
@@ -960,6 +1001,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       return _SignedOutScreen(
         onLogin: _login,
         onRegister: _register,
+        tokenStore: widget.tokenStore,
         busy: _busy,
         error: _error,
       );
@@ -1016,6 +1058,7 @@ class _SignedOutScreen extends StatefulWidget {
   const _SignedOutScreen({
     required this.onLogin,
     required this.onRegister,
+    required this.tokenStore,
     required this.busy,
     this.error,
   });
@@ -1028,6 +1071,7 @@ class _SignedOutScreen extends StatefulWidget {
   onLogin;
   final Future<void> Function(String name, String email, String password)
   onRegister;
+  final AuthTokenStore tokenStore;
   final bool busy;
   final String? error;
 
@@ -1041,6 +1085,14 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
   final _password = TextEditingController();
   bool _registerMode = false;
   bool _rememberMe = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.tokenStore.loadRememberMe().then((rememberMe) {
+      if (mounted) setState(() => _rememberMe = rememberMe);
+    });
+  }
 
   @override
   void dispose() {
@@ -1088,107 +1140,116 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
         ? 'Use any test email and a 12+ character password'
         : 'Live API-backed personal assistant';
 
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
-        child: _ShellCard(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _SectionTitle(
-                icon: _registerMode
-                    ? Icons.person_add_alt_1_rounded
-                    : Icons.lock_rounded,
-                title: title,
-                subtitle: subtitle,
-              ),
-              const SizedBox(height: 16),
-              if (_registerMode) ...[
-                TextField(
-                  key: const Key('auth-name'),
-                  controller: _name,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(labelText: 'Name'),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: _ShellCard(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _SectionTitle(
+                  icon: _registerMode
+                      ? Icons.person_add_alt_1_rounded
+                      : Icons.lock_rounded,
+                  title: title,
+                  subtitle: subtitle,
                 ),
-                const SizedBox(height: 12),
-              ],
-              TextField(
-                key: const Key('auth-email'),
-                controller: _email,
-                keyboardType: TextInputType.emailAddress,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: 'Email'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('auth-password'),
-                controller: _password,
-                obscureText: true,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => widget.busy ? null : _submit(),
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  helperText: _registerMode ? 'Minimum 12 characters' : null,
-                ),
-              ),
-              if (!_registerMode) ...[
-                const SizedBox(height: 8),
-                CheckboxListTile(
-                  key: const Key('remember-me-checkbox'),
-                  value: _rememberMe,
-                  onChanged: widget.busy
-                      ? null
-                      : (value) => setState(() => _rememberMe = value ?? false),
-                  title: const Text('Remember me'),
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  dense: true,
-                ),
-              ],
-              if (widget.error != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  widget.error!,
-                  style: const TextStyle(color: Colors.redAccent),
-                ),
-              ],
-              const SizedBox(height: 16),
-              FilledButton(
-                key: const Key('auth-submit'),
-                onPressed: widget.busy ? null : _submit,
-                child: Text(
-                  widget.busy
-                      ? (_registerMode ? 'Creating account…' : 'Signing in…')
-                      : (_registerMode ? 'Create account' : 'Sign in'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                alignment: WrapAlignment.spaceBetween,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  TextButton(
-                    key: Key(
-                      _registerMode ? 'show-login-mode' : 'show-register-mode',
-                    ),
-                    onPressed: widget.busy ? null : _toggleMode,
-                    child: Text(
-                      _registerMode
-                          ? 'Already have an account? Sign in'
-                          : 'Create an account',
-                    ),
+                const SizedBox(height: 16),
+                if (_registerMode) ...[
+                  TextField(
+                    key: const Key('auth-name'),
+                    controller: _name,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(labelText: 'Name'),
                   ),
-                  TextButton(
-                    key: const Key('forgot-login-action'),
-                    onPressed: widget.busy ? null : _showForgotLoginDialog,
-                    child: const Text('Forgot login?'),
+                  const SizedBox(height: 12),
+                ],
+                TextField(
+                  key: const Key('auth-email'),
+                  controller: _email,
+                  keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: 'Email'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('auth-password'),
+                  controller: _password,
+                  obscureText: true,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => widget.busy ? null : _submit(),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    helperText: _registerMode ? 'Minimum 12 characters' : null,
+                  ),
+                ),
+                if (!_registerMode) ...[
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    key: const Key('remember-me-checkbox'),
+                    value: _rememberMe,
+                    onChanged: widget.busy
+                        ? null
+                        : (value) =>
+                              setState(() => _rememberMe = value ?? false),
+                    title: const Text('Remember me'),
+                    subtitle: const Text(
+                      'Keeps you signed in on this device until you delete the account or the saved token is revoked.',
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    dense: true,
                   ),
                 ],
-              ),
-            ],
+                if (widget.error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    widget.error!,
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                FilledButton(
+                  key: const Key('auth-submit'),
+                  onPressed: widget.busy ? null : _submit,
+                  child: Text(
+                    widget.busy
+                        ? (_registerMode ? 'Creating account…' : 'Signing in…')
+                        : (_registerMode ? 'Create account' : 'Sign in'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    TextButton(
+                      key: Key(
+                        _registerMode
+                            ? 'show-login-mode'
+                            : 'show-register-mode',
+                      ),
+                      onPressed: widget.busy ? null : _toggleMode,
+                      child: Text(
+                        _registerMode
+                            ? 'Already have an account? Sign in'
+                            : 'Create an account',
+                      ),
+                    ),
+                    TextButton(
+                      key: const Key('forgot-login-action'),
+                      onPressed: widget.busy ? null : _showForgotLoginDialog,
+                      child: const Text('Forgot login?'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

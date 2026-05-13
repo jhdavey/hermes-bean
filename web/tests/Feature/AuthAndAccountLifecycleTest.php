@@ -27,6 +27,7 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseHas('personal_access_tokens', [
             'user_id' => User::where('email', 'bean@example.com')->value('id'),
             'token' => hash('sha256', $plainToken),
+            'expires_at' => null,
         ]);
 
         $this->withToken($plainToken)->getJson('/api/auth/me')

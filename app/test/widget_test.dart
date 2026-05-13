@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -514,7 +516,40 @@ void main() {
 
     expect(find.byKey(const Key('calendar-view')), findsOneWidget);
     expect(tokenStore.token, 'fake-token');
+    expect(tokenStore.rememberMe, isTrue);
   });
+
+  testWidgets(
+    'remember me preference stays checked and survives transient API failures',
+    (WidgetTester tester) async {
+      final tokenStore = _MemoryAuthTokenStore()
+        ..token = 'saved-token'
+        ..rememberMe = true;
+
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _NetworkDownRememberedTokenHermesApiClient(),
+          tokenStore: tokenStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tokenStore.token, 'saved-token');
+      expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
+      expect(
+        find.textContaining('Remember me token is still saved'),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<CheckboxListTile>(
+              find.byKey(const Key('remember-me-checkbox')),
+            )
+            .value,
+        isTrue,
+      );
+    },
+  );
 
   testWidgets('uses old HeyBean green Material 3 styling indicators', (
     WidgetTester tester,
@@ -839,13 +874,22 @@ void main() {
 
 class _MemoryAuthTokenStore implements AuthTokenStore {
   String? token;
+  bool rememberMe = false;
 
   @override
   Future<String?> loadToken() async => token;
 
   @override
+  Future<bool> loadRememberMe() async => rememberMe;
+
+  @override
   Future<void> saveToken(String token) async {
     this.token = token;
+  }
+
+  @override
+  Future<void> saveRememberMe(bool rememberMe) async {
+    this.rememberMe = rememberMe;
   }
 
   @override
@@ -877,6 +921,14 @@ class _ExpiredTokenHermesApiClient extends HermesApiClient {
   @override
   Future<HermesUser> me() async =>
       throw const HermesApiException(401, '{"message":"Unauthenticated."}');
+}
+
+class _NetworkDownRememberedTokenHermesApiClient extends HermesApiClient {
+  _NetworkDownRememberedTokenHermesApiClient()
+    : super(transport: (_) async => const HermesApiResponse(500, 'unused'));
+
+  @override
+  Future<HermesUser> me() async => throw const SocketException('offline');
 }
 
 class _FakeHermesApiClient extends HermesApiClient {
