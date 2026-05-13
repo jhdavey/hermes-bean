@@ -87,6 +87,32 @@ void main() {
     },
   );
 
+  testWidgets('sign in still succeeds when old API lacks past tasks endpoint', (
+    WidgetTester tester,
+  ) async {
+    final api = _PastTasksUnavailableHermesApiClient();
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('auth-email')),
+      'bean@example.com',
+    );
+    await tester.enterText(
+      find.byKey(const Key('auth-password')),
+      'correct-horse-battery-staple',
+    );
+    await tester.tap(find.byKey(const Key('auth-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+    expect(find.textContaining('Session expired'), findsNothing);
+    expect(api.pastTaskCalls, 1);
+  });
+
   testWidgets(
     'Hermes Bean command center renders chat, progress, surfaces, and approvals',
     (WidgetTester tester) async {
@@ -176,7 +202,7 @@ void main() {
       expect(find.text('Noon'), findsOneWidget);
       expect(find.text('10 PM'), findsOneWidget);
       expect(find.byKey(const Key('apple-style-day-strip')), findsNothing);
-      expect(find.text('Today / upcoming'), findsNothing);
+      expect(find.text('Today / upcoming'), findsOneWidget);
       expect(find.text('Tasks for today'), findsOneWidget);
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Design review'), findsWidgets);
@@ -335,6 +361,105 @@ void main() {
 
     expect(after, _headingDaysAfter(before, 7));
   });
+
+  testWidgets(
+    'tasks can be checked from the day view and drop below open tasks',
+    (WidgetTester tester) async {
+      final api = _ActiveTasksFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Yesterday one-off'), findsNothing);
+      expect(find.text('Recurring vitamins'), findsOneWidget);
+
+      final firstOpenTaskBefore = tester.getRect(find.text('Pack bags'));
+      final secondOpenTaskBefore = tester.getRect(find.text('Call pharmacy'));
+      expect(firstOpenTaskBefore.top, lessThan(secondOpenTaskBefore.top));
+
+      await tester.ensureVisible(
+        find.byKey(const Key('task-complete-checkbox-101')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('task-complete-checkbox-101')));
+      await tester.pumpAndSettle();
+
+      expect(api.completedTaskIds, [101]);
+      final completedTaskAfter = tester.getRect(find.text('Pack bags'));
+      final stillOpenTaskAfter = tester.getRect(find.text('Call pharmacy'));
+      expect(stillOpenTaskAfter.top, lessThan(completedTaskAfter.top));
+      expect(
+        find.byKey(const Key('task-complete-checkbox-101')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('tasks can be checked from the tasks page', (
+    WidgetTester tester,
+  ) async {
+    final api = _ActiveTasksFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('task-complete-checkbox-102')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-complete-checkbox-102')));
+    await tester.pumpAndSettle();
+
+    expect(api.completedTaskIds, [102]);
+    final openRecurring = tester.getRect(find.text('Recurring vitamins'));
+    final completedTask = tester.getRect(find.text('Call pharmacy'));
+    expect(openRecurring.top, lessThan(completedTask.top));
+
+    await tester.tap(find.byKey(const Key('task-complete-checkbox-102')));
+    await tester.pumpAndSettle();
+
+    expect(api.reopenedTaskIds, [102]);
+    final reopenedTask = tester.widget<CheckboxListTile>(
+      find.byKey(const Key('task-complete-checkbox-102')),
+    );
+    expect(reopenedTask.value, isFalse);
+  });
+
+  testWidgets(
+    'settings lists completed past tasks that dropped off active lists',
+    (WidgetTester tester) async {
+      final api = _ActiveTasksFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Archived oil change'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('past-tasks-settings')));
+      await tester.pumpAndSettle();
+
+      expect(api.pastTaskListCalls, 1);
+      expect(find.text('Past tasks'), findsOneWidget);
+      expect(find.text('Archived oil change'), findsOneWidget);
+      expect(
+        find.text('Completed · Permanently deletes after 10 days'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('task-complete-checkbox-201')));
+      await tester.pumpAndSettle();
+
+      expect(api.reopenedTaskIds, [201]);
+      expect(find.text('Archived oil change'), findsNothing);
+    },
+  );
 
   testWidgets(
     'invalid remembered tokens return to sign in instead of offline chat',
@@ -498,6 +623,77 @@ void main() {
     expect(api.todaySummaryCalls, greaterThan(1));
   });
 
+  testWidgets(
+    'calendar events open an editable detail sheet with category color recurrence and event reminders',
+    (WidgetTester tester) async {
+      final api = _EditableCalendarFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Today / upcoming'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Design review').last);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('calendar-event-detail-view')),
+        findsOneWidget,
+      );
+      expect(find.text('Event details'), findsOneWidget);
+      expect(find.byKey(const Key('event-title-field')), findsOneWidget);
+      expect(find.byKey(const Key('event-start-field')), findsOneWidget);
+      expect(find.byKey(const Key('event-end-field')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-field')), findsOneWidget);
+      expect(find.byKey(const Key('event-color-field')), findsOneWidget);
+      expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
+      expect(
+        find.byKey(const Key('event-reminder-minutes-field')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('event-title-field')),
+        'Design sync',
+      );
+      await tester.enterText(
+        find.byKey(const Key('event-start-field')),
+        '2026-05-14T16:00:00Z',
+      );
+      await tester.enterText(
+        find.byKey(const Key('event-end-field')),
+        '2026-05-14T17:00:00Z',
+      );
+      await tester.enterText(
+        find.byKey(const Key('event-category-field')),
+        'Work',
+      );
+      await tester.tap(find.byKey(const Key('event-color-field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Orange').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('event-recurrence-field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Weekly').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('event-reminder-minutes-field')),
+        '15',
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      expect(api.updatedEvent?.title, 'Design sync');
+      expect(api.updatedEvent?.category, 'Work');
+      expect(api.updatedEvent?.color, '#FF9500');
+      expect(api.updatedEvent?.recurrence, 'weekly');
+      expect(api.createdReminder?['calendar_event_id'], 3);
+      expect(api.createdReminder?['title'], 'Reminder: Design sync');
+      expect(find.text('Design sync'), findsWidgets);
+    },
+  );
+
   testWidgets('chat renders backend JSON message envelopes as natural language', (
     WidgetTester tester,
   ) async {
@@ -543,6 +739,16 @@ class _MemoryAuthTokenStore implements AuthTokenStore {
   @override
   Future<void> clearToken() async {
     token = null;
+  }
+}
+
+class _PastTasksUnavailableHermesApiClient extends _FakeHermesApiClient {
+  int pastTaskCalls = 0;
+
+  @override
+  Future<List<HermesTask>> listPastTasks() async {
+    pastTaskCalls++;
+    throw const HermesApiException(405, 'Method Not Allowed');
   }
 }
 
@@ -613,6 +819,9 @@ class _FakeHermesApiClient extends HermesApiClient {
           HermesTask(id: 10, title: 'Generated follow-up task', status: 'open'),
         ]
       : const [HermesTask(id: 1, title: 'Plan launch', status: 'open')];
+
+  @override
+  Future<List<HermesTask>> listPastTasks() async => const [];
 
   @override
   Future<List<HermesReminder>> listReminders() async => plannedToday
@@ -727,6 +936,99 @@ class _TwoDayCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   }
 }
 
+class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  final completedTaskIds = <int>[];
+  final reopenedTaskIds = <int>[];
+  int pastTaskListCalls = 0;
+  bool _pastTaskReopened = false;
+  late List<HermesTask> _activeTasks = [
+    HermesTask(
+      id: 101,
+      title: 'Pack bags',
+      status: 'open',
+      dueAt: DateTime.now().toIso8601String(),
+    ),
+    HermesTask(
+      id: 102,
+      title: 'Call pharmacy',
+      status: 'open',
+      dueAt: DateTime.now().toIso8601String(),
+    ),
+    HermesTask(
+      id: 103,
+      title: 'Yesterday one-off',
+      status: 'open',
+      dueAt: DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+    ),
+    HermesTask(
+      id: 104,
+      title: 'Recurring vitamins',
+      status: 'open',
+      dueAt: DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+      metadata: {'recurrence': 'daily'},
+    ),
+  ];
+
+  @override
+  Future<List<HermesTask>> listTasks() async => _activeTasks;
+
+  @override
+  Future<List<HermesTask>> listPastTasks() async {
+    pastTaskListCalls++;
+    if (_pastTaskReopened) return const [];
+    return [
+      HermesTask(
+        id: 201,
+        title: 'Archived oil change',
+        status: 'completed',
+        dueAt: DateTime.now()
+            .subtract(const Duration(days: 2))
+            .toIso8601String(),
+        completedAt: DateTime.now()
+            .subtract(const Duration(days: 2))
+            .toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<HermesTask> completeTask(int taskId) async {
+    completedTaskIds.add(taskId);
+    _activeTasks = _activeTasks
+        .map(
+          (task) => task.id == taskId
+              ? task.copyWith(
+                  status: 'completed',
+                  completedAt: DateTime.now().toIso8601String(),
+                )
+              : task,
+        )
+        .toList();
+    return _activeTasks.singleWhere((task) => task.id == taskId);
+  }
+
+  @override
+  Future<HermesTask> reopenTask(int taskId) async {
+    reopenedTaskIds.add(taskId);
+    if (taskId == 201) {
+      _pastTaskReopened = true;
+      return const HermesTask(
+        id: 201,
+        title: 'Archived oil change',
+        status: 'open',
+      );
+    }
+    _activeTasks = _activeTasks
+        .map(
+          (task) => task.id == taskId
+              ? task.copyWith(status: 'open', clearCompletedAt: true)
+              : task,
+        )
+        .toList();
+    return _activeTasks.singleWhere((task) => task.id == taskId);
+  }
+}
+
 class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
   @override
   Future<HermesMessageResult> sendMessage({
@@ -746,6 +1048,66 @@ class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
       blocker: {'reason': 'Gmail OAuth is not connected.'},
     );
   }
+}
+
+class _EditableCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  HermesCalendarEvent? updatedEvent;
+  Map<String, Object?>? createdReminder;
+
+  @override
+  Future<HermesCalendarEvent> updateCalendarEvent(
+    int eventId, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+  }) async {
+    updatedEvent = HermesCalendarEvent(
+      id: eventId,
+      title: title,
+      startsAt: startsAt,
+      endsAt: endsAt,
+      category: category,
+      color: color,
+      recurrence: recurrence,
+    );
+    return updatedEvent!;
+  }
+
+  @override
+  Future<HermesReminder> createEventReminder({
+    required int calendarEventId,
+    required String title,
+    required String remindAt,
+  }) async {
+    createdReminder = {
+      'calendar_event_id': calendarEventId,
+      'title': title,
+      'remind_at': remindAt,
+    };
+    return HermesReminder(id: 99, title: title, dueAt: remindAt);
+  }
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+    updatedEvent ??
+        HermesCalendarEvent(
+          id: 3,
+          title: 'Design review',
+          startsAt: DateTime.now()
+              .copyWith(hour: 14, minute: 30)
+              .toIso8601String(),
+          endsAt: DateTime.now()
+              .copyWith(hour: 15, minute: 00)
+              .toIso8601String(),
+          category: 'Personal',
+          color: '#34C759',
+          recurrence: 'none',
+        ),
+  ];
 }
 
 class _JsonEnvelopeMessageHermesApiClient extends _SignedInFakeHermesApiClient {

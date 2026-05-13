@@ -24,7 +24,7 @@ class TodaySummaryController extends Controller
             ->latest('id')
             ->first();
 
-        $tasks = Task::where('user_id', $user->id)->latest('updated_at')->get();
+        $tasks = Task::where('user_id', $user->id)->visibleInActiveViews()->latest('updated_at')->get();
         $agentProfile = AgentProfile::where('user_id', $user->id)->first();
         $reminders = Reminder::where('user_id', $user->id)->latest('remind_at')->get();
         $calendarEvents = CalendarEvent::where('user_id', $user->id)->orderBy('starts_at')->get();

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 class AuthAndAccountLifecycleTest extends TestCase
@@ -44,6 +45,55 @@ class AuthAndAccountLifecycleTest extends TestCase
 
         $this->withToken($loginToken)->getJson('/api/auth/me')
             ->assertUnauthorized();
+    }
+
+    public function test_registration_can_seed_visible_calendar_events_for_new_users(): void
+    {
+        config()->set('hermes_bean.seed_onboarding_resources', true);
+
+        $token = $this->postJson('/api/auth/register', [
+            'name' => 'Seeded User',
+            'email' => 'seeded@example.com',
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertCreated()->json('data.token');
+
+        $this->withToken($token)->getJson('/api/today')
+            ->assertOk()
+            ->assertJsonPath('data.counts.tasks', 1)
+            ->assertJsonPath('data.counts.reminders', 1)
+            ->assertJsonPath('data.counts.calendar_events', 2)
+            ->assertJsonFragment(['title' => 'Design review'])
+            ->assertJsonFragment(['title' => 'Plan dinner'])
+            ->assertJsonFragment(['event_type' => 'assistant.onboarding.seeded']);
+
+        $this->withToken($token)->getJson('/api/calendar-events')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonFragment(['title' => 'Design review'])
+            ->assertJsonFragment(['title' => 'Plan dinner']);
+    }
+
+    public function test_login_backfills_visible_calendar_events_for_existing_users(): void
+    {
+        config()->set('hermes_bean.seed_onboarding_resources', true);
+
+        User::factory()->create([
+            'name' => 'Existing User',
+            'email' => 'existing@example.com',
+            'password' => Hash::make('correct-horse-battery-staple'),
+        ]);
+
+        $token = $this->postJson('/api/auth/login', [
+            'email' => 'existing@example.com',
+            'password' => 'correct-horse-battery-staple',
+        ])->assertOk()->json('data.token');
+
+        $this->withToken($token)->getJson('/api/calendar-events')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonFragment(['title' => 'Design review'])
+            ->assertJsonFragment(['title' => 'Plan dinner']);
     }
 
     public function test_assistant_routes_require_auth_and_scope_route_model_binding_to_owner(): void

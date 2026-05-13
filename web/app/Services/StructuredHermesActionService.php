@@ -258,6 +258,7 @@ class StructuredHermesActionService
         $reminder = Reminder::create([
             'user_id' => $session->user_id,
             'conversation_session_id' => $session->id,
+            'calendar_event_id' => $parameters['calendar_event_id'] ?? null,
             'title' => $this->stringParameter($parameters, 'title', 'Untitled reminder'),
             'notes' => $parameters['notes'] ?? null,
             'remind_at' => Carbon::parse((string) ($parameters['remind_at'] ?? now()->addDay()->toIso8601String())),
@@ -285,6 +286,9 @@ class StructuredHermesActionService
             'title' => $this->stringParameter($parameters, 'title', 'Untitled event'),
             'description' => $parameters['description'] ?? null,
             'location' => $parameters['location'] ?? null,
+            'category' => $parameters['category'] ?? null,
+            'color' => $parameters['color'] ?? null,
+            'recurrence' => $parameters['recurrence'] ?? null,
             'starts_at' => $startsAt,
             'ends_at' => $endsAt,
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
@@ -329,7 +333,7 @@ class StructuredHermesActionService
     private function updateCalendarEvent(ConversationSession $session, array $parameters): ActivityEvent
     {
         $calendarEvent = $this->ownedModel(CalendarEvent::class, $session, $parameters);
-        $updates = $this->onlyPresent($parameters, ['title', 'description', 'location', 'status', 'metadata']);
+        $updates = $this->onlyPresent($parameters, ['title', 'description', 'location', 'category', 'color', 'recurrence', 'status', 'metadata']);
         if (array_key_exists('starts_at', $parameters)) {
             $updates['starts_at'] = Carbon::parse((string) $parameters['starts_at']);
         }

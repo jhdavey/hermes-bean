@@ -26,6 +26,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/today', [TodaySummaryController::class, 'show']);
 
         Route::get('/tasks', [DomainResourceController::class, 'listTasks']);
+        Route::get('/tasks/past', [DomainResourceController::class, 'listPastTasks']);
         Route::post('/tasks', [DomainResourceController::class, 'storeTask']);
         Route::patch('/tasks/{task}', [DomainResourceController::class, 'updateTask']);
         Route::delete('/tasks/{task}', [DomainResourceController::class, 'destroyTask']);

@@ -101,6 +101,93 @@ void main() {
     },
   );
 
+  test('marks tasks complete with bearer token', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'PATCH');
+        expect(request.path, '/tasks/7');
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        expect(request.body, {'status': 'completed'});
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'id': 7,
+              'title': 'Pack bags',
+              'status': 'completed',
+              'completed_at': '2026-05-12T12:00:00Z',
+            },
+          }),
+        );
+      },
+    );
+
+    final task = await client.completeTask(7);
+
+    expect(task.status, 'completed');
+    expect(task.completedAt, '2026-05-12T12:00:00Z');
+    expect(requests, hasLength(1));
+  });
+
+  test('marks completed tasks open again with bearer token', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        expect(request.method, 'PATCH');
+        expect(request.path, '/tasks/7');
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        expect(request.body, {'status': 'open', 'completed_at': null});
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {'id': 7, 'title': 'Pack bags', 'status': 'open'},
+          }),
+        );
+      },
+    );
+
+    final task = await client.reopenTask(7);
+
+    expect(task.status, 'open');
+    expect(task.completedAt, isNull);
+  });
+
+  test('lists past completed tasks with bearer token', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        expect(request.method, 'GET');
+        expect(request.path, '/tasks/past');
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': [
+              {
+                'id': 8,
+                'title': 'Dropped-off task',
+                'status': 'completed',
+                'due_at': '2026-05-10T09:00:00Z',
+                'completed_at': '2026-05-10T18:00:00Z',
+              },
+            ],
+          }),
+        );
+      },
+    );
+
+    final tasks = await client.listPastTasks();
+
+    expect(tasks.single.title, 'Dropped-off task');
+    expect(tasks.single.completedAt, '2026-05-10T18:00:00Z');
+  });
+
   test('lists live assistant resources with bearer token', () async {
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),

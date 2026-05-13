@@ -93,6 +93,219 @@ class AssistantDomainApiTest extends TestCase
         $this->assertDatabaseHas('scheduler_job_records', ['name' => 'daily-review']);
     }
 
+    public function test_calendar_events_support_editable_details_categories_recurrence_and_event_reminders(): void
+    {
+        $token = $this->apiToken();
+
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Soccer practice',
+            'starts_at' => '2026-05-14T15:00:00Z',
+            'ends_at' => '2026-05-14T16:00:00Z',
+            'category' => 'Family',
+            'color' => '#34C759',
+            'recurrence' => 'weekly',
+        ])->assertCreated()
+            ->assertJsonPath('data.category', 'Family')
+            ->assertJsonPath('data.color', '#34C759')
+            ->assertJsonPath('data.recurrence', 'weekly')
+            ->json('data.id');
+
+        $this->withToken($token)->patchJson("/api/calendar-events/{$eventId}", [
+            'title' => 'Soccer match',
+            'starts_at' => '2026-05-14T17:30:00Z',
+            'ends_at' => '2026-05-14T18:45:00Z',
+            'category' => 'Kids',
+            'color' => '#007AFF',
+            'recurrence' => 'none',
+        ])->assertOk()
+            ->assertJsonPath('data.title', 'Soccer match')
+            ->assertJsonPath('data.category', 'Kids')
+            ->assertJsonPath('data.color', '#007AFF')
+            ->assertJsonPath('data.recurrence', 'none');
+
+        $this->withToken($token)->postJson('/api/reminders', [
+            'calendar_event_id' => $eventId,
+            'title' => 'Leave for soccer match',
+            'remind_at' => '2026-05-14T17:00:00Z',
+        ])->assertCreated()
+            ->assertJsonPath('data.calendar_event_id', $eventId);
+
+        $this->assertDatabaseHas('calendar_events', [
+            'id' => $eventId,
+            'title' => 'Soccer match',
+            'category' => 'Kids',
+            'color' => '#007AFF',
+            'recurrence' => 'none',
+        ]);
+        $this->assertDatabaseHas('reminders', [
+            'calendar_event_id' => $eventId,
+            'title' => 'Leave for soccer match',
+        ]);
+    }
+
+    public function test_agent_can_update_calendar_event_metadata_and_create_event_reminder(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Updated the event and added a reminder.',
+    'actions' => [
+        [
+            'type' => 'calendar_event.update',
+            'risk' => 'low',
+            'parameters' => [
+                'id' => 1,
+                'title' => 'Updated design review',
+                'starts_at' => '2026-05-14T17:00:00Z',
+                'ends_at' => '2026-05-14T18:00:00Z',
+                'category' => 'Work',
+                'color' => '#FF9500',
+                'recurrence' => 'weekly',
+            ],
+        ],
+        [
+            'type' => 'reminder.create',
+            'risk' => 'low',
+            'parameters' => [
+                'calendar_event_id' => 1,
+                'title' => 'Prep for updated design review',
+                'remind_at' => '2026-05-14T16:45:00Z',
+            ],
+        ],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Design review',
+            'starts_at' => '2026-05-14T15:00:00Z',
+        ])->assertCreated()->json('data.id');
+        $this->assertSame(1, $eventId);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Calendar edits',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Move design review, make it weekly orange work, and remind me 15 min before',
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('calendar_events', [
+            'id' => $eventId,
+            'title' => 'Updated design review',
+            'category' => 'Work',
+            'color' => '#FF9500',
+            'recurrence' => 'weekly',
+        ]);
+        $this->assertDatabaseHas('reminders', [
+            'calendar_event_id' => $eventId,
+            'title' => 'Prep for updated design review',
+        ]);
+    }
+
+    public function test_task_lists_hide_expired_one_off_tasks_but_keep_recurring_tasks(): void
+    {
+        $token = $this->apiToken();
+
+        $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Yesterday one-off',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->subDay()->toIso8601String(),
+        ])->assertCreated();
+
+        $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Recurring vitamins',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->subDay()->toIso8601String(),
+            'metadata' => ['recurrence' => 'daily'],
+        ])->assertCreated();
+
+        $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Today task',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->toIso8601String(),
+        ])->assertCreated();
+
+        $this->withToken($token)->getJson('/api/tasks')
+            ->assertOk()
+            ->assertJsonMissing(['title' => 'Yesterday one-off'])
+            ->assertJsonFragment(['title' => 'Recurring vitamins'])
+            ->assertJsonFragment(['title' => 'Today task']);
+
+        $this->withToken($token)->getJson('/api/today')
+            ->assertOk()
+            ->assertJsonMissing(['title' => 'Yesterday one-off'])
+            ->assertJsonFragment(['title' => 'Recurring vitamins'])
+            ->assertJsonFragment(['title' => 'Today task']);
+    }
+
+    public function test_past_tasks_lists_completed_tasks_that_dropped_from_active_views(): void
+    {
+        $token = $this->apiToken();
+
+        $pastTaskId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Archived oil change',
+            'type' => 'maintenance',
+            'status' => 'open',
+            'due_at' => now()->subDays(2)->toIso8601String(),
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->patchJson("/api/tasks/{$pastTaskId}", [
+            'status' => 'completed',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.completed_at', fn ($value) => is_string($value));
+
+        $this->withToken($token)->getJson('/api/tasks')
+            ->assertOk()
+            ->assertJsonMissing(['title' => 'Archived oil change']);
+
+        $this->withToken($token)->getJson('/api/tasks/past')
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Archived oil change'])
+            ->assertJsonPath('data.0.status', 'completed')
+            ->assertJsonPath('data.0.completed_at', fn ($value) => is_string($value));
+
+        $this->withToken($token)->patchJson("/api/tasks/{$pastTaskId}", [
+            'status' => 'open',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'open')
+            ->assertJsonPath('data.completed_at', null);
+
+        $this->assertDatabaseHas('tasks', ['id' => $pastTaskId, 'completed_at' => null]);
+    }
+
+    public function test_completed_tasks_are_purged_after_ten_days(): void
+    {
+        $token = $this->apiToken();
+
+        $oldCompletedId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Old completed task',
+            'type' => 'todo',
+            'status' => 'completed',
+            'due_at' => now()->subDays(14)->toIso8601String(),
+            'completed_at' => now()->subDays(11)->toIso8601String(),
+        ])->assertCreated()->json('data.id');
+
+        $recentCompletedId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Recent completed task',
+            'type' => 'todo',
+            'status' => 'completed',
+            'due_at' => now()->subDays(4)->toIso8601String(),
+            'completed_at' => now()->subDays(9)->toIso8601String(),
+        ])->assertCreated()->json('data.id');
+
+        $this->artisan('tasks:purge-completed')->assertSuccessful();
+
+        $this->assertDatabaseMissing('tasks', ['id' => $oldCompletedId]);
+        $this->assertDatabaseHas('tasks', ['id' => $recentCompletedId]);
+    }
+
     public function test_activity_events_can_be_polled_for_a_session(): void
     {
         $this->configureFakeHermes(<<<'PHP'

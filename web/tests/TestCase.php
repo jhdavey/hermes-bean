@@ -7,8 +7,17 @@ use Illuminate\Support\Facades\File;
 
 abstract class TestCase extends BaseTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('hermes_bean.seed_onboarding_resources', false);
+    }
+
     protected function apiToken(string $email = 'test@example.com'): string
     {
+        config()->set('hermes_bean.seed_onboarding_resources', false);
+
         return $this->postJson('/api/auth/register', [
             'name' => str($email)->before('@')->title()->toString(),
             'email' => $email,

@@ -22,7 +22,26 @@ class DomainResourceController extends Controller
 
     public function listTasks(Request $request): JsonResponse
     {
-        return $this->listed(Task::where('user_id', $request->user()->id)->orderBy('id')->get());
+        return $this->listed(Task::where('user_id', $request->user()->id)->visibleInActiveViews()->orderBy('id')->get());
+    }
+
+    public function listPastTasks(Request $request): JsonResponse
+    {
+        return $this->listed(
+            Task::where('user_id', $request->user()->id)
+                ->whereNotNull('completed_at')
+                ->where('completed_at', '>=', now()->subDays(10))
+                ->where(function ($query): void {
+                    $query->whereIn('status', ['completed', 'complete', 'done'])
+                        ->orWhereIn('status', ['COMPLETED', 'Complete', 'Done']);
+                })
+                ->whereNot(function ($query): void {
+                    $query->visibleInActiveViews();
+                })
+                ->orderByDesc('completed_at')
+                ->orderByDesc('id')
+                ->get()
+        );
     }
 
     public function listReminders(Request $request): JsonResponse
@@ -47,28 +66,48 @@ class DomainResourceController extends Controller
 
     public function storeTask(Request $request): JsonResponse
     {
-        return $this->created(Task::create($this->owned($request, $request->validate([
+        $validated = $request->validate([
             'conversation_session_id' => $this->ownedSessionRule($request),
             'title' => ['required', 'string', 'max:255'],
             'type' => ['required', Rule::in(['todo', 'chore', 'maintenance'])],
             'status' => ['nullable', 'string', 'max:50'],
             'notes' => ['nullable', 'string'],
             'due_at' => ['nullable', 'date'],
+            'completed_at' => ['nullable', 'date'],
             'metadata' => ['nullable', 'array'],
-        ]))));
+        ]);
+
+        if ($this->taskStatusIsCompleted($validated['status'] ?? null) && empty($validated['completed_at'])) {
+            $validated['completed_at'] = now();
+        }
+
+        return $this->created(Task::create($this->owned($request, $validated)));
     }
 
     public function updateTask(Request $request, string $task): JsonResponse
     {
         $model = Task::where('user_id', $request->user()->id)->findOrFail($task);
-        $model->update($request->validate([
+        $validated = $request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'type' => ['sometimes', 'required', Rule::in(['todo', 'chore', 'maintenance'])],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'due_at' => ['sometimes', 'nullable', 'date'],
+            'completed_at' => ['sometimes', 'nullable', 'date'],
             'metadata' => ['sometimes', 'nullable', 'array'],
-        ]));
+        ]);
+
+        if (array_key_exists('status', $validated)) {
+            $willBeCompleted = $this->taskStatusIsCompleted($validated['status']);
+            if ($willBeCompleted && $model->completed_at === null && ! array_key_exists('completed_at', $validated)) {
+                $validated['completed_at'] = now();
+            }
+            if (! $willBeCompleted && ! array_key_exists('completed_at', $validated)) {
+                $validated['completed_at'] = null;
+            }
+        }
+
+        $model->update($validated);
 
         return response()->json(['data' => $model->refresh()]);
     }
@@ -82,6 +121,7 @@ class DomainResourceController extends Controller
     {
         return $this->created(Reminder::create($this->owned($request, $request->validate([
             'conversation_session_id' => $this->ownedSessionRule($request),
+            'calendar_event_id' => ['nullable', Rule::exists('calendar_events', 'id')->where('user_id', $request->user()->id)],
             'title' => ['required', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
             'remind_at' => ['required', 'date'],
@@ -96,6 +136,7 @@ class DomainResourceController extends Controller
         $model->update($request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'notes' => ['sometimes', 'nullable', 'string'],
+            'calendar_event_id' => ['sometimes', 'nullable', Rule::exists('calendar_events', 'id')->where('user_id', $request->user()->id)],
             'remind_at' => ['sometimes', 'required', 'date'],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'metadata' => ['sometimes', 'nullable', 'array'],
@@ -116,6 +157,9 @@ class DomainResourceController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'location' => ['nullable', 'string', 'max:255'],
+            'category' => ['nullable', 'string', 'max:80'],
+            'color' => ['nullable', 'string', 'max:20'],
+            'recurrence' => ['nullable', 'string', 'max:50'],
             'starts_at' => ['required', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'status' => ['nullable', 'string', 'max:50'],
@@ -130,6 +174,9 @@ class DomainResourceController extends Controller
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string'],
             'location' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'category' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'color' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'recurrence' => ['sometimes', 'nullable', 'string', 'max:50'],
             'starts_at' => ['sometimes', 'required', 'date'],
             'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
@@ -296,5 +343,10 @@ class DomainResourceController extends Controller
     private function owned(Request $request, array $attributes): array
     {
         return ['user_id' => $request->user()->id] + $attributes;
+    }
+
+    private function taskStatusIsCompleted(?string $status): bool
+    {
+        return in_array(strtolower(str_replace('_', '-', (string) $status)), ['completed', 'complete', 'done'], true);
     }
 }

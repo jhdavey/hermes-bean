@@ -4,9 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityEvent;
+use App\Models\AgentProfile;
 use App\Models\Approval;
 use App\Models\Blocker;
-use App\Models\AgentProfile;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
 use App\Models\PersonalAccessToken;
@@ -15,6 +15,7 @@ use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\AgentProfileService;
+use App\Services\OnboardingSeedService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -33,6 +34,9 @@ class AuthController extends Controller
 
         $user = User::create($data);
         app(AgentProfileService::class)->ensureForUser($user);
+        if (config('hermes_bean.seed_onboarding_resources', true)) {
+            app(OnboardingSeedService::class)->ensureForUser($user);
+        }
         $user->load('agentProfile');
 
         return response()->json(['data' => [
@@ -55,6 +59,9 @@ class AuthController extends Controller
         }
 
         $user->loadMissing('agentProfile');
+        if (config('hermes_bean.seed_onboarding_resources', true)) {
+            app(OnboardingSeedService::class)->ensureForUser($user);
+        }
 
         return response()->json(['data' => [
             'user' => $user,

@@ -182,6 +182,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   HermesUser? _user;
   HermesSession? _session;
   List<HermesTask> _tasks = const [];
+  List<HermesTask> _pastTasks = const [];
   List<HermesReminder> _reminders = const [];
   List<HermesCalendarEvent> _calendar = const [];
   List<HermesApproval> _approvals = const [];
@@ -230,6 +231,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       );
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
+        widget.apiClient.listPastTasks().catchError(
+          (_) => const <HermesTask>[],
+        ),
         widget.apiClient.pollActivityEvents(session.id),
       ]);
       final summary = results[0] as HermesTodaySummary;
@@ -238,10 +242,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _user = user;
         _session = session;
         _tasks = summary.tasks;
+        _pastTasks = results[1] as List<HermesTask>;
         _reminders = summary.reminders;
         _calendar = summary.calendarEvents;
         _approvals = summary.approvals;
-        _events = results[1] as List<HermesActivityEvent>;
+        _events = results[2] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
       });
     } catch (error) {
@@ -254,6 +259,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _user = null;
         _session = null;
         _tasks = const [];
+        _pastTasks = const [];
         _reminders = const [];
         _calendar = const [];
         _approvals = const [];
@@ -530,21 +536,143 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     try {
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
+        widget.apiClient.listPastTasks().catchError(
+          (_) => const <HermesTask>[],
+        ),
         widget.apiClient.pollActivityEvents(session.id),
       ]);
       final summary = results[0] as HermesTodaySummary;
       if (!mounted) return;
       setState(() {
         _tasks = summary.tasks;
+        _pastTasks = results[1] as List<HermesTask>;
         _reminders = summary.reminders;
         _calendar = summary.calendarEvents;
         _approvals = summary.approvals;
-        _events = results[1] as List<HermesActivityEvent>;
+        _events = results[2] as List<HermesActivityEvent>;
         _error = null;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = 'Refresh failed: $error');
+    }
+  }
+
+  Future<void> _toggleTaskCompletion(HermesTask task) async {
+    final wasCompleted = _taskIsCompleted(task);
+    final previousTasks = _tasks;
+    final previousPastTasks = _pastTasks;
+    final optimisticTask = wasCompleted
+        ? task.copyWith(status: 'open', clearCompletedAt: true)
+        : task.copyWith(
+            status: 'completed',
+            completedAt: DateTime.now().toIso8601String(),
+          );
+    setState(() {
+      if (_tasks.any((candidate) => candidate.id == task.id)) {
+        _tasks = _replaceTask(_tasks, optimisticTask);
+      }
+      if (_pastTasks.any((candidate) => candidate.id == task.id)) {
+        _pastTasks = wasCompleted
+            ? _removeTask(_pastTasks, task.id)
+            : _replaceTask(_pastTasks, optimisticTask);
+      }
+      _error = null;
+    });
+
+    try {
+      final updatedTask = wasCompleted
+          ? await widget.apiClient.reopenTask(task.id)
+          : await widget.apiClient.completeTask(task.id);
+      if (!mounted) return;
+      setState(() {
+        if (_tasks.any((candidate) => candidate.id == updatedTask.id)) {
+          _tasks = _replaceTask(_tasks, updatedTask);
+        }
+        if (_pastTasks.any((candidate) => candidate.id == updatedTask.id)) {
+          _pastTasks = _replaceTask(_pastTasks, updatedTask);
+        }
+      });
+      await _refreshSignedInViews();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _tasks = previousTasks;
+        _pastTasks = previousPastTasks;
+        _error = wasCompleted
+            ? 'Could not reopen task: $error'
+            : 'Could not complete task: $error';
+      });
+    }
+  }
+
+  Future<void> _editCalendarEvent(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    int? reminderMinutesBefore,
+  }) async {
+    final previousCalendar = _calendar;
+    final optimisticEvent = event.copyWith(
+      title: title,
+      startsAt: startsAt,
+      endsAt: endsAt,
+      category: category,
+      color: color,
+      recurrence: recurrence,
+    );
+    setState(() {
+      _calendar = _calendar
+          .map(
+            (candidate) =>
+                candidate.id == event.id ? optimisticEvent : candidate,
+          )
+          .toList();
+      _error = null;
+    });
+
+    try {
+      final updatedEvent = await widget.apiClient.updateCalendarEvent(
+        event.id,
+        title: title,
+        startsAt: startsAt,
+        endsAt: endsAt,
+        category: category,
+        color: color,
+        recurrence: recurrence,
+      );
+      if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
+        final start = _parseCalendarEventDateTime(startsAt);
+        if (start != null) {
+          await widget.apiClient.createEventReminder(
+            calendarEventId: event.id,
+            title: 'Reminder: $title',
+            remindAt: start
+                .subtract(Duration(minutes: reminderMinutesBefore))
+                .toIso8601String(),
+          );
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _calendar = _calendar
+            .map(
+              (candidate) =>
+                  candidate.id == event.id ? updatedEvent : candidate,
+            )
+            .toList();
+      });
+      await _refreshSignedInViews();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _calendar = previousCalendar;
+        _error = 'Could not update event: $error';
+      });
     }
   }
 
@@ -620,7 +748,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                     ),
                     const SizedBox(width: 8),
                     _CriticalTaskBadge(
-                      count: _tasks.length + _reminders.length,
+                      count:
+                          _visibleSortedTasks(_tasks).length +
+                          _reminders.length,
                     ),
                   ],
                   const SizedBox(width: 16),
@@ -663,6 +793,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         child: _CommandCenterContent(
           user: _user!,
           tasks: _tasks,
+          pastTasks: _pastTasks,
           reminders: _reminders,
           calendar: _calendar,
           approvals: _approvals,
@@ -683,6 +814,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           onSelectDestination: (destination) =>
               setState(() => _selectedDestination = destination),
           onSend: _sendChat,
+          onTaskCompleted: _toggleTaskCompletion,
+          onCalendarEventEdited: _editCalendarEvent,
           onDeleteAccount: _deleteAccount,
         ),
       ),
@@ -878,6 +1011,7 @@ class _CommandCenterContent extends StatelessWidget {
   const _CommandCenterContent({
     required this.user,
     required this.tasks,
+    required this.pastTasks,
     required this.reminders,
     required this.calendar,
     required this.approvals,
@@ -896,12 +1030,15 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onCalendarEndHourChanged,
     required this.onSelectDestination,
     required this.onSend,
+    required this.onTaskCompleted,
+    required this.onCalendarEventEdited,
     required this.onDeleteAccount,
     this.error,
   });
 
   final HermesUser user;
   final List<HermesTask> tasks;
+  final List<HermesTask> pastTasks;
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
   final List<HermesApproval> approvals;
@@ -920,6 +1057,18 @@ class _CommandCenterContent extends StatelessWidget {
   final ValueChanged<int> onCalendarEndHourChanged;
   final ValueChanged<_HomeDestination> onSelectDestination;
   final Future<void> Function(String content) onSend;
+  final Future<void> Function(HermesTask task) onTaskCompleted;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    int? reminderMinutesBefore,
+  })
+  onCalendarEventEdited;
   final Future<void> Function() onDeleteAccount;
   final String? error;
 
@@ -930,6 +1079,7 @@ class _CommandCenterContent extends StatelessWidget {
         final pendingApprovals = approvals
             .where((approval) => (approval.status ?? 'pending') == 'pending')
             .toList();
+        final activeTasks = _visibleSortedTasks(tasks);
         final beanPanel = Column(
           children: [
             if (pendingApprovals.isNotEmpty) ...[
@@ -945,10 +1095,14 @@ class _CommandCenterContent extends StatelessWidget {
             const SizedBox(height: 16),
             _ApprovalCard(approvals: pendingApprovals),
             const SizedBox(height: 16),
-            _ProgressCard(user: user, error: error, taskCount: tasks.length),
+            _ProgressCard(
+              user: user,
+              error: error,
+              taskCount: activeTasks.length,
+            ),
             const SizedBox(height: 16),
             _TabSurface(
-              tasks: tasks,
+              tasks: activeTasks,
               reminders: reminders,
               calendar: calendar,
               events: events,
@@ -962,7 +1116,7 @@ class _CommandCenterContent extends StatelessWidget {
         final selectedPanel = switch (selectedDestination) {
           _HomeDestination.today => _TodayHomeView(
             user: user,
-            tasks: tasks,
+            tasks: activeTasks,
             reminders: reminders,
             calendar: calendar,
             approvals: pendingApprovals,
@@ -972,13 +1126,20 @@ class _CommandCenterContent extends StatelessWidget {
             endHour: calendarEndHour,
             onDateSelected: onCalendarDaySelected,
             onBackToDay: onBackToCalendarDay,
+            onTaskCompleted: onTaskCompleted,
+            onCalendarEventEdited: onCalendarEventEdited,
           ),
-          _HomeDestination.tasks => _TaskListCard(tasks: tasks),
+          _HomeDestination.tasks => _TaskListCard(
+            tasks: activeTasks,
+            onTaskCompleted: onTaskCompleted,
+          ),
           _HomeDestination.bean => beanPanel,
           _HomeDestination.reminders => _ReminderListCard(reminders: reminders),
           _HomeDestination.settings => _SettingsView(
             user: user,
             approvals: pendingApprovals,
+            pastTasks: pastTasks,
+            onTaskCompleted: onTaskCompleted,
             calendarStartHour: calendarStartHour,
             calendarEndHour: calendarEndHour,
             onCalendarStartHourChanged: onCalendarStartHourChanged,
@@ -990,11 +1151,20 @@ class _CommandCenterContent extends StatelessWidget {
           children: [
             _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
             const SizedBox(height: 16),
-            _ProgressCard(user: user, error: error, taskCount: tasks.length),
+            _ProgressCard(
+              user: user,
+              error: error,
+              taskCount: activeTasks.length,
+            ),
             const SizedBox(height: 16),
             _ActivityCard(events: events),
             const SizedBox(height: 16),
-            _ShellCard(child: _CalendarAgenda(calendar: calendar)),
+            _ShellCard(
+              child: _CalendarAgenda(
+                calendar: calendar,
+                onEventTap: onCalendarEventEdited,
+              ),
+            ),
           ],
         );
         if (constraints.maxWidth < 900 ||
@@ -1576,6 +1746,8 @@ class _TodayHomeView extends StatelessWidget {
     required this.endHour,
     required this.onDateSelected,
     required this.onBackToDay,
+    required this.onTaskCompleted,
+    required this.onCalendarEventEdited,
   });
 
   final HermesUser user;
@@ -1589,6 +1761,18 @@ class _TodayHomeView extends StatelessWidget {
   final int endHour;
   final ValueChanged<DateTime> onDateSelected;
   final VoidCallback onBackToDay;
+  final Future<void> Function(HermesTask task) onTaskCompleted;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    int? reminderMinutesBefore,
+  })
+  onCalendarEventEdited;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1619,6 +1803,7 @@ class _TodayHomeView extends StatelessWidget {
                 tasks: tasks,
                 reminders: reminders,
                 calendar: calendar,
+                onTaskCompleted: onTaskCompleted,
               ),
             ] else ...[
               _AppleStyleTodayTimeline(
@@ -1627,6 +1812,12 @@ class _TodayHomeView extends StatelessWidget {
                 startHour: startHour,
                 endHour: endHour,
                 onDayChanged: onDateSelected,
+                onEventTap: onCalendarEventEdited,
+              ),
+              const SizedBox(height: 16),
+              _CalendarAgenda(
+                calendar: calendar,
+                onEventTap: onCalendarEventEdited,
               ),
             ],
           ],
@@ -1648,10 +1839,10 @@ class _TodayHomeView extends StatelessWidget {
               const _EmptySurface(label: 'Nothing scheduled for today')
             else ...[
               for (final task in tasks)
-                _CompactItemTile(
-                  icon: Icons.radio_button_unchecked_rounded,
-                  title: task.title,
+                _TaskItemTile(
+                  task: task,
                   subtitle: _statusLabel(task.status),
+                  onCompleted: onTaskCompleted,
                 ),
               for (final reminder in reminders)
                 _CompactItemTile(
@@ -1707,6 +1898,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     required this.startHour,
     required this.endHour,
     required this.onDayChanged,
+    required this.onEventTap,
   });
 
   final List<HermesCalendarEvent> calendar;
@@ -1714,6 +1906,17 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
   final int startHour;
   final int endHour;
   final ValueChanged<DateTime> onDayChanged;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    int? reminderMinutesBefore,
+  })
+  onEventTap;
 
   @override
   State<_AppleStyleTodayTimeline> createState() =>
@@ -1849,6 +2052,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                     endHour: widget.endHour,
                     visibleHours: visibleHours,
                     isActivePage: page == _visibleDayPage,
+                    onEventTap: widget.onEventTap,
                   ),
                 ),
               ),
@@ -1871,6 +2075,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     required this.endHour,
     required this.visibleHours,
     required this.isActivePage,
+    required this.onEventTap,
   });
 
   final List<HermesCalendarEvent> calendar;
@@ -1881,6 +2086,17 @@ class _TwoDayTimelinePage extends StatelessWidget {
   final int endHour;
   final List<int> visibleHours;
   final bool isActivePage;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    int? reminderMinutesBefore,
+  })
+  onEventTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1962,6 +2178,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       endHour: endHour,
                       columnIndex: 0,
                       timelineWidth: constraints.maxWidth,
+                      onTap: onEventTap,
                     ),
                   if (_eventFallsOnDay(event, selectedNextDay) &&
                       _eventFallsWithinHours(event, startHour, endHour))
@@ -1971,6 +2188,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       endHour: endHour,
                       columnIndex: 1,
                       timelineWidth: constraints.maxWidth,
+                      onTap: onEventTap,
                     ),
                 ],
               ],
@@ -2278,6 +2496,7 @@ class _TimelineEventBlock extends StatelessWidget {
     required this.endHour,
     required this.columnIndex,
     required this.timelineWidth,
+    required this.onTap,
   });
 
   final HermesCalendarEvent event;
@@ -2285,6 +2504,17 @@ class _TimelineEventBlock extends StatelessWidget {
   final int endHour;
   final int columnIndex;
   final double timelineWidth;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    int? reminderMinutesBefore,
+  })
+  onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2301,30 +2531,193 @@ class _TimelineEventBlock extends StatelessWidget {
     final left = (dayColumnWidth * columnIndex) + 8;
     final width = (dayColumnWidth - 16).clamp(0.0, double.infinity);
     return Positioned(
-      key: Key(_calendarEventBlockKey(event)),
       top: hourPosition + 2,
       left: left,
       width: width,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0x2416A34A),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0x5516A34A)),
-        ),
-        child: Text(
-          event.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: HeyBeanTheme.accentStrong,
-            fontWeight: FontWeight.w800,
-            fontSize: 12,
+      child: InkWell(
+        key: Key(_calendarEventBlockKey(event)),
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => _showCalendarEventDetails(context, event, onTap),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: _calendarEventColor(event).withValues(alpha: .14),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: _calendarEventColor(event).withValues(alpha: .35),
+            ),
+          ),
+          child: Text(
+            event.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: _calendarEventColor(event),
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+Future<void> _showCalendarEventDetails(
+  BuildContext context,
+  HermesCalendarEvent event,
+  Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    int? reminderMinutesBefore,
+  })
+  onSave,
+) async {
+  final title = TextEditingController(text: event.title);
+  final startsAt = TextEditingController(text: event.startsAt ?? '');
+  final endsAt = TextEditingController(text: event.endsAt ?? '');
+  final category = TextEditingController(text: event.category ?? 'Personal');
+  final reminder = TextEditingController();
+  var color = event.color ?? '#34C759';
+  var recurrence = event.recurrence ?? 'none';
+
+  final result = await showDialog<Map<String, Object?>>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        key: const Key('calendar-event-detail-view'),
+        title: const Text('Event details'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                key: const Key('event-title-field'),
+                controller: title,
+                decoration: const InputDecoration(labelText: 'Title'),
+              ),
+              TextField(
+                key: const Key('event-start-field'),
+                controller: startsAt,
+                decoration: const InputDecoration(labelText: 'Start time'),
+              ),
+              TextField(
+                key: const Key('event-end-field'),
+                controller: endsAt,
+                decoration: const InputDecoration(labelText: 'End time'),
+              ),
+              TextField(
+                key: const Key('event-category-field'),
+                controller: category,
+                decoration: const InputDecoration(labelText: 'Category'),
+              ),
+              DropdownButtonFormField<String>(
+                key: const Key('event-color-field'),
+                initialValue: color,
+                decoration: const InputDecoration(labelText: 'Color'),
+                items: const [
+                  DropdownMenuItem(value: '#34C759', child: Text('Green')),
+                  DropdownMenuItem(value: '#007AFF', child: Text('Blue')),
+                  DropdownMenuItem(value: '#FF9500', child: Text('Orange')),
+                  DropdownMenuItem(value: '#AF52DE', child: Text('Purple')),
+                  DropdownMenuItem(value: '#FF3B30', child: Text('Red')),
+                ],
+                onChanged: (value) => setDialogState(() {
+                  color = value ?? color;
+                }),
+              ),
+              DropdownButtonFormField<String>(
+                key: const Key('event-recurrence-field'),
+                initialValue: recurrence,
+                decoration: const InputDecoration(labelText: 'Recurrence'),
+                items: const [
+                  DropdownMenuItem(value: 'none', child: Text('None')),
+                  DropdownMenuItem(value: 'daily', child: Text('Daily')),
+                  DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                  DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                  DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
+                ],
+                onChanged: (value) => setDialogState(() {
+                  recurrence = value ?? recurrence;
+                }),
+              ),
+              TextField(
+                key: const Key('event-reminder-minutes-field'),
+                controller: reminder,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Reminder minutes before',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('event-save-action'),
+            onPressed: () {
+              Navigator.of(context).pop(<String, Object?>{
+                'title': title.text.trim().isEmpty
+                    ? event.title
+                    : title.text.trim(),
+                'startsAt': startsAt.text.trim(),
+                'endsAt': endsAt.text.trim().isEmpty
+                    ? null
+                    : endsAt.text.trim(),
+                'category': category.text.trim().isEmpty
+                    ? null
+                    : category.text.trim(),
+                'color': color,
+                'recurrence': recurrence,
+                'reminderMinutesBefore': int.tryParse(reminder.text.trim()),
+              });
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (result != null) {
+    await onSave(
+      event,
+      title: result['title'] as String,
+      startsAt: result['startsAt'] as String,
+      endsAt: result['endsAt'] as String?,
+      category: result['category'] as String?,
+      color: result['color'] as String?,
+      recurrence: result['recurrence'] as String?,
+      reminderMinutesBefore: result['reminderMinutesBefore'] as int?,
+    );
+  }
+}
+
+Color _calendarEventColor(HermesCalendarEvent event) {
+  final value = event.color;
+  if (value == null || !value.startsWith('#') || value.length != 7) {
+    return HeyBeanTheme.accentStrong;
+  }
+  return Color(int.parse('FF${value.substring(1)}', radix: 16));
+}
+
+String _eventSubtitle(HermesCalendarEvent event) {
+  final parts = <String>[
+    if (event.startsAt != null) event.startsAt!,
+    if (event.category != null && event.category!.isNotEmpty) event.category!,
+    if (event.recurrence != null && event.recurrence != 'none')
+      event.recurrence!,
+  ];
+  return parts.isEmpty ? 'Unscheduled' : parts.join(' · ');
 }
 
 String _calendarEventBlockKey(HermesCalendarEvent event) {
@@ -2413,11 +2806,13 @@ class _CalendarMonthTaskList extends StatelessWidget {
     required this.tasks,
     required this.reminders,
     required this.calendar,
+    required this.onTaskCompleted,
   });
 
   final List<HermesTask> tasks;
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
+  final Future<void> Function(HermesTask task) onTaskCompleted;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -2434,10 +2829,10 @@ class _CalendarMonthTaskList extends StatelessWidget {
         const _EmptySurface(label: 'No tasks for the rest of the month')
       else ...[
         for (final task in tasks)
-          _CompactItemTile(
-            icon: Icons.radio_button_unchecked_rounded,
-            title: task.title,
+          _TaskItemTile(
+            task: task,
             subtitle: 'Today · ${_statusLabel(task.status)}',
+            onCompleted: onTaskCompleted,
           ),
         for (final reminder in reminders)
           _CompactItemTile(
@@ -2667,9 +3062,20 @@ class _MonthDayCell extends StatelessWidget {
 }
 
 class _CalendarAgenda extends StatelessWidget {
-  const _CalendarAgenda({required this.calendar});
+  const _CalendarAgenda({required this.calendar, this.onEventTap});
 
   final List<HermesCalendarEvent> calendar;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    int? reminderMinutesBefore,
+  })?
+  onEventTap;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -2689,16 +3095,20 @@ class _CalendarAgenda extends StatelessWidget {
           _CompactItemTile(
             icon: Icons.event_available_rounded,
             title: event.title,
-            subtitle: event.startsAt ?? 'Unscheduled',
+            subtitle: _eventSubtitle(event),
+            onTap: onEventTap == null
+                ? null
+                : () => _showCalendarEventDetails(context, event, onEventTap!),
           ),
     ],
   );
 }
 
 class _TaskListCard extends StatelessWidget {
-  const _TaskListCard({required this.tasks});
+  const _TaskListCard({required this.tasks, required this.onTaskCompleted});
 
   final List<HermesTask> tasks;
+  final Future<void> Function(HermesTask task) onTaskCompleted;
 
   @override
   Widget build(BuildContext context) => _ShellCard(
@@ -2725,10 +3135,10 @@ class _TaskListCard extends StatelessWidget {
           const _EmptySurface(label: 'No open tasks')
         else
           for (final task in tasks)
-            _CompactItemTile(
-              icon: Icons.check_circle_outline_rounded,
-              title: task.title,
+            _TaskItemTile(
+              task: task,
               subtitle: _statusLabel(task.status),
+              onCompleted: onTaskCompleted,
             ),
       ],
     ),
@@ -2779,6 +3189,8 @@ class _SettingsView extends StatelessWidget {
   const _SettingsView({
     required this.user,
     required this.approvals,
+    required this.pastTasks,
+    required this.onTaskCompleted,
     required this.calendarStartHour,
     required this.calendarEndHour,
     required this.onCalendarStartHourChanged,
@@ -2788,6 +3200,8 @@ class _SettingsView extends StatelessWidget {
 
   final HermesUser user;
   final List<HermesApproval> approvals;
+  final List<HermesTask> pastTasks;
+  final Future<void> Function(HermesTask task) onTaskCompleted;
   final int calendarStartHour;
   final int calendarEndHour;
   final ValueChanged<int> onCalendarStartHourChanged;
@@ -2824,6 +3238,10 @@ class _SettingsView extends StatelessWidget {
               endHour: calendarEndHour,
               onStartHourChanged: onCalendarStartHourChanged,
               onEndHourChanged: onCalendarEndHourChanged,
+            ),
+            _PastTasksSettingsCard(
+              tasks: pastTasks,
+              onTaskCompleted: onTaskCompleted,
             ),
             _CompactItemTile(
               icon: Icons.verified_user_outlined,
@@ -2949,19 +3367,18 @@ class _CalendarPreferencesCard extends StatelessWidget {
   }
 }
 
-class _CompactItemTile extends StatelessWidget {
-  const _CompactItemTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
+class _PastTasksSettingsCard extends StatelessWidget {
+  const _PastTasksSettingsCard({
+    required this.tasks,
+    required this.onTaskCompleted,
   });
 
-  final IconData icon;
-  final String title;
-  final String subtitle;
+  final List<HermesTask> tasks;
+  final Future<void> Function(HermesTask task) onTaskCompleted;
 
   @override
   Widget build(BuildContext context) => Container(
+    key: const Key('past-tasks-settings'),
     margin: const EdgeInsets.only(bottom: 10),
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
@@ -2969,20 +3386,140 @@ class _CompactItemTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       border: Border.all(color: HeyBeanTheme.border),
     ),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: HeyBeanTheme.accentStrong),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
-              Text(subtitle, style: const TextStyle(color: HeyBeanTheme.muted)),
-            ],
+        const Row(
+          children: [
+            Icon(
+              Icons.history_toggle_off_rounded,
+              color: HeyBeanTheme.accentStrong,
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Past tasks',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  Text(
+                    'Completed tasks that dropped off active lists stay here for 10 days.',
+                    style: TextStyle(color: HeyBeanTheme.muted),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (tasks.isEmpty)
+          const _EmptySurface(label: 'No past completed tasks')
+        else
+          for (final task in tasks)
+            _TaskItemTile(
+              task: task,
+              subtitle: 'Completed · Permanently deletes after 10 days',
+              onCompleted: onTaskCompleted,
+            ),
+      ],
+    ),
+  );
+}
+
+class _TaskItemTile extends StatelessWidget {
+  const _TaskItemTile({
+    required this.task,
+    required this.subtitle,
+    required this.onCompleted,
+  });
+
+  final HermesTask task;
+  final String subtitle;
+  final Future<void> Function(HermesTask task) onCompleted;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = _taskIsCompleted(task);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      decoration: BoxDecoration(
+        color: completed ? HeyBeanTheme.surface : HeyBeanTheme.surface2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: CheckboxListTile(
+        key: Key('task-complete-checkbox-${task.id}'),
+        value: completed,
+        onChanged: (_) => onCompleted(task),
+        controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 6),
+        activeColor: HeyBeanTheme.accentStrong,
+        title: Text(
+          task.title,
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            decoration: completed ? TextDecoration.lineThrough : null,
+            color: completed ? HeyBeanTheme.muted : HeyBeanTheme.text,
           ),
         ),
-      ],
+        subtitle: Text(
+          subtitle,
+          style: const TextStyle(color: HeyBeanTheme.muted),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactItemTile extends StatelessWidget {
+  const _CompactItemTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    borderRadius: BorderRadius.circular(16),
+    onTap: onTap,
+    child: Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: HeyBeanTheme.accentStrong),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: HeyBeanTheme.muted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -3003,6 +3540,66 @@ class _EmptySurface extends StatelessWidget {
     ),
     child: Text(label, style: const TextStyle(color: HeyBeanTheme.muted)),
   );
+}
+
+List<HermesTask> _replaceTask(List<HermesTask> tasks, HermesTask replacement) =>
+    tasks
+        .map((task) => task.id == replacement.id ? replacement : task)
+        .toList(growable: false);
+
+List<HermesTask> _removeTask(List<HermesTask> tasks, int taskId) =>
+    tasks.where((task) => task.id != taskId).toList(growable: false);
+
+List<HermesTask> _visibleSortedTasks(List<HermesTask> tasks) {
+  final today = _dateOnly(DateTime.now());
+  final visible = tasks
+      .where((task) => _taskVisibleOnOrAfter(task, today))
+      .toList();
+  visible.sort((a, b) {
+    final completedCompare = _taskIsCompleted(a) == _taskIsCompleted(b)
+        ? 0
+        : (_taskIsCompleted(a) ? 1 : -1);
+    if (completedCompare != 0) return completedCompare;
+    final aDue = _parseTaskDueDate(a);
+    final bDue = _parseTaskDueDate(b);
+    if (aDue != null && bDue != null) {
+      final dueCompare = aDue.compareTo(bDue);
+      if (dueCompare != 0) return dueCompare;
+    } else if (aDue != null) {
+      return -1;
+    } else if (bDue != null) {
+      return 1;
+    }
+    return a.id.compareTo(b.id);
+  });
+  return visible;
+}
+
+bool _taskVisibleOnOrAfter(HermesTask task, DateTime today) {
+  if (_taskIsRecurring(task)) return true;
+  final dueAt = _parseTaskDueDate(task);
+  return dueAt == null || !_dateOnly(dueAt).isBefore(today);
+}
+
+bool _taskIsCompleted(HermesTask task) {
+  final status = (task.status ?? 'open').toLowerCase().replaceAll('_', '-');
+  return status == 'completed' || status == 'complete' || status == 'done';
+}
+
+bool _taskIsRecurring(HermesTask task) {
+  final metadata = task.metadata;
+  if (metadata == null) return false;
+  final recurrence =
+      metadata['recurrence'] ?? metadata['recurring'] ?? metadata['rrule'];
+  return recurrence != null &&
+      recurrence != false &&
+      recurrence.toString().isNotEmpty;
+}
+
+DateTime? _parseTaskDueDate(HermesTask task) {
+  final dueAt = task.dueAt;
+  if (dueAt == null || dueAt.isEmpty) return null;
+  return DateTime.tryParse(dueAt)?.toLocal();
 }
 
 String _statusLabel(String? status) {
