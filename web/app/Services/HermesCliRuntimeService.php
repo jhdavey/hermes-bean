@@ -247,6 +247,9 @@ Rules:
 - Risky external, destructive outside the dashboard, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
 - If no concrete action is needed, return an empty actions array.
 - Use ISO-8601 timestamps for dates when you create or update reminders, calendar events, and scheduler jobs.
+- For user-facing requests to schedule, plan, book, block time, add an appointment, create a reminder, or create a task: emit visible dashboard resources (`calendar_event.*`, `reminder.*`, and/or `task.*`) so the item appears in `/api/today`. Do not use `scheduler_job.*` for ordinary user calendar/reminder/task planning.
+- Only use `scheduler_job.*` for internal/background agent automation. If you do emit `scheduler_job.create` with `scheduled_for` for a user-visible scheduled plan, the app will mirror it to a calendar event unless `parameters.kind` or `parameters.payload.kind` is `internal_automation`, `background_job`, or `system_job`.
+- Calendar event parameters support `title`, `description`, `location`, `category`, `color`, `recurrence`, `starts_at`, `ends_at`, `status`, and `metadata`. Reminder metadata can include recurrence details. Task due dates use `due_at`.
 - If the user asks for a named event on multiple weekdays without explicitly saying recurring, weekly, every week, repeats, or recurrence: create one-off calendar events for the next matching days in the current week, then ask a follow-up about whether it should recur. Only set recurrence metadata when the user explicitly requests recurrence.
 
 Runtime payload:

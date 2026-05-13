@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -235,6 +236,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   }
 
   Future<void> _bootstrap() async {
+    await _loadCalendarPreferences();
     final rememberedToken = await widget.tokenStore.loadToken();
     widget.apiClient.bearerToken ??= rememberedToken;
     if (widget.apiClient.bearerToken == null) {
@@ -563,6 +565,30 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     });
   }
 
+  Future<void> _loadCalendarPreferences() async {
+    final preferences = await SharedPreferences.getInstance();
+    final startHour = preferences.getInt(_calendarStartHourPreferenceKey);
+    final endHour = preferences.getInt(_calendarEndHourPreferenceKey);
+    final nextStart = (startHour ?? _defaultCalendarStartHour).clamp(0, 22);
+    final nextEnd = (endHour ?? _defaultCalendarEndHour).clamp(
+      nextStart + 1,
+      23,
+    );
+    if (!mounted) return;
+    setState(() {
+      _calendarStartHour = nextStart;
+      _calendarEndHour = nextEnd;
+    });
+  }
+
+  Future<void> _persistCalendarPreferences() async {
+    final preferences = await SharedPreferences.getInstance();
+    await Future.wait([
+      preferences.setInt(_calendarStartHourPreferenceKey, _calendarStartHour),
+      preferences.setInt(_calendarEndHourPreferenceKey, _calendarEndHour),
+    ]);
+  }
+
   void _setCalendarStartHour(int hour) {
     setState(() {
       _calendarStartHour = hour.clamp(0, 22);
@@ -570,12 +596,14 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _calendarEndHour = (_calendarStartHour + 1).clamp(1, 23);
       }
     });
+    unawaited(_persistCalendarPreferences());
   }
 
   void _setCalendarEndHour(int hour) {
     setState(() {
       _calendarEndHour = hour.clamp(_calendarStartHour + 1, 23);
     });
+    unawaited(_persistCalendarPreferences());
   }
 
   Future<void> _refreshSignedInViews() async {
@@ -819,6 +847,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -833,6 +862,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       category: category,
       color: color,
       recurrence: recurrence,
+      metadata: metadata,
       clearEndsAt: endsAt == null,
       clearCategory: category == null,
       clearColor: color == null,
@@ -857,6 +887,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         category: category,
         color: color,
         recurrence: recurrence,
+        metadata: metadata,
       );
       if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
         final start = _parseCalendarEventDateTime(startsAt);
@@ -1338,6 +1369,7 @@ class _CommandCenterContent extends StatelessWidget {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -2072,6 +2104,7 @@ class _TodayHomeView extends StatelessWidget {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -2201,7 +2234,9 @@ class _CriticalTaskBadge extends StatelessWidget {
   );
 }
 
-const _defaultCalendarStartHour = 9;
+const _calendarStartHourPreferenceKey = 'calendar_start_hour';
+const _calendarEndHourPreferenceKey = 'calendar_end_hour';
+const _defaultCalendarStartHour = 7;
 const _defaultCalendarEndHour = 22;
 const _calendarHourHeight = 52.5;
 const _calendarTimeColumnWidth = 48.0;
@@ -2233,6 +2268,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -2432,6 +2468,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -2872,6 +2909,7 @@ class _TimelineEventBlock extends StatelessWidget {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -2963,6 +3001,7 @@ Future<void> _showCalendarEventDetails(
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -2999,6 +3038,7 @@ Future<void> _showCalendarEventDetails(
       category: result['category'] as String?,
       color: result['color'] as String?,
       recurrence: result['recurrence'] as String?,
+      metadata: result['metadata'] as Map<String, Object?>?,
       reminderMinutesBefore: result['reminderMinutesBefore'] as int?,
       reminderRecurrence: result['reminderRecurrence'] as String?,
       reminderSpecificDays: (result['reminderSpecificDays'] as List?)
@@ -3040,13 +3080,16 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   late final TextEditingController _endsAt;
   late final TextEditingController _category;
   late final TextEditingController _reminder;
+  late final TextEditingController _eventInterval;
   late final TextEditingController _reminderInterval;
   late String _color;
   late String _recurrence;
   late List<HermesEventCategory> _categories;
+  String _eventIntervalUnit = 'days';
   String _reminderRecurrence = 'none';
   String _reminderIntervalUnit = 'days';
   String? _validationError;
+  final Set<String> _eventSpecificDays = <String>{};
   final Set<String> _reminderSpecificDays = <String>{};
   bool _savingCategory = false;
 
@@ -3064,6 +3107,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     (value: 'weekly', label: 'Weekly'),
     (value: 'monthly', label: 'Monthly'),
     (value: 'yearly', label: 'Yearly'),
+    (value: 'specific_days', label: 'Specific days'),
+    (value: 'interval', label: 'Every X'),
   ];
 
   static const _reminderRecurrences = <({String value, String label})>[
@@ -3104,6 +3149,10 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
     _category = TextEditingController(text: event.category ?? 'Personal');
     _reminder = TextEditingController();
+    final eventMetadata = event.metadata ?? const <String, Object?>{};
+    _eventInterval = TextEditingController(
+      text: eventMetadata['interval']?.toString() ?? '1',
+    );
     _reminderInterval = TextEditingController(text: '1');
     _categories = [...widget.eventCategories];
     _color = _colors.any((color) => color.value == event.color)
@@ -3113,6 +3162,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         _recurrences.any((recurrence) => recurrence.value == event.recurrence)
         ? event.recurrence!
         : 'none';
+    _eventSpecificDays.addAll(
+      ((eventMetadata['days'] as List?) ?? const <Object?>[])
+          .whereType<String>(),
+    );
+    _eventIntervalUnit =
+        _intervalUnits.any((unit) => unit.value == eventMetadata['unit'])
+        ? eventMetadata['unit'] as String
+        : 'days';
   }
 
   @override
@@ -3122,6 +3179,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _endsAt.dispose();
     _category.dispose();
     _reminder.dispose();
+    _eventInterval.dispose();
     _reminderInterval.dispose();
     super.dispose();
   }
@@ -3152,12 +3210,25 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       );
       return;
     }
-    if (parsedEnd != null && parsedEnd.isBefore(parsedStart)) {
+    if (parsedEnd != null &&
+        (parsedEnd.isBefore(parsedStart) ||
+            parsedEnd.isAtSameMomentAs(parsedStart))) {
       setState(
         () => _validationError = 'End time must be after the start time.',
       );
       return;
     }
+
+    final eventInterval = int.tryParse(_eventInterval.text.trim()) ?? 1;
+    final eventMetadata = <String, Object?>{
+      'recurrence': _recurrence,
+      if (_recurrence == 'specific_days')
+        'days': _eventSpecificDays.toList()..sort(),
+      if (_recurrence == 'specific_days' || _recurrence == 'interval')
+        'interval': eventInterval,
+      if (_recurrence == 'specific_days' || _recurrence == 'interval')
+        'unit': _eventIntervalUnit,
+    };
 
     Navigator.of(context).pop(<String, Object?>{
       'title': _title.text.trim().isEmpty
@@ -3168,6 +3239,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       'category': _category.text.trim().isEmpty ? null : _category.text.trim(),
       'color': _color,
       'recurrence': _recurrence,
+      'metadata': eventMetadata,
       'reminderMinutesBefore': int.tryParse(_reminder.text.trim()),
       'reminderRecurrence': _reminderRecurrence,
       'reminderSpecificDays': _reminderSpecificDays.toList()..sort(),
@@ -3478,6 +3550,71 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                       ),
                                   ],
                                 ),
+                                if (_recurrence == 'specific_days') ...[
+                                  const SizedBox(height: 10),
+                                  Wrap(
+                                    key: const Key('event-specific-days'),
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      for (final day in _weekdays)
+                                        FilterChip(
+                                          label: Text(day.label),
+                                          selected: _eventSpecificDays.contains(
+                                            day.value,
+                                          ),
+                                          onSelected: (selected) =>
+                                              setState(() {
+                                                if (selected) {
+                                                  _eventSpecificDays.add(
+                                                    day.value,
+                                                  );
+                                                } else {
+                                                  _eventSpecificDays.remove(
+                                                    day.value,
+                                                  );
+                                                }
+                                              }),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                                if (_recurrence == 'interval') ...[
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    key: const Key('event-interval-field'),
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          controller: _eventInterval,
+                                          keyboardType: TextInputType.number,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Every',
+                                            prefixIcon: Icon(
+                                              Icons.numbers_rounded,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      DropdownButton<String>(
+                                        value: _eventIntervalUnit,
+                                        items: [
+                                          for (final unit in _intervalUnits)
+                                            DropdownMenuItem(
+                                              value: unit.value,
+                                              child: Text(unit.label),
+                                            ),
+                                        ],
+                                        onChanged: (value) => setState(() {
+                                          if (value != null) {
+                                            _eventIntervalUnit = value;
+                                          }
+                                        }),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ],
                             ),
                           ],
@@ -4322,6 +4459,7 @@ class _CalendarAgenda extends StatelessWidget {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,

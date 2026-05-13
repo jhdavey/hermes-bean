@@ -226,7 +226,7 @@ class StructuredHermesActionService
             'blocker.update' => collect([$this->updateBlocker($session, $parameters)]),
             'blocker.resolve' => collect([$this->resolveBlocker($session, $parameters)]),
             'blocker.delete' => collect([$this->deleteOwned(Blocker::class, $session, $parameters, 'assistant.blocker.deleted', 'blockers.delete', 'blocker_id')]),
-            'scheduler_job.create' => collect([$this->createSchedulerJob($session, $parameters)]),
+            'scheduler_job.create' => $this->createSchedulerJob($session, $parameters),
             'scheduler_job.update' => collect([$this->updateSchedulerJob($session, $parameters)]),
             'scheduler_job.delete' => collect([$this->deleteOwned(SchedulerJobRecord::class, $session, $parameters, 'assistant.scheduler_job.deleted', 'scheduler_jobs.delete', 'scheduler_job_id')]),
             'agent_profile.update' => collect([$this->updateAgentProfile($session, $parameters)]),
@@ -469,20 +469,73 @@ class StructuredHermesActionService
         return $this->recordEvent($session, 'assistant.blocker.resolved', ['blocker_id' => $blocker->id], 'blockers.resolve', 'succeeded');
     }
 
-    private function createSchedulerJob(ConversationSession $session, array $parameters): ActivityEvent
+    /**
+     * @return Collection<int, ActivityEvent>
+     */
+    private function createSchedulerJob(ConversationSession $session, array $parameters): Collection
     {
+        $scheduledFor = isset($parameters['scheduled_for']) ? Carbon::parse((string) $parameters['scheduled_for']) : null;
+        $name = $this->stringParameter($parameters, 'name', $this->stringParameter($parameters, 'title', 'Scheduled job'));
         $job = SchedulerJobRecord::create([
             'user_id' => $session->user_id,
-            'name' => $this->stringParameter($parameters, 'name', $this->stringParameter($parameters, 'title', 'Scheduled job')),
+            'name' => $name,
             'status' => $this->stringParameter($parameters, 'status', 'queued'),
-            'scheduled_for' => isset($parameters['scheduled_for']) ? Carbon::parse((string) $parameters['scheduled_for']) : null,
+            'scheduled_for' => $scheduledFor,
             'started_at' => isset($parameters['started_at']) ? Carbon::parse((string) $parameters['started_at']) : null,
             'finished_at' => isset($parameters['finished_at']) ? Carbon::parse((string) $parameters['finished_at']) : null,
             'payload' => $parameters['payload'] ?? null,
             'last_error' => $parameters['last_error'] ?? null,
         ]);
 
-        return $this->recordEvent($session, 'assistant.scheduler_job.created', ['scheduler_job_id' => $job->id, 'name' => $job->name], 'scheduler_jobs.create', 'succeeded');
+        $events = collect([
+            $this->recordEvent($session, 'assistant.scheduler_job.created', ['scheduler_job_id' => $job->id, 'name' => $job->name], 'scheduler_jobs.create', 'succeeded'),
+        ]);
+
+        if ($scheduledFor !== null && $this->shouldMirrorSchedulerJobToCalendar($parameters)) {
+            $calendarEvent = CalendarEvent::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'title' => $name,
+                'description' => isset($parameters['description']) ? (string) $parameters['description'] : null,
+                'location' => $parameters['location'] ?? null,
+                'category' => $parameters['category'] ?? 'Scheduled',
+                'color' => $parameters['color'] ?? '#FF9500',
+                'recurrence' => $parameters['recurrence'] ?? null,
+                'starts_at' => $scheduledFor,
+                'ends_at' => isset($parameters['ends_at'])
+                    ? Carbon::parse((string) $parameters['ends_at'])
+                    : $scheduledFor->copy()->addMinutes((int) ($parameters['duration_minutes'] ?? 30)),
+                'status' => 'scheduled',
+                'metadata' => array_filter([
+                    'created_by' => 'structured_hermes_action',
+                    'mirrored_from' => 'scheduler_job',
+                    'scheduler_job_id' => $job->id,
+                    'recurrence' => $parameters['recurrence'] ?? null,
+                ], static fn ($value) => $value !== null),
+            ]);
+
+            $events->push($this->recordEvent($session, 'assistant.calendar_event.created', [
+                'calendar_event_id' => $calendarEvent->id,
+                'scheduler_job_id' => $job->id,
+                'title' => $calendarEvent->title,
+                'starts_at' => $calendarEvent->starts_at->toIso8601String(),
+                'ends_at' => $calendarEvent->ends_at?->toIso8601String(),
+            ], 'calendar.create', 'succeeded'));
+        }
+
+        return $events;
+    }
+
+    private function shouldMirrorSchedulerJobToCalendar(array $parameters): bool
+    {
+        $payload = is_array($parameters['payload'] ?? null) ? $parameters['payload'] : [];
+        $kind = strtolower((string) ($payload['kind'] ?? $parameters['kind'] ?? ''));
+
+        if (in_array($kind, ['internal_automation', 'background_job', 'system_job'], true)) {
+            return false;
+        }
+
+        return true;
     }
 
     private function updateSchedulerJob(ConversationSession $session, array $parameters): ActivityEvent

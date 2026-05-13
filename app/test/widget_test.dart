@@ -2,11 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:hermes_bean_app/hermes_api_client.dart';
 import 'package:hermes_bean_app/main.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   testWidgets(
     'starts signed out, logs in, loads live data, sends chat, and exposes delete account',
     (WidgetTester tester) async {
@@ -204,7 +209,7 @@ void main() {
         find.byKey(const Key('calendar-current-time-marker')),
         findsOneWidget,
       );
-      expect(find.text('9 AM'), findsOneWidget);
+      expect(find.text('7 AM'), findsOneWidget);
       expect(find.text('Noon'), findsOneWidget);
       expect(find.text('10 PM'), findsOneWidget);
       expect(find.byKey(const Key('apple-style-day-strip')), findsNothing);
@@ -281,7 +286,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('10 AM'), findsOneWidget);
       expect(find.text('9 PM'), findsOneWidget);
-      expect(find.text('9 AM'), findsNothing);
+      expect(find.text('7 AM'), findsNothing);
       expect(find.text('10 PM'), findsNothing);
     },
   );
@@ -321,7 +326,7 @@ void main() {
     final fixedHourColumn = tester.getRect(
       find.byKey(const Key('calendar-fixed-hours-column')),
     );
-    expect(fixedHourColumn.height, closeTo(48 + (14 * 52.5), .1));
+    expect(fixedHourColumn.height, closeTo(48 + (16 * 52.5), .1));
     final scrollingDayColumns = tester.getRect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
     );
@@ -368,6 +373,51 @@ void main() {
 
     expect(after, _headingDaysAfter(before, 7));
   });
+
+  testWidgets(
+    'calendar start and end hour preferences survive app relaunches',
+    (WidgetTester tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final tokenStore = _MemoryAuthTokenStore()..token = 'saved-token';
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _SignedInFakeHermesApiClient(),
+          tokenStore: tokenStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('7 AM'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-start-hour-setting')),
+      );
+      await tester.tap(find.byKey(const Key('calendar-start-hour-setting')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('10 AM').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('calendar-end-hour-setting')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('9 PM').last);
+      await tester.pumpAndSettle();
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _SignedInFakeHermesApiClient(),
+          tokenStore: tokenStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('10 AM'), findsOneWidget);
+      expect(find.text('9 PM'), findsOneWidget);
+      expect(find.text('7 AM'), findsNothing);
+    },
+  );
 
   testWidgets(
     'tasks can be checked from the day view and drop below open tasks',
@@ -778,7 +828,27 @@ void main() {
           .widget<ChoiceChip>(
             find.descendant(
               of: find.byKey(const Key('event-recurrence-field')),
-              matching: find.widgetWithText(ChoiceChip, 'Weekly'),
+              matching: find.widgetWithText(ChoiceChip, 'Specific days'),
+            ),
+          )
+          .onSelected
+          ?.call(true);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('event-specific-days')), findsOneWidget);
+      tester
+          .widget<FilterChip>(
+            find.descendant(
+              of: find.byKey(const Key('event-specific-days')),
+              matching: find.widgetWithText(FilterChip, 'Tue'),
+            ),
+          )
+          .onSelected
+          ?.call(true);
+      tester
+          .widget<FilterChip>(
+            find.descendant(
+              of: find.byKey(const Key('event-specific-days')),
+              matching: find.widgetWithText(FilterChip, 'Thu'),
             ),
           )
           .onSelected
@@ -801,7 +871,12 @@ void main() {
         '15',
       );
       tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Specific days'))
+          .widget<ChoiceChip>(
+            find.descendant(
+              of: find.byKey(const Key('event-reminder-recurrence-field')),
+              matching: find.widgetWithText(ChoiceChip, 'Specific days'),
+            ),
+          )
           .onSelected
           ?.call(true);
       await tester.pumpAndSettle();
@@ -810,11 +885,21 @@ void main() {
         findsOneWidget,
       );
       tester
-          .widget<FilterChip>(find.widgetWithText(FilterChip, 'Mon'))
+          .widget<FilterChip>(
+            find.descendant(
+              of: find.byKey(const Key('event-reminder-specific-days')),
+              matching: find.widgetWithText(FilterChip, 'Mon'),
+            ),
+          )
           .onSelected
           ?.call(true);
       tester
-          .widget<FilterChip>(find.widgetWithText(FilterChip, 'Wed'))
+          .widget<FilterChip>(
+            find.descendant(
+              of: find.byKey(const Key('event-reminder-specific-days')),
+              matching: find.widgetWithText(FilterChip, 'Wed'),
+            ),
+          )
           .onSelected
           ?.call(true);
       await tester.pumpAndSettle();
@@ -842,7 +927,13 @@ void main() {
       );
       expect(api.updatedEvent?.category, 'Work');
       expect(api.updatedEvent?.color, '#FF9500');
-      expect(api.updatedEvent?.recurrence, 'weekly');
+      expect(api.updatedEvent?.recurrence, 'specific_days');
+      expect(api.updatedEvent?.metadata, {
+        'recurrence': 'specific_days',
+        'days': ['thu', 'tue'],
+        'interval': 1,
+        'unit': 'days',
+      });
       await tester.ensureVisible(
         find.byKey(const Key('calendar-event-block-design-sync')),
       );
@@ -862,6 +953,47 @@ void main() {
         'interval': 1,
         'unit': 'days',
       });
+    },
+  );
+
+  testWidgets(
+    'calendar event editor rejects end times that are not after start',
+    (WidgetTester tester) async {
+      final api = _EditableCalendarFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-event-block-design-review')),
+      );
+      await tester.tap(
+        find.byKey(const Key('calendar-event-block-design-review')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('event-start-field')),
+        '4:00 PM',
+      );
+      await tester.enterText(
+        find.byKey(const Key('event-end-field')),
+        '4:00 PM',
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('event-validation-error')), findsOneWidget);
+      expect(
+        find.text('End time must be after the start time.'),
+        findsOneWidget,
+      );
+      expect(api.updatedEvent, isNull);
+      expect(
+        find.byKey(const Key('calendar-event-detail-page')),
+        findsOneWidget,
+      );
     },
   );
 
@@ -1265,6 +1397,7 @@ class _EditableCalendarFakeHermesApiClient
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
   }) async {
     updatedEvent = HermesCalendarEvent(
       id: eventId,
@@ -1274,6 +1407,7 @@ class _EditableCalendarFakeHermesApiClient
       category: category,
       color: color,
       recurrence: recurrence,
+      metadata: metadata,
     );
     return updatedEvent!;
   }

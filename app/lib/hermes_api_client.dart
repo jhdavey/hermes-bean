@@ -251,6 +251,7 @@ class HermesApiClient {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
   }) async {
     final data = await _sendJson(
       'PATCH',
@@ -262,6 +263,7 @@ class HermesApiClient {
         'category': category,
         'color': color,
         'recurrence': recurrence,
+        if (metadata != null) 'metadata': metadata,
       },
     );
     return HermesCalendarEvent.fromJson(_expectMap(data['data']));
@@ -626,6 +628,7 @@ class HermesCalendarEvent {
     this.category,
     this.color,
     this.recurrence,
+    this.metadata,
   });
 
   final int id;
@@ -635,23 +638,23 @@ class HermesCalendarEvent {
   final String? category;
   final String? color;
   final String? recurrence;
+  final Map<String, Object?>? metadata;
 
-  factory HermesCalendarEvent.fromJson(Map<String, Object?> json) =>
-      HermesCalendarEvent(
-        id: _expectInt(json['id']),
-        title: _readTitle(json),
-        startsAt: (json['starts_at'] ?? json['startsAt']) as String?,
-        endsAt: (json['ends_at'] ?? json['endsAt']) as String?,
-        category:
-            json['category'] as String? ??
-            (_expectMapOrNull(json['metadata'])?['category'] as String?),
-        color:
-            json['color'] as String? ??
-            (_expectMapOrNull(json['metadata'])?['color'] as String?),
-        recurrence:
-            json['recurrence'] as String? ??
-            (_expectMapOrNull(json['metadata'])?['recurrence'] as String?),
-      );
+  factory HermesCalendarEvent.fromJson(Map<String, Object?> json) {
+    final metadata = _expectMapOrNull(json['metadata']);
+    return HermesCalendarEvent(
+      id: _expectInt(json['id']),
+      title: _readTitle(json),
+      startsAt: (json['starts_at'] ?? json['startsAt']) as String?,
+      endsAt: (json['ends_at'] ?? json['endsAt']) as String?,
+      category:
+          json['category'] as String? ?? (metadata?['category'] as String?),
+      color: json['color'] as String? ?? (metadata?['color'] as String?),
+      recurrence:
+          json['recurrence'] as String? ?? (metadata?['recurrence'] as String?),
+      metadata: metadata,
+    );
+  }
 
   HermesCalendarEvent copyWith({
     String? title,
@@ -660,10 +663,12 @@ class HermesCalendarEvent {
     String? category,
     String? color,
     String? recurrence,
+    Map<String, Object?>? metadata,
     bool clearEndsAt = false,
     bool clearCategory = false,
     bool clearColor = false,
     bool clearRecurrence = false,
+    bool clearMetadata = false,
   }) => HermesCalendarEvent(
     id: id,
     title: title ?? this.title,
@@ -672,6 +677,7 @@ class HermesCalendarEvent {
     category: clearCategory ? null : category ?? this.category,
     color: clearColor ? null : color ?? this.color,
     recurrence: clearRecurrence ? null : recurrence ?? this.recurrence,
+    metadata: clearMetadata ? null : metadata ?? this.metadata,
   );
 }
 

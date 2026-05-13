@@ -2,8 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\AgentProfile;
+use App\Models\Blocker;
+use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
+use App\Models\Reminder;
 use App\Models\Task;
+use App\Models\User;
 use App\Services\HermesRuntimeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -143,16 +148,16 @@ echo json_encode([
 PHP);
 
         $token = $this->apiToken();
-        $userId = \App\Models\User::where('email', 'test@example.com')->value('id');
+        $userId = User::where('email', 'test@example.com')->value('id');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Universal dashboard control',
         ])->assertCreated()->json('data.id');
 
-        \App\Models\Task::create(['id' => 1, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Plan launch', 'status' => 'open']);
-        \App\Models\Reminder::create(['id' => 1, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Standup', 'remind_at' => '2026-05-12T13:00:00Z']);
-        \App\Models\Reminder::create(['id' => 2, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Delete me', 'remind_at' => '2026-05-12T15:00:00Z']);
-        \App\Models\CalendarEvent::create(['id' => 1, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Design review', 'starts_at' => '2026-05-12T18:00:00Z']);
-        \App\Models\Blocker::create(['id' => 1, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'reason' => 'Needs OAuth', 'status' => 'open']);
+        Task::create(['id' => 1, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Plan launch', 'status' => 'open']);
+        Reminder::create(['id' => 1, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Standup', 'remind_at' => '2026-05-12T13:00:00Z']);
+        Reminder::create(['id' => 2, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Delete me', 'remind_at' => '2026-05-12T15:00:00Z']);
+        CalendarEvent::create(['id' => 1, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Design review', 'starts_at' => '2026-05-12T18:00:00Z']);
+        Blocker::create(['id' => 1, 'user_id' => $userId, 'conversation_session_id' => $sessionId, 'reason' => 'Needs OAuth', 'status' => 'open']);
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Complete launch planning, move design review, clean reminders, resolve blockers, and make Bean more executive.',
@@ -172,7 +177,7 @@ PHP);
         $this->assertDatabaseMissing('reminders', ['id' => 2, 'user_id' => $userId]);
         $this->assertDatabaseHas('calendar_events', ['id' => 1, 'user_id' => $userId, 'title' => 'Moved design review']);
         $this->assertDatabaseHas('blockers', ['id' => 1, 'user_id' => $userId, 'status' => 'resolved']);
-        $this->assertSame('executive', \App\Models\AgentProfile::where('user_id', $userId)->firstOrFail()->settings['tone'] ?? null);
+        $this->assertSame('executive', AgentProfile::where('user_id', $userId)->firstOrFail()->settings['tone'] ?? null);
     }
 
     public function test_runtime_exposes_universal_dashboard_action_schema_to_hermes_prompt(): void
@@ -222,7 +227,7 @@ echo json_encode([
 PHP);
 
         $token = $this->apiToken();
-        $userId = \App\Models\User::where('email', 'test@example.com')->value('id');
+        $userId = User::where('email', 'test@example.com')->value('id');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Nested JSON response',
         ])->assertCreated()->json('data.id');
@@ -240,6 +245,98 @@ PHP);
             'starts_at' => '2026-05-13 09:00:00',
             'ends_at' => '2026-05-13 10:00:00',
         ]);
+    }
+
+    public function test_agent_scheduled_job_claims_are_materialized_on_today_calendar(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Scheduled Focus block for 3 PM.',
+    'actions' => [[
+        'type' => 'scheduler_job.create',
+        'risk' => 'low',
+        'parameters' => [
+            'name' => 'Focus block',
+            'scheduled_for' => '2026-05-13T15:00:00Z',
+            'payload' => ['kind' => 'user_scheduled_plan'],
+        ],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Visible scheduled plan',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Schedule Focus block for 3 PM.',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Scheduled Focus block for 3 PM.')
+            ->assertJsonFragment(['event_type' => 'assistant.scheduler_job.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $this->withToken($token)->getJson('/api/today')
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Focus block'])
+            ->assertJsonPath('data.counts.calendar_events', 1);
+
+        $this->assertDatabaseHas('calendar_events', [
+            'title' => 'Focus block',
+            'starts_at' => '2026-05-13 15:00:00',
+            'status' => 'scheduled',
+        ]);
+    }
+
+    public function test_agent_created_task_reminder_and_event_are_visible_in_today_dashboard(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Added the task, reminder, and calendar event.',
+    'actions' => [
+        [
+            'type' => 'task.create',
+            'risk' => 'low',
+            'parameters' => ['title' => 'Draft proposal', 'due_at' => '2026-05-13T17:00:00Z'],
+        ],
+        [
+            'type' => 'reminder.create',
+            'risk' => 'low',
+            'parameters' => ['title' => 'Check oven', 'remind_at' => '2026-05-13T16:00:00Z'],
+        ],
+        [
+            'type' => 'calendar_event.create',
+            'risk' => 'low',
+            'parameters' => ['title' => 'Design sync', 'starts_at' => '2026-05-13T18:00:00Z', 'ends_at' => '2026-05-13T18:30:00Z'],
+        ],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Visible dashboard resources',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Add a proposal task, oven reminder, and design sync.',
+        ])->assertCreated()
+            ->assertJsonFragment(['event_type' => 'assistant.task.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.reminder.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $this->withToken($token)->getJson('/api/today')
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Draft proposal'])
+            ->assertJsonFragment(['title' => 'Check oven'])
+            ->assertJsonFragment(['title' => 'Design sync'])
+            ->assertJsonPath('data.counts.tasks', 1)
+            ->assertJsonPath('data.counts.reminders', 1)
+            ->assertJsonPath('data.counts.calendar_events', 1);
     }
 
     public function test_runtime_fails_safe_to_blocker_when_real_hermes_cli_is_not_configured(): void
