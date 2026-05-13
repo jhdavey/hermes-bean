@@ -1991,7 +1991,7 @@ class _CriticalTaskBadge extends StatelessWidget {
 
 const _defaultCalendarStartHour = 9;
 const _defaultCalendarEndHour = 22;
-const _calendarHourHeight = 42.0;
+const _calendarHourHeight = 52.5;
 const _calendarTimeColumnWidth = 48.0;
 
 class _AppleStyleTodayTimeline extends StatefulWidget {

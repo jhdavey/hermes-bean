@@ -315,6 +315,7 @@ void main() {
     final fixedHourColumn = tester.getRect(
       find.byKey(const Key('calendar-fixed-hours-column')),
     );
+    expect(fixedHourColumn.height, closeTo(48 + (14 * 52.5), .1));
     final scrollingDayColumns = tester.getRect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
     );
