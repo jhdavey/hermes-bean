@@ -93,6 +93,47 @@ class HermesApiClient {
     ).map((json) => HermesTask.fromJson(_expectMap(json))).toList();
   }
 
+  Future<HermesTask> createTask({
+    required String title,
+    String type = 'todo',
+    String status = 'open',
+    String? dueAt,
+    Map<String, Object?>? metadata,
+  }) async {
+    final body = <String, Object?>{
+      'title': title,
+      'type': type,
+      'status': status,
+      'due_at': dueAt,
+      if (metadata != null) 'metadata': metadata,
+    };
+    final data = await _sendJson('POST', '/tasks', body: body);
+    return HermesTask.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesTask> updateTask(
+    int taskId, {
+    String? title,
+    String? status,
+    String? dueAt,
+    String? completedAt,
+    Map<String, Object?>? metadata,
+  }) async {
+    final body = <String, Object?>{
+      if (title != null) 'title': title,
+      if (status != null) 'status': status,
+      'due_at': dueAt,
+      if (completedAt != null || status == 'open') 'completed_at': completedAt,
+      if (metadata != null) 'metadata': metadata,
+    };
+    final data = await _sendJson('PATCH', '/tasks/$taskId', body: body);
+    return HermesTask.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> deleteTask(int taskId) async {
+    await _sendJson('DELETE', '/tasks/$taskId');
+  }
+
   Future<HermesTask> completeTask(int taskId) async {
     final data = await _sendJson(
       'PATCH',
@@ -116,6 +157,47 @@ class HermesApiClient {
     return _expectList(
       data['data'],
     ).map((json) => HermesReminder.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<HermesReminder> createReminder({
+    required String title,
+    required String remindAt,
+    String status = 'pending',
+    int? calendarEventId,
+    Map<String, Object?>? metadata,
+  }) async {
+    final body = <String, Object?>{
+      'title': title,
+      'remind_at': remindAt,
+      'status': status,
+      if (calendarEventId != null) 'calendar_event_id': calendarEventId,
+      if (metadata != null) 'metadata': metadata,
+    };
+    final data = await _sendJson('POST', '/reminders', body: body);
+    return HermesReminder.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesReminder> updateReminder(
+    int reminderId, {
+    String? title,
+    String? remindAt,
+    String? status,
+    int? calendarEventId,
+    Map<String, Object?>? metadata,
+  }) async {
+    final body = <String, Object?>{
+      if (title != null) 'title': title,
+      if (remindAt != null) 'remind_at': remindAt,
+      if (status != null) 'status': status,
+      if (calendarEventId != null) 'calendar_event_id': calendarEventId,
+      if (metadata != null) 'metadata': metadata,
+    };
+    final data = await _sendJson('PATCH', '/reminders/$reminderId', body: body);
+    return HermesReminder.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> deleteReminder(int reminderId) async {
+    await _sendJson('DELETE', '/reminders/$reminderId');
   }
 
   Future<List<HermesCalendarEvent>> listCalendarEvents() async {
@@ -442,16 +524,20 @@ class HermesTask {
   );
 
   HermesTask copyWith({
+    String? title,
     String? status,
+    String? dueAt,
     String? completedAt,
+    Map<String, Object?>? metadata,
+    bool clearDueAt = false,
     bool clearCompletedAt = false,
   }) => HermesTask(
     id: id,
-    title: title,
+    title: title ?? this.title,
     status: status ?? this.status,
-    dueAt: dueAt,
+    dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
     completedAt: clearCompletedAt ? null : completedAt ?? this.completedAt,
-    metadata: metadata,
+    metadata: metadata ?? this.metadata,
   );
 }
 
@@ -460,21 +546,48 @@ class HermesReminder {
     required this.id,
     required this.title,
     this.dueAt,
+    this.status,
+    this.completedAt,
     this.calendarEventId,
+    this.metadata,
   });
 
   final int id;
   final String title;
   final String? dueAt;
+  final String? status;
+  final String? completedAt;
   final int? calendarEventId;
+  final Map<String, Object?>? metadata;
 
   factory HermesReminder.fromJson(Map<String, Object?> json) => HermesReminder(
     id: _expectInt(json['id']),
     title: _readTitle(json),
     dueAt: (json['due_at'] ?? json['remind_at'] ?? json['dueAt']) as String?,
+    status: json['status'] as String?,
+    completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
     calendarEventId: json['calendar_event_id'] == null
         ? null
         : _expectInt(json['calendar_event_id']),
+    metadata: json['metadata'] == null ? null : _expectMap(json['metadata']),
+  );
+
+  HermesReminder copyWith({
+    String? title,
+    String? dueAt,
+    String? status,
+    String? completedAt,
+    int? calendarEventId,
+    Map<String, Object?>? metadata,
+    bool clearDueAt = false,
+  }) => HermesReminder(
+    id: id,
+    title: title ?? this.title,
+    dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
+    status: status ?? this.status,
+    completedAt: completedAt ?? this.completedAt,
+    calendarEventId: calendarEventId ?? this.calendarEventId,
+    metadata: metadata ?? this.metadata,
   );
 }
 
@@ -547,14 +660,18 @@ class HermesCalendarEvent {
     String? category,
     String? color,
     String? recurrence,
+    bool clearEndsAt = false,
+    bool clearCategory = false,
+    bool clearColor = false,
+    bool clearRecurrence = false,
   }) => HermesCalendarEvent(
     id: id,
     title: title ?? this.title,
     startsAt: startsAt ?? this.startsAt,
-    endsAt: endsAt ?? this.endsAt,
-    category: category ?? this.category,
-    color: color ?? this.color,
-    recurrence: recurrence ?? this.recurrence,
+    endsAt: clearEndsAt ? null : endsAt ?? this.endsAt,
+    category: clearCategory ? null : category ?? this.category,
+    color: clearColor ? null : color ?? this.color,
+    recurrence: clearRecurrence ? null : recurrence ?? this.recurrence,
   );
 }
 

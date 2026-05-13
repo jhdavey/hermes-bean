@@ -416,14 +416,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.completedTaskIds, [102]);
-    final openRecurring = tester.getRect(find.text('Recurring vitamins'));
-    final completedTask = tester.getRect(find.text('Call pharmacy'));
-    expect(openRecurring.top, lessThan(completedTask.top));
+    expect(find.text('Call pharmacy'), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const Key('task-filter-done')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-filter-done')));
+    await tester.pumpAndSettle();
+    expect(find.text('Call pharmacy'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('task-complete-checkbox-102')));
     await tester.pumpAndSettle();
 
     expect(api.reopenedTaskIds, [102]);
+    await tester.tap(find.byKey(const Key('task-filter-open')));
+    await tester.pumpAndSettle();
     final reopenedTask = tester.widget<CheckboxListTile>(
       find.byKey(const Key('task-complete-checkbox-102')),
     );
@@ -637,6 +643,9 @@ void main() {
         find.byKey(const Key('calendar-event-block-design-review')),
       );
       await tester.pumpAndSettle();
+      final initialEventHeight = tester
+          .getRect(find.byKey(const Key('calendar-event-block-design-review')))
+          .height;
       await tester.tap(
         find.byKey(const Key('calendar-event-block-design-review')),
       );
@@ -673,14 +682,14 @@ void main() {
         find.byKey(const Key('event-title-field')),
         'Design sync',
       );
-      final eventYear = DateTime.now().year;
+      final eventDate = DateTime.now();
       await tester.enterText(
         find.byKey(const Key('event-start-field')),
-        'Thu May 14 · 4:00 PM',
+        '4:00 PM',
       );
       await tester.enterText(
         find.byKey(const Key('event-end-field')),
-        'Thu May 14 · 5:00 PM',
+        '5:00 PM',
       );
       await tester.enterText(
         find.byKey(const Key('event-category-field')),
@@ -756,15 +765,35 @@ void main() {
       expect(api.updatedEvent?.title, 'Design sync');
       expect(
         api.updatedEvent?.startsAt,
-        DateTime(eventYear, 5, 14, 16).toIso8601String(),
+        DateTime(
+          eventDate.year,
+          eventDate.month,
+          eventDate.day,
+          16,
+        ).toIso8601String(),
       );
       expect(
         api.updatedEvent?.endsAt,
-        DateTime(eventYear, 5, 14, 17).toIso8601String(),
+        DateTime(
+          eventDate.year,
+          eventDate.month,
+          eventDate.day,
+          17,
+        ).toIso8601String(),
       );
       expect(api.updatedEvent?.category, 'Work');
       expect(api.updatedEvent?.color, '#FF9500');
       expect(api.updatedEvent?.recurrence, 'weekly');
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-event-block-design-sync')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .getRect(find.byKey(const Key('calendar-event-block-design-sync')))
+            .height,
+        greaterThan(initialEventHeight),
+      );
       expect(api.createdReminder?['calendar_event_id'], 3);
       expect(api.createdReminder?['title'], 'Reminder: Design sync');
       expect(api.createdReminder?['metadata'], {
