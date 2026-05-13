@@ -1814,11 +1814,6 @@ class _TodayHomeView extends StatelessWidget {
                 onDayChanged: onDateSelected,
                 onEventTap: onCalendarEventEdited,
               ),
-              const SizedBox(height: 16),
-              _CalendarAgenda(
-                calendar: calendar,
-                onEventTap: onCalendarEventEdited,
-              ),
             ],
           ],
         ),

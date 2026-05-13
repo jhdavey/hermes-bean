@@ -202,10 +202,10 @@ void main() {
       expect(find.text('Noon'), findsOneWidget);
       expect(find.text('10 PM'), findsOneWidget);
       expect(find.byKey(const Key('apple-style-day-strip')), findsNothing);
-      expect(find.text('Today / upcoming'), findsOneWidget);
+      expect(find.text('Today / upcoming'), findsNothing);
       expect(find.text('Tasks for today'), findsOneWidget);
       expect(find.text('Plan launch'), findsOneWidget);
-      expect(find.text('Design review'), findsWidgets);
+      expect(find.text('Design review'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('calendar-month-chevron')));
       await tester.pumpAndSettle();
@@ -632,9 +632,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('Today / upcoming'));
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-event-block-design-review')),
+      );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Design review').last);
+      await tester.tap(
+        find.byKey(const Key('calendar-event-block-design-review')),
+      );
       await tester.pumpAndSettle();
 
       expect(
@@ -690,7 +694,6 @@ void main() {
       expect(api.updatedEvent?.recurrence, 'weekly');
       expect(api.createdReminder?['calendar_event_id'], 3);
       expect(api.createdReminder?['title'], 'Reminder: Design sync');
-      expect(find.text('Design sync'), findsWidgets);
     },
   );
 
