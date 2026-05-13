@@ -185,6 +185,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   List<HermesTask> _pastTasks = const [];
   List<HermesReminder> _reminders = const [];
   List<HermesCalendarEvent> _calendar = const [];
+  List<HermesEventCategory> _eventCategories = const [];
   List<HermesApproval> _approvals = const [];
   List<HermesActivityEvent> _events = const [];
   final List<HermesMessage> _messages = const [
@@ -234,6 +235,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         widget.apiClient.listPastTasks().catchError(
           (_) => const <HermesTask>[],
         ),
+        widget.apiClient.listEventCategories().catchError(
+          (_) => const <HermesEventCategory>[],
+        ),
         widget.apiClient.pollActivityEvents(session.id),
       ]);
       final summary = results[0] as HermesTodaySummary;
@@ -243,10 +247,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _session = session;
         _tasks = summary.tasks;
         _pastTasks = results[1] as List<HermesTask>;
+        _eventCategories = results[2] as List<HermesEventCategory>;
         _reminders = summary.reminders;
         _calendar = summary.calendarEvents;
         _approvals = summary.approvals;
-        _events = results[2] as List<HermesActivityEvent>;
+        _events = results[3] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
       });
     } catch (error) {
@@ -262,6 +267,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _pastTasks = const [];
         _reminders = const [];
         _calendar = const [];
+        _eventCategories = const [];
         _approvals = const [];
         _events = const [];
         _phase = _AuthPhase.signedOut;
@@ -539,6 +545,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         widget.apiClient.listPastTasks().catchError(
           (_) => const <HermesTask>[],
         ),
+        widget.apiClient.listEventCategories().catchError(
+          (_) => const <HermesEventCategory>[],
+        ),
         widget.apiClient.pollActivityEvents(session.id),
       ]);
       final summary = results[0] as HermesTodaySummary;
@@ -546,10 +555,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       setState(() {
         _tasks = summary.tasks;
         _pastTasks = results[1] as List<HermesTask>;
+        _eventCategories = results[2] as List<HermesEventCategory>;
         _reminders = summary.reminders;
         _calendar = summary.calendarEvents;
         _approvals = summary.approvals;
-        _events = results[2] as List<HermesActivityEvent>;
+        _events = results[3] as List<HermesActivityEvent>;
         _error = null;
       });
     } catch (error) {
@@ -606,6 +616,47 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
+  Future<HermesEventCategory> _saveEventCategory({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  }) async {
+    final saved = category == null
+        ? await widget.apiClient.createEventCategory(name: name, color: color)
+        : await widget.apiClient.updateEventCategory(
+            category.id,
+            name: name,
+            color: color,
+          );
+    if (!mounted) return saved;
+    setState(() {
+      final exists = _eventCategories.any((item) => item.id == saved.id);
+      _eventCategories = exists
+          ? _eventCategories
+                .map((item) => item.id == saved.id ? saved : item)
+                .toList()
+          : [..._eventCategories, saved];
+    });
+    return saved;
+  }
+
+  Future<void> _deleteEventCategory(HermesEventCategory category) async {
+    await widget.apiClient.deleteEventCategory(category.id);
+    if (!mounted) return;
+    setState(() {
+      _eventCategories = _eventCategories
+          .where((item) => item.id != category.id)
+          .toList();
+      _calendar = _calendar
+          .map(
+            (event) => event.category == category.name
+                ? event.copyWith(category: null)
+                : event,
+          )
+          .toList();
+    });
+  }
+
   Future<void> _editCalendarEvent(
     HermesCalendarEvent event, {
     required String title,
@@ -615,6 +666,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? color,
     String? recurrence,
     int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
   }) async {
     final previousCalendar = _calendar;
     final optimisticEvent = event.copyWith(
@@ -654,6 +709,15 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
             remindAt: start
                 .subtract(Duration(minutes: reminderMinutesBefore))
                 .toIso8601String(),
+            metadata: {
+              'minutes_before': reminderMinutesBefore,
+              'recurrence': reminderRecurrence ?? 'none',
+              if ((reminderSpecificDays ?? const <String>[]).isNotEmpty)
+                'days': reminderSpecificDays,
+              if (reminderInterval != null && reminderInterval > 0)
+                'interval': reminderInterval,
+              if (reminderIntervalUnit != null) 'unit': reminderIntervalUnit,
+            },
           );
         }
       }
@@ -796,6 +860,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           pastTasks: _pastTasks,
           reminders: _reminders,
           calendar: _calendar,
+          eventCategories: _eventCategories,
           approvals: _approvals,
           events: _events,
           messages: _messages,
@@ -816,6 +881,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           onSend: _sendChat,
           onTaskCompleted: _toggleTaskCompletion,
           onCalendarEventEdited: _editCalendarEvent,
+          onEventCategorySaved: _saveEventCategory,
+          onEventCategoryDeleted: _deleteEventCategory,
           onDeleteAccount: _deleteAccount,
         ),
       ),
@@ -1014,6 +1081,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.pastTasks,
     required this.reminders,
     required this.calendar,
+    required this.eventCategories,
     required this.approvals,
     required this.events,
     required this.messages,
@@ -1032,6 +1100,8 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onSend,
     required this.onTaskCompleted,
     required this.onCalendarEventEdited,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
     required this.onDeleteAccount,
     this.error,
   });
@@ -1041,6 +1111,7 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesTask> pastTasks;
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
+  final List<HermesEventCategory> eventCategories;
   final List<HermesApproval> approvals;
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
@@ -1067,8 +1138,20 @@ class _CommandCenterContent extends StatelessWidget {
     String? color,
     String? recurrence,
     int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
   })
   onCalendarEventEdited;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(HermesEventCategory category)
+  onEventCategoryDeleted;
   final Future<void> Function() onDeleteAccount;
   final String? error;
 
@@ -1119,6 +1202,7 @@ class _CommandCenterContent extends StatelessWidget {
             tasks: activeTasks,
             reminders: reminders,
             calendar: calendar,
+            eventCategories: eventCategories,
             approvals: pendingApprovals,
             selectedDay: selectedCalendarDay,
             showMonth: showCalendarMonth,
@@ -1128,6 +1212,8 @@ class _CommandCenterContent extends StatelessWidget {
             onBackToDay: onBackToCalendarDay,
             onTaskCompleted: onTaskCompleted,
             onCalendarEventEdited: onCalendarEventEdited,
+            onEventCategorySaved: onEventCategorySaved,
+            onEventCategoryDeleted: onEventCategoryDeleted,
           ),
           _HomeDestination.tasks => _TaskListCard(
             tasks: activeTasks,
@@ -1162,7 +1248,10 @@ class _CommandCenterContent extends StatelessWidget {
             _ShellCard(
               child: _CalendarAgenda(
                 calendar: calendar,
+                eventCategories: eventCategories,
                 onEventTap: onCalendarEventEdited,
+                onEventCategorySaved: onEventCategorySaved,
+                onEventCategoryDeleted: onEventCategoryDeleted,
               ),
             ),
           ],
@@ -1739,6 +1828,7 @@ class _TodayHomeView extends StatelessWidget {
     required this.tasks,
     required this.reminders,
     required this.calendar,
+    required this.eventCategories,
     required this.approvals,
     required this.selectedDay,
     required this.showMonth,
@@ -1748,12 +1838,15 @@ class _TodayHomeView extends StatelessWidget {
     required this.onBackToDay,
     required this.onTaskCompleted,
     required this.onCalendarEventEdited,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
   });
 
   final HermesUser user;
   final List<HermesTask> tasks;
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
+  final List<HermesEventCategory> eventCategories;
   final List<HermesApproval> approvals;
   final DateTime selectedDay;
   final bool showMonth;
@@ -1771,8 +1864,20 @@ class _TodayHomeView extends StatelessWidget {
     String? color,
     String? recurrence,
     int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
   })
   onCalendarEventEdited;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(HermesEventCategory category)
+  onEventCategoryDeleted;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1808,11 +1913,14 @@ class _TodayHomeView extends StatelessWidget {
             ] else ...[
               _AppleStyleTodayTimeline(
                 calendar: calendar,
+                eventCategories: eventCategories,
                 selectedDay: selectedDay,
                 startHour: startHour,
                 endHour: endHour,
                 onDayChanged: onDateSelected,
                 onEventTap: onCalendarEventEdited,
+                onEventCategorySaved: onEventCategorySaved,
+                onEventCategoryDeleted: onEventCategoryDeleted,
               ),
             ],
           ],
@@ -1889,14 +1997,18 @@ const _calendarTimeColumnWidth = 48.0;
 class _AppleStyleTodayTimeline extends StatefulWidget {
   const _AppleStyleTodayTimeline({
     required this.calendar,
+    required this.eventCategories,
     required this.selectedDay,
     required this.startHour,
     required this.endHour,
     required this.onDayChanged,
     required this.onEventTap,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
   });
 
   final List<HermesCalendarEvent> calendar;
+  final List<HermesEventCategory> eventCategories;
   final DateTime selectedDay;
   final int startHour;
   final int endHour;
@@ -1910,8 +2022,20 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     String? color,
     String? recurrence,
     int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
   })
   onEventTap;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(HermesEventCategory category)
+  onEventCategoryDeleted;
 
   @override
   State<_AppleStyleTodayTimeline> createState() =>
@@ -2040,6 +2164,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                   itemBuilder: (context, page) => _TwoDayTimelinePage(
                     key: ValueKey('two-day-timeline-page-$page'),
                     calendar: widget.calendar,
+                    eventCategories: widget.eventCategories,
                     selectedDay: _dateForPage(page),
                     today: today,
                     now: now,
@@ -2048,6 +2173,8 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                     visibleHours: visibleHours,
                     isActivePage: page == _visibleDayPage,
                     onEventTap: widget.onEventTap,
+                    onEventCategorySaved: widget.onEventCategorySaved,
+                    onEventCategoryDeleted: widget.onEventCategoryDeleted,
                   ),
                 ),
               ),
@@ -2063,6 +2190,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
   const _TwoDayTimelinePage({
     super.key,
     required this.calendar,
+    required this.eventCategories,
     required this.selectedDay,
     required this.today,
     required this.now,
@@ -2071,9 +2199,12 @@ class _TwoDayTimelinePage extends StatelessWidget {
     required this.visibleHours,
     required this.isActivePage,
     required this.onEventTap,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
   });
 
   final List<HermesCalendarEvent> calendar;
+  final List<HermesEventCategory> eventCategories;
   final DateTime selectedDay;
   final DateTime today;
   final DateTime now;
@@ -2090,8 +2221,20 @@ class _TwoDayTimelinePage extends StatelessWidget {
     String? color,
     String? recurrence,
     int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
   })
   onEventTap;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(HermesEventCategory category)
+  onEventCategoryDeleted;
 
   @override
   Widget build(BuildContext context) {
@@ -2173,7 +2316,10 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       endHour: endHour,
                       columnIndex: 0,
                       timelineWidth: constraints.maxWidth,
+                      eventCategories: eventCategories,
                       onTap: onEventTap,
+                      onEventCategorySaved: onEventCategorySaved,
+                      onEventCategoryDeleted: onEventCategoryDeleted,
                     ),
                   if (_eventFallsOnDay(event, selectedNextDay) &&
                       _eventFallsWithinHours(event, startHour, endHour))
@@ -2183,7 +2329,10 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       endHour: endHour,
                       columnIndex: 1,
                       timelineWidth: constraints.maxWidth,
+                      eventCategories: eventCategories,
                       onTap: onEventTap,
+                      onEventCategorySaved: onEventCategorySaved,
+                      onEventCategoryDeleted: onEventCategoryDeleted,
                     ),
                 ],
               ],
@@ -2491,7 +2640,10 @@ class _TimelineEventBlock extends StatelessWidget {
     required this.endHour,
     required this.columnIndex,
     required this.timelineWidth,
+    required this.eventCategories,
     required this.onTap,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
   });
 
   final HermesCalendarEvent event;
@@ -2499,6 +2651,7 @@ class _TimelineEventBlock extends StatelessWidget {
   final int endHour;
   final int columnIndex;
   final double timelineWidth;
+  final List<HermesEventCategory> eventCategories;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -2508,8 +2661,20 @@ class _TimelineEventBlock extends StatelessWidget {
     String? color,
     String? recurrence,
     int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
   })
   onTap;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(HermesEventCategory category)
+  onEventCategoryDeleted;
 
   @override
   Widget build(BuildContext context) {
@@ -2532,7 +2697,14 @@ class _TimelineEventBlock extends StatelessWidget {
       child: InkWell(
         key: Key(_calendarEventBlockKey(event)),
         borderRadius: BorderRadius.circular(10),
-        onTap: () => _showCalendarEventDetails(context, event, onTap),
+        onTap: () => _showCalendarEventDetails(
+          context,
+          event,
+          eventCategories: eventCategories,
+          onSave: onTap,
+          onEventCategorySaved: onEventCategorySaved,
+          onEventCategoryDeleted: onEventCategoryDeleted,
+        ),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
@@ -2560,8 +2732,9 @@ class _TimelineEventBlock extends StatelessWidget {
 
 Future<void> _showCalendarEventDetails(
   BuildContext context,
-  HermesCalendarEvent event,
-  Future<void> Function(
+  HermesCalendarEvent event, {
+  required List<HermesEventCategory> eventCategories,
+  required Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
@@ -2570,11 +2743,30 @@ Future<void> _showCalendarEventDetails(
     String? color,
     String? recurrence,
     int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
   })
   onSave,
-) async {
+  required Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved,
+  required Future<void> Function(HermesEventCategory category)
+  onEventCategoryDeleted,
+}) async {
   final result = await Navigator.of(context).push<Map<String, Object?>>(
-    MaterialPageRoute(builder: (_) => _CalendarEventDetailPage(event: event)),
+    MaterialPageRoute(
+      builder: (_) => _CalendarEventDetailPage(
+        event: event,
+        eventCategories: eventCategories,
+        onEventCategorySaved: onEventCategorySaved,
+        onEventCategoryDeleted: onEventCategoryDeleted,
+      ),
+    ),
   );
 
   if (result != null) {
@@ -2587,14 +2779,34 @@ Future<void> _showCalendarEventDetails(
       color: result['color'] as String?,
       recurrence: result['recurrence'] as String?,
       reminderMinutesBefore: result['reminderMinutesBefore'] as int?,
+      reminderRecurrence: result['reminderRecurrence'] as String?,
+      reminderSpecificDays: (result['reminderSpecificDays'] as List?)
+          ?.whereType<String>()
+          .toList(),
+      reminderInterval: result['reminderInterval'] as int?,
+      reminderIntervalUnit: result['reminderIntervalUnit'] as String?,
     );
   }
 }
 
 class _CalendarEventDetailPage extends StatefulWidget {
-  const _CalendarEventDetailPage({required this.event});
+  const _CalendarEventDetailPage({
+    required this.event,
+    required this.eventCategories,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
+  });
 
   final HermesCalendarEvent event;
+  final List<HermesEventCategory> eventCategories;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(HermesEventCategory category)
+  onEventCategoryDeleted;
 
   @override
   State<_CalendarEventDetailPage> createState() =>
@@ -2607,8 +2819,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   late final TextEditingController _endsAt;
   late final TextEditingController _category;
   late final TextEditingController _reminder;
+  late final TextEditingController _reminderInterval;
   late String _color;
   late String _recurrence;
+  late List<HermesEventCategory> _categories;
+  String _reminderRecurrence = 'none';
+  String _reminderIntervalUnit = 'days';
+  final Set<String> _reminderSpecificDays = <String>{};
+  bool _savingCategory = false;
 
   static const _colors = <({String value, String label})>[
     (value: '#34C759', label: 'Green'),
@@ -2626,6 +2844,31 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     (value: 'yearly', label: 'Yearly'),
   ];
 
+  static const _reminderRecurrences = <({String value, String label})>[
+    (value: 'none', label: 'Once'),
+    (value: 'daily', label: 'Daily'),
+    (value: 'weekly', label: 'Weekly'),
+    (value: 'monthly', label: 'Monthly'),
+    (value: 'specific_days', label: 'Specific days'),
+    (value: 'interval', label: 'Every X'),
+  ];
+
+  static const _weekdays = <({String value, String label})>[
+    (value: 'mon', label: 'Mon'),
+    (value: 'tue', label: 'Tue'),
+    (value: 'wed', label: 'Wed'),
+    (value: 'thu', label: 'Thu'),
+    (value: 'fri', label: 'Fri'),
+    (value: 'sat', label: 'Sat'),
+    (value: 'sun', label: 'Sun'),
+  ];
+
+  static const _intervalUnits = <({String value, String label})>[
+    (value: 'days', label: 'days'),
+    (value: 'weeks', label: 'weeks'),
+    (value: 'months', label: 'months'),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -2639,6 +2882,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
     _category = TextEditingController(text: event.category ?? 'Personal');
     _reminder = TextEditingController();
+    _reminderInterval = TextEditingController(text: '1');
+    _categories = [...widget.eventCategories];
     _color = _colors.any((color) => color.value == event.color)
         ? event.color!
         : '#34C759';
@@ -2655,6 +2900,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _endsAt.dispose();
     _category.dispose();
     _reminder.dispose();
+    _reminderInterval.dispose();
     super.dispose();
   }
 
@@ -2679,7 +2925,53 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       'color': _color,
       'recurrence': _recurrence,
       'reminderMinutesBefore': int.tryParse(_reminder.text.trim()),
+      'reminderRecurrence': _reminderRecurrence,
+      'reminderSpecificDays': _reminderSpecificDays.toList()..sort(),
+      'reminderInterval': int.tryParse(_reminderInterval.text.trim()),
+      'reminderIntervalUnit': _reminderIntervalUnit,
     });
+  }
+
+  Future<void> _saveCategory({HermesEventCategory? category}) async {
+    final name = _category.text.trim();
+    if (name.isEmpty) return;
+    setState(() => _savingCategory = true);
+    try {
+      final saved = await widget.onEventCategorySaved(
+        category: category,
+        name: name,
+        color: _color,
+      );
+      if (!mounted) return;
+      setState(() {
+        final exists = _categories.any((item) => item.id == saved.id);
+        _categories = exists
+            ? _categories
+                  .map((item) => item.id == saved.id ? saved : item)
+                  .toList()
+            : [..._categories, saved];
+        _category.text = saved.name;
+        _color = saved.color;
+      });
+    } finally {
+      if (mounted) setState(() => _savingCategory = false);
+    }
+  }
+
+  Future<void> _deleteCategory(HermesEventCategory category) async {
+    setState(() => _savingCategory = true);
+    try {
+      await widget.onEventCategoryDeleted(category);
+      if (!mounted) return;
+      setState(() {
+        _categories = _categories
+            .where((item) => item.id != category.id)
+            .toList();
+        if (_category.text.trim() == category.name) _category.clear();
+      });
+    } finally {
+      if (mounted) setState(() => _savingCategory = false);
+    }
   }
 
   @override
@@ -2786,6 +3078,59 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 labelText: 'Category',
                                 prefixIcon: Icon(Icons.sell_outlined),
                               ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              key: const Key('event-category-manager'),
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final category in _categories)
+                                  InputChip(
+                                    label: Text(category.name),
+                                    selected:
+                                        _category.text.trim() == category.name,
+                                    avatar: CircleAvatar(
+                                      radius: 6,
+                                      backgroundColor: _colorFromHex(
+                                        category.color,
+                                      ),
+                                    ),
+                                    onPressed: () => setState(() {
+                                      _category.text = category.name;
+                                      _color = category.color;
+                                    }),
+                                    onDeleted: _savingCategory
+                                        ? null
+                                        : () => _deleteCategory(category),
+                                  ),
+                                ActionChip(
+                                  key: const Key('event-category-save-action'),
+                                  avatar: const Icon(
+                                    Icons.save_outlined,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    _savingCategory
+                                        ? 'Saving...'
+                                        : 'Save category color',
+                                  ),
+                                  onPressed: _savingCategory
+                                      ? null
+                                      : () {
+                                          final matches = _categories.where(
+                                            (item) =>
+                                                item.name ==
+                                                _category.text.trim(),
+                                          );
+                                          _saveCategory(
+                                            category: matches.isEmpty
+                                                ? null
+                                                : matches.first,
+                                          );
+                                        },
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 12),
                             Column(
@@ -2908,6 +3253,88 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 prefixIcon: Icon(Icons.alarm_rounded),
                               ),
                             ),
+                            const SizedBox(height: 12),
+                            _EventFieldLabel(
+                              icon: Icons.repeat_on_rounded,
+                              label: 'Reminder repeats',
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              key: const Key('event-reminder-recurrence-field'),
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final recurrence in _reminderRecurrences)
+                                  ChoiceChip(
+                                    label: Text(recurrence.label),
+                                    selected:
+                                        _reminderRecurrence == recurrence.value,
+                                    onSelected: (_) => setState(() {
+                                      _reminderRecurrence = recurrence.value;
+                                    }),
+                                  ),
+                              ],
+                            ),
+                            if (_reminderRecurrence == 'specific_days') ...[
+                              const SizedBox(height: 10),
+                              Wrap(
+                                key: const Key('event-reminder-specific-days'),
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final day in _weekdays)
+                                    FilterChip(
+                                      label: Text(day.label),
+                                      selected: _reminderSpecificDays.contains(
+                                        day.value,
+                                      ),
+                                      onSelected: (selected) => setState(() {
+                                        if (selected) {
+                                          _reminderSpecificDays.add(day.value);
+                                        } else {
+                                          _reminderSpecificDays.remove(
+                                            day.value,
+                                          );
+                                        }
+                                      }),
+                                    ),
+                                ],
+                              ),
+                            ],
+                            if (_reminderRecurrence == 'interval') ...[
+                              const SizedBox(height: 10),
+                              Row(
+                                key: const Key('event-reminder-interval-field'),
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _reminderInterval,
+                                      keyboardType: TextInputType.number,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Every',
+                                        prefixIcon: Icon(Icons.numbers_rounded),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  DropdownButton<String>(
+                                    value: _reminderIntervalUnit,
+                                    items: [
+                                      for (final unit in _intervalUnits)
+                                        DropdownMenuItem(
+                                          value: unit.value,
+                                          child: Text(unit.label),
+                                        ),
+                                    ],
+                                    onChanged: (value) => setState(() {
+                                      if (value != null) {
+                                        _reminderIntervalUnit = value;
+                                      }
+                                    }),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -3057,12 +3484,17 @@ class _EventDetailHero extends StatelessWidget {
   );
 }
 
-Color _calendarEventColor(HermesCalendarEvent event) {
-  final value = event.color;
-  if (value == null || !value.startsWith('#') || value.length != 7) {
+Color _colorFromHex(String value) {
+  if (!value.startsWith('#') || value.length != 7) {
     return HeyBeanTheme.accentStrong;
   }
   return Color(int.parse('FF${value.substring(1)}', radix: 16));
+}
+
+Color _calendarEventColor(HermesCalendarEvent event) {
+  final value = event.color;
+  if (value == null) return HeyBeanTheme.accentStrong;
+  return _colorFromHex(value);
 }
 
 String _eventSubtitle(HermesCalendarEvent event) {
@@ -3159,9 +3591,9 @@ String _formatCalendarEventDateTime(String? value) {
   var hour = local.hour % 12;
   if (hour == 0) hour = 12;
   final minute = local.minute.toString().padLeft(2, '0');
-  final meridiem = local.hour >= 12 ? 'pm' : 'am';
-  return '${_shortWeekdayName(local.weekday)} ${_shortMonthName(local.month)} '
-      '${local.day} @ $hour:$minute$meridiem';
+  final meridiem = local.hour >= 12 ? 'PM' : 'AM';
+  return '${_shortWeekdayName(local.weekday)}, ${_shortMonthName(local.month)} '
+      '${local.day} · $hour:$minute $meridiem';
 }
 
 String _eventDateRangeLabel({String? startsAt, String? endsAt}) {
@@ -3198,7 +3630,7 @@ DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
 
   final trimmed = value.trim();
   final friendlyMatch = RegExp(
-    r'^(?:[A-Za-z]{3,9}\s+)?([A-Za-z]{3,9})\s+(\d{1,2})\s*@\s*'
+    r'^(?:[A-Za-z]{3,9},?\s+)?([A-Za-z]{3,9})\s+(\d{1,2})\s*(?:@|·|at)?\s*'
     r'(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
     caseSensitive: false,
   ).firstMatch(trimmed);
@@ -3503,9 +3935,16 @@ class _MonthDayCell extends StatelessWidget {
 }
 
 class _CalendarAgenda extends StatelessWidget {
-  const _CalendarAgenda({required this.calendar, this.onEventTap});
+  const _CalendarAgenda({
+    required this.calendar,
+    required this.eventCategories,
+    this.onEventTap,
+    this.onEventCategorySaved,
+    this.onEventCategoryDeleted,
+  });
 
   final List<HermesCalendarEvent> calendar;
+  final List<HermesEventCategory> eventCategories;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -3515,8 +3954,20 @@ class _CalendarAgenda extends StatelessWidget {
     String? color,
     String? recurrence,
     int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
   })?
   onEventTap;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })?
+  onEventCategorySaved;
+  final Future<void> Function(HermesEventCategory category)?
+  onEventCategoryDeleted;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -3537,9 +3988,19 @@ class _CalendarAgenda extends StatelessWidget {
             icon: Icons.event_available_rounded,
             title: event.title,
             subtitle: _eventSubtitle(event),
-            onTap: onEventTap == null
+            onTap:
+                onEventTap == null ||
+                    onEventCategorySaved == null ||
+                    onEventCategoryDeleted == null
                 ? null
-                : () => _showCalendarEventDetails(context, event, onEventTap!),
+                : () => _showCalendarEventDetails(
+                    context,
+                    event,
+                    eventCategories: eventCategories,
+                    onSave: onEventTap!,
+                    onEventCategorySaved: onEventCategorySaved!,
+                    onEventCategoryDeleted: onEventCategoryDeleted!,
+                  ),
           ),
     ],
   );

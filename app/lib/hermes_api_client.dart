@@ -125,6 +125,42 @@ class HermesApiClient {
     ).map((json) => HermesCalendarEvent.fromJson(_expectMap(json))).toList();
   }
 
+  Future<List<HermesEventCategory>> listEventCategories() async {
+    final data = await _sendJson('GET', '/event-categories');
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesEventCategory.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<HermesEventCategory> createEventCategory({
+    required String name,
+    required String color,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/event-categories',
+      body: {'name': name, 'color': color},
+    );
+    return HermesEventCategory.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesEventCategory> updateEventCategory(
+    int categoryId, {
+    required String name,
+    required String color,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/event-categories/$categoryId',
+      body: {'name': name, 'color': color},
+    );
+    return HermesEventCategory.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> deleteEventCategory(int categoryId) async {
+    await _sendJson('DELETE', '/event-categories/$categoryId');
+  }
+
   Future<HermesCalendarEvent> updateCalendarEvent(
     int eventId, {
     required String title,
@@ -153,16 +189,15 @@ class HermesApiClient {
     required int calendarEventId,
     required String title,
     required String remindAt,
+    Map<String, Object?>? metadata,
   }) async {
-    final data = await _sendJson(
-      'POST',
-      '/reminders',
-      body: {
-        'calendar_event_id': calendarEventId,
-        'title': title,
-        'remind_at': remindAt,
-      },
-    );
+    final body = <String, Object?>{
+      'calendar_event_id': calendarEventId,
+      'title': title,
+      'remind_at': remindAt,
+    };
+    if (metadata != null) body['metadata'] = metadata;
+    final data = await _sendJson('POST', '/reminders', body: body);
     return HermesReminder.fromJson(_expectMap(data['data']));
   }
 
@@ -441,6 +476,32 @@ class HermesReminder {
         ? null
         : _expectInt(json['calendar_event_id']),
   );
+}
+
+class HermesEventCategory {
+  const HermesEventCategory({
+    required this.id,
+    required this.name,
+    required this.color,
+  });
+
+  final int id;
+  final String name;
+  final String color;
+
+  factory HermesEventCategory.fromJson(Map<String, Object?> json) =>
+      HermesEventCategory(
+        id: _expectInt(json['id']),
+        name: _expectString(json['name']),
+        color: (json['color'] as String?) ?? '#34C759',
+      );
+
+  HermesEventCategory copyWith({String? name, String? color}) =>
+      HermesEventCategory(
+        id: id,
+        name: name ?? this.name,
+        color: color ?? this.color,
+      );
 }
 
 class HermesCalendarEvent {

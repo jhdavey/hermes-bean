@@ -8,6 +8,7 @@ use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
+use App\Models\EventCategory;
 use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
@@ -162,6 +163,7 @@ class StructuredHermesActionService
             'task.create', 'task.update', 'task.delete',
             'reminder.create', 'reminder.update', 'reminder.delete',
             'calendar_event.create', 'calendar_event.update', 'calendar_event.delete', 'calendar.create', 'calendar.update', 'calendar.delete',
+            'event_category.create', 'event_category.update', 'event_category.delete',
             'approval.create', 'approval.update', 'approval.approve', 'approval.deny', 'approval.delete',
             'blocker.create', 'blocker.update', 'blocker.resolve', 'blocker.delete',
             'scheduler_job.create', 'scheduler_job.update', 'scheduler_job.delete',
@@ -212,6 +214,9 @@ class StructuredHermesActionService
             'calendar_event.create', 'calendar.create' => collect([$this->createCalendarEvent($session, $parameters)]),
             'calendar_event.update', 'calendar.update' => collect([$this->updateCalendarEvent($session, $parameters)]),
             'calendar_event.delete', 'calendar.delete' => collect([$this->deleteOwned(CalendarEvent::class, $session, $parameters, 'assistant.calendar_event.deleted', 'calendar.delete', 'calendar_event_id')]),
+            'event_category.create' => collect([$this->createEventCategory($session, $parameters)]),
+            'event_category.update' => collect([$this->updateEventCategory($session, $parameters)]),
+            'event_category.delete' => collect([$this->deleteEventCategory($session, $parameters)]),
             'approval.create' => collect([$this->createApproval($session, $parameters)]),
             'approval.update' => collect([$this->updateApproval($session, $parameters)]),
             'approval.approve' => $this->approveOwned($session, $parameters),
@@ -263,7 +268,10 @@ class StructuredHermesActionService
             'notes' => $parameters['notes'] ?? null,
             'remind_at' => Carbon::parse((string) ($parameters['remind_at'] ?? now()->addDay()->toIso8601String())),
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
-            'metadata' => ['created_by' => 'structured_hermes_action'],
+            'metadata' => array_merge(
+                ['created_by' => 'structured_hermes_action'],
+                is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []
+            ),
         ]);
 
         return $this->recordEvent($session, 'assistant.reminder.created', [
@@ -343,6 +351,52 @@ class StructuredHermesActionService
         $calendarEvent->update($updates);
 
         return $this->recordEvent($session, 'assistant.calendar_event.updated', ['calendar_event_id' => $calendarEvent->id, 'title' => $calendarEvent->title], 'calendar.update', 'succeeded');
+    }
+
+    private function createEventCategory(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $category = EventCategory::updateOrCreate(
+            [
+                'user_id' => $session->user_id,
+                'name' => $this->stringParameter($parameters, 'name', 'Personal'),
+            ],
+            [
+                'color' => $this->stringParameter($parameters, 'color', '#34C759'),
+                'metadata' => array_merge(
+                    ['created_by' => 'structured_hermes_action'],
+                    is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []
+                ),
+            ]
+        );
+
+        return $this->recordEvent($session, 'assistant.event_category.saved', ['event_category_id' => $category->id, 'name' => $category->name], 'event_categories.create', 'succeeded');
+    }
+
+    private function updateEventCategory(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $category = $this->ownedModel(EventCategory::class, $session, $parameters);
+        $oldName = $category->name;
+        $category->update($this->onlyPresent($parameters, ['name', 'color', 'metadata']));
+        if ($oldName !== $category->name) {
+            CalendarEvent::where('user_id', $session->user_id)
+                ->where('category', $oldName)
+                ->update(['category' => $category->name]);
+        }
+
+        return $this->recordEvent($session, 'assistant.event_category.updated', ['event_category_id' => $category->id, 'name' => $category->name], 'event_categories.update', 'succeeded');
+    }
+
+    private function deleteEventCategory(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $category = $this->ownedModel(EventCategory::class, $session, $parameters);
+        CalendarEvent::where('user_id', $session->user_id)
+            ->where('category', $category->name)
+            ->update(['category' => null]);
+        $id = $category->id;
+        $name = $category->name;
+        $category->delete();
+
+        return $this->recordEvent($session, 'assistant.event_category.deleted', ['event_category_id' => $id, 'name' => $name], 'event_categories.delete', 'succeeded');
     }
 
     private function createApproval(ConversationSession $session, array $parameters): ActivityEvent

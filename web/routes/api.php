@@ -38,6 +38,10 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/calendar-events', [DomainResourceController::class, 'storeCalendarEvent']);
         Route::patch('/calendar-events/{calendarEvent}', [DomainResourceController::class, 'updateCalendarEvent']);
         Route::delete('/calendar-events/{calendarEvent}', [DomainResourceController::class, 'destroyCalendarEvent']);
+        Route::get('/event-categories', [DomainResourceController::class, 'listEventCategories']);
+        Route::post('/event-categories', [DomainResourceController::class, 'storeEventCategory']);
+        Route::patch('/event-categories/{eventCategory}', [DomainResourceController::class, 'updateEventCategory']);
+        Route::delete('/event-categories/{eventCategory}', [DomainResourceController::class, 'destroyEventCategory']);
         Route::get('/approvals', [DomainResourceController::class, 'listApprovals']);
         Route::post('/approvals', [DomainResourceController::class, 'storeApproval']);
         Route::patch('/approvals/{approval}', [DomainResourceController::class, 'updateApproval']);

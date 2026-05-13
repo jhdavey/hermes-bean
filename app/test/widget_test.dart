@@ -655,6 +655,8 @@ void main() {
       expect(find.byKey(const Key('event-start-field')), findsOneWidget);
       expect(find.byKey(const Key('event-end-field')), findsOneWidget);
       expect(find.byKey(const Key('event-category-field')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-manager')), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
       expect(find.byKey(const Key('event-color-field')), findsOneWidget);
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
       final startEditor = tester.widget<EditableText>(
@@ -663,7 +665,7 @@ void main() {
           matching: find.byType(EditableText),
         ),
       );
-      expect(startEditor.controller.text, contains('@ 2:30pm'));
+      expect(startEditor.controller.text, contains('· 2:30 PM'));
       expect(startEditor.controller.text, isNot(contains('T14:30')));
 
       await tester.enterText(
@@ -673,16 +675,25 @@ void main() {
       final eventYear = DateTime.now().year;
       await tester.enterText(
         find.byKey(const Key('event-start-field')),
-        'Thu May 14 @ 4:00pm',
+        'Thu May 14 · 4:00 PM',
       );
       await tester.enterText(
         find.byKey(const Key('event-end-field')),
-        'Thu May 14 @ 5:00pm',
+        'Thu May 14 · 5:00 PM',
       );
       await tester.enterText(
         find.byKey(const Key('event-category-field')),
         'Work',
       );
+      tester
+          .widget<ActionChip>(
+            find.byKey(const Key('event-category-save-action')),
+          )
+          .onPressed
+          ?.call();
+      await tester.pumpAndSettle();
+      expect(api.savedCategory?.name, 'Work');
+      expect(api.savedCategory?.color, '#34C759');
       tester
           .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Orange'))
           .onSelected
@@ -695,7 +706,12 @@ void main() {
       );
       await tester.pumpAndSettle();
       tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Weekly'))
+          .widget<ChoiceChip>(
+            find.descendant(
+              of: find.byKey(const Key('event-recurrence-field')),
+              matching: find.widgetWithText(ChoiceChip, 'Weekly'),
+            ),
+          )
           .onSelected
           ?.call(true);
       await tester.pumpAndSettle();
@@ -707,10 +723,32 @@ void main() {
         find.byKey(const Key('event-reminder-minutes-field')),
         findsOneWidget,
       );
+      expect(
+        find.byKey(const Key('event-reminder-recurrence-field')),
+        findsOneWidget,
+      );
       await tester.enterText(
         find.byKey(const Key('event-reminder-minutes-field')),
         '15',
       );
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Specific days'))
+          .onSelected
+          ?.call(true);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('event-reminder-specific-days')),
+        findsOneWidget,
+      );
+      tester
+          .widget<FilterChip>(find.widgetWithText(FilterChip, 'Mon'))
+          .onSelected
+          ?.call(true);
+      tester
+          .widget<FilterChip>(find.widgetWithText(FilterChip, 'Wed'))
+          .onSelected
+          ?.call(true);
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('event-save-action')));
       await tester.pumpAndSettle();
 
@@ -728,6 +766,13 @@ void main() {
       expect(api.updatedEvent?.recurrence, 'weekly');
       expect(api.createdReminder?['calendar_event_id'], 3);
       expect(api.createdReminder?['title'], 'Reminder: Design sync');
+      expect(api.createdReminder?['metadata'], {
+        'minutes_before': 15,
+        'recurrence': 'specific_days',
+        'days': ['mon', 'wed'],
+        'interval': 1,
+        'unit': 'days',
+      });
     },
   );
 
@@ -1091,6 +1136,7 @@ class _EditableCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   HermesCalendarEvent? updatedEvent;
   Map<String, Object?>? createdReminder;
+  HermesEventCategory? savedCategory;
 
   @override
   Future<HermesCalendarEvent> updateCalendarEvent(
@@ -1119,14 +1165,47 @@ class _EditableCalendarFakeHermesApiClient
     required int calendarEventId,
     required String title,
     required String remindAt,
+    Map<String, Object?>? metadata,
   }) async {
     createdReminder = {
       'calendar_event_id': calendarEventId,
       'title': title,
       'remind_at': remindAt,
+      'metadata': metadata,
     };
     return HermesReminder(id: 99, title: title, dueAt: remindAt);
   }
+
+  @override
+  Future<List<HermesEventCategory>> listEventCategories() async => const [
+    HermesEventCategory(id: 10, name: 'Work', color: '#007AFF'),
+  ];
+
+  @override
+  Future<HermesEventCategory> createEventCategory({
+    required String name,
+    required String color,
+  }) async {
+    savedCategory = HermesEventCategory(id: 11, name: name, color: color);
+    return savedCategory!;
+  }
+
+  @override
+  Future<HermesEventCategory> updateEventCategory(
+    int categoryId, {
+    required String name,
+    required String color,
+  }) async {
+    savedCategory = HermesEventCategory(
+      id: categoryId,
+      name: name,
+      color: color,
+    );
+    return savedCategory!;
+  }
+
+  @override
+  Future<void> deleteEventCategory(int categoryId) async {}
 
   @override
   Future<List<HermesCalendarEvent>> listCalendarEvents() async => [

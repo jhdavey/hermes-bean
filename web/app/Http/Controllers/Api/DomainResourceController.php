@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
+use App\Models\EventCategory;
 use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
@@ -52,6 +53,11 @@ class DomainResourceController extends Controller
     public function listCalendarEvents(Request $request): JsonResponse
     {
         return $this->listed(CalendarEvent::where('user_id', $request->user()->id)->orderBy('starts_at')->orderBy('id')->get());
+    }
+
+    public function listEventCategories(Request $request): JsonResponse
+    {
+        return $this->listed(EventCategory::where('user_id', $request->user()->id)->orderBy('name')->orderBy('id')->get());
     }
 
     public function listApprovals(Request $request): JsonResponse
@@ -189,6 +195,37 @@ class DomainResourceController extends Controller
     public function destroyCalendarEvent(Request $request, string $calendarEvent): JsonResponse
     {
         return $this->destroyed(CalendarEvent::where('user_id', $request->user()->id)->findOrFail($calendarEvent));
+    }
+
+    public function storeEventCategory(Request $request): JsonResponse
+    {
+        return $this->created(EventCategory::create($this->owned($request, $request->validate([
+            'name' => ['required', 'string', 'max:80'],
+            'color' => ['required', 'string', 'max:20'],
+            'metadata' => ['nullable', 'array'],
+        ]))));
+    }
+
+    public function updateEventCategory(Request $request, string $eventCategory): JsonResponse
+    {
+        $model = EventCategory::where('user_id', $request->user()->id)->findOrFail($eventCategory);
+        $model->update($request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:80'],
+            'color' => ['sometimes', 'required', 'string', 'max:20'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+        ]));
+
+        return response()->json(['data' => $model->refresh()]);
+    }
+
+    public function destroyEventCategory(Request $request, string $eventCategory): JsonResponse
+    {
+        $model = EventCategory::where('user_id', $request->user()->id)->findOrFail($eventCategory);
+        CalendarEvent::where('user_id', $request->user()->id)
+            ->where('category', $model->name)
+            ->update(['category' => null]);
+
+        return $this->destroyed($model);
     }
 
     public function storeApproval(Request $request): JsonResponse

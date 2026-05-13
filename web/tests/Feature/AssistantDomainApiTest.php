@@ -97,6 +97,25 @@ class AssistantDomainApiTest extends TestCase
     {
         $token = $this->apiToken();
 
+        $categoryId = $this->withToken($token)->postJson('/api/event-categories', [
+            'name' => 'Family',
+            'color' => '#AF52DE',
+        ])->assertCreated()
+            ->assertJsonPath('data.name', 'Family')
+            ->assertJsonPath('data.color', '#AF52DE')
+            ->json('data.id');
+
+        $this->withToken($token)->patchJson("/api/event-categories/{$categoryId}", [
+            'name' => 'Kids',
+            'color' => '#007AFF',
+        ])->assertOk()
+            ->assertJsonPath('data.name', 'Kids')
+            ->assertJsonPath('data.color', '#007AFF');
+
+        $this->withToken($token)->getJson('/api/event-categories')
+            ->assertOk()
+            ->assertJsonFragment(['name' => 'Kids', 'color' => '#007AFF']);
+
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Soccer practice',
             'starts_at' => '2026-05-14T15:00:00Z',
@@ -127,8 +146,16 @@ class AssistantDomainApiTest extends TestCase
             'calendar_event_id' => $eventId,
             'title' => 'Leave for soccer match',
             'remind_at' => '2026-05-14T17:00:00Z',
+            'metadata' => [
+                'recurrence' => 'specific_days',
+                'days' => ['mon', 'wed', 'fri'],
+                'interval' => 2,
+                'unit' => 'weeks',
+            ],
         ])->assertCreated()
-            ->assertJsonPath('data.calendar_event_id', $eventId);
+            ->assertJsonPath('data.calendar_event_id', $eventId)
+            ->assertJsonPath('data.metadata.recurrence', 'specific_days')
+            ->assertJsonPath('data.metadata.unit', 'weeks');
 
         $this->assertDatabaseHas('calendar_events', [
             'id' => $eventId,
@@ -141,6 +168,10 @@ class AssistantDomainApiTest extends TestCase
             'calendar_event_id' => $eventId,
             'title' => 'Leave for soccer match',
         ]);
+
+        $this->withToken($token)->deleteJson("/api/event-categories/{$categoryId}")->assertNoContent();
+        $this->assertDatabaseMissing('event_categories', ['id' => $categoryId]);
+        $this->assertDatabaseHas('calendar_events', ['id' => $eventId, 'category' => null]);
     }
 
     public function test_agent_can_update_calendar_event_metadata_and_create_event_reminder(): void
