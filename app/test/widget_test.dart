@@ -399,6 +399,26 @@ void main() {
     },
   );
 
+  testWidgets(
+    'task and reminder timestamps render naturally without raw ISO text',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _ActiveTasksFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-tasks')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Due today at'), findsWidgets);
+      expect(find.textContaining(RegExp(r'\d{4}-\d{2}-\d{2}T')), findsNothing);
+      expect(find.textContaining(RegExp(r'\.\d{3,6}Z')), findsNothing);
+    },
+  );
+
   testWidgets('tasks can be checked from the tasks page', (
     WidgetTester tester,
   ) async {
@@ -710,7 +730,7 @@ void main() {
           matching: find.byType(EditableText),
         ),
       );
-      expect(startEditor.controller.text, contains('· 2:30 PM'));
+      expect(startEditor.controller.text, 'today at 2:30pm');
       expect(startEditor.controller.text, isNot(contains('T14:30')));
 
       await tester.enterText(

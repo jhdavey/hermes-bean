@@ -2162,7 +2162,10 @@ class _TodayHomeView extends StatelessWidget {
                 _CompactItemTile(
                   icon: Icons.notifications_active_outlined,
                   title: reminder.title,
-                  subtitle: reminder.dueAt ?? 'Reminder',
+                  subtitle: _naturalDateTimeOrFallback(
+                    reminder.dueAt,
+                    fallback: 'Reminder',
+                  ),
                 ),
             ],
           ],
@@ -3820,7 +3823,32 @@ String _weekdayLetter(int weekday) =>
     const ['M', 'T', 'W', 'T', 'F', 'S', 'S'][weekday - 1];
 
 String _shortWeekdayName(int weekday) =>
-    const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
+    const ['Mon', 'Tues', 'Wed', 'Thurs', 'Fri', 'Sat', 'Sun'][weekday - 1];
+
+int? _weekdayNumber(String name) {
+  final normalized = name.toLowerCase().replaceAll('.', '');
+  const aliases = <String, int>{
+    'mon': DateTime.monday,
+    'monday': DateTime.monday,
+    'tue': DateTime.tuesday,
+    'tues': DateTime.tuesday,
+    'tuesday': DateTime.tuesday,
+    'wed': DateTime.wednesday,
+    'weds': DateTime.wednesday,
+    'wednesday': DateTime.wednesday,
+    'thu': DateTime.thursday,
+    'thur': DateTime.thursday,
+    'thurs': DateTime.thursday,
+    'thursday': DateTime.thursday,
+    'fri': DateTime.friday,
+    'friday': DateTime.friday,
+    'sat': DateTime.saturday,
+    'saturday': DateTime.saturday,
+    'sun': DateTime.sunday,
+    'sunday': DateTime.sunday,
+  };
+  return aliases[normalized];
+}
 
 String _shortMonthName(int month) => const [
   'Jan',
@@ -3847,26 +3875,55 @@ int? _monthNumber(String name) {
   return null;
 }
 
-String _formatCalendarEventDateTime(String? value) {
+String _formatCalendarEventDateTime(String? value) =>
+    _formatNaturalDateTime(value);
+
+String _naturalDateTimeOrFallback(String? value, {required String fallback}) {
+  final formatted = _formatNaturalDateTime(value);
+  return formatted.isEmpty ? fallback : formatted;
+}
+
+String _formatNaturalDateTime(String? value, {DateTime? now}) {
   if (value == null || value.trim().isEmpty) return '';
   final parsed = _parseCalendarEventDateTime(value);
   if (parsed == null) return value.trim();
-  var hour = parsed.hour % 12;
+  final anchor = _dateOnly(now ?? DateTime.now());
+  final date = _dateOnly(parsed);
+  final daysFromToday = date.difference(anchor).inDays;
+  final time = _naturalTimeLabel(parsed);
+
+  if (daysFromToday == 0) return 'today at $time';
+  if (daysFromToday == 1) return 'tomorrow at $time';
+  if (daysFromToday > 1 && daysFromToday < 7) {
+    return '${_shortWeekdayName(parsed.weekday)} at $time';
+  }
+  final dateLabel = parsed.year == anchor.year
+      ? '${_shortMonthName(parsed.month)} ${parsed.day}'
+      : '${_shortMonthName(parsed.month)} ${parsed.day}, ${parsed.year}';
+  return '$dateLabel at $time';
+}
+
+String _naturalTimeLabel(DateTime value) {
+  var hour = value.hour % 12;
   if (hour == 0) hour = 12;
-  final minute = parsed.minute.toString().padLeft(2, '0');
-  final meridiem = parsed.hour >= 12 ? 'PM' : 'AM';
-  return '${_shortWeekdayName(parsed.weekday)}, ${_shortMonthName(parsed.month)} '
-      '${parsed.day} · $hour:$minute $meridiem';
+  final minute = value.minute == 0
+      ? ''
+      : ':${value.minute.toString().padLeft(2, '0')}';
+  final meridiem = value.hour >= 12 ? 'pm' : 'am';
+  return '$hour$minute$meridiem';
 }
 
 String _eventDateRangeLabel({String? startsAt, String? endsAt}) {
-  final parts = <String>[
-    if (startsAt != null && startsAt.trim().isNotEmpty)
-      _formatCalendarEventDateTime(startsAt),
-    if (endsAt != null && endsAt.trim().isNotEmpty)
-      _formatCalendarEventDateTime(endsAt),
-  ].where((part) => part.isNotEmpty).toList();
-  return parts.isEmpty ? 'Unscheduled' : parts.join(' → ');
+  final start = _parseCalendarEventDateTime(startsAt);
+  final end = _parseCalendarEventDateTime(endsAt, startsAt);
+  if (start == null && end == null) return 'Unscheduled';
+  if (start == null) return _formatNaturalDateTime(endsAt);
+  final startLabel = _formatNaturalDateTime(startsAt);
+  if (end == null) return startLabel;
+  final endLabel = _sameCalendarDay(start, end)
+      ? _naturalTimeLabel(end)
+      : _formatNaturalDateTime(endsAt);
+  return '$startLabel – $endLabel';
 }
 
 String? _calendarEventInputToWireValue(
@@ -3912,6 +3969,26 @@ DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
     if (hour != null) {
       if (meridiem == 'PM' && hour != 12) hour += 12;
       if (meridiem == 'AM' && hour == 12) hour = 0;
+      return DateTime(base.year, base.month, base.day, hour, minute);
+    }
+  }
+
+  final weekdayMatch = RegExp(
+    r'^(mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\.?\s*(?:@|·|at)?\s*'
+    r'(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
+    caseSensitive: false,
+  ).firstMatch(trimmed);
+  if (weekdayMatch != null) {
+    final weekday = _weekdayNumber(weekdayMatch.group(1)!);
+    var hour = int.tryParse(weekdayMatch.group(2)!);
+    final minute = int.tryParse(weekdayMatch.group(3) ?? '0') ?? 0;
+    final meridiem = weekdayMatch.group(4)!.toUpperCase();
+    if (weekday != null && hour != null) {
+      if (meridiem == 'PM' && hour != 12) hour += 12;
+      if (meridiem == 'AM' && hour == 12) hour = 0;
+      final today = _dateOnly(DateTime.now());
+      final daysUntil = (weekday - today.weekday) % DateTime.daysPerWeek;
+      final base = today.add(Duration(days: daysUntil));
       return DateTime(base.year, base.month, base.day, hour, minute);
     }
   }
@@ -3999,13 +4076,19 @@ class _CalendarMonthTaskList extends StatelessWidget {
           _CompactItemTile(
             icon: Icons.notifications_active_outlined,
             title: reminder.title,
-            subtitle: reminder.dueAt ?? 'Today',
+            subtitle: _naturalDateTimeOrFallback(
+              reminder.dueAt,
+              fallback: 'Today',
+            ),
           ),
         for (final event in calendar)
           _CompactItemTile(
             icon: Icons.event_available_rounded,
             title: event.title,
-            subtitle: event.startsAt ?? 'This month',
+            subtitle: _naturalDateTimeOrFallback(
+              event.startsAt,
+              fallback: 'This month',
+            ),
           ),
       ],
     ],
@@ -5150,13 +5233,7 @@ String _eventTimeRangeShort(HermesCalendarEvent event) {
   String shortTime(String? value) {
     final parsed = _parseCalendarEventDateTime(value, event.startsAt);
     if (parsed == null) return '';
-    var hour = parsed.hour % 12;
-    if (hour == 0) hour = 12;
-    final minute = parsed.minute == 0
-        ? ''
-        : ':${parsed.minute.toString().padLeft(2, '0')}';
-    final meridiem = parsed.hour >= 12 ? 'PM' : 'AM';
-    return '$hour$minute $meridiem';
+    return _naturalTimeLabel(parsed);
   }
 
   final start = shortTime(event.startsAt);
