@@ -972,7 +972,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                     _CriticalTaskBadge(
                       count:
                           _visibleSortedTasks(_tasks).length +
-                          _reminders.length,
+                          _visibleActiveReminders(_reminders).length,
                     ),
                   ],
                   const SizedBox(width: 16),
@@ -1196,9 +1196,6 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                         : (value) =>
                               setState(() => _rememberMe = value ?? false),
                     title: const Text('Remember me'),
-                    subtitle: const Text(
-                      'Keeps you signed in on this device until you delete the account or the saved token is revoked.',
-                    ),
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                     dense: true,
@@ -1367,6 +1364,7 @@ class _CommandCenterContent extends StatelessWidget {
             .where((approval) => (approval.status ?? 'pending') == 'pending')
             .toList();
         final activeTasks = _visibleSortedTasks(tasks);
+        final activeReminders = _visibleActiveReminders(reminders);
         final beanPanel = Column(
           children: [
             if (pendingApprovals.isNotEmpty) ...[
@@ -1390,7 +1388,7 @@ class _CommandCenterContent extends StatelessWidget {
             const SizedBox(height: 16),
             _TabSurface(
               tasks: activeTasks,
-              reminders: reminders,
+              reminders: activeReminders,
               calendar: calendar,
               events: events,
             ),
@@ -1404,7 +1402,7 @@ class _CommandCenterContent extends StatelessWidget {
           _HomeDestination.today => _TodayHomeView(
             user: user,
             tasks: activeTasks,
-            reminders: reminders,
+            reminders: activeReminders,
             calendar: calendar,
             eventCategories: eventCategories,
             approvals: pendingApprovals,
@@ -5183,6 +5181,51 @@ List<HermesTask> _visibleSortedTasks(List<HermesTask> tasks) {
     return a.id.compareTo(b.id);
   });
   return visible;
+}
+
+List<HermesReminder> _visibleActiveReminders(List<HermesReminder> reminders) {
+  final now = DateTime.now();
+  final visible = reminders
+      .where((reminder) => _reminderVisibleNowOrLater(reminder, now))
+      .toList();
+  visible.sort((a, b) {
+    final aDue = _parseReminderDueDate(a);
+    final bDue = _parseReminderDueDate(b);
+    if (aDue != null && bDue != null) {
+      final dueCompare = aDue.compareTo(bDue);
+      if (dueCompare != 0) return dueCompare;
+    } else if (aDue != null) {
+      return -1;
+    } else if (bDue != null) {
+      return 1;
+    }
+    return a.id.compareTo(b.id);
+  });
+  return visible;
+}
+
+bool _reminderVisibleNowOrLater(HermesReminder reminder, DateTime now) {
+  if (_reminderIsCompleted(reminder)) return false;
+  if (_reminderIsRecurring(reminder)) return true;
+  final dueAt = _parseReminderDueDate(reminder);
+  return dueAt == null || !dueAt.isBefore(now);
+}
+
+bool _reminderIsRecurring(HermesReminder reminder) {
+  final metadata = reminder.metadata;
+  if (metadata == null) return false;
+  final recurrence =
+      metadata['recurrence'] ?? metadata['recurring'] ?? metadata['rrule'];
+  return recurrence != null &&
+      recurrence != false &&
+      recurrence.toString().isNotEmpty &&
+      recurrence != 'none';
+}
+
+DateTime? _parseReminderDueDate(HermesReminder reminder) {
+  final dueAt = reminder.dueAt;
+  if (dueAt == null || dueAt.isEmpty) return null;
+  return _parseCalendarEventDateTime(dueAt);
 }
 
 bool _taskVisibleOnOrAfter(HermesTask task, DateTime today) {

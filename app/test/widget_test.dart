@@ -22,6 +22,10 @@ void main() {
       expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
       expect(find.byKey(const Key('remember-me-checkbox')), findsOneWidget);
       expect(find.text('Remember me'), findsOneWidget);
+      expect(
+        find.textContaining('Keeps you signed in on this device'),
+        findsNothing,
+      );
 
       await tester.tap(find.byKey(const Key('remember-me-checkbox')));
       await tester.pumpAndSettle();
@@ -57,7 +61,7 @@ void main() {
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
       expect(find.text('Agent online'), findsNothing);
       expect(find.text('Plan launch'), findsOneWidget);
-      expect(find.text('Stand up'), findsOneWidget);
+      expect(find.text('Stand up'), findsNothing);
       expect(find.text('Design review'), findsWidgets);
       expect(find.text('assistant.ready'), findsNothing);
 
@@ -169,7 +173,7 @@ void main() {
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
       expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
       expect(find.text('Today'), findsOneWidget);
-      expect(find.text('2'), findsWidgets);
+      expect(find.text('1'), findsWidgets);
       expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
       expect(
         tester.getTopLeft(find.byKey(const Key('calendar-month-chevron'))).dx,
@@ -215,7 +219,7 @@ void main() {
       expect(find.byKey(const Key('calendar-day-chevron')), findsOneWidget);
       expect(find.text('Rest of month'), findsOneWidget);
       expect(find.text('Plan launch'), findsWidgets);
-      expect(find.text('Stand up'), findsWidgets);
+      expect(find.text('Stand up'), findsNothing);
       await tester.tap(find.text('1').first);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('apple-style-day-timeline')), findsOneWidget);
@@ -1008,15 +1012,27 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<List<HermesTask>> listPastTasks() async => const [];
 
   @override
-  Future<List<HermesReminder>> listReminders() async => plannedToday
-      ? const [
-          HermesReminder(
-            id: 20,
-            title: 'Stretch and hydrate',
-            dueAt: '10:00 AM',
-          ),
-        ]
-      : const [HermesReminder(id: 2, title: 'Stand up', dueAt: '9:00 AM')];
+  Future<List<HermesReminder>> listReminders() async {
+    if (plannedToday) {
+      return [
+        HermesReminder(
+          id: 20,
+          title: 'Stretch and hydrate',
+          dueAt: DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
+        ),
+      ];
+    }
+    return [
+      HermesReminder(
+        id: 2,
+        title: 'Stand up',
+        dueAt: DateTime.now()
+            .subtract(const Duration(days: 1))
+            .copyWith(hour: 9, minute: 0, second: 0, millisecond: 0)
+            .toIso8601String(),
+      ),
+    ];
+  }
 
   @override
   Future<List<HermesCalendarEvent>> listCalendarEvents() async => plannedToday
