@@ -3587,13 +3587,12 @@ String _formatCalendarEventDateTime(String? value) {
   if (value == null || value.trim().isEmpty) return '';
   final parsed = _parseCalendarEventDateTime(value);
   if (parsed == null) return value.trim();
-  final local = parsed.toLocal();
-  var hour = local.hour % 12;
+  var hour = parsed.hour % 12;
   if (hour == 0) hour = 12;
-  final minute = local.minute.toString().padLeft(2, '0');
-  final meridiem = local.hour >= 12 ? 'PM' : 'AM';
-  return '${_shortWeekdayName(local.weekday)}, ${_shortMonthName(local.month)} '
-      '${local.day} · $hour:$minute $meridiem';
+  final minute = parsed.minute.toString().padLeft(2, '0');
+  final meridiem = parsed.hour >= 12 ? 'PM' : 'AM';
+  return '${_shortWeekdayName(parsed.weekday)}, ${_shortMonthName(parsed.month)} '
+      '${parsed.day} · $hour:$minute $meridiem';
 }
 
 String _eventDateRangeLabel({String? startsAt, String? endsAt}) {

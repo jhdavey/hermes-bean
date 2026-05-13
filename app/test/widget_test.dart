@@ -1213,12 +1213,20 @@ class _EditableCalendarFakeHermesApiClient
         HermesCalendarEvent(
           id: 3,
           title: 'Design review',
-          startsAt: DateTime.now()
-              .copyWith(hour: 14, minute: 30)
-              .toIso8601String(),
-          endsAt: DateTime.now()
-              .copyWith(hour: 15, minute: 00)
-              .toIso8601String(),
+          startsAt: DateTime.utc(
+            DateTime.now().year,
+            DateTime.now().month,
+            DateTime.now().day,
+            14,
+            30,
+          ).toIso8601String(),
+          endsAt: DateTime.utc(
+            DateTime.now().year,
+            DateTime.now().month,
+            DateTime.now().day,
+            15,
+            00,
+          ).toIso8601String(),
           category: 'Personal',
           color: '#34C759',
           recurrence: 'none',
