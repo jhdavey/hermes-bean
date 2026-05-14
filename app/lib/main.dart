@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -3290,6 +3291,206 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     }
   }
 
+  List<String> get _categoryDropdownValues {
+    final values = <String>{
+      if (_category.text.trim().isNotEmpty) _category.text.trim(),
+      for (final category in _categories) category.name,
+      'Personal',
+    }.toList();
+    values.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return values;
+  }
+
+  void _selectCategory(String value) {
+    final matching = _categories.where((item) => item.name == value);
+    setState(() {
+      _category.text = value;
+      if (matching.isNotEmpty) _color = matching.first.color;
+    });
+  }
+
+  Future<void> _showTimeDock(
+    TextEditingController controller, {
+    required String? originalValue,
+    String? referenceValue,
+  }) async {
+    final parsed =
+        _parseCalendarEventDateTime(controller.text, referenceValue) ??
+        _parseCalendarEventDateTime(originalValue, referenceValue) ??
+        _parseCalendarEventDateTime(referenceValue) ??
+        DateTime.now();
+    final initialHourIndex =
+        (parsed.hour % 12 == 0 ? 12 : parsed.hour % 12) - 1;
+    final initialMinuteIndex = (parsed.minute / 5).round().clamp(0, 11);
+    final initialMeridiemIndex = parsed.hour >= 12 ? 1 : 0;
+    var selectedHourIndex = initialHourIndex;
+    var selectedMinuteIndex = initialMinuteIndex;
+    var selectedMeridiemIndex = initialMeridiemIndex;
+    final hourController = FixedExtentScrollController(
+      initialItem: initialHourIndex,
+    );
+    final minuteController = FixedExtentScrollController(
+      initialItem: initialMinuteIndex,
+    );
+    final meridiemController = FixedExtentScrollController(
+      initialItem: initialMeridiemIndex,
+    );
+
+    final selected = await showModalBottomSheet<DateTime>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => SafeArea(
+        top: false,
+        child: Container(
+          key: const Key('event-time-dock'),
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          decoration: BoxDecoration(
+            color: HeyBeanTheme.surface,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: HeyBeanTheme.border),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x26000000),
+                blurRadius: 30,
+                offset: Offset(0, 16),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: HeyBeanTheme.border,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Choose time',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: HeyBeanTheme.text,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 190,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: CupertinoPicker(
+                        key: const Key('event-time-hour-dial'),
+                        scrollController: hourController,
+                        itemExtent: 42,
+                        magnification: 1.08,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedHourIndex = index;
+                        },
+                        children: [
+                          for (var hour = 1; hour <= 12; hour++)
+                            Center(child: Text(hour.toString())),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      ':',
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                    Expanded(
+                      child: CupertinoPicker(
+                        key: const Key('event-time-minute-dial'),
+                        scrollController: minuteController,
+                        itemExtent: 42,
+                        magnification: 1.08,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedMinuteIndex = index;
+                        },
+                        children: [
+                          for (var minute = 0; minute < 60; minute += 5)
+                            Center(
+                              child: Text(minute.toString().padLeft(2, '0')),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: CupertinoPicker(
+                        key: const Key('event-time-meridiem-dial'),
+                        scrollController: meridiemController,
+                        itemExtent: 42,
+                        magnification: 1.08,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedMeridiemIndex = index;
+                        },
+                        children: const [
+                          Center(child: Text('AM')),
+                          Center(child: Text('PM')),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      key: const Key('event-time-dock-done'),
+                      onPressed: () {
+                        final hour12 = selectedHourIndex + 1;
+                        final minute = selectedMinuteIndex * 5;
+                        var hour24 = hour12 % 12;
+                        if (selectedMeridiemIndex == 1) hour24 += 12;
+                        Navigator.of(context).pop(
+                          DateTime(
+                            parsed.year,
+                            parsed.month,
+                            parsed.day,
+                            hour24,
+                            minute,
+                          ),
+                        );
+                      },
+                      child: const Text('Done'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    hourController.dispose();
+    minuteController.dispose();
+    meridiemController.dispose();
+    if (selected != null && mounted) {
+      setState(() {
+        controller.text = _formatCalendarEventDateTime(
+          selected.toIso8601String(),
+        );
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final eventColor = _calendarEventColor(
@@ -3386,13 +3587,38 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               ),
                             ),
                             const SizedBox(height: 12),
+                            DropdownButtonFormField<String>(
+                              key: const Key('event-category-dropdown'),
+                              initialValue:
+                                  _categoryDropdownValues.contains(
+                                    _category.text.trim(),
+                                  )
+                                  ? _category.text.trim()
+                                  : null,
+                              decoration: const InputDecoration(
+                                labelText: 'Category',
+                                prefixIcon: Icon(Icons.sell_outlined),
+                              ),
+                              items: [
+                                for (final category in _categoryDropdownValues)
+                                  DropdownMenuItem(
+                                    value: category,
+                                    child: Text(category),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                if (value != null) _selectCategory(value);
+                              },
+                            ),
+                            const SizedBox(height: 12),
                             TextField(
                               key: const Key('event-category-field'),
                               controller: _category,
                               textInputAction: TextInputAction.next,
+                              onChanged: (_) => setState(() {}),
                               decoration: const InputDecoration(
-                                labelText: 'Category',
-                                prefixIcon: Icon(Icons.sell_outlined),
+                                labelText: 'New or edited category name',
+                                prefixIcon: Icon(Icons.edit_note_rounded),
                               ),
                             ),
                             const SizedBox(height: 8),
@@ -3509,20 +3735,29 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             TextField(
                               key: const Key('event-start-field'),
                               controller: _startsAt,
-                              textInputAction: TextInputAction.next,
+                              onTap: () => _showTimeDock(
+                                _startsAt,
+                                originalValue: widget.event.startsAt,
+                              ),
                               decoration: const InputDecoration(
                                 labelText: 'Start time',
                                 prefixIcon: Icon(Icons.play_arrow_rounded),
+                                suffixIcon: Icon(Icons.expand_less_rounded),
                               ),
                             ),
                             const SizedBox(height: 12),
                             TextField(
                               key: const Key('event-end-field'),
                               controller: _endsAt,
-                              textInputAction: TextInputAction.next,
+                              onTap: () => _showTimeDock(
+                                _endsAt,
+                                originalValue: widget.event.endsAt,
+                                referenceValue: _startsAt.text,
+                              ),
                               decoration: const InputDecoration(
                                 labelText: 'End time',
                                 prefixIcon: Icon(Icons.stop_rounded),
+                                suffixIcon: Icon(Icons.expand_less_rounded),
                               ),
                             ),
                             const SizedBox(height: 12),

@@ -957,6 +957,56 @@ void main() {
   );
 
   testWidgets(
+    'calendar event editor uses category dropdown and bottom dock time dials with five minute increments',
+    (WidgetTester tester) async {
+      final api = _EditableCalendarFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-event-block-design-review')),
+      );
+      await tester.tap(
+        find.byKey(const Key('calendar-event-block-design-review')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('event-category-dropdown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Work').last);
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('event-start-field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('event-start-field')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('event-time-dock')), findsOneWidget);
+      expect(find.byKey(const Key('event-time-hour-dial')), findsOneWidget);
+      expect(find.byKey(const Key('event-time-minute-dial')), findsOneWidget);
+      expect(find.byKey(const Key('event-time-meridiem-dial')), findsOneWidget);
+      expect(find.text('25'), findsOneWidget);
+      expect(find.text('30'), findsOneWidget);
+      expect(find.text('35'), findsOneWidget);
+      expect(find.text('07'), findsNothing);
+      await tester.tap(find.byKey(const Key('event-time-dock-done')));
+      await tester.pumpAndSettle();
+
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Orange'))
+          .onSelected
+          ?.call(true);
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      expect(api.updatedEvent?.category, 'Work');
+      expect(api.updatedEvent?.color, '#FF9500');
+    },
+  );
+
+  testWidgets(
     'calendar event editor rejects end times that are not after start',
     (WidgetTester tester) async {
       final api = _EditableCalendarFakeHermesApiClient();
