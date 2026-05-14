@@ -766,11 +766,17 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const Key('calendar-event-detail-view')), findsNothing);
-      expect(find.text('Event settings'), findsOneWidget);
+      expect(find.text('Event Details'), findsOneWidget);
       expect(
-        find.text('Schedule, category, recurrence, and reminders'),
+        find.byKey(const Key('event-detail-header-title')),
         findsOneWidget,
       );
+      expect(find.text('Event settings'), findsNothing);
+      expect(
+        find.text('Schedule, category, recurrence, and reminders'),
+        findsNothing,
+      );
+      expect(find.text('Details'), findsNothing);
       expect(find.byKey(const Key('event-title-field')), findsOneWidget);
       expect(find.byKey(const Key('event-start-field')), findsOneWidget);
       expect(find.byKey(const Key('event-end-field')), findsOneWidget);
@@ -793,6 +799,21 @@ void main() {
       expect(find.byKey(const Key('event-color-field')), findsNothing);
       expect(find.widgetWithText(ChoiceChip, 'Orange'), findsNothing);
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
+      final titleTop = tester
+          .getTopLeft(find.byKey(const Key('event-title-field')))
+          .dy;
+      final scheduleTop = tester
+          .getTopLeft(find.byKey(const Key('event-start-field')))
+          .dy;
+      final recurrenceTop = tester
+          .getTopLeft(find.byKey(const Key('event-recurrence-field')))
+          .dy;
+      final categoryTop = tester
+          .getTopLeft(find.byKey(const Key('event-category-chip-list')))
+          .dy;
+      expect(titleTop, lessThan(scheduleTop));
+      expect(scheduleTop, lessThan(recurrenceTop));
+      expect(recurrenceTop, lessThan(categoryTop));
       final startEditor = tester.widget<EditableText>(
         find.descendant(
           of: find.byKey(const Key('event-start-field')),
@@ -815,12 +836,6 @@ void main() {
         find.byKey(const Key('event-end-field')),
         '5:00 PM',
       );
-      await tester.ensureVisible(
-        find.byKey(const Key('event-category-chip-Work')),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('event-category-chip-Work')));
-      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const Key('event-reminder-minutes-field')),
         200,
@@ -906,6 +921,14 @@ void main() {
           .onSelected
           ?.call(true);
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('event-category-chip-Work')),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('event-category-chip-Work')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('event-save-action')));
       await tester.pumpAndSettle();
 
@@ -976,6 +999,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(
+        find.byKey(const Key('event-category-chip-list')),
+      );
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('event-category-dropdown')), findsNothing);
       expect(find.byKey(const Key('event-category-chip-list')), findsOneWidget);
       expect(find.byKey(const Key('event-category-chip-Work')), findsOneWidget);

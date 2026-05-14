@@ -3609,18 +3609,6 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final eventColor = _calendarEventColor(
-      HermesCalendarEvent(
-        id: widget.event.id,
-        title: widget.event.title,
-        startsAt: widget.event.startsAt,
-        endsAt: widget.event.endsAt,
-        category: widget.event.category,
-        color: _color,
-        recurrence: widget.event.recurrence,
-      ),
-    );
-
     return Scaffold(
       key: const Key('calendar-event-detail-page'),
       body: Container(
@@ -3649,18 +3637,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Event settings',
+                            'Event Details',
+                            key: const Key('event-detail-header-title'),
                             style: Theme.of(context).textTheme.headlineSmall
                                 ?.copyWith(
                                   fontWeight: FontWeight.w900,
                                   color: HeyBeanTheme.text,
                                   letterSpacing: -.4,
                                 ),
-                          ),
-                          Text(
-                            'Schedule, category, recurrence, and reminders',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: HeyBeanTheme.muted),
                           ),
                         ],
                       ),
@@ -3674,89 +3658,16 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _EventDetailHero(
-                        title: widget.event.title,
-                        startsAt: widget.event.startsAt,
-                        endsAt: widget.event.endsAt,
-                        color: eventColor,
-                      ),
-                      const SizedBox(height: 14),
                       _ShellCard(
                         glow: true,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const _SectionTitle(
-                              icon: Icons.edit_calendar_rounded,
-                              title: 'Details',
-                              subtitle:
-                                  'Keep this event readable for you and the agent.',
-                            ),
-                            const SizedBox(height: 18),
-                            TextField(
-                              key: const Key('event-title-field'),
-                              controller: _title,
-                              textInputAction: TextInputAction.next,
-                              decoration: const InputDecoration(
-                                labelText: 'Title',
-                                prefixIcon: Icon(Icons.title_rounded),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Column(
-                              key: const Key('event-category-chip-list'),
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Expanded(
-                                      child: _EventFieldLabel(
-                                        icon: Icons.sell_outlined,
-                                        label: 'Categories',
-                                      ),
-                                    ),
-                                    IconButton.filledTonal(
-                                      key: const Key(
-                                        'event-category-add-action',
-                                      ),
-                                      onPressed: _savingCategory
-                                          ? null
-                                          : _openCategoryCreationModal,
-                                      tooltip: 'Create category',
-                                      icon: const Icon(Icons.add_rounded),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final category in _categoryChipValues)
-                                      _EventCategoryChip(
-                                        chipKey: Key(
-                                          'event-category-chip-${_categoryKey(category.name)}',
-                                        ),
-                                        deleteKey: Key(
-                                          'event-category-delete-${_categoryKey(category.name)}',
-                                        ),
-                                        category: category,
-                                        color: _categoryColor(category.color),
-                                        selected:
-                                            _category.text.trim() ==
-                                            category.name,
-                                        saving: _savingCategory,
-                                        onSelected: () =>
-                                            _selectCategory(category),
-                                        onDeleted: () =>
-                                            _deleteCategoryValues(category),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                          ],
+                        child: TextField(
+                          key: const Key('event-title-field'),
+                          controller: _title,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: 'Title',
+                            prefixIcon: Icon(Icons.title_rounded),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -3807,98 +3718,93 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 suffixIcon: Icon(Icons.expand_less_rounded),
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            Column(
-                              key: const Key('event-recurrence-field'),
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _ShellCard(
+                        child: Column(
+                          key: const Key('event-recurrence-field'),
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle(
+                              icon: Icons.repeat_rounded,
+                              title: 'Recurrence',
+                              subtitle: 'Repeat this event when needed.',
+                            ),
+                            const SizedBox(height: 18),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
                               children: [
-                                _EventFieldLabel(
-                                  icon: Icons.repeat_rounded,
-                                  label: 'Recurrence',
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final recurrence in _recurrences)
-                                      ChoiceChip(
-                                        label: Text(recurrence.label),
-                                        selected:
-                                            _recurrence == recurrence.value,
-                                        onSelected: (_) => setState(() {
-                                          _recurrence = recurrence.value;
-                                        }),
-                                      ),
-                                  ],
-                                ),
-                                if (_recurrence == 'specific_days') ...[
-                                  const SizedBox(height: 10),
-                                  Wrap(
-                                    key: const Key('event-specific-days'),
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      for (final day in _weekdays)
-                                        FilterChip(
-                                          label: Text(day.label),
-                                          selected: _eventSpecificDays.contains(
-                                            day.value,
-                                          ),
-                                          onSelected: (selected) =>
-                                              setState(() {
-                                                if (selected) {
-                                                  _eventSpecificDays.add(
-                                                    day.value,
-                                                  );
-                                                } else {
-                                                  _eventSpecificDays.remove(
-                                                    day.value,
-                                                  );
-                                                }
-                                              }),
-                                        ),
-                                    ],
+                                for (final recurrence in _recurrences)
+                                  ChoiceChip(
+                                    label: Text(recurrence.label),
+                                    selected: _recurrence == recurrence.value,
+                                    onSelected: (_) => setState(() {
+                                      _recurrence = recurrence.value;
+                                    }),
                                   ),
-                                ],
-                                if (_recurrence == 'interval') ...[
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    key: const Key('event-interval-field'),
-                                    children: [
-                                      Expanded(
-                                        child: TextField(
-                                          controller: _eventInterval,
-                                          keyboardType: TextInputType.number,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Every',
-                                            prefixIcon: Icon(
-                                              Icons.numbers_rounded,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      DropdownButton<String>(
-                                        value: _eventIntervalUnit,
-                                        items: [
-                                          for (final unit in _intervalUnits)
-                                            DropdownMenuItem(
-                                              value: unit.value,
-                                              child: Text(unit.label),
-                                            ),
-                                        ],
-                                        onChanged: (value) => setState(() {
-                                          if (value != null) {
-                                            _eventIntervalUnit = value;
-                                          }
-                                        }),
-                                      ),
-                                    ],
-                                  ),
-                                ],
                               ],
                             ),
+                            if (_recurrence == 'specific_days') ...[
+                              const SizedBox(height: 10),
+                              Wrap(
+                                key: const Key('event-specific-days'),
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final day in _weekdays)
+                                    FilterChip(
+                                      label: Text(day.label),
+                                      selected: _eventSpecificDays.contains(
+                                        day.value,
+                                      ),
+                                      onSelected: (selected) => setState(() {
+                                        if (selected) {
+                                          _eventSpecificDays.add(day.value);
+                                        } else {
+                                          _eventSpecificDays.remove(day.value);
+                                        }
+                                      }),
+                                    ),
+                                ],
+                              ),
+                            ],
+                            if (_recurrence == 'interval') ...[
+                              const SizedBox(height: 10),
+                              Row(
+                                key: const Key('event-interval-field'),
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _eventInterval,
+                                      keyboardType: TextInputType.number,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Every',
+                                        prefixIcon: Icon(Icons.numbers_rounded),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  DropdownButton<String>(
+                                    value: _eventIntervalUnit,
+                                    items: [
+                                      for (final unit in _intervalUnits)
+                                        DropdownMenuItem(
+                                          value: unit.value,
+                                          child: Text(unit.label),
+                                        ),
+                                    ],
+                                    onChanged: (value) => setState(() {
+                                      if (value != null) {
+                                        _eventIntervalUnit = value;
+                                      }
+                                    }),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -4006,6 +3912,57 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 ],
                               ),
                             ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _ShellCard(
+                        child: Column(
+                          key: const Key('event-category-chip-list'),
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Expanded(
+                                  child: _EventFieldLabel(
+                                    icon: Icons.sell_outlined,
+                                    label: 'Categories',
+                                  ),
+                                ),
+                                IconButton.filledTonal(
+                                  key: const Key('event-category-add-action'),
+                                  onPressed: _savingCategory
+                                      ? null
+                                      : _openCategoryCreationModal,
+                                  tooltip: 'Create category',
+                                  icon: const Icon(Icons.add_rounded),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final category in _categoryChipValues)
+                                  _EventCategoryChip(
+                                    chipKey: Key(
+                                      'event-category-chip-${_categoryKey(category.name)}',
+                                    ),
+                                    deleteKey: Key(
+                                      'event-category-delete-${_categoryKey(category.name)}',
+                                    ),
+                                    category: category,
+                                    color: _categoryColor(category.color),
+                                    selected:
+                                        _category.text.trim() == category.name,
+                                    saving: _savingCategory,
+                                    onSelected: () => _selectCategory(category),
+                                    onDeleted: () =>
+                                        _deleteCategoryValues(category),
+                                  ),
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -4227,89 +4184,6 @@ class _EventFieldLabel extends StatelessWidget {
         ),
       ),
     ],
-  );
-}
-
-class _EventDetailHero extends StatelessWidget {
-  const _EventDetailHero({
-    required this.title,
-    required this.startsAt,
-    required this.endsAt,
-    required this.color,
-  });
-
-  final String title;
-  final String? startsAt;
-  final String? endsAt;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(24),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [color.withValues(alpha: .20), HeyBeanTheme.surface],
-      ),
-      border: Border.all(color: color.withValues(alpha: .28)),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x14000000),
-          blurRadius: 30,
-          offset: Offset(0, 18),
-        ),
-      ],
-    ),
-    child: Row(
-      children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: color.withValues(alpha: .28),
-                blurRadius: 18,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: const Icon(Icons.event_rounded, color: Colors.white),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: HeyBeanTheme.text,
-                  letterSpacing: -.3,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _eventDateRangeLabel(startsAt: startsAt, endsAt: endsAt),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: HeyBeanTheme.muted,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
   );
 }
 
