@@ -1034,6 +1034,20 @@ void main() {
       expect(find.byKey(const Key('event-time-hour-dial')), findsOneWidget);
       expect(find.byKey(const Key('event-time-minute-dial')), findsOneWidget);
       expect(find.byKey(const Key('event-time-meridiem-dial')), findsOneWidget);
+      final hourPicker = tester.widget<CupertinoPicker>(
+        find.byKey(const Key('event-time-hour-dial')),
+      );
+      final minutePicker = tester.widget<CupertinoPicker>(
+        find.byKey(const Key('event-time-minute-dial')),
+      );
+      expect(
+        hourPicker.childDelegate,
+        isA<ListWheelChildLoopingListDelegate>(),
+      );
+      expect(
+        minutePicker.childDelegate,
+        isA<ListWheelChildLoopingListDelegate>(),
+      );
       expect(find.text('25'), findsOneWidget);
       expect(find.text('30'), findsOneWidget);
       expect(find.text('35'), findsOneWidget);
@@ -1044,6 +1058,8 @@ void main() {
           )
           .onSelectedItemChanged
           ?.call(2);
+      hourPicker.onSelectedItemChanged?.call(12);
+      minutePicker.onSelectedItemChanged?.call(13);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('event-time-dock-done')));
       await tester.pumpAndSettle();
@@ -1057,6 +1073,7 @@ void main() {
         updatedStartEditor.controller.text,
         contains('${DateTime.now().year + 1}'),
       );
+      expect(updatedStartEditor.controller.text, contains('1:05pm'));
     },
   );
 

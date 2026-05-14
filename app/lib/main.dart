@@ -3502,8 +3502,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         itemExtent: 42,
                         magnification: 1.08,
                         useMagnifier: true,
+                        looping: true,
                         onSelectedItemChanged: (index) {
-                          selectedHourIndex = index;
+                          selectedHourIndex = index % 12;
                         },
                         children: [
                           for (var hour = 1; hour <= 12; hour++)
@@ -3523,8 +3524,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         itemExtent: 42,
                         magnification: 1.08,
                         useMagnifier: true,
+                        looping: true,
                         onSelectedItemChanged: (index) {
-                          selectedMinuteIndex = index;
+                          selectedMinuteIndex = index % 12;
                         },
                         children: [
                           for (var minute = 0; minute < 60; minute += 5)
