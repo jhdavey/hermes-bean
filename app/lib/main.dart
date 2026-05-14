@@ -779,6 +779,40 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
+  Future<void> _toggleReminderCompletion(HermesReminder reminder) async {
+    final previousReminders = _reminders;
+    final completed = _reminderIsCompleted(reminder);
+    final updatedStatus = completed ? 'pending' : 'completed';
+    final optimisticReminder = reminder.copyWith(status: updatedStatus);
+    setState(() {
+      _reminders = _reminders
+          .map((item) => item.id == reminder.id ? optimisticReminder : item)
+          .toList();
+      _error = null;
+    });
+    try {
+      final saved = await widget.apiClient.updateReminder(
+        reminder.id,
+        status: updatedStatus,
+      );
+      if (!mounted) return;
+      setState(() {
+        _reminders = _reminders
+            .map((item) => item.id == saved.id ? saved : item)
+            .toList();
+      });
+      await _refreshSignedInViews();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _reminders = previousReminders;
+        _error = completed
+            ? 'Could not reopen reminder: $error'
+            : 'Could not complete reminder: $error';
+      });
+    }
+  }
+
   Future<void> _deleteReminder(HermesReminder reminder) async {
     final previousReminders = _reminders;
     setState(
@@ -1075,6 +1109,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           onTaskSaved: _createOrUpdateTask,
           onTaskDeleted: _deleteTask,
           onReminderSaved: _createOrUpdateReminder,
+          onReminderCompleted: _toggleReminderCompletion,
           onReminderDeleted: _deleteReminder,
           onCalendarEventEdited: _editCalendarEvent,
           onEventCategorySaved: _saveEventCategory,
@@ -1315,6 +1350,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onTaskSaved,
     required this.onTaskDeleted,
     required this.onReminderSaved,
+    required this.onReminderCompleted,
     required this.onReminderDeleted,
     required this.onCalendarEventEdited,
     required this.onEventCategorySaved,
@@ -1361,6 +1397,7 @@ class _CommandCenterContent extends StatelessWidget {
     String status,
   })
   onReminderSaved;
+  final Future<void> Function(HermesReminder reminder) onReminderCompleted;
   final Future<void> Function(HermesReminder reminder) onReminderDeleted;
   final Future<void> Function(
     HermesCalendarEvent event, {
@@ -1399,10 +1436,6 @@ class _CommandCenterContent extends StatelessWidget {
         final activeTasks = _visibleSortedTasks(tasks);
         final activeReminders = _visibleActiveReminders(reminders);
         final selectedDayTasks = _tasksForDay(activeTasks, selectedCalendarDay);
-        final selectedDayReminders = _remindersForDay(
-          activeReminders,
-          selectedCalendarDay,
-        );
         final beanPanel = Column(
           children: [
             if (pendingApprovals.isNotEmpty) ...[
@@ -1440,7 +1473,6 @@ class _CommandCenterContent extends StatelessWidget {
           _HomeDestination.today => _TodayHomeView(
             user: user,
             tasks: selectedDayTasks,
-            reminders: selectedDayReminders,
             calendar: calendar,
             eventCategories: eventCategories,
             approvals: pendingApprovals,
@@ -1466,6 +1498,7 @@ class _CommandCenterContent extends StatelessWidget {
           _HomeDestination.reminders => _ReminderListCard(
             reminders: reminders,
             onReminderSaved: onReminderSaved,
+            onReminderCompleted: onReminderCompleted,
             onReminderDeleted: onReminderDeleted,
           ),
           _HomeDestination.settings => _SettingsView(
@@ -2073,7 +2106,6 @@ class _TodayHomeView extends StatelessWidget {
   const _TodayHomeView({
     required this.user,
     required this.tasks,
-    required this.reminders,
     required this.calendar,
     required this.eventCategories,
     required this.approvals,
@@ -2091,7 +2123,6 @@ class _TodayHomeView extends StatelessWidget {
 
   final HermesUser user;
   final List<HermesTask> tasks;
-  final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final List<HermesApproval> approvals;
@@ -2156,7 +2187,6 @@ class _TodayHomeView extends StatelessWidget {
                 const SizedBox(height: 16),
                 _CalendarMonthTaskList(
                   tasks: tasks,
-                  reminders: reminders,
                   calendar: calendar,
                   onTaskCompleted: onTaskCompleted,
                 ),
@@ -2185,27 +2215,17 @@ class _TodayHomeView extends StatelessWidget {
               _SectionTitle(
                 icon: Icons.task_alt_rounded,
                 title: 'Tasks for $dayLabel',
-                subtitle:
-                    '${tasks.length} tasks · ${reminders.length} reminders',
+                subtitle: '${tasks.length} tasks',
               ),
               const SizedBox(height: 12),
-              if (tasks.isEmpty && reminders.isEmpty)
-                _EmptySurface(label: 'Nothing scheduled for $dayLabel')
+              if (tasks.isEmpty)
+                _EmptySurface(label: 'No tasks scheduled for $dayLabel')
               else ...[
                 for (final task in tasks)
                   _TaskItemTile(
                     task: task,
                     subtitle: _statusLabel(task.status),
                     onCompleted: onTaskCompleted,
-                  ),
-                for (final reminder in reminders)
-                  _CompactItemTile(
-                    icon: Icons.notifications_active_outlined,
-                    title: reminder.title,
-                    subtitle: _naturalDateTimeOrFallback(
-                      reminder.dueAt,
-                      fallback: 'Reminder',
-                    ),
                   ),
               ],
             ],
@@ -4573,13 +4593,11 @@ bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
 class _CalendarMonthTaskList extends StatelessWidget {
   const _CalendarMonthTaskList({
     required this.tasks,
-    required this.reminders,
     required this.calendar,
     required this.onTaskCompleted,
   });
 
   final List<HermesTask> tasks;
-  final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
   final Future<void> Function(HermesTask task) onTaskCompleted;
 
@@ -4594,7 +4612,7 @@ class _CalendarMonthTaskList extends StatelessWidget {
         ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
       ),
       const SizedBox(height: 8),
-      if (tasks.isEmpty && reminders.isEmpty && calendar.isEmpty)
+      if (tasks.isEmpty && calendar.isEmpty)
         const _EmptySurface(label: 'No tasks for the rest of the month')
       else ...[
         for (final task in tasks)
@@ -4602,15 +4620,6 @@ class _CalendarMonthTaskList extends StatelessWidget {
             task: task,
             subtitle: 'Today · ${_statusLabel(task.status)}',
             onCompleted: onTaskCompleted,
-          ),
-        for (final reminder in reminders)
-          _CompactItemTile(
-            icon: Icons.notifications_active_outlined,
-            title: reminder.title,
-            subtitle: _naturalDateTimeOrFallback(
-              reminder.dueAt,
-              fallback: 'Today',
-            ),
           ),
         for (final event in calendar)
           _CompactItemTile(
@@ -4920,142 +4929,139 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   String? deleteLabel,
   String? completeLabel,
 }) async {
-  final titleController = TextEditingController(text: initialTitle);
-  final timeController = TextEditingController(text: initialTime);
+  var currentTitle = initialTitle;
+  var currentTime = initialTime;
   String? validationError;
-  try {
-    return showModalBottomSheet<Map<String, Object?>>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
+  return showModalBottomSheet<Map<String, Object?>>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setModalState) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          decoration: const BoxDecoration(
+            color: HeyBeanTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+            border: Border(top: BorderSide(color: HeyBeanTheme.border)),
           ),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            decoration: const BoxDecoration(
-              color: HeyBeanTheme.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-              border: Border(top: BorderSide(color: HeyBeanTheme.border)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _SectionTitle(
-                    icon: Icons.edit_note_rounded,
-                    title: title,
-                    subtitle:
-                        'These changes sync to Bean and are available to the agent.',
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _SectionTitle(
+                  icon: Icons.edit_note_rounded,
+                  title: title,
+                  subtitle:
+                      'These changes sync to Bean and are available to the agent.',
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  key: const Key('title-time-editor-title'),
+                  initialValue: initialTitle,
+                  textInputAction: TextInputAction.next,
+                  onChanged: (value) => currentTitle = value,
+                  decoration: InputDecoration(labelText: titleLabel),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: const Key('title-time-editor-time'),
+                  initialValue: initialTime,
+                  textInputAction: TextInputAction.done,
+                  onChanged: (value) => currentTime = value,
+                  decoration: InputDecoration(
+                    labelText: timeLabel,
+                    helperText: allowEmptyTime
+                        ? 'Optional · examples: Today 5:00 PM, 5:00 PM, May 18 9 AM'
+                        : 'Required · examples: Today 5:00 PM, May 18 9 AM',
                   ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    key: const Key('title-time-editor-title'),
-                    controller: titleController,
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(labelText: titleLabel),
+                ),
+                if (validationError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    validationError!,
+                    style: const TextStyle(color: Colors.redAccent),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const Key('title-time-editor-time'),
-                    controller: timeController,
-                    textInputAction: TextInputAction.done,
-                    decoration: InputDecoration(
-                      labelText: timeLabel,
-                      helperText: allowEmptyTime
-                          ? 'Optional · examples: Today 5:00 PM, 5:00 PM, May 18 9 AM'
-                          : 'Required · examples: Today 5:00 PM, May 18 9 AM',
-                    ),
-                  ),
-                  if (validationError != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      validationError!,
-                      style: const TextStyle(color: Colors.redAccent),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      if (deleteLabel != null)
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            key: const Key('title-time-editor-delete'),
-                            onPressed: () =>
-                                Navigator.of(context).pop({'delete': true}),
-                            icon: const Icon(Icons.delete_outline_rounded),
-                            label: Text(deleteLabel),
-                          ),
-                        ),
-                      if (deleteLabel != null) const SizedBox(width: 10),
+                ],
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    if (deleteLabel != null)
                       Expanded(
-                        child: FilledButton.icon(
-                          key: const Key('title-time-editor-save'),
-                          onPressed: () {
-                            final title = titleController.text.trim();
-                            final time = timeController.text.trim();
-                            if (title.isEmpty) {
-                              setModalState(
-                                () => validationError = 'A title is required.',
-                              );
-                              return;
-                            }
-                            if (!allowEmptyTime && time.isEmpty) {
-                              setModalState(
-                                () => validationError = 'A time is required.',
-                              );
-                              return;
-                            }
-                            if (time.isNotEmpty &&
-                                _taskReminderInputToWireValue(time) == null) {
-                              setModalState(
-                                () => validationError =
-                                    'Use a recognizable date/time, like Today 5:00 PM.',
-                              );
-                              return;
-                            }
-                            Navigator.of(context).pop({
-                              'title': title,
-                              'time': time.isEmpty ? null : time,
-                            });
-                          },
-                          icon: const Icon(Icons.check_rounded),
-                          label: const Text('Save'),
+                        child: OutlinedButton.icon(
+                          key: const Key('title-time-editor-delete'),
+                          onPressed: () =>
+                              Navigator.of(context).pop({'delete': true}),
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          label: Text(deleteLabel),
                         ),
                       ),
-                    ],
-                  ),
-                  if (completeLabel != null) ...[
-                    const SizedBox(height: 8),
-                    TextButton.icon(
-                      key: const Key('title-time-editor-complete'),
-                      onPressed: () {
-                        final title = titleController.text.trim();
-                        final time = timeController.text.trim();
-                        if (title.isEmpty || time.isEmpty) return;
-                        Navigator.of(
-                          context,
-                        ).pop({'title': title, 'time': time, 'complete': true});
-                      },
-                      icon: const Icon(Icons.done_all_rounded),
-                      label: Text(completeLabel),
+                    if (deleteLabel != null) const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.icon(
+                        key: const Key('title-time-editor-save'),
+                        onPressed: () {
+                          final title = currentTitle.trim();
+                          final time = currentTime.trim();
+                          if (title.isEmpty) {
+                            setModalState(
+                              () => validationError = 'A title is required.',
+                            );
+                            return;
+                          }
+                          if (!allowEmptyTime && time.isEmpty) {
+                            setModalState(
+                              () => validationError = 'A time is required.',
+                            );
+                            return;
+                          }
+                          if (time.isNotEmpty &&
+                              _taskReminderInputToWireValue(time) == null) {
+                            setModalState(
+                              () => validationError =
+                                  'Use a recognizable date/time, like Today 5:00 PM.',
+                            );
+                            return;
+                          }
+                          Navigator.of(context).pop({
+                            'title': title,
+                            'time': time.isEmpty ? null : time,
+                          });
+                        },
+                        icon: const Icon(Icons.check_rounded),
+                        label: const Text('Save'),
+                      ),
                     ),
                   ],
+                ),
+                if (completeLabel != null) ...[
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    key: const Key('title-time-editor-complete'),
+                    onPressed: () {
+                      final title = currentTitle.trim();
+                      final time = currentTime.trim();
+                      if (title.isEmpty || time.isEmpty) return;
+                      Navigator.of(
+                        context,
+                      ).pop({'title': title, 'time': time, 'complete': true});
+                    },
+                    icon: const Icon(Icons.done_all_rounded),
+                    label: Text(completeLabel),
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
         ),
       ),
-    );
-  } finally {
-    titleController.dispose();
-    timeController.dispose();
-  }
+    ),
+  );
 }
 
 class _TaskListCard extends StatefulWidget {
@@ -5182,6 +5188,7 @@ class _ReminderListCard extends StatefulWidget {
   const _ReminderListCard({
     required this.reminders,
     required this.onReminderSaved,
+    required this.onReminderCompleted,
     required this.onReminderDeleted,
   });
 
@@ -5193,6 +5200,7 @@ class _ReminderListCard extends StatefulWidget {
     String status,
   })
   onReminderSaved;
+  final Future<void> Function(HermesReminder reminder) onReminderCompleted;
   final Future<void> Function(HermesReminder reminder) onReminderDeleted;
 
   @override
@@ -5258,13 +5266,11 @@ class _ReminderListCardState extends State<_ReminderListCard> {
             )
           else
             for (final reminder in visibleReminders)
-              _CompactItemTile(
-                icon: _reminderIsCompleted(reminder)
-                    ? Icons.notifications_paused_rounded
-                    : Icons.notifications_none_rounded,
-                title: reminder.title,
+              _ReminderItemTile(
+                reminder: reminder,
                 subtitle: _reminderSubtitle(reminder),
                 onTap: () => _showReminderEditor(context, reminder: reminder),
+                onCompleted: widget.onReminderCompleted,
               ),
         ],
       ),
@@ -5616,6 +5622,81 @@ class _TaskItemTile extends StatelessWidget {
   }
 }
 
+class _ReminderItemTile extends StatelessWidget {
+  const _ReminderItemTile({
+    required this.reminder,
+    required this.subtitle,
+    required this.onCompleted,
+    this.onTap,
+  });
+
+  final HermesReminder reminder;
+  final String subtitle;
+  final Future<void> Function(HermesReminder reminder) onCompleted;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = _reminderIsCompleted(reminder);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      decoration: BoxDecoration(
+        color: completed ? HeyBeanTheme.surface : HeyBeanTheme.surface2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Row(
+        children: [
+          Checkbox(
+            key: Key('reminder-complete-checkbox-${reminder.id}'),
+            value: completed,
+            onChanged: (_) => onCompleted(reminder),
+            activeColor: HeyBeanTheme.accentStrong,
+          ),
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      reminder.title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        decoration: completed
+                            ? TextDecoration.lineThrough
+                            : null,
+                        color: completed
+                            ? HeyBeanTheme.muted
+                            : HeyBeanTheme.text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(color: HeyBeanTheme.muted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            key: Key('reminder-edit-action-${reminder.id}'),
+            tooltip: 'Edit reminder',
+            onPressed: onTap,
+            icon: const Icon(Icons.edit_outlined),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CompactItemTile extends StatelessWidget {
   const _CompactItemTile({
     required this.icon,
@@ -5737,23 +5818,6 @@ List<HermesReminder> _visibleActiveReminders(List<HermesReminder> reminders) {
   final visible = reminders
       .where((reminder) => _reminderVisibleNowOrLater(reminder, now))
       .toList();
-  visible.sort(_compareRemindersByDueDate);
-  return visible;
-}
-
-List<HermesReminder> _remindersForDay(
-  List<HermesReminder> reminders,
-  DateTime day,
-) {
-  final selectedDay = _dateOnly(day);
-  final today = _dateOnly(DateTime.now());
-  final visible = reminders.where((reminder) {
-    if (_reminderIsCompleted(reminder)) return false;
-    if (_reminderIsRecurring(reminder)) return true;
-    final dueAt = _parseReminderDueDate(reminder);
-    if (dueAt == null) return _sameCalendarDay(selectedDay, today);
-    return _sameCalendarDay(_dateOnly(dueAt), selectedDay);
-  }).toList();
   visible.sort(_compareRemindersByDueDate);
   return visible;
 }

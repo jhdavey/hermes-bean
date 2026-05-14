@@ -1240,33 +1240,91 @@ void main() {
     },
   );
 
-  testWidgets(
-    'day view task list only shows tasks and reminders for selected day',
-    (WidgetTester tester) async {
-      await tester.pumpWidget(
-        HermesBeanApp(
-          apiClient: _TomorrowReminderFakeHermesApiClient(),
-          tokenStore: _MemoryAuthTokenStore(),
-        ),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('day view task list only shows tasks for selected day', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _TomorrowReminderFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      expect(find.text('Tasks for today'), findsOneWidget);
-      expect(find.text('Today task'), findsOneWidget);
-      expect(find.text('Today reminder'), findsOneWidget);
-      expect(find.text('Tomorrow task'), findsNothing);
-      expect(find.text('Tomorrow reminder'), findsNothing);
+    expect(find.text('Tasks for today'), findsOneWidget);
+    expect(find.text('Today task'), findsOneWidget);
+    expect(find.text('Today reminder'), findsNothing);
+    expect(find.text('Tomorrow task'), findsNothing);
+    expect(find.text('Tomorrow reminder'), findsNothing);
 
-      await tester.tap(find.byKey(const Key('week-date-pill-next-visible')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('week-date-pill-next-visible')));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Tasks for tomorrow'), findsOneWidget);
-      expect(find.text('Today task'), findsNothing);
-      expect(find.text('Today reminder'), findsNothing);
-      expect(find.text('Tomorrow task'), findsOneWidget);
-      expect(find.text('Tomorrow reminder'), findsOneWidget);
-    },
-  );
+    expect(find.text('Tasks for tomorrow'), findsOneWidget);
+    expect(find.text('Today task'), findsNothing);
+    expect(find.text('Today reminder'), findsNothing);
+    expect(find.text('Tomorrow task'), findsOneWidget);
+    expect(find.text('Tomorrow reminder'), findsNothing);
+  });
+
+  testWidgets('reminder editor keeps controllers alive while opened', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableReminderFakeHermesApiClient();
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-reminders')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refill dog food'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('title-time-editor-title')),
+      'Refill Bean food',
+    );
+    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(api.updatedReminder?.title, 'Refill Bean food');
+  });
+
+  testWidgets('reminders view can check off reminders from the list', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableReminderFakeHermesApiClient();
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-reminders')));
+    await tester.pumpAndSettle();
+    expect(find.text('Refill dog food'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('reminder-complete-checkbox-401')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedReminder?.status, 'completed');
+    expect(find.text('Refill dog food'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('reminder-filter-completed')));
+    await tester.pumpAndSettle();
+    expect(find.text('Refill dog food'), findsOneWidget);
+    expect(
+      tester
+          .widget<Checkbox>(
+            find.byKey(const Key('reminder-complete-checkbox-401')),
+          )
+          .value,
+      isTrue,
+    );
+  });
 
   testWidgets('chat renders backend JSON message envelopes as natural language', (
     WidgetTester tester,
@@ -1549,6 +1607,47 @@ class _TomorrowReminderFakeHermesApiClient
         dueAt: tomorrow.toIso8601String(),
       ),
     ];
+  }
+}
+
+class _EditableReminderFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  HermesReminder? updatedReminder;
+  late List<HermesReminder> _reminders = [
+    HermesReminder(
+      id: 401,
+      title: 'Refill dog food',
+      status: 'pending',
+      dueAt: DateTime.now().add(const Duration(hours: 2)).toIso8601String(),
+    ),
+  ];
+
+  @override
+  Future<List<HermesReminder>> listReminders() async => _reminders;
+
+  @override
+  Future<HermesReminder> updateReminder(
+    int reminderId, {
+    String? title,
+    String? remindAt,
+    String? status,
+    int? calendarEventId,
+    Map<String, Object?>? metadata,
+  }) async {
+    final existing = _reminders.firstWhere((item) => item.id == reminderId);
+    final updated = HermesReminder(
+      id: existing.id,
+      title: title ?? existing.title,
+      status: status ?? existing.status,
+      dueAt: remindAt ?? existing.dueAt,
+      calendarEventId: calendarEventId ?? existing.calendarEventId,
+      metadata: metadata ?? existing.metadata,
+    );
+    updatedReminder = updated;
+    _reminders = _reminders
+        .map((item) => item.id == reminderId ? updated : item)
+        .toList();
+    return updated;
   }
 }
 
