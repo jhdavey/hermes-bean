@@ -3355,13 +3355,30 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         _parseCalendarEventDateTime(originalValue, referenceValue) ??
         _parseCalendarEventDateTime(referenceValue) ??
         DateTime.now();
+    final initialYear = parsed.year;
+    final yearStart = initialYear - 1;
+    final initialMonthIndex = parsed.month - 1;
+    final initialDayIndex = parsed.day - 1;
+    final initialYearIndex = initialYear - yearStart;
     final initialHourIndex =
         (parsed.hour % 12 == 0 ? 12 : parsed.hour % 12) - 1;
     final initialMinuteIndex = (parsed.minute / 5).round().clamp(0, 11);
     final initialMeridiemIndex = parsed.hour >= 12 ? 1 : 0;
+    var selectedMonthIndex = initialMonthIndex;
+    var selectedDayIndex = initialDayIndex;
+    var selectedYearIndex = initialYearIndex;
     var selectedHourIndex = initialHourIndex;
     var selectedMinuteIndex = initialMinuteIndex;
     var selectedMeridiemIndex = initialMeridiemIndex;
+    final monthController = FixedExtentScrollController(
+      initialItem: initialMonthIndex,
+    );
+    final dayController = FixedExtentScrollController(
+      initialItem: initialDayIndex,
+    );
+    final yearController = FixedExtentScrollController(
+      initialItem: initialYearIndex,
+    );
     final hourController = FixedExtentScrollController(
       initialItem: initialHourIndex,
     );
@@ -3407,10 +3424,70 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
               ),
               const SizedBox(height: 14),
               Text(
-                'Choose time',
+                'Choose date and time',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: HeyBeanTheme.text,
                   fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 128,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: CupertinoPicker(
+                        key: const Key('event-date-month-dial'),
+                        scrollController: monthController,
+                        itemExtent: 36,
+                        magnification: 1.05,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedMonthIndex = index;
+                        },
+                        children: [
+                          for (var month = 1; month <= 12; month++)
+                            Center(child: Text(_monthName(month))),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: CupertinoPicker(
+                        key: const Key('event-date-day-dial'),
+                        scrollController: dayController,
+                        itemExtent: 36,
+                        magnification: 1.05,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedDayIndex = index;
+                        },
+                        children: [
+                          for (var day = 1; day <= 31; day++)
+                            Center(child: Text(day.toString())),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: CupertinoPicker(
+                        key: const Key('event-date-year-dial'),
+                        scrollController: yearController,
+                        itemExtent: 36,
+                        magnification: 1.05,
+                        useMagnifier: true,
+                        onSelectedItemChanged: (index) {
+                          selectedYearIndex = index;
+                        },
+                        children: [
+                          for (
+                            var year = yearStart;
+                            year <= yearStart + 4;
+                            year++
+                          )
+                            Center(child: Text(year.toString())),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 12),
@@ -3494,15 +3571,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         final minute = selectedMinuteIndex * 5;
                         var hour24 = hour12 % 12;
                         if (selectedMeridiemIndex == 1) hour24 += 12;
-                        Navigator.of(context).pop(
-                          DateTime(
-                            parsed.year,
-                            parsed.month,
-                            parsed.day,
-                            hour24,
-                            minute,
-                          ),
-                        );
+                        final year = yearStart + selectedYearIndex;
+                        final month = selectedMonthIndex + 1;
+                        final maxDay = DateTime(year, month + 1, 0).day;
+                        final day = (selectedDayIndex + 1).clamp(1, maxDay);
+                        Navigator.of(
+                          context,
+                        ).pop(DateTime(year, month, day, hour24, minute));
                       },
                       child: const Text('Done'),
                     ),
@@ -3515,6 +3590,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       ),
     );
 
+    monthController.dispose();
+    dayController.dispose();
+    yearController.dispose();
     hourController.dispose();
     minuteController.dispose();
     meridiemController.dispose();
@@ -3675,41 +3753,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 12),
-                            Column(
-                              key: const Key('event-color-field'),
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _EventFieldLabel(
-                                  icon: Icons.palette_outlined,
-                                  label: 'Color',
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final color in _colors)
-                                      ChoiceChip(
-                                        label: Text(color.label),
-                                        selected: _color == color.value,
-                                        avatar: CircleAvatar(
-                                          radius: 6,
-                                          backgroundColor: Color(
-                                            int.parse(
-                                              'FF${color.value.substring(1)}',
-                                              radix: 16,
-                                            ),
-                                          ),
-                                        ),
-                                        onSelected: (_) => setState(() {
-                                          _color = color.value;
-                                        }),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                            const SizedBox(height: 4),
                           ],
                         ),
                       ),

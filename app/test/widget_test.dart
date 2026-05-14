@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -789,7 +790,8 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const Key('event-category-field')), findsNothing);
-      expect(find.byKey(const Key('event-color-field')), findsOneWidget);
+      expect(find.byKey(const Key('event-color-field')), findsNothing);
+      expect(find.widgetWithText(ChoiceChip, 'Orange'), findsNothing);
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
       final startEditor = tester.widget<EditableText>(
         find.descendant(
@@ -818,11 +820,6 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('event-category-chip-Work')));
-      await tester.pumpAndSettle();
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Orange'))
-          .onSelected
-          ?.call(true);
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const Key('event-reminder-minutes-field')),
@@ -932,7 +929,7 @@ void main() {
         ).toIso8601String(),
       );
       expect(api.updatedEvent?.category, 'Work');
-      expect(api.updatedEvent?.color, '#FF9500');
+      expect(api.updatedEvent?.color, '#007AFF');
       expect(api.updatedEvent?.recurrence, 'specific_days');
       expect(api.updatedEvent?.metadata, {
         'recurrence': 'specific_days',
@@ -1031,6 +1028,9 @@ void main() {
       await tester.tap(find.byKey(const Key('event-start-field')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('event-time-dock')), findsOneWidget);
+      expect(find.byKey(const Key('event-date-month-dial')), findsOneWidget);
+      expect(find.byKey(const Key('event-date-day-dial')), findsOneWidget);
+      expect(find.byKey(const Key('event-date-year-dial')), findsOneWidget);
       expect(find.byKey(const Key('event-time-hour-dial')), findsOneWidget);
       expect(find.byKey(const Key('event-time-minute-dial')), findsOneWidget);
       expect(find.byKey(const Key('event-time-meridiem-dial')), findsOneWidget);
@@ -1038,18 +1038,25 @@ void main() {
       expect(find.text('30'), findsOneWidget);
       expect(find.text('35'), findsOneWidget);
       expect(find.text('07'), findsNothing);
+      tester
+          .widget<CupertinoPicker>(
+            find.byKey(const Key('event-date-year-dial')),
+          )
+          .onSelectedItemChanged
+          ?.call(2);
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('event-time-dock-done')));
       await tester.pumpAndSettle();
-
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Orange'))
-          .onSelected
-          ?.call(true);
-      await tester.tap(find.byKey(const Key('event-save-action')));
-      await tester.pumpAndSettle();
-
-      expect(api.updatedEvent?.category, 'Travel');
-      expect(api.updatedEvent?.color, '#FF9500');
+      final updatedStartEditor = tester.widget<EditableText>(
+        find.descendant(
+          of: find.byKey(const Key('event-start-field')),
+          matching: find.byType(EditableText),
+        ),
+      );
+      expect(
+        updatedStartEditor.controller.text,
+        contains('${DateTime.now().year + 1}'),
+      );
     },
   );
 
