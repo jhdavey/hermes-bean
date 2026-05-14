@@ -773,13 +773,22 @@ void main() {
       expect(find.byKey(const Key('event-title-field')), findsOneWidget);
       expect(find.byKey(const Key('event-start-field')), findsOneWidget);
       expect(find.byKey(const Key('event-end-field')), findsOneWidget);
-      expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-dropdown')), findsNothing);
+      expect(find.byKey(const Key('event-category-chip-list')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-chip-Work')), findsOneWidget);
+      expect(
+        find.byKey(const Key('event-category-chip-Personal')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('event-category-delete-Work')),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const Key('event-category-add-action')),
         findsOneWidget,
       );
       expect(find.byKey(const Key('event-category-field')), findsNothing);
-      expect(find.byKey(const Key('event-category-manager')), findsNothing);
       expect(find.byKey(const Key('event-color-field')), findsOneWidget);
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
       final startEditor = tester.widget<EditableText>(
@@ -804,12 +813,11 @@ void main() {
         find.byKey(const Key('event-end-field')),
         '5:00 PM',
       );
-      tester
-          .widget<DropdownButtonFormField<String>>(
-            find.byKey(const Key('event-category-dropdown')),
-          )
-          .onChanged
-          ?.call('Work');
+      await tester.ensureVisible(
+        find.byKey(const Key('event-category-chip-Work')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('event-category-chip-Work')));
       await tester.pumpAndSettle();
       tester
           .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Orange'))
@@ -971,7 +979,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-dropdown')), findsNothing);
+      expect(find.byKey(const Key('event-category-chip-list')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-chip-Work')), findsOneWidget);
+      expect(
+        find.byKey(const Key('event-category-delete-Work')),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const Key('event-category-add-action')),
         findsOneWidget,
@@ -979,6 +993,11 @@ void main() {
       expect(find.byKey(const Key('event-category-field')), findsNothing);
       expect(find.byKey(const Key('event-category-manager')), findsNothing);
       expect(find.byKey(const Key('event-category-save-action')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('event-category-delete-Work')));
+      await tester.pumpAndSettle();
+      expect(api.deletedCategoryId, 10);
+      expect(find.byKey(const Key('event-category-chip-Work')), findsNothing);
 
       await tester.tap(find.byKey(const Key('event-category-add-action')));
       await tester.pumpAndSettle();
@@ -1465,6 +1484,7 @@ class _EditableCalendarFakeHermesApiClient
   HermesCalendarEvent? updatedEvent;
   Map<String, Object?>? createdReminder;
   HermesEventCategory? savedCategory;
+  int? deletedCategoryId;
 
   @override
   Future<HermesCalendarEvent> updateCalendarEvent(
@@ -1535,7 +1555,9 @@ class _EditableCalendarFakeHermesApiClient
   }
 
   @override
-  Future<void> deleteEventCategory(int categoryId) async {}
+  Future<void> deleteEventCategory(int categoryId) async {
+    deletedCategoryId = categoryId;
+  }
 
   @override
   Future<List<HermesCalendarEvent>> listCalendarEvents() async => [

@@ -3292,22 +3292,57 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
   }
 
-  List<String> get _categoryDropdownValues {
-    final values = <String>{
-      if (_category.text.trim().isNotEmpty) _category.text.trim(),
-      for (final category in _categories) category.name,
-      'Personal',
-    }.toList();
-    values.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  String _categoryKey(String name) => name.trim().replaceAll(' ', '-');
+
+  Color _categoryColor(String value) =>
+      Color(int.parse('FF${value.substring(1)}', radix: 16));
+
+  List<HermesEventCategory> get _categoryChipValues {
+    final byName = <String, HermesEventCategory>{};
+    for (final category in _categories) {
+      byName[category.name.toLowerCase()] = category;
+    }
+    final selectedName = _category.text.trim();
+    if (selectedName.isNotEmpty &&
+        !byName.containsKey(selectedName.toLowerCase())) {
+      byName[selectedName.toLowerCase()] = HermesEventCategory(
+        id: -1,
+        name: selectedName,
+        color: _color,
+      );
+    }
+    final values = byName.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return values;
   }
 
-  void _selectCategory(String value) {
-    final matching = _categories.where((item) => item.name == value);
+  void _selectCategory(HermesEventCategory category) {
     setState(() {
-      _category.text = value;
-      if (matching.isNotEmpty) _color = matching.first.color;
+      _category.text = category.name;
+      _color = category.color;
     });
+  }
+
+  Future<void> _deleteCategoryValues(HermesEventCategory category) async {
+    if (category.id < 0) {
+      setState(() {
+        if (_category.text.trim() == category.name) _category.clear();
+      });
+      return;
+    }
+    setState(() => _savingCategory = true);
+    try {
+      await widget.onEventCategoryDeleted(category);
+      if (!mounted) return;
+      setState(() {
+        _categories = _categories
+            .where((item) => item.id != category.id)
+            .toList();
+        if (_category.text.trim() == category.name) _category.clear();
+      });
+    } finally {
+      if (mounted) setState(() => _savingCategory = false);
+    }
   }
 
   Future<void> _showTimeDock(
@@ -3588,43 +3623,55 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            Row(
+                            Column(
+                              key: const Key('event-category-chip-list'),
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(
-                                  child: DropdownButtonFormField<String>(
-                                    key: const Key('event-category-dropdown'),
-                                    initialValue:
-                                        _categoryDropdownValues.contains(
-                                          _category.text.trim(),
-                                        )
-                                        ? _category.text.trim()
-                                        : null,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Category',
-                                      prefixIcon: Icon(Icons.sell_outlined),
+                                Row(
+                                  children: [
+                                    const Expanded(
+                                      child: _EventFieldLabel(
+                                        icon: Icons.sell_outlined,
+                                        label: 'Categories',
+                                      ),
                                     ),
-                                    items: [
-                                      for (final category
-                                          in _categoryDropdownValues)
-                                        DropdownMenuItem(
-                                          value: category,
-                                          child: Text(category),
-                                        ),
-                                    ],
-                                    onChanged: (value) {
-                                      if (value != null) _selectCategory(value);
-                                    },
-                                  ),
+                                    IconButton.filledTonal(
+                                      key: const Key(
+                                        'event-category-add-action',
+                                      ),
+                                      onPressed: _savingCategory
+                                          ? null
+                                          : _openCategoryCreationModal,
+                                      tooltip: 'Create category',
+                                      icon: const Icon(Icons.add_rounded),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 10),
-                                IconButton.filledTonal(
-                                  key: const Key('event-category-add-action'),
-                                  onPressed: _savingCategory
-                                      ? null
-                                      : _openCategoryCreationModal,
-                                  tooltip: 'Create category',
-                                  icon: const Icon(Icons.add_rounded),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final category in _categoryChipValues)
+                                      _EventCategoryChip(
+                                        chipKey: Key(
+                                          'event-category-chip-${_categoryKey(category.name)}',
+                                        ),
+                                        deleteKey: Key(
+                                          'event-category-delete-${_categoryKey(category.name)}',
+                                        ),
+                                        category: category,
+                                        color: _categoryColor(category.color),
+                                        selected:
+                                            _category.text.trim() ==
+                                            category.name,
+                                        saving: _savingCategory,
+                                        onSelected: () =>
+                                            _selectCategory(category),
+                                        onDeleted: () =>
+                                            _deleteCategoryValues(category),
+                                      ),
+                                  ],
                                 ),
                               ],
                             ),
@@ -3955,6 +4002,72 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       ),
     );
   }
+}
+
+class _EventCategoryChip extends StatelessWidget {
+  const _EventCategoryChip({
+    required this.chipKey,
+    required this.deleteKey,
+    required this.category,
+    required this.color,
+    required this.selected,
+    required this.saving,
+    required this.onSelected,
+    required this.onDeleted,
+  });
+
+  final Key chipKey;
+  final Key deleteKey;
+  final HermesEventCategory category;
+  final Color color;
+  final bool selected;
+  final bool saving;
+  final VoidCallback onSelected;
+  final VoidCallback onDeleted;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: selected ? color.withValues(alpha: .14) : Colors.white,
+    shape: StadiumBorder(
+      side: BorderSide(
+        color: selected ? color : HeyBeanTheme.border,
+        width: 1.4,
+      ),
+    ),
+    child: InkWell(
+      key: chipKey,
+      borderRadius: BorderRadius.circular(999),
+      onTap: onSelected,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 10, right: 4, top: 4, bottom: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(radius: 6, backgroundColor: color),
+            const SizedBox(width: 7),
+            Text(
+              category.name,
+              style: TextStyle(
+                color: HeyBeanTheme.text,
+                fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 4),
+            InkResponse(
+              key: deleteKey,
+              radius: 16,
+              onTap: saving ? null : onDeleted,
+              child: Icon(
+                Icons.close_rounded,
+                size: 18,
+                color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _EventCategoryCreateDialog extends StatefulWidget {
