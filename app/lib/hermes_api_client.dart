@@ -98,6 +98,8 @@ class HermesApiClient {
     String type = 'todo',
     String status = 'open',
     String? dueAt,
+    String? category,
+    String? color,
     Map<String, Object?>? metadata,
   }) async {
     final body = <String, Object?>{
@@ -105,6 +107,8 @@ class HermesApiClient {
       'type': type,
       'status': status,
       'due_at': dueAt,
+      'category': category,
+      'color': color,
       if (metadata != null) 'metadata': metadata,
     };
     final data = await _sendJson('POST', '/tasks', body: body);
@@ -117,13 +121,19 @@ class HermesApiClient {
     String? status,
     String? dueAt,
     String? completedAt,
+    String? category,
+    String? color,
     Map<String, Object?>? metadata,
+    bool clearCategory = false,
+    bool clearColor = false,
   }) async {
     final body = <String, Object?>{
       if (title != null) 'title': title,
       if (status != null) 'status': status,
       'due_at': dueAt,
       if (completedAt != null || status == 'open') 'completed_at': completedAt,
+      if (category != null || clearCategory) 'category': category,
+      if (color != null || clearColor) 'color': color,
       if (metadata != null) 'metadata': metadata,
     };
     final data = await _sendJson('PATCH', '/tasks/$taskId', body: body);
@@ -164,12 +174,16 @@ class HermesApiClient {
     required String remindAt,
     String status = 'pending',
     int? calendarEventId,
+    String? category,
+    String? color,
     Map<String, Object?>? metadata,
   }) async {
     final body = <String, Object?>{
       'title': title,
       'remind_at': remindAt,
       'status': status,
+      'category': category,
+      'color': color,
       if (calendarEventId != null) 'calendar_event_id': calendarEventId,
       if (metadata != null) 'metadata': metadata,
     };
@@ -183,13 +197,19 @@ class HermesApiClient {
     String? remindAt,
     String? status,
     int? calendarEventId,
+    String? category,
+    String? color,
     Map<String, Object?>? metadata,
+    bool clearCategory = false,
+    bool clearColor = false,
   }) async {
     final body = <String, Object?>{
       if (title != null) 'title': title,
       if (remindAt != null) 'remind_at': remindAt,
       if (status != null) 'status': status,
       if (calendarEventId != null) 'calendar_event_id': calendarEventId,
+      if (category != null || clearCategory) 'category': category,
+      if (color != null || clearColor) 'color': color,
       if (metadata != null) 'metadata': metadata,
     };
     final data = await _sendJson('PATCH', '/reminders/$reminderId', body: body);
@@ -505,6 +525,8 @@ class HermesTask {
     required this.title,
     this.status,
     this.dueAt,
+    this.category,
+    this.color,
     this.completedAt,
     this.metadata,
   });
@@ -513,31 +535,45 @@ class HermesTask {
   final String title;
   final String? status;
   final String? dueAt;
+  final String? category;
+  final String? color;
   final String? completedAt;
   final Map<String, Object?>? metadata;
 
-  factory HermesTask.fromJson(Map<String, Object?> json) => HermesTask(
-    id: _expectInt(json['id']),
-    title: _readTitle(json),
-    status: json['status'] as String?,
-    dueAt: (json['due_at'] ?? json['dueAt']) as String?,
-    completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
-    metadata: json['metadata'] == null ? null : _expectMap(json['metadata']),
-  );
+  factory HermesTask.fromJson(Map<String, Object?> json) {
+    final metadata = _expectMapOrNull(json['metadata']);
+    return HermesTask(
+      id: _expectInt(json['id']),
+      title: _readTitle(json),
+      status: json['status'] as String?,
+      dueAt: (json['due_at'] ?? json['dueAt']) as String?,
+      category:
+          json['category'] as String? ?? (metadata?['category'] as String?),
+      color: json['color'] as String? ?? (metadata?['color'] as String?),
+      completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
+      metadata: metadata,
+    );
+  }
 
   HermesTask copyWith({
     String? title,
     String? status,
     String? dueAt,
+    String? category,
+    String? color,
     String? completedAt,
     Map<String, Object?>? metadata,
     bool clearDueAt = false,
+    bool clearCategory = false,
+    bool clearColor = false,
     bool clearCompletedAt = false,
   }) => HermesTask(
     id: id,
     title: title ?? this.title,
     status: status ?? this.status,
     dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
+    category: clearCategory ? null : category ?? this.category,
+    color: clearColor ? null : color ?? this.color,
     completedAt: clearCompletedAt ? null : completedAt ?? this.completedAt,
     metadata: metadata ?? this.metadata,
   );
@@ -548,6 +584,8 @@ class HermesReminder {
     required this.id,
     required this.title,
     this.dueAt,
+    this.category,
+    this.color,
     this.status,
     this.completedAt,
     this.calendarEventId,
@@ -557,35 +595,49 @@ class HermesReminder {
   final int id;
   final String title;
   final String? dueAt;
+  final String? category;
+  final String? color;
   final String? status;
   final String? completedAt;
   final int? calendarEventId;
   final Map<String, Object?>? metadata;
 
-  factory HermesReminder.fromJson(Map<String, Object?> json) => HermesReminder(
-    id: _expectInt(json['id']),
-    title: _readTitle(json),
-    dueAt: (json['due_at'] ?? json['remind_at'] ?? json['dueAt']) as String?,
-    status: json['status'] as String?,
-    completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
-    calendarEventId: json['calendar_event_id'] == null
-        ? null
-        : _expectInt(json['calendar_event_id']),
-    metadata: json['metadata'] == null ? null : _expectMap(json['metadata']),
-  );
+  factory HermesReminder.fromJson(Map<String, Object?> json) {
+    final metadata = _expectMapOrNull(json['metadata']);
+    return HermesReminder(
+      id: _expectInt(json['id']),
+      title: _readTitle(json),
+      dueAt: (json['due_at'] ?? json['remind_at'] ?? json['dueAt']) as String?,
+      category:
+          json['category'] as String? ?? (metadata?['category'] as String?),
+      color: json['color'] as String? ?? (metadata?['color'] as String?),
+      status: json['status'] as String?,
+      completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
+      calendarEventId: json['calendar_event_id'] == null
+          ? null
+          : _expectInt(json['calendar_event_id']),
+      metadata: metadata,
+    );
+  }
 
   HermesReminder copyWith({
     String? title,
     String? dueAt,
+    String? category,
+    String? color,
     String? status,
     String? completedAt,
     int? calendarEventId,
     Map<String, Object?>? metadata,
     bool clearDueAt = false,
+    bool clearCategory = false,
+    bool clearColor = false,
   }) => HermesReminder(
     id: id,
     title: title ?? this.title,
     dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
+    category: clearCategory ? null : category ?? this.category,
+    color: clearColor ? null : color ?? this.color,
     status: status ?? this.status,
     completedAt: completedAt ?? this.completedAt,
     calendarEventId: calendarEventId ?? this.calendarEventId,

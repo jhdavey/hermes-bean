@@ -8,7 +8,7 @@ use Illuminate\Support\Carbon;
 
 class Task extends Model
 {
-    protected $fillable = ['user_id', 'conversation_session_id', 'title', 'type', 'status', 'notes', 'due_at', 'completed_at', 'metadata'];
+    protected $fillable = ['user_id', 'conversation_session_id', 'title', 'type', 'status', 'notes', 'category', 'color', 'due_at', 'completed_at', 'metadata'];
 
     protected function casts(): array
     {

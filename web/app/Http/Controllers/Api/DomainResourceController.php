@@ -78,6 +78,8 @@ class DomainResourceController extends Controller
             'type' => ['required', Rule::in(['todo', 'chore', 'maintenance'])],
             'status' => ['nullable', 'string', 'max:50'],
             'notes' => ['nullable', 'string'],
+            'category' => ['nullable', 'string', 'max:80'],
+            'color' => ['nullable', 'string', 'max:20'],
             'due_at' => ['nullable', 'date'],
             'completed_at' => ['nullable', 'date'],
             'metadata' => ['nullable', 'array'],
@@ -98,6 +100,8 @@ class DomainResourceController extends Controller
             'type' => ['sometimes', 'required', Rule::in(['todo', 'chore', 'maintenance'])],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'notes' => ['sometimes', 'nullable', 'string'],
+            'category' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'due_at' => ['sometimes', 'nullable', 'date'],
             'completed_at' => ['sometimes', 'nullable', 'date'],
             'metadata' => ['sometimes', 'nullable', 'array'],
@@ -130,6 +134,8 @@ class DomainResourceController extends Controller
             'calendar_event_id' => ['nullable', Rule::exists('calendar_events', 'id')->where('user_id', $request->user()->id)],
             'title' => ['required', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
+            'category' => ['nullable', 'string', 'max:80'],
+            'color' => ['nullable', 'string', 'max:20'],
             'remind_at' => ['required', 'date'],
             'status' => ['nullable', 'string', 'max:50'],
             'metadata' => ['nullable', 'array'],
@@ -143,6 +149,8 @@ class DomainResourceController extends Controller
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'calendar_event_id' => ['sometimes', 'nullable', Rule::exists('calendar_events', 'id')->where('user_id', $request->user()->id)],
+            'category' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'remind_at' => ['sometimes', 'required', 'date'],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'metadata' => ['sometimes', 'nullable', 'array'],
@@ -223,7 +231,13 @@ class DomainResourceController extends Controller
         $model = EventCategory::where('user_id', $request->user()->id)->findOrFail($eventCategory);
         CalendarEvent::where('user_id', $request->user()->id)
             ->where('category', $model->name)
-            ->update(['category' => null]);
+            ->update(['category' => null, 'color' => null]);
+        Task::where('user_id', $request->user()->id)
+            ->where('category', $model->name)
+            ->update(['category' => null, 'color' => null]);
+        Reminder::where('user_id', $request->user()->id)
+            ->where('category', $model->name)
+            ->update(['category' => null, 'color' => null]);
 
         return $this->destroyed($model);
     }

@@ -695,6 +695,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     HermesTask? task, {
     required String title,
     String? dueAt,
+    String? category,
+    String? color,
   }) async {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
     try {
@@ -702,12 +704,18 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           ? await widget.apiClient.createTask(
               title: title,
               dueAt: normalizedDueAt,
+              category: category,
+              color: color,
             )
           : await widget.apiClient.updateTask(
               task.id,
               title: title,
               status: task.status ?? 'open',
               dueAt: normalizedDueAt,
+              category: category,
+              color: color,
+              clearCategory: category == null,
+              clearColor: color == null,
             );
       if (!mounted) return;
       setState(() {
@@ -744,6 +752,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     required String title,
     required String remindAt,
     String status = 'pending',
+    String? category,
+    String? color,
   }) async {
     final normalizedRemindAt = _taskReminderInputToWireValue(remindAt);
     if (normalizedRemindAt == null) {
@@ -756,12 +766,18 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               title: title,
               remindAt: normalizedRemindAt,
               status: status,
+              category: category,
+              color: color,
             )
           : await widget.apiClient.updateReminder(
               reminder.id,
               title: title,
               remindAt: normalizedRemindAt,
               status: status,
+              category: category,
+              color: color,
+              clearCategory: category == null,
+              clearColor: color == null,
             );
       if (!mounted) return;
       setState(() {
@@ -867,8 +883,22 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       _calendar = _calendar
           .map(
             (event) => event.category == category.name
-                ? event.copyWith(clearCategory: true)
+                ? event.copyWith(clearCategory: true, clearColor: true)
                 : event,
+          )
+          .toList();
+      _tasks = _tasks
+          .map(
+            (task) => task.category == category.name
+                ? task.copyWith(clearCategory: true, clearColor: true)
+                : task,
+          )
+          .toList();
+      _reminders = _reminders
+          .map(
+            (reminder) => reminder.category == category.name
+                ? reminder.copyWith(clearCategory: true, clearColor: true)
+                : reminder,
           )
           .toList();
     });
@@ -1386,6 +1416,8 @@ class _CommandCenterContent extends StatelessWidget {
     HermesTask? task, {
     required String title,
     String? dueAt,
+    String? category,
+    String? color,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -1394,6 +1426,8 @@ class _CommandCenterContent extends StatelessWidget {
     required String title,
     required String remindAt,
     String status,
+    String? category,
+    String? color,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -1488,6 +1522,7 @@ class _CommandCenterContent extends StatelessWidget {
           ),
           _HomeDestination.tasks => _TaskListCard(
             tasks: tasks,
+            eventCategories: eventCategories,
             pendingTaskIds: pendingTaskIds,
             onTaskCompleted: onTaskCompleted,
             onTaskSaved: onTaskSaved,
@@ -1496,6 +1531,7 @@ class _CommandCenterContent extends StatelessWidget {
           _HomeDestination.bean => beanPanel,
           _HomeDestination.reminders => _ReminderListCard(
             reminders: reminders,
+            eventCategories: eventCategories,
             onReminderSaved: onReminderSaved,
             onReminderCompleted: onReminderCompleted,
             onReminderDeleted: onReminderDeleted,
@@ -5043,11 +5079,16 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   required String initialTitle,
   required String initialTime,
   required bool allowEmptyTime,
+  List<HermesEventCategory> categories = const [],
+  String? initialCategory,
+  String? initialColor,
   String? deleteLabel,
   String? completeLabel,
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
+  var selectedCategory = initialCategory?.trim() ?? '';
+  var selectedColor = initialColor?.trim() ?? '';
   String? validationError;
 
   return showModalBottomSheet<Map<String, Object?>>(
@@ -5086,6 +5127,48 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                   decoration: InputDecoration(labelText: titleLabel),
                 ),
                 const SizedBox(height: 12),
+                if (categories.isNotEmpty) ...[
+                  Text(
+                    'Category',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: HeyBeanTheme.text,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        key: const Key('title-time-editor-category-none'),
+                        label: const Text('No category'),
+                        selected: selectedCategory.isEmpty,
+                        onSelected: (_) => setModalState(() {
+                          selectedCategory = '';
+                          selectedColor = '';
+                        }),
+                      ),
+                      for (final category in categories)
+                        ChoiceChip(
+                          key: Key(
+                            'title-time-editor-category-${category.name.toLowerCase().replaceAll(' ', '-')}',
+                          ),
+                          avatar: CircleAvatar(
+                            radius: 5,
+                            backgroundColor: _safeCategoryColor(category.color),
+                          ),
+                          label: Text(category.name),
+                          selected: selectedCategory == category.name,
+                          onSelected: (_) => setModalState(() {
+                            selectedCategory = category.name;
+                            selectedColor = category.color;
+                          }),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 TextFormField(
                   key: const Key('title-time-editor-time'),
                   controller: timeController,
@@ -5190,6 +5273,14 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                           Navigator.of(context).pop({
                             'title': title,
                             'time': time.isEmpty ? null : time,
+                            'category': selectedCategory.isEmpty
+                                ? null
+                                : selectedCategory,
+                            'color': selectedCategory.isEmpty
+                                ? null
+                                : (selectedColor.isEmpty
+                                      ? '#34C759'
+                                      : selectedColor),
                           });
                         },
                         icon: const Icon(Icons.check_rounded),
@@ -5206,9 +5297,19 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                       final title = titleController.text.trim();
                       final time = timeController.text.trim();
                       if (title.isEmpty || time.isEmpty) return;
-                      Navigator.of(
-                        context,
-                      ).pop({'title': title, 'time': time, 'complete': true});
+                      Navigator.of(context).pop({
+                        'title': title,
+                        'time': time,
+                        'complete': true,
+                        'category': selectedCategory.isEmpty
+                            ? null
+                            : selectedCategory,
+                        'color': selectedCategory.isEmpty
+                            ? null
+                            : (selectedColor.isEmpty
+                                  ? '#34C759'
+                                  : selectedColor),
+                      });
                     },
                     icon: const Icon(Icons.done_all_rounded),
                     label: Text(completeLabel),
@@ -5226,6 +5327,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
 class _TaskListCard extends StatefulWidget {
   const _TaskListCard({
     required this.tasks,
+    required this.eventCategories,
     required this.pendingTaskIds,
     required this.onTaskCompleted,
     required this.onTaskSaved,
@@ -5233,12 +5335,15 @@ class _TaskListCard extends StatefulWidget {
   });
 
   final List<HermesTask> tasks;
+  final List<HermesEventCategory> eventCategories;
   final Set<int> pendingTaskIds;
   final Future<void> Function(HermesTask task) onTaskCompleted;
   final Future<void> Function(
     HermesTask? task, {
     required String title,
     String? dueAt,
+    String? category,
+    String? color,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -5326,6 +5431,9 @@ class _TaskListCardState extends State<_TaskListCard> {
       initialTitle: task?.title ?? '',
       initialTime: _formatCalendarEventDateTime(task?.dueAt),
       allowEmptyTime: true,
+      categories: widget.eventCategories,
+      initialCategory: task?.category,
+      initialColor: task?.color,
       deleteLabel: task == null ? null : 'Delete task',
     );
     if (result == null) return;
@@ -5339,6 +5447,8 @@ class _TaskListCardState extends State<_TaskListCard> {
       task,
       title: title,
       dueAt: result['time'] as String?,
+      category: result['category'] as String?,
+      color: result['color'] as String?,
     );
   }
 }
@@ -5346,17 +5456,21 @@ class _TaskListCardState extends State<_TaskListCard> {
 class _ReminderListCard extends StatefulWidget {
   const _ReminderListCard({
     required this.reminders,
+    required this.eventCategories,
     required this.onReminderSaved,
     required this.onReminderCompleted,
     required this.onReminderDeleted,
   });
 
   final List<HermesReminder> reminders;
+  final List<HermesEventCategory> eventCategories;
   final Future<void> Function(
     HermesReminder? reminder, {
     required String title,
     required String remindAt,
     String status,
+    String? category,
+    String? color,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -5448,6 +5562,9 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       initialTitle: reminder?.title ?? '',
       initialTime: _formatCalendarEventDateTime(reminder?.dueAt),
       allowEmptyTime: false,
+      categories: widget.eventCategories,
+      initialCategory: reminder?.category,
+      initialColor: reminder?.color,
       deleteLabel: reminder == null ? null : 'Delete reminder',
       completeLabel: reminder == null
           ? null
@@ -5471,6 +5588,8 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       title: title,
       remindAt: time,
       status: status,
+      category: result['category'] as String?,
+      color: result['color'] as String?,
     );
   }
 }
@@ -6041,6 +6160,7 @@ bool _reminderIsCompleted(HermesReminder reminder) {
 String _taskSubtitle(HermesTask task) {
   final parts = <String>[
     _statusLabel(task.status),
+    if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
     if (task.dueAt != null && task.dueAt!.trim().isNotEmpty)
       'Due ${_formatCalendarEventDateTime(task.dueAt)}',
     if (_taskIsRecurring(task)) 'Recurring',
@@ -6051,6 +6171,7 @@ String _taskSubtitle(HermesTask task) {
 String _reminderSubtitle(HermesReminder reminder) {
   final parts = <String>[
     _reminderIsCompleted(reminder) ? 'Completed' : 'Pending',
+    if ((reminder.category ?? '').trim().isNotEmpty) reminder.category!.trim(),
     if (reminder.dueAt != null && reminder.dueAt!.trim().isNotEmpty)
       _formatCalendarEventDateTime(reminder.dueAt)
     else
@@ -6061,6 +6182,14 @@ String _reminderSubtitle(HermesReminder reminder) {
       'Repeats ${reminder.metadata!['recurrence']}',
   ];
   return parts.join(' · ');
+}
+
+Color _safeCategoryColor(String? value) {
+  final color = value?.trim() ?? '';
+  if (!RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(color)) {
+    return HeyBeanTheme.accentStrong;
+  }
+  return Color(int.parse('FF${color.substring(1)}', radix: 16));
 }
 
 String _eventTimeRangeShort(HermesCalendarEvent event) {

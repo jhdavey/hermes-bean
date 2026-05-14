@@ -220,6 +220,42 @@ void main() {
     );
   });
 
+  testWidgets('task and reminder editors can assign event-style categories', (
+    WidgetTester tester,
+  ) async {
+    final api = _TaskReminderCategoryFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-edit-action-501')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedTask?.category, 'Work');
+    expect(api.updatedTask?.color, '#007AFF');
+    expect(find.textContaining('Work'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('nav-reminders')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reminder-edit-action-601')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedReminder?.category, 'Work');
+    expect(api.updatedReminder?.color, '#007AFF');
+    expect(find.textContaining('Work'), findsWidgets);
+  });
+
   testWidgets(
     'focused old HeyBean views render home calendar, tasks, reminders, chat, and settings',
     (WidgetTester tester) async {
@@ -1686,7 +1722,11 @@ class _EditableReminderFakeHermesApiClient
     String? remindAt,
     String? status,
     int? calendarEventId,
+    String? category,
+    String? color,
     Map<String, Object?>? metadata,
+    bool clearCategory = false,
+    bool clearColor = false,
   }) async {
     final existing = _reminders.firstWhere((item) => item.id == reminderId);
     final updated = HermesReminder(
@@ -1694,6 +1734,8 @@ class _EditableReminderFakeHermesApiClient
       title: title ?? existing.title,
       status: status ?? existing.status,
       dueAt: remindAt ?? existing.dueAt,
+      category: clearCategory ? null : category ?? existing.category,
+      color: clearColor ? null : color ?? existing.color,
       calendarEventId: calendarEventId ?? existing.calendarEventId,
       metadata: metadata ?? existing.metadata,
     );
@@ -1702,6 +1744,98 @@ class _EditableReminderFakeHermesApiClient
         .map((item) => item.id == reminderId ? updated : item)
         .toList();
     return updated;
+  }
+}
+
+class _TaskReminderCategoryFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  HermesTask? updatedTask;
+  HermesReminder? updatedReminder;
+
+  @override
+  Future<List<HermesEventCategory>> listEventCategories() async => const [
+    HermesEventCategory(id: 10, name: 'Work', color: '#007AFF'),
+  ];
+
+  @override
+  Future<List<HermesTask>> listTasks() async => [
+    updatedTask ??
+        HermesTask(
+          id: 501,
+          title: 'Categorize proposal',
+          status: 'open',
+          dueAt: DateTime.now().add(const Duration(hours: 3)).toIso8601String(),
+        ),
+  ];
+
+  @override
+  Future<List<HermesReminder>> listReminders() async => [
+    updatedReminder ??
+        HermesReminder(
+          id: 601,
+          title: 'Categorize reminder',
+          status: 'pending',
+          dueAt: DateTime.now().add(const Duration(hours: 4)).toIso8601String(),
+        ),
+  ];
+
+  @override
+  Future<HermesTask> updateTask(
+    int taskId, {
+    String? title,
+    String? status,
+    String? dueAt,
+    String? completedAt,
+    String? category,
+    String? color,
+    Map<String, Object?>? metadata,
+    bool clearCategory = false,
+    bool clearColor = false,
+  }) async {
+    final existing = (await listTasks()).firstWhere(
+      (item) => item.id == taskId,
+    );
+    updatedTask = HermesTask(
+      id: existing.id,
+      title: title ?? existing.title,
+      status: status ?? existing.status,
+      dueAt: dueAt ?? existing.dueAt,
+      category: clearCategory ? null : category ?? existing.category,
+      color: clearColor ? null : color ?? existing.color,
+      completedAt: completedAt ?? existing.completedAt,
+      metadata: metadata ?? existing.metadata,
+    );
+    return updatedTask!;
+  }
+
+  @override
+  Future<HermesReminder> updateReminder(
+    int reminderId, {
+    String? title,
+    String? remindAt,
+    String? status,
+    int? calendarEventId,
+    String? category,
+    String? color,
+    Map<String, Object?>? metadata,
+    bool clearCategory = false,
+    bool clearColor = false,
+  }) async {
+    final existing = (await listReminders()).firstWhere(
+      (item) => item.id == reminderId,
+    );
+    updatedReminder = HermesReminder(
+      id: existing.id,
+      title: title ?? existing.title,
+      dueAt: remindAt ?? existing.dueAt,
+      category: clearCategory ? null : category ?? existing.category,
+      color: clearColor ? null : color ?? existing.color,
+      status: status ?? existing.status,
+      completedAt: existing.completedAt,
+      calendarEventId: calendarEventId ?? existing.calendarEventId,
+      metadata: metadata ?? existing.metadata,
+    );
+    return updatedReminder!;
   }
 }
 
