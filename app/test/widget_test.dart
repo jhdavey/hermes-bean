@@ -166,6 +166,60 @@ void main() {
     },
   );
 
+  testWidgets('critical count opens a dropdown with listed critical items', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _SignedInFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('critical-task-count')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('critical-task-dropdown')), findsOneWidget);
+    expect(find.text('Critical'), findsOneWidget);
+    expect(find.textContaining('Critical means open tasks'), findsOneWidget);
+    expect(find.byKey(const Key('critical-task-item-1')), findsOneWidget);
+    expect(find.text('Plan launch'), findsWidgets);
+    expect(find.byKey(const Key('critical-reminder-item-2')), findsNothing);
+  });
+
+  testWidgets('reminder editor uses the shared date/time picker dock', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _SignedInFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-reminders')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reminder-edit-action-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('title-time-editor-picker-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('title-time-time-dock')), findsOneWidget);
+    expect(find.text('Choose date and time'), findsWidgets);
+    expect(find.byKey(const Key('title-time-date-month-dial')), findsOneWidget);
+    expect(find.byKey(const Key('title-time-time-hour-dial')), findsOneWidget);
+    expect(
+      find.byKey(const Key('title-time-time-minute-dial')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('title-time-time-meridiem-dial')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets(
     'focused old HeyBean views render home calendar, tasks, reminders, chat, and settings',
     (WidgetTester tester) async {
