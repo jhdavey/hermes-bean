@@ -11,6 +11,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\HermesRuntimeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
@@ -24,12 +25,15 @@ class HermesRuntimeApiTest extends TestCase
     {
         parent::setUp();
 
+        Carbon::setTestNow(Carbon::parse('2026-05-13 12:00:00'));
         $this->tempDir = sys_get_temp_dir().'/hermes-runtime-api-test-'.bin2hex(random_bytes(6));
         File::makeDirectory($this->tempDir, 0755, true);
     }
 
     protected function tearDown(): void
     {
+        Carbon::setTestNow();
+
         if (isset($this->tempDir) && File::isDirectory($this->tempDir)) {
             File::deleteDirectory($this->tempDir);
         }
@@ -288,6 +292,44 @@ PHP);
             'starts_at' => '2026-05-13 15:00:00',
             'status' => 'scheduled',
         ]);
+    }
+
+    public function test_runtime_dashboard_state_exposes_calendar_category_color_and_recurrence_to_agent(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = implode(' ', $argv);
+$required = ['Design review', 'Work', '#FF9500', 'weekly'];
+$missing = array_values(array_filter($required, fn ($needle) => ! str_contains($prompt, $needle)));
+echo json_encode([
+    'message' => empty($missing) ? 'Dashboard state included calendar details.' : 'Missing calendar details: '.implode(', ', $missing),
+    'actions' => [],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $userId = User::where('email', 'test@example.com')->value('id');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Calendar context',
+        ])->assertCreated()->json('data.id');
+
+        CalendarEvent::create([
+            'user_id' => $userId,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Design review',
+            'category' => 'Work',
+            'color' => '#FF9500',
+            'recurrence' => 'weekly',
+            'starts_at' => '2026-05-13T15:00:00Z',
+            'ends_at' => '2026-05-13T16:00:00Z',
+            'status' => 'scheduled',
+        ]);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'What details do you know about my design review?',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Dashboard state included calendar details.');
     }
 
     public function test_agent_created_task_reminder_and_event_are_visible_in_today_dashboard(): void

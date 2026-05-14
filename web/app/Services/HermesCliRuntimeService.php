@@ -285,7 +285,7 @@ PROMPT.$this->payloadFor($session, $message);
             'dashboard_state' => [
                 'tasks' => Task::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'type', 'status', 'notes', 'due_at', 'metadata']),
                 'reminders' => Reminder::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'notes', 'status', 'remind_at', 'metadata']),
-                'calendar_events' => CalendarEvent::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'description', 'location', 'status', 'starts_at', 'ends_at', 'metadata']),
+                'calendar_events' => CalendarEvent::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'description', 'location', 'category', 'color', 'recurrence', 'status', 'starts_at', 'ends_at', 'metadata']),
                 'approvals' => Approval::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'status', 'description', 'payload']),
                 'blockers' => Blocker::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'reason', 'status', 'context']),
             ],
