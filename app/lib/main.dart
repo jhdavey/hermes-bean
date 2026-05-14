@@ -3249,15 +3249,19 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     });
   }
 
-  Future<void> _saveCategory({HermesEventCategory? category}) async {
-    final name = _category.text.trim();
-    if (name.isEmpty) return;
+  Future<void> _saveCategoryValues({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  }) async {
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty) return;
     setState(() => _savingCategory = true);
     try {
       final saved = await widget.onEventCategorySaved(
         category: category,
-        name: name,
-        color: _color,
+        name: trimmedName,
+        color: color,
       );
       if (!mounted) return;
       setState(() {
@@ -3275,20 +3279,17 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     }
   }
 
-  Future<void> _deleteCategory(HermesEventCategory category) async {
-    setState(() => _savingCategory = true);
-    try {
-      await widget.onEventCategoryDeleted(category);
-      if (!mounted) return;
-      setState(() {
-        _categories = _categories
-            .where((item) => item.id != category.id)
-            .toList();
-        if (_category.text.trim() == category.name) _category.clear();
-      });
-    } finally {
-      if (mounted) setState(() => _savingCategory = false);
-    }
+  Future<void> _openCategoryCreationModal() async {
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) =>
+          _EventCategoryCreateDialog(initialColor: _color, colors: _colors),
+    );
+    if (result == null || !mounted) return;
+    await _saveCategoryValues(
+      name: result['name'] ?? '',
+      color: result['color'] ?? _color,
+    );
   }
 
   List<String> get _categoryDropdownValues {
@@ -3587,90 +3588,43 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            DropdownButtonFormField<String>(
-                              key: const Key('event-category-dropdown'),
-                              initialValue:
-                                  _categoryDropdownValues.contains(
-                                    _category.text.trim(),
-                                  )
-                                  ? _category.text.trim()
-                                  : null,
-                              decoration: const InputDecoration(
-                                labelText: 'Category',
-                                prefixIcon: Icon(Icons.sell_outlined),
-                              ),
-                              items: [
-                                for (final category in _categoryDropdownValues)
-                                  DropdownMenuItem(
-                                    value: category,
-                                    child: Text(category),
-                                  ),
-                              ],
-                              onChanged: (value) {
-                                if (value != null) _selectCategory(value);
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              key: const Key('event-category-field'),
-                              controller: _category,
-                              textInputAction: TextInputAction.next,
-                              onChanged: (_) => setState(() {}),
-                              decoration: const InputDecoration(
-                                labelText: 'New or edited category name',
-                                prefixIcon: Icon(Icons.edit_note_rounded),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              key: const Key('event-category-manager'),
-                              spacing: 8,
-                              runSpacing: 8,
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                for (final category in _categories)
-                                  InputChip(
-                                    label: Text(category.name),
-                                    selected:
-                                        _category.text.trim() == category.name,
-                                    avatar: CircleAvatar(
-                                      radius: 6,
-                                      backgroundColor: _colorFromHex(
-                                        category.color,
-                                      ),
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    key: const Key('event-category-dropdown'),
+                                    initialValue:
+                                        _categoryDropdownValues.contains(
+                                          _category.text.trim(),
+                                        )
+                                        ? _category.text.trim()
+                                        : null,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Category',
+                                      prefixIcon: Icon(Icons.sell_outlined),
                                     ),
-                                    onPressed: () => setState(() {
-                                      _category.text = category.name;
-                                      _color = category.color;
-                                    }),
-                                    onDeleted: _savingCategory
-                                        ? null
-                                        : () => _deleteCategory(category),
+                                    items: [
+                                      for (final category
+                                          in _categoryDropdownValues)
+                                        DropdownMenuItem(
+                                          value: category,
+                                          child: Text(category),
+                                        ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value != null) _selectCategory(value);
+                                    },
                                   ),
-                                ActionChip(
-                                  key: const Key('event-category-save-action'),
-                                  avatar: const Icon(
-                                    Icons.save_outlined,
-                                    size: 18,
-                                  ),
-                                  label: Text(
-                                    _savingCategory
-                                        ? 'Saving...'
-                                        : 'Save category color',
-                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                IconButton.filledTonal(
+                                  key: const Key('event-category-add-action'),
                                   onPressed: _savingCategory
                                       ? null
-                                      : () {
-                                          final matches = _categories.where(
-                                            (item) =>
-                                                item.name ==
-                                                _category.text.trim(),
-                                          );
-                                          _saveCategory(
-                                            category: matches.isEmpty
-                                                ? null
-                                                : matches.first,
-                                          );
-                                        },
+                                      : _openCategoryCreationModal,
+                                  tooltip: 'Create category',
+                                  icon: const Icon(Icons.add_rounded),
                                 ),
                               ],
                             ),
@@ -4001,6 +3955,98 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       ),
     );
   }
+}
+
+class _EventCategoryCreateDialog extends StatefulWidget {
+  const _EventCategoryCreateDialog({
+    required this.initialColor,
+    required this.colors,
+  });
+
+  final String initialColor;
+  final List<({String value, String label})> colors;
+
+  @override
+  State<_EventCategoryCreateDialog> createState() =>
+      _EventCategoryCreateDialogState();
+}
+
+class _EventCategoryCreateDialogState
+    extends State<_EventCategoryCreateDialog> {
+  late final TextEditingController _nameController;
+  late String _selectedColor;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController();
+    _selectedColor = widget.initialColor;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    key: const Key('event-category-create-modal'),
+    title: const Text('New category'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            key: const Key('event-category-modal-name-field'),
+            controller: _nameController,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Category name',
+              prefixIcon: Icon(Icons.sell_outlined),
+            ),
+          ),
+          const SizedBox(height: 14),
+          _EventFieldLabel(icon: Icons.palette_outlined, label: 'Color'),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final color in widget.colors)
+                ChoiceChip(
+                  label: Text(color.label),
+                  selected: _selectedColor == color.value,
+                  avatar: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Color(
+                      int.parse('FF${color.value.substring(1)}', radix: 16),
+                    ),
+                  ),
+                  onSelected: (_) => setState(() {
+                    _selectedColor = color.value;
+                  }),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const Key('event-category-modal-save-action'),
+        onPressed: () => Navigator.of(
+          context,
+        ).pop({'name': _nameController.text.trim(), 'color': _selectedColor}),
+        child: const Text('Create'),
+      ),
+    ],
+  );
 }
 
 class _EventFieldLabel extends StatelessWidget {

@@ -773,9 +773,13 @@ void main() {
       expect(find.byKey(const Key('event-title-field')), findsOneWidget);
       expect(find.byKey(const Key('event-start-field')), findsOneWidget);
       expect(find.byKey(const Key('event-end-field')), findsOneWidget);
-      expect(find.byKey(const Key('event-category-field')), findsOneWidget);
-      expect(find.byKey(const Key('event-category-manager')), findsOneWidget);
-      expect(find.text('Work'), findsOneWidget);
+      expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
+      expect(
+        find.byKey(const Key('event-category-add-action')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('event-category-field')), findsNothing);
+      expect(find.byKey(const Key('event-category-manager')), findsNothing);
       expect(find.byKey(const Key('event-color-field')), findsOneWidget);
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
       final startEditor = tester.widget<EditableText>(
@@ -800,19 +804,13 @@ void main() {
         find.byKey(const Key('event-end-field')),
         '5:00 PM',
       );
-      await tester.enterText(
-        find.byKey(const Key('event-category-field')),
-        'Work',
-      );
       tester
-          .widget<ActionChip>(
-            find.byKey(const Key('event-category-save-action')),
+          .widget<DropdownButtonFormField<String>>(
+            find.byKey(const Key('event-category-dropdown')),
           )
-          .onPressed
-          ?.call();
+          .onChanged
+          ?.call('Work');
       await tester.pumpAndSettle();
-      expect(api.savedCategory?.name, 'Work');
-      expect(api.savedCategory?.color, '#34C759');
       tester
           .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Orange'))
           .onSelected
@@ -957,7 +955,7 @@ void main() {
   );
 
   testWidgets(
-    'calendar event editor uses category dropdown and bottom dock time dials with five minute increments',
+    'calendar event editor creates categories from plus modal and uses bottom dock time dials with five minute increments',
     (WidgetTester tester) async {
       final api = _EditableCalendarFakeHermesApiClient();
       await tester.pumpWidget(
@@ -974,10 +972,40 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('event-category-dropdown')));
+      expect(
+        find.byKey(const Key('event-category-add-action')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('event-category-field')), findsNothing);
+      expect(find.byKey(const Key('event-category-manager')), findsNothing);
+      expect(find.byKey(const Key('event-category-save-action')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('event-category-add-action')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Work').last);
+      expect(
+        find.byKey(const Key('event-category-create-modal')),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const Key('event-category-modal-name-field')),
+        'Travel',
+      );
+      tester
+          .widget<ChoiceChip>(
+            find.descendant(
+              of: find.byKey(const Key('event-category-create-modal')),
+              matching: find.widgetWithText(ChoiceChip, 'Purple'),
+            ),
+          )
+          .onSelected
+          ?.call(true);
       await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('event-category-modal-save-action')),
+      );
+      await tester.pumpAndSettle();
+      expect(api.savedCategory?.name, 'Travel');
+      expect(api.savedCategory?.color, '#AF52DE');
 
       await tester.ensureVisible(find.byKey(const Key('event-start-field')));
       await tester.pumpAndSettle();
@@ -1001,7 +1029,7 @@ void main() {
       await tester.tap(find.byKey(const Key('event-save-action')));
       await tester.pumpAndSettle();
 
-      expect(api.updatedEvent?.category, 'Work');
+      expect(api.updatedEvent?.category, 'Travel');
       expect(api.updatedEvent?.color, '#FF9500');
     },
   );
