@@ -2559,9 +2559,15 @@ class _TwoDayTimelinePage extends StatelessWidget {
                   ),
                 for (final event in calendar) ...[
                   if (_eventFallsOnDay(event, selectedDay) &&
-                      _eventFallsWithinHours(event, startHour, endHour))
+                      _eventFallsWithinHours(
+                        event,
+                        selectedDay,
+                        startHour,
+                        endHour,
+                      ))
                     _TimelineEventBlock(
                       event: event,
+                      day: selectedDay,
                       startHour: startHour,
                       endHour: endHour,
                       columnIndex: 0,
@@ -2572,9 +2578,15 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       onEventCategoryDeleted: onEventCategoryDeleted,
                     ),
                   if (_eventFallsOnDay(event, selectedNextDay) &&
-                      _eventFallsWithinHours(event, startHour, endHour))
+                      _eventFallsWithinHours(
+                        event,
+                        selectedNextDay,
+                        startHour,
+                        endHour,
+                      ))
                     _TimelineEventBlock(
                       event: event,
+                      day: selectedNextDay,
                       startHour: startHour,
                       endHour: endHour,
                       columnIndex: 1,
@@ -2886,6 +2898,7 @@ class _TimelineDayGridRow extends StatelessWidget {
 class _TimelineEventBlock extends StatelessWidget {
   const _TimelineEventBlock({
     required this.event,
+    required this.day,
     required this.startHour,
     required this.endHour,
     required this.columnIndex,
@@ -2897,6 +2910,7 @@ class _TimelineEventBlock extends StatelessWidget {
   });
 
   final HermesCalendarEvent event;
+  final DateTime day;
   final int startHour;
   final int endHour;
   final int columnIndex;
@@ -2929,21 +2943,14 @@ class _TimelineEventBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final parsed = _parseCalendarEventDateTime(event.startsAt);
-    if (parsed == null) return const SizedBox.shrink();
-    final parsedEnd = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
-    final visibleHours = _calendarVisibleHours(startHour, endHour);
-    final visibleStart = visibleHours.first.toDouble();
-    final visibleEnd = visibleHours.last.toDouble();
-    final startDecimal = parsed.hour + (parsed.minute / 60);
-    final endDecimal = parsedEnd == null || !parsedEnd.isAfter(parsed)
-        ? startDecimal + .5
-        : parsedEnd.hour + (parsedEnd.minute / 60);
-    final clampedStart = startDecimal.clamp(visibleStart, visibleEnd);
-    final clampedEnd = endDecimal.clamp(visibleStart, visibleEnd);
-    final hourPosition = (clampedStart - visibleStart) * _calendarHourHeight;
-    final eventHeight = ((clampedEnd - clampedStart) * _calendarHourHeight - 4)
-        .clamp(34.0, (visibleEnd - visibleStart + 1) * _calendarHourHeight);
+    final segment = _eventVisibleSegment(event, day, startHour, endHour);
+    if (segment == null) return const SizedBox.shrink();
+    final visibleStart = startHour.toDouble();
+    final startDecimal = _decimalHoursFromDayStart(segment.start, day);
+    final endDecimal = _decimalHoursFromDayStart(segment.end, day);
+    final hourPosition = (startDecimal - visibleStart) * _calendarHourHeight;
+    final eventHeight = ((endDecimal - startDecimal) * _calendarHourHeight - 4)
+        .clamp(34.0, (endHour + 1 - startHour) * _calendarHourHeight);
     final dayColumnWidth = timelineWidth / 2;
     final left = (dayColumnWidth * columnIndex) + 8;
     final width = (dayColumnWidth - 16).clamp(0.0, double.infinity);
@@ -4227,24 +4234,39 @@ List<int> _calendarVisibleHours(int startHour, int endHour) {
 
 bool _eventFallsWithinHours(
   HermesCalendarEvent event,
+  DateTime day,
+  int startHour,
+  int endHour,
+) => _eventVisibleSegment(event, day, startHour, endHour) != null;
+
+({DateTime start, DateTime end})? _eventVisibleSegment(
+  HermesCalendarEvent event,
+  DateTime day,
   int startHour,
   int endHour,
 ) {
   final start = _parseCalendarEventDateTime(event.startsAt);
-  if (start == null) return false;
-  final end =
+  if (start == null) return null;
+  var end =
       _parseCalendarEventDateTime(event.endsAt, event.startsAt) ??
       start.add(const Duration(minutes: 30));
-  final visibleStart = DateTime(start.year, start.month, start.day, startHour);
-  final visibleEnd = DateTime(
-    start.year,
-    start.month,
-    start.day,
-    endHour,
-    59,
-    59,
-  );
-  return end.isAfter(visibleStart) && start.isBefore(visibleEnd);
+  if (!end.isAfter(start)) {
+    end = start.add(const Duration(minutes: 30));
+  }
+
+  final visibleStart = DateTime(day.year, day.month, day.day, startHour);
+  final visibleEnd = DateTime(day.year, day.month, day.day, endHour + 1);
+  if (!end.isAfter(visibleStart) || !start.isBefore(visibleEnd)) return null;
+
+  final segmentStart = start.isAfter(visibleStart) ? start : visibleStart;
+  final segmentEnd = end.isBefore(visibleEnd) ? end : visibleEnd;
+  if (!segmentEnd.isAfter(segmentStart)) return null;
+  return (start: segmentStart, end: segmentEnd);
+}
+
+double _decimalHoursFromDayStart(DateTime value, DateTime day) {
+  final dayStart = DateTime(day.year, day.month, day.day);
+  return value.difference(dayStart).inMinutes / 60;
 }
 
 String _hourLabel(int hour) {
@@ -4483,9 +4505,17 @@ bool _sameCalendarDay(DateTime a, DateTime b) =>
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 
 bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
-  final parsed = _parseCalendarEventDateTime(event.startsAt);
-  if (parsed == null) return false;
-  return _sameCalendarDay(parsed, day);
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  if (start == null) return false;
+  var end =
+      _parseCalendarEventDateTime(event.endsAt, event.startsAt) ??
+      start.add(const Duration(minutes: 30));
+  if (!end.isAfter(start)) {
+    end = start.add(const Duration(minutes: 30));
+  }
+  final dayStart = DateTime(day.year, day.month, day.day);
+  final dayEnd = dayStart.add(const Duration(days: 1));
+  return end.isAfter(dayStart) && start.isBefore(dayEnd);
 }
 
 class _CalendarMonthTaskList extends StatelessWidget {

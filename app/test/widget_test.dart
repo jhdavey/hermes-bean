@@ -983,6 +983,62 @@ void main() {
   );
 
   testWidgets(
+    'multi-day event end edits render through the rest of the start day and next morning',
+    (WidgetTester tester) async {
+      final api = _MultiDayEditableCalendarFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('week-date-pill-next-visible')));
+      await tester.pumpAndSettle();
+
+      final eventBlock = find.byKey(
+        const Key('calendar-event-block-conference'),
+      );
+      await tester.ensureVisible(eventBlock);
+      await tester.pumpAndSettle();
+      final initialHeight = tester.getRect(eventBlock).height;
+
+      await tester.tap(eventBlock);
+      await tester.pumpAndSettle();
+      final end = DateTime.now().add(const Duration(days: 2));
+      const monthNames = [
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December',
+      ];
+      await tester.enterText(
+        find.byKey(const Key('event-end-field')),
+        '${monthNames[end.month - 1]} ${end.day} at 1pm',
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      expect(
+        api.updatedEvent?.endsAt,
+        DateTime(end.year, end.month, end.day, 13).toIso8601String(),
+      );
+      expect(eventBlock, findsNWidgets(2));
+      final startDayHeight = tester.getRect(eventBlock.first).height;
+      expect(startDayHeight, greaterThan(initialHeight * 6));
+
+      final nextMorningSegment = tester.getRect(eventBlock.last).height;
+      expect(nextMorningSegment, greaterThan(initialHeight * 5));
+      expect(nextMorningSegment, lessThan(startDayHeight));
+    },
+  );
+
+  testWidgets(
     'calendar event editor creates categories from plus modal and uses bottom dock time dials with five minute increments',
     (WidgetTester tester) async {
       final api = _EditableCalendarFakeHermesApiClient();
@@ -1637,6 +1693,36 @@ class _EditableCalendarFakeHermesApiClient
   ];
 }
 
+class _MultiDayEditableCalendarFakeHermesApiClient
+    extends _EditableCalendarFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    return [
+      updatedEvent ??
+          HermesCalendarEvent(
+            id: 40,
+            title: 'Conference',
+            startsAt: DateTime(
+              tomorrow.year,
+              tomorrow.month,
+              tomorrow.day,
+              9,
+            ).toIso8601String(),
+            endsAt: DateTime(
+              tomorrow.year,
+              tomorrow.month,
+              tomorrow.day,
+              10,
+            ).toIso8601String(),
+            category: 'Work',
+            color: '#007AFF',
+            recurrence: 'none',
+          ),
+    ];
+  }
+}
+
 class _JsonEnvelopeMessageHermesApiClient extends _SignedInFakeHermesApiClient {
   @override
   Future<HermesMessageResult> sendMessage({
@@ -1703,9 +1789,9 @@ const _testMonthNames = [
 
 const _testShortWeekdayNames = [
   'Mon',
-  'Tue',
+  'Tues',
   'Wed',
-  'Thu',
+  'Thurs',
   'Fri',
   'Sat',
   'Sun',
