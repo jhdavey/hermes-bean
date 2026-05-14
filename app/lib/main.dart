@@ -4418,12 +4418,40 @@ String? _calendarEventInputToWireValue(
   return parsed?.toIso8601String() ?? trimmed;
 }
 
+DateTime? _parseIsoWallClockDateTime(String value) {
+  final match = RegExp(
+    r'^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2})(?::(\d{2}))?(?::(\d{2})(?:\.(\d{1,6}))?)?)?(?:Z|[+-]\d{2}:?\d{2})?$',
+  ).firstMatch(value);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final day = int.tryParse(match.group(3)!);
+  if (year == null || month == null || day == null) return null;
+  final hour = int.tryParse(match.group(4) ?? '0') ?? 0;
+  final minute = int.tryParse(match.group(5) ?? '0') ?? 0;
+  final second = int.tryParse(match.group(6) ?? '0') ?? 0;
+  final fraction = (match.group(7) ?? '').padRight(6, '0');
+  final microsecond = int.tryParse(fraction) ?? 0;
+  return DateTime(
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    microsecond ~/ 1000,
+    microsecond % 1000,
+  );
+}
+
 DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
   if (value == null || value.trim().isEmpty) return null;
-  final parsed = DateTime.tryParse(value);
+  final trimmed = value.trim();
+  final isoWallClock = _parseIsoWallClockDateTime(trimmed);
+  if (isoWallClock != null) return isoWallClock;
+  final parsed = DateTime.tryParse(trimmed);
   if (parsed != null) return parsed;
 
-  final trimmed = value.trim();
   final relativeMatch = RegExp(
     r'^(today|tomorrow)\s*(?:@|·|at)?\s*(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
     caseSensitive: false,

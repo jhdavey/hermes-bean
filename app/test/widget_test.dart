@@ -1039,6 +1039,45 @@ void main() {
   );
 
   testWidgets(
+    'UTC multi-day event timestamps render as wall-clock segments across today and tomorrow',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _UtcMultiDayCalendarFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final eventBlock = find.byKey(
+        const Key('calendar-event-block-app-project-focus-block'),
+      );
+      expect(eventBlock, findsNWidgets(2));
+
+      final selectedHeading = tester.getRect(
+        find.byKey(const Key('day-column-heading-selected')),
+      );
+      final nextHeading = tester.getRect(
+        find.byKey(const Key('day-column-heading-next')),
+      );
+      final todaySegment = tester.getRect(eventBlock.first);
+      final tomorrowSegment = tester.getRect(eventBlock.last);
+
+      expect(todaySegment.left, greaterThanOrEqualTo(selectedHeading.left));
+      expect(todaySegment.right, lessThanOrEqualTo(selectedHeading.right));
+      expect(tomorrowSegment.left, greaterThanOrEqualTo(nextHeading.left));
+      expect(tomorrowSegment.right, lessThanOrEqualTo(nextHeading.right));
+      expect(
+        todaySegment.top,
+        closeTo(selectedHeading.bottom + (2 * 52.5) + 2, 1),
+      );
+      expect(todaySegment.height, closeTo((14 * 52.5) - 4, 1));
+      expect(tomorrowSegment.top, closeTo(nextHeading.bottom + 2, 1));
+      expect(tomorrowSegment.height, closeTo((3 * 52.5) - 4, 1));
+    },
+  );
+
+  testWidgets(
     'calendar event editor creates categories from plus modal and uses bottom dock time dials with five minute increments',
     (WidgetTester tester) async {
       final api = _EditableCalendarFakeHermesApiClient();
@@ -1719,6 +1758,36 @@ class _MultiDayEditableCalendarFakeHermesApiClient
             color: '#007AFF',
             recurrence: 'none',
           ),
+    ];
+  }
+}
+
+class _UtcMultiDayCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final today = DateTime.now();
+    final tomorrow = today.add(const Duration(days: 1));
+    return [
+      HermesCalendarEvent(
+        id: 31,
+        title: 'App project focus block',
+        startsAt: DateTime.utc(
+          today.year,
+          today.month,
+          today.day,
+          9,
+        ).toIso8601String(),
+        endsAt: DateTime.utc(
+          tomorrow.year,
+          tomorrow.month,
+          tomorrow.day,
+          10,
+        ).toIso8601String(),
+        category: 'Work',
+        color: '#007AFF',
+        recurrence: 'none',
+      ),
     ];
   }
 }
