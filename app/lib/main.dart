@@ -1398,6 +1398,11 @@ class _CommandCenterContent extends StatelessWidget {
             .toList();
         final activeTasks = _visibleSortedTasks(tasks);
         final activeReminders = _visibleActiveReminders(reminders);
+        final selectedDayTasks = _tasksForDay(activeTasks, selectedCalendarDay);
+        final selectedDayReminders = _remindersForDay(
+          activeReminders,
+          selectedCalendarDay,
+        );
         final beanPanel = Column(
           children: [
             if (pendingApprovals.isNotEmpty) ...[
@@ -1434,8 +1439,8 @@ class _CommandCenterContent extends StatelessWidget {
         final selectedPanel = switch (selectedDestination) {
           _HomeDestination.today => _TodayHomeView(
             user: user,
-            tasks: activeTasks,
-            reminders: activeReminders,
+            tasks: selectedDayTasks,
+            reminders: selectedDayReminders,
             calendar: calendar,
             eventCategories: eventCategories,
             approvals: pendingApprovals,
@@ -2123,88 +2128,92 @@ class _TodayHomeView extends StatelessWidget {
   onEventCategoryDeleted;
 
   @override
-  Widget build(BuildContext context) => Column(
-    key: const Key('today-view'),
-    children: [
-      if (approvals.isNotEmpty) ...[
-        _ApprovalBanner(approval: approvals.first),
+  Widget build(BuildContext context) {
+    final dayLabel = _relativeDayLabel(selectedDay);
+    return Column(
+      key: const Key('today-view'),
+      children: [
+        if (approvals.isNotEmpty) ...[
+          _ApprovalBanner(approval: approvals.first),
+          const SizedBox(height: 16),
+        ],
+        _ShellCard(
+          key: const Key('calendar-view'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (showMonth) ...[
+                _MonthCalendarHeader(
+                  month: selectedDay,
+                  onBackToDay: onBackToDay,
+                ),
+                const SizedBox(height: 16),
+                _MonthGrid(
+                  calendar: calendar,
+                  selectedDay: selectedDay,
+                  onDateSelected: onDateSelected,
+                ),
+                const SizedBox(height: 16),
+                _CalendarMonthTaskList(
+                  tasks: tasks,
+                  reminders: reminders,
+                  calendar: calendar,
+                  onTaskCompleted: onTaskCompleted,
+                ),
+              ] else ...[
+                _AppleStyleTodayTimeline(
+                  calendar: calendar,
+                  eventCategories: eventCategories,
+                  selectedDay: selectedDay,
+                  startHour: startHour,
+                  endHour: endHour,
+                  onDayChanged: onDateSelected,
+                  onEventTap: onCalendarEventEdited,
+                  onEventCategorySaved: onEventCategorySaved,
+                  onEventCategoryDeleted: onEventCategoryDeleted,
+                ),
+              ],
+            ],
+          ),
+        ),
         const SizedBox(height: 16),
-      ],
-      _ShellCard(
-        key: const Key('calendar-view'),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (showMonth) ...[
-              _MonthCalendarHeader(
-                month: selectedDay,
-                onBackToDay: onBackToDay,
+        _ShellCard(
+          key: const Key('today-task-list'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionTitle(
+                icon: Icons.task_alt_rounded,
+                title: 'Tasks for $dayLabel',
+                subtitle:
+                    '${tasks.length} tasks · ${reminders.length} reminders',
               ),
-              const SizedBox(height: 16),
-              _MonthGrid(
-                calendar: calendar,
-                selectedDay: selectedDay,
-                onDateSelected: onDateSelected,
-              ),
-              const SizedBox(height: 16),
-              _CalendarMonthTaskList(
-                tasks: tasks,
-                reminders: reminders,
-                calendar: calendar,
-                onTaskCompleted: onTaskCompleted,
-              ),
-            ] else ...[
-              _AppleStyleTodayTimeline(
-                calendar: calendar,
-                eventCategories: eventCategories,
-                selectedDay: selectedDay,
-                startHour: startHour,
-                endHour: endHour,
-                onDayChanged: onDateSelected,
-                onEventTap: onCalendarEventEdited,
-                onEventCategorySaved: onEventCategorySaved,
-                onEventCategoryDeleted: onEventCategoryDeleted,
-              ),
-            ],
-          ],
-        ),
-      ),
-      const SizedBox(height: 16),
-      _ShellCard(
-        key: const Key('today-task-list'),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionTitle(
-              icon: Icons.task_alt_rounded,
-              title: 'Tasks for today',
-              subtitle: '${tasks.length} tasks · ${reminders.length} reminders',
-            ),
-            const SizedBox(height: 12),
-            if (tasks.isEmpty && reminders.isEmpty)
-              const _EmptySurface(label: 'Nothing scheduled for today')
-            else ...[
-              for (final task in tasks)
-                _TaskItemTile(
-                  task: task,
-                  subtitle: _statusLabel(task.status),
-                  onCompleted: onTaskCompleted,
-                ),
-              for (final reminder in reminders)
-                _CompactItemTile(
-                  icon: Icons.notifications_active_outlined,
-                  title: reminder.title,
-                  subtitle: _naturalDateTimeOrFallback(
-                    reminder.dueAt,
-                    fallback: 'Reminder',
+              const SizedBox(height: 12),
+              if (tasks.isEmpty && reminders.isEmpty)
+                _EmptySurface(label: 'Nothing scheduled for $dayLabel')
+              else ...[
+                for (final task in tasks)
+                  _TaskItemTile(
+                    task: task,
+                    subtitle: _statusLabel(task.status),
+                    onCompleted: onTaskCompleted,
                   ),
-                ),
+                for (final reminder in reminders)
+                  _CompactItemTile(
+                    icon: Icons.notifications_active_outlined,
+                    title: reminder.title,
+                    subtitle: _naturalDateTimeOrFallback(
+                      reminder.dueAt,
+                      fallback: 'Reminder',
+                    ),
+                  ),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _CriticalTaskBadge extends StatelessWidget {
@@ -4530,6 +4539,21 @@ DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
 bool _sameCalendarDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
 
+String _relativeDayLabel(DateTime day, {DateTime? now}) {
+  final anchor = _dateOnly(now ?? DateTime.now());
+  final selectedDay = _dateOnly(day);
+  final daysFromToday = selectedDay.difference(anchor).inDays;
+  if (daysFromToday == 0) return 'today';
+  if (daysFromToday == 1) return 'tomorrow';
+  if (daysFromToday == -1) return 'yesterday';
+  if (daysFromToday > 1 && daysFromToday < 7) {
+    return _shortWeekdayName(selectedDay.weekday);
+  }
+  return selectedDay.year == anchor.year
+      ? '${_shortMonthName(selectedDay.month)} ${selectedDay.day}'
+      : '${_shortMonthName(selectedDay.month)} ${selectedDay.day}, ${selectedDay.year}';
+}
+
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 
 bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
@@ -5673,24 +5697,39 @@ List<HermesTask> _visibleSortedTasks(List<HermesTask> tasks) {
   final visible = tasks
       .where((task) => _taskVisibleOnOrAfter(task, today))
       .toList();
-  visible.sort((a, b) {
-    final completedCompare = _taskIsCompleted(a) == _taskIsCompleted(b)
-        ? 0
-        : (_taskIsCompleted(a) ? 1 : -1);
-    if (completedCompare != 0) return completedCompare;
-    final aDue = _parseTaskDueDate(a);
-    final bDue = _parseTaskDueDate(b);
-    if (aDue != null && bDue != null) {
-      final dueCompare = aDue.compareTo(bDue);
-      if (dueCompare != 0) return dueCompare;
-    } else if (aDue != null) {
-      return -1;
-    } else if (bDue != null) {
-      return 1;
-    }
-    return a.id.compareTo(b.id);
-  });
+  visible.sort(_compareTasksByCompletionAndDueDate);
   return visible;
+}
+
+List<HermesTask> _tasksForDay(List<HermesTask> tasks, DateTime day) {
+  final selectedDay = _dateOnly(day);
+  final today = _dateOnly(DateTime.now());
+  final visible = tasks.where((task) {
+    if (_taskIsRecurring(task)) return true;
+    final dueAt = _parseTaskDueDate(task);
+    if (dueAt == null) return _sameCalendarDay(selectedDay, today);
+    return _sameCalendarDay(_dateOnly(dueAt), selectedDay);
+  }).toList();
+  visible.sort(_compareTasksByCompletionAndDueDate);
+  return visible;
+}
+
+int _compareTasksByCompletionAndDueDate(HermesTask a, HermesTask b) {
+  final completedCompare = _taskIsCompleted(a) == _taskIsCompleted(b)
+      ? 0
+      : (_taskIsCompleted(a) ? 1 : -1);
+  if (completedCompare != 0) return completedCompare;
+  final aDue = _parseTaskDueDate(a);
+  final bDue = _parseTaskDueDate(b);
+  if (aDue != null && bDue != null) {
+    final dueCompare = aDue.compareTo(bDue);
+    if (dueCompare != 0) return dueCompare;
+  } else if (aDue != null) {
+    return -1;
+  } else if (bDue != null) {
+    return 1;
+  }
+  return a.id.compareTo(b.id);
 }
 
 List<HermesReminder> _visibleActiveReminders(List<HermesReminder> reminders) {
@@ -5698,20 +5737,39 @@ List<HermesReminder> _visibleActiveReminders(List<HermesReminder> reminders) {
   final visible = reminders
       .where((reminder) => _reminderVisibleNowOrLater(reminder, now))
       .toList();
-  visible.sort((a, b) {
-    final aDue = _parseReminderDueDate(a);
-    final bDue = _parseReminderDueDate(b);
-    if (aDue != null && bDue != null) {
-      final dueCompare = aDue.compareTo(bDue);
-      if (dueCompare != 0) return dueCompare;
-    } else if (aDue != null) {
-      return -1;
-    } else if (bDue != null) {
-      return 1;
-    }
-    return a.id.compareTo(b.id);
-  });
+  visible.sort(_compareRemindersByDueDate);
   return visible;
+}
+
+List<HermesReminder> _remindersForDay(
+  List<HermesReminder> reminders,
+  DateTime day,
+) {
+  final selectedDay = _dateOnly(day);
+  final today = _dateOnly(DateTime.now());
+  final visible = reminders.where((reminder) {
+    if (_reminderIsCompleted(reminder)) return false;
+    if (_reminderIsRecurring(reminder)) return true;
+    final dueAt = _parseReminderDueDate(reminder);
+    if (dueAt == null) return _sameCalendarDay(selectedDay, today);
+    return _sameCalendarDay(_dateOnly(dueAt), selectedDay);
+  }).toList();
+  visible.sort(_compareRemindersByDueDate);
+  return visible;
+}
+
+int _compareRemindersByDueDate(HermesReminder a, HermesReminder b) {
+  final aDue = _parseReminderDueDate(a);
+  final bDue = _parseReminderDueDate(b);
+  if (aDue != null && bDue != null) {
+    final dueCompare = aDue.compareTo(bDue);
+    if (dueCompare != 0) return dueCompare;
+  } else if (aDue != null) {
+    return -1;
+  } else if (bDue != null) {
+    return 1;
+  }
+  return a.id.compareTo(b.id);
 }
 
 bool _reminderVisibleNowOrLater(HermesReminder reminder, DateTime now) {

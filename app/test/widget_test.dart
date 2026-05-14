@@ -1240,6 +1240,34 @@ void main() {
     },
   );
 
+  testWidgets(
+    'day view task list only shows tasks and reminders for selected day',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _TomorrowReminderFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tasks for today'), findsOneWidget);
+      expect(find.text('Today task'), findsOneWidget);
+      expect(find.text('Today reminder'), findsOneWidget);
+      expect(find.text('Tomorrow task'), findsNothing);
+      expect(find.text('Tomorrow reminder'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('week-date-pill-next-visible')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tasks for tomorrow'), findsOneWidget);
+      expect(find.text('Today task'), findsNothing);
+      expect(find.text('Today reminder'), findsNothing);
+      expect(find.text('Tomorrow task'), findsOneWidget);
+      expect(find.text('Tomorrow reminder'), findsOneWidget);
+    },
+  );
+
   testWidgets('chat renders backend JSON message envelopes as natural language', (
     WidgetTester tester,
   ) async {
@@ -1478,6 +1506,49 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<void> deleteAccount() async {
     deletedAccount = true;
     bearerToken = null;
+  }
+}
+
+class _TomorrowReminderFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesTask>> listTasks() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day, 10);
+    final tomorrow = today.add(const Duration(days: 1, hours: 4));
+    return [
+      HermesTask(
+        id: 201,
+        title: 'Today task',
+        status: 'open',
+        dueAt: today.toIso8601String(),
+      ),
+      HermesTask(
+        id: 202,
+        title: 'Tomorrow task',
+        status: 'open',
+        dueAt: tomorrow.toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<List<HermesReminder>> listReminders() async {
+    final now = DateTime.now();
+    final today = now.add(const Duration(minutes: 15));
+    final tomorrow = DateTime(now.year, now.month, now.day + 1, 14);
+    return [
+      HermesReminder(
+        id: 301,
+        title: 'Today reminder',
+        dueAt: today.toIso8601String(),
+      ),
+      HermesReminder(
+        id: 302,
+        title: 'Tomorrow reminder',
+        dueAt: tomorrow.toIso8601String(),
+      ),
+    ];
   }
 }
 
