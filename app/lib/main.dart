@@ -231,6 +231,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   final Set<int> _pendingTaskIds = <int>{};
   bool _forceAgentOnboarding = false;
   bool _editingAgentPreferences = false;
+  bool _beanVoiceListening = false;
+  String? _beanVoiceDraft;
 
   @override
   void initState() {
@@ -424,6 +426,71 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
+  Future<void> _startNewChatSession() async {
+    setState(() {
+      _busy = true;
+      _chatRunState = 'Starting new session…';
+      _error = null;
+    });
+    try {
+      final session = await widget.apiClient.startSession(
+        title: 'New chat',
+        metadata: {'source': 'flutter'},
+      );
+      final events = await widget.apiClient
+          .pollActivityEvents(session.id)
+          .catchError((_) => const <HermesActivityEvent>[]);
+      if (!mounted) return;
+      setState(() {
+        _session = session;
+        _messages
+          ..clear()
+          ..add(
+            const HermesMessage(
+              id: 0,
+              role: 'assistant',
+              content: 'New chat started. What should Bean handle next?',
+            ),
+          );
+        _events = events;
+        _chatRunState = 'Ready';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _chatRunState = 'Failed';
+        _error = 'Could not start a new Bean session: $error';
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _startBeanVoiceDraft() {
+    setState(() {
+      _selectedDestination = _HomeDestination.bean;
+      _beanVoiceListening = true;
+      _beanVoiceDraft = '';
+      _chatRunState = 'Listening…';
+    });
+  }
+
+  void _updateBeanVoiceDraft(String draft) {
+    setState(() => _beanVoiceDraft = draft);
+  }
+
+  void _finishBeanVoiceDraft() {
+    final draft = (_beanVoiceDraft ?? '').trim();
+    setState(() {
+      _beanVoiceListening = false;
+      _beanVoiceDraft = null;
+      _chatRunState = draft.isEmpty ? 'Ready' : 'Sending voice note…';
+    });
+    if (draft.isNotEmpty) {
+      unawaited(_sendChat(draft));
+    }
+  }
+
   Future<void> _sendChat(String content) async {
     final trimmed = content.trim();
     final session = _session;
@@ -606,9 +673,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     });
   }
 
-  void _openCalendarMonth() {
+  void _openCurrentCalendarMonth() {
     setState(() {
       _selectedDestination = _HomeDestination.today;
+      _selectedCalendarDay = _dateOnly(DateTime.now());
       _showCalendarMonth = true;
     });
   }
@@ -1102,9 +1170,16 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                 title: _phase == _AuthPhase.signedIn
                     ? _CalendarHeaderButton(
                         key: const Key('calendar-month-chevron'),
-                        label: _monthName(_selectedCalendarDay.month),
+                        label: _monthName(DateTime.now().month),
                         icon: Icons.chevron_left_rounded,
-                        onTap: _openCalendarMonth,
+                        iconSize: 15,
+                        horizontalPadding: 9,
+                        verticalPadding: 6,
+                        labelStyle: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        onTap: _openCurrentCalendarMonth,
                       )
                     : null,
                 actions: [
@@ -1135,8 +1210,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               bottomNavigationBar: _phase == _AuthPhase.signedIn
                   ? _HeyBeanBottomMenu(
                       selected: _selectedDestination,
+                      beanListening: _beanVoiceListening,
                       onSelected: (destination) =>
                           setState(() => _selectedDestination = destination),
+                      onBeanLongPressStart: _startBeanVoiceDraft,
+                      onBeanLongPressEnd: _finishBeanVoiceDraft,
                     )
                   : null,
             ),
@@ -1201,6 +1279,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               onSelectDestination: (destination) =>
                   setState(() => _selectedDestination = destination),
               onSend: _sendChat,
+              onNewChatSession: _startNewChatSession,
+              beanVoiceListening: _beanVoiceListening,
+              beanVoiceDraft: _beanVoiceDraft,
+              onBeanVoiceDraftChanged: _updateBeanVoiceDraft,
               onTaskCompleted: _toggleTaskCompletion,
               pendingTaskIds: _pendingTaskIds,
               onTaskSaved: _createOrUpdateTask,
@@ -1782,6 +1864,10 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onCalendarEndHourChanged,
     required this.onSelectDestination,
     required this.onSend,
+    required this.onNewChatSession,
+    required this.beanVoiceListening,
+    required this.beanVoiceDraft,
+    required this.onBeanVoiceDraftChanged,
     required this.onTaskCompleted,
     required this.pendingTaskIds,
     required this.onTaskSaved,
@@ -1820,6 +1906,10 @@ class _CommandCenterContent extends StatelessWidget {
   final ValueChanged<int> onCalendarEndHourChanged;
   final ValueChanged<_HomeDestination> onSelectDestination;
   final Future<void> Function(String content) onSend;
+  final Future<void> Function() onNewChatSession;
+  final bool beanVoiceListening;
+  final String? beanVoiceDraft;
+  final ValueChanged<String> onBeanVoiceDraftChanged;
   final Future<void> Function(HermesTask task) onTaskCompleted;
   final Set<int> pendingTaskIds;
   final Future<void> Function(
@@ -1878,40 +1968,18 @@ class _CommandCenterContent extends StatelessWidget {
             .where((approval) => (approval.status ?? 'pending') == 'pending')
             .toList();
         final activeTasks = _visibleSortedTasks(tasks);
-        final activeReminders = _visibleActiveReminders(reminders);
-        final selectedDayTasks = _tasksForDay(activeTasks, selectedCalendarDay);
-        final beanPanel = Column(
-          children: [
-            if (pendingApprovals.isNotEmpty) ...[
-              _ApprovalBanner(approval: pendingApprovals.first),
-              const SizedBox(height: 16),
-            ],
-            _HeroChatCard(
-              messages: messages,
-              busy: busy,
-              runState: chatRunState,
-              onSend: onSend,
-            ),
-            const SizedBox(height: 16),
-            _ApprovalCard(approvals: pendingApprovals),
-            const SizedBox(height: 16),
-            _ProgressCard(
-              user: user,
-              error: error,
-              taskCount: activeTasks.length,
-            ),
-            const SizedBox(height: 16),
-            _TabSurface(
-              tasks: activeTasks,
-              reminders: activeReminders,
-              calendar: calendar,
-              events: events,
-            ),
-            const SizedBox(height: 16),
-            _ActivityCard(events: events),
-            const SizedBox(height: 16),
-            _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
-          ],
+        final selectedDayTasks = _tasksForDay(activeTasks, DateTime.now());
+        final beanPanel = _HeroChatCard(
+          messages: messages,
+          busy: busy,
+          runState: chatRunState,
+          approvals: pendingApprovals,
+          events: events,
+          voiceListening: beanVoiceListening,
+          voiceDraft: beanVoiceDraft,
+          onVoiceDraftChanged: onBeanVoiceDraftChanged,
+          onNewSession: onNewChatSession,
+          onSend: onSend,
         );
         final selectedPanel = switch (selectedDestination) {
           _HomeDestination.today => _TodayHomeView(
@@ -1927,6 +1995,8 @@ class _CommandCenterContent extends StatelessWidget {
             onDateSelected: onCalendarDaySelected,
             onBackToDay: onBackToCalendarDay,
             onTaskCompleted: onTaskCompleted,
+            onTaskSaved: onTaskSaved,
+            onTaskDeleted: onTaskDeleted,
             onCalendarEventEdited: onCalendarEventEdited,
             onEventCategorySaved: onEventCategorySaved,
             onEventCategoryDeleted: onEventCategoryDeleted,
@@ -1988,6 +2058,11 @@ class _CommandCenterContent extends StatelessWidget {
             selectedDestination != _HomeDestination.bean) {
           return selectedPanel;
         }
+        // The Bean chat tab owns the full screen; activity/approvals live inside
+        // its top menu and bottom approval dock instead of side dashboard cards.
+        if (selectedDestination == _HomeDestination.bean) {
+          return selectedPanel;
+        }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2006,12 +2081,24 @@ class _HeroChatCard extends StatefulWidget {
     required this.messages,
     required this.busy,
     required this.runState,
+    required this.approvals,
+    required this.events,
+    required this.voiceListening,
+    required this.voiceDraft,
+    required this.onVoiceDraftChanged,
+    required this.onNewSession,
     required this.onSend,
   });
 
   final List<HermesMessage> messages;
   final bool busy;
   final String runState;
+  final List<HermesApproval> approvals;
+  final List<HermesActivityEvent> events;
+  final bool voiceListening;
+  final String? voiceDraft;
+  final ValueChanged<String> onVoiceDraftChanged;
+  final Future<void> Function() onNewSession;
   final Future<void> Function(String content) onSend;
 
   @override
@@ -2020,85 +2107,305 @@ class _HeroChatCard extends StatefulWidget {
 
 class _HeroChatCardState extends State<_HeroChatCard> {
   final _controller = TextEditingController();
+  final _scrollController = ScrollController();
+
+  @override
+  void didUpdateWidget(covariant _HeroChatCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.voiceListening &&
+        widget.voiceDraft != null &&
+        widget.voiceDraft != _controller.text) {
+      _controller.text = widget.voiceDraft!;
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+  }
 
   @override
   void dispose() {
     _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Future<void> _sendCurrentDraft() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || widget.busy) return;
+    _controller.clear();
+    await widget.onSend(text);
+  }
+
+  void _editSentMessage(HermesMessage message) {
+    _controller.text = message.content ?? '';
+    _controller.selection = TextSelection.collapsed(
+      offset: _controller.text.length,
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => Column(
-    key: const Key('chat-view'),
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const _SectionTitle(
-        icon: Icons.chat_bubble_rounded,
-        title: 'Bean',
-        subtitle: 'Chat-first command center for your household',
-      ),
-      const SizedBox(height: 10),
-      _ChatRunStatePill(label: widget.runState),
-      const SizedBox(height: 14),
-      _QuickPromptRail(onPrompt: widget.onSend),
-      const SizedBox(height: 18),
-      for (final message in widget.messages) ...[
-        _MessageBubble(
-          sender: message.role == 'user' ? 'You' : 'Hermes',
-          message: message.content ?? '',
-          alignRight: message.role == 'user',
-        ),
-        const SizedBox(height: 10),
-      ],
-      Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: HeyBeanTheme.surface2,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: HeyBeanTheme.border),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: TextField(
-                key: const Key('chat-input'),
-                controller: _controller,
-                minLines: 1,
-                maxLines: 4,
-                textInputAction: TextInputAction.send,
-                onSubmitted: widget.busy
-                    ? null
-                    : (text) {
-                        _controller.clear();
-                        widget.onSend(text);
-                      },
-                decoration: const InputDecoration(
-                  hintText:
-                      'Ask Bean to create tasks, reminders, or calendar events...',
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  filled: false,
+  Widget build(BuildContext context) {
+    final pendingApprovals = widget.approvals
+        .where((approval) => (approval.status ?? 'pending') == 'pending')
+        .toList();
+    return SizedBox(
+      key: const Key('chat-view'),
+      height: MediaQuery.of(context).size.height - 178,
+      child: Stack(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  _ChatRunStatePill(label: widget.runState),
+                  const Spacer(),
+                  _ChatActivityMenu(events: widget.events),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    key: const Key('chat-new-session-action'),
+                    onPressed: widget.busy ? null : widget.onNewSession,
+                    icon: const Icon(Icons.add_comment_rounded, size: 18),
+                    label: const Text('/new'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.builder(
+                  key: const Key('chat-message-list'),
+                  controller: _scrollController,
+                  padding: EdgeInsets.only(
+                    bottom: pendingApprovals.isEmpty ? 12 : 142,
+                    top: 8,
+                  ),
+                  itemCount: widget.messages.length + (widget.busy ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index >= widget.messages.length) {
+                      return _MessageBubble(
+                        sender: 'Bean',
+                        message: widget.runState,
+                        progress: true,
+                      );
+                    }
+                    final message = widget.messages[index];
+                    final isUser = message.role == 'user';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _MessageBubble(
+                        sender: isUser ? 'You' : 'Bean',
+                        message: message.content ?? '',
+                        alignRight: isUser,
+                        onEdit: isUser ? () => _editSentMessage(message) : null,
+                      ),
+                    );
+                  },
                 ),
               ),
+              _ChatInputDock(
+                controller: _controller,
+                busy: widget.busy,
+                listening: widget.voiceListening,
+                onChanged: widget.voiceListening
+                    ? widget.onVoiceDraftChanged
+                    : null,
+                onSend: _sendCurrentDraft,
+              ),
+            ],
+          ),
+          if (pendingApprovals.isNotEmpty)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 84,
+              child: _ApprovalBottomDock(approvals: pendingApprovals),
             ),
-            const SizedBox(width: 8),
-            FilledButton(
-              key: const Key('primary-chat-action'),
-              onPressed: widget.busy
-                  ? null
-                  : () {
-                      final text = _controller.text;
-                      _controller.clear();
-                      widget.onSend(text);
-                    },
-              child: const Icon(Icons.arrow_upward_rounded, size: 18),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChatInputDock extends StatelessWidget {
+  const _ChatInputDock({
+    required this.controller,
+    required this.busy,
+    required this.listening,
+    required this.onSend,
+    this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final bool busy;
+  final bool listening;
+  final VoidCallback onSend;
+  final ValueChanged<String>? onChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('chat-input-dock'),
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface,
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(
+        color: listening ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
+        width: listening ? 2 : 1,
+      ),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x14000000),
+          blurRadius: 22,
+          offset: Offset(0, 10),
+        ),
+      ],
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: TextField(
+            key: const Key('chat-input'),
+            controller: controller,
+            minLines: 1,
+            maxLines: 3,
+            onChanged: onChanged,
+            textInputAction: TextInputAction.send,
+            onSubmitted: busy ? null : (_) => onSend(),
+            decoration: InputDecoration(
+              hintText: listening
+                  ? 'Listening… speak now or type to correct the transcript'
+                  : 'Message Bean…',
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
             ),
-          ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton(
+          key: const Key('primary-chat-action'),
+          onPressed: busy ? null : onSend,
+          child: const Icon(Icons.arrow_upward_rounded, size: 18),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ChatActivityMenu extends StatelessWidget {
+  const _ChatActivityMenu({required this.events});
+
+  final List<HermesActivityEvent> events;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<void>(
+    key: const Key('chat-activity-menu'),
+    tooltip: 'Activity feed',
+    icon: const Icon(Icons.menu_rounded),
+    itemBuilder: (context) => [
+      PopupMenuItem<void>(
+        enabled: false,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320, minWidth: 240),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Activity feed',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              if (events.isEmpty)
+                const Text(
+                  'No recent activity.',
+                  style: TextStyle(color: HeyBeanTheme.muted),
+                )
+              else
+                for (final event in events.take(6))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '${event.eventType} · ${event.status ?? 'updated'}',
+                    ),
+                  ),
+            ],
+          ),
         ),
       ),
     ],
+  );
+}
+
+class _ApprovalBottomDock extends StatelessWidget {
+  const _ApprovalBottomDock({required this.approvals});
+
+  final List<HermesApproval> approvals;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('chat-approval-bottom-dock'),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFFBEB),
+      borderRadius: BorderRadius.circular(24),
+      border: Border.all(color: HeyBeanTheme.warning.withValues(alpha: .36)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x22000000),
+          blurRadius: 24,
+          offset: Offset(0, 14),
+        ),
+      ],
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Approval needed',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 8),
+        for (final approval in approvals.take(2))
+          Row(
+            children: [
+              const Icon(Icons.priority_high_rounded, size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text(approval.title)),
+              TextButton(
+                key: const Key('review-approval-action'),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Pending approval'),
+                    content: Text(approval.title),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('OK'),
+                      ),
+                    ],
+                  ),
+                ),
+                child: const Text('Review'),
+              ),
+            ],
+          ),
+      ],
+    ),
   );
 }
 
@@ -2148,6 +2455,7 @@ class _ChatRunStatePill extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _QuickPromptRail extends StatelessWidget {
   const _QuickPromptRail({required this.onPrompt});
 
@@ -2213,11 +2521,15 @@ class _MessageBubble extends StatelessWidget {
     required this.sender,
     required this.message,
     this.alignRight = false,
+    this.progress = false,
+    this.onEdit,
   });
 
   final String sender;
   final String message;
   final bool alignRight;
+  final bool progress;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) => Align(
@@ -2233,12 +2545,36 @@ class _MessageBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            sender,
-            style: const TextStyle(
-              color: HeyBeanTheme.accentStrong,
-              fontWeight: FontWeight.w800,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (progress) ...[
+                const SizedBox.square(
+                  dimension: 12,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                sender,
+                style: const TextStyle(
+                  color: HeyBeanTheme.accentStrong,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              if (onEdit != null) ...[
+                const SizedBox(width: 8),
+                InkWell(
+                  key: const Key('chat-edit-sent-message-action'),
+                  onTap: onEdit,
+                  borderRadius: BorderRadius.circular(999),
+                  child: const Padding(
+                    padding: EdgeInsets.all(3),
+                    child: Icon(Icons.edit_outlined, size: 14),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 4),
           Text(message),
@@ -2326,6 +2662,7 @@ class _ApprovalBanner extends StatelessWidget {
   );
 }
 
+// ignore: unused_element
 class _ApprovalCard extends StatelessWidget {
   const _ApprovalCard({required this.approvals});
 
@@ -2407,6 +2744,7 @@ class _ApprovalListTile extends StatelessWidget {
   );
 }
 
+// ignore: unused_element
 class _TabSurface extends StatelessWidget {
   const _TabSurface({
     required this.tasks,
@@ -2562,6 +2900,8 @@ class _TodayHomeView extends StatelessWidget {
     required this.onDateSelected,
     required this.onBackToDay,
     required this.onTaskCompleted,
+    required this.onTaskSaved,
+    required this.onTaskDeleted,
     required this.onCalendarEventEdited,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
@@ -2579,6 +2919,15 @@ class _TodayHomeView extends StatelessWidget {
   final ValueChanged<DateTime> onDateSelected;
   final VoidCallback onBackToDay;
   final Future<void> Function(HermesTask task) onTaskCompleted;
+  final Future<void> Function(
+    HermesTask? task, {
+    required String title,
+    String? dueAt,
+    String? category,
+    String? color,
+  })
+  onTaskSaved;
+  final Future<void> Function(HermesTask task) onTaskDeleted;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -2606,7 +2955,7 @@ class _TodayHomeView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dayLabel = _relativeDayLabel(selectedDay);
+    const dayLabel = 'Today';
     return Column(
       key: const Key('today-view'),
       children: [
@@ -2634,6 +2983,9 @@ class _TodayHomeView extends StatelessWidget {
                 tasks: tasks,
                 calendar: calendar,
                 onTaskCompleted: onTaskCompleted,
+                onTaskSaved: onTaskSaved,
+                onTaskDeleted: onTaskDeleted,
+                eventCategories: eventCategories,
               ),
             ] else ...[
               _AppleStyleTodayTimeline(
@@ -2668,14 +3020,45 @@ class _TodayHomeView extends StatelessWidget {
                 for (final task in tasks)
                   _TaskItemTile(
                     task: task,
-                    subtitle: _statusLabel(task.status),
+                    subtitle: _taskSubtitle(task),
                     onCompleted: onTaskCompleted,
+                    onTap: () => _showTaskEditor(context, task: task),
                   ),
               ],
             ],
           ),
         ),
       ],
+    );
+  }
+
+  Future<void> _showTaskEditor(BuildContext context, {HermesTask? task}) async {
+    final result = await _showTitleTimeEditor(
+      context,
+      title: task == null ? 'New task' : 'Edit task',
+      titleLabel: 'Task title',
+      timeLabel: 'Due date',
+      initialTitle: task?.title ?? '',
+      initialTime: _formatCalendarEventDateTime(task?.dueAt),
+      allowEmptyTime: true,
+      categories: eventCategories,
+      initialCategory: task?.category,
+      initialColor: task?.color,
+      deleteLabel: task == null ? null : 'Delete task',
+    );
+    if (result == null) return;
+    if (result['delete'] == true && task != null) {
+      await onTaskDeleted(task);
+      return;
+    }
+    final title = (result['title'] as String).trim();
+    if (title.isEmpty) return;
+    await onTaskSaved(
+      task,
+      title: title,
+      dueAt: result['time'] as String?,
+      category: result['category'] as String?,
+      color: result['color'] as String?,
     );
   }
 }
@@ -3269,7 +3652,6 @@ class _WeekDateHeader extends StatelessWidget {
       child: Row(
         key: const Key('apple-style-week-date-header'),
         children: [
-          const SizedBox(width: _calendarTimeColumnWidth),
           for (var index = 0; index < 7; index++)
             Expanded(
               child: Builder(
@@ -4905,11 +5287,24 @@ class _CalendarMonthTaskList extends StatelessWidget {
     required this.tasks,
     required this.calendar,
     required this.onTaskCompleted,
+    required this.onTaskSaved,
+    required this.onTaskDeleted,
+    required this.eventCategories,
   });
 
   final List<HermesTask> tasks;
   final List<HermesCalendarEvent> calendar;
   final Future<void> Function(HermesTask task) onTaskCompleted;
+  final Future<void> Function(
+    HermesTask? task, {
+    required String title,
+    String? dueAt,
+    String? category,
+    String? color,
+  })
+  onTaskSaved;
+  final Future<void> Function(HermesTask task) onTaskDeleted;
+  final List<HermesEventCategory> eventCategories;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -4928,8 +5323,9 @@ class _CalendarMonthTaskList extends StatelessWidget {
         for (final task in tasks)
           _TaskItemTile(
             task: task,
-            subtitle: 'Today · ${_statusLabel(task.status)}',
+            subtitle: _taskSubtitle(task),
             onCompleted: onTaskCompleted,
+            onTap: () => _showTaskEditor(context, task: task),
           ),
         for (final event in calendar)
           _CompactItemTile(
@@ -4943,6 +5339,36 @@ class _CalendarMonthTaskList extends StatelessWidget {
       ],
     ],
   );
+
+  Future<void> _showTaskEditor(BuildContext context, {HermesTask? task}) async {
+    final result = await _showTitleTimeEditor(
+      context,
+      title: task == null ? 'New task' : 'Edit task',
+      titleLabel: 'Task title',
+      timeLabel: 'Due date',
+      initialTitle: task?.title ?? '',
+      initialTime: _formatCalendarEventDateTime(task?.dueAt),
+      allowEmptyTime: true,
+      categories: eventCategories,
+      initialCategory: task?.category,
+      initialColor: task?.color,
+      deleteLabel: task == null ? null : 'Delete task',
+    );
+    if (result == null) return;
+    if (result['delete'] == true && task != null) {
+      await onTaskDeleted(task);
+      return;
+    }
+    final title = (result['title'] as String).trim();
+    if (title.isEmpty) return;
+    await onTaskSaved(
+      task,
+      title: title,
+      dueAt: result['time'] as String?,
+      category: result['category'] as String?,
+      color: result['color'] as String?,
+    );
+  }
 }
 
 class _MonthCalendarHeader extends StatelessWidget {
@@ -6473,46 +6899,82 @@ class _TaskItemTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final completed = _taskIsCompleted(task);
+    final categoryColor = _safeCategoryColor(task.color);
+    final surfaceColor = completed
+        ? HeyBeanTheme.surface
+        : categoryColor.withValues(alpha: .14);
+    final borderColor = completed
+        ? HeyBeanTheme.border
+        : categoryColor.withValues(alpha: .34);
     return Container(
+      key: Key('task-row-surface-${task.id}'),
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       decoration: BoxDecoration(
-        color: completed ? HeyBeanTheme.surface : HeyBeanTheme.surface2,
+        color: surfaceColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HeyBeanTheme.border),
+        border: Border.all(color: borderColor),
       ),
-      child: CheckboxListTile(
-        key: Key('task-complete-checkbox-${task.id}'),
-        value: completed,
-        onChanged: pending ? null : (_) => onCompleted(task),
-        secondary: onTap == null
-            ? (pending
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : null)
-            : IconButton(
-                key: Key('task-edit-action-${task.id}'),
-                tooltip: 'Edit task',
-                onPressed: onTap,
-                icon: const Icon(Icons.edit_outlined),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          pending
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : Checkbox(
+                  key: Key('task-complete-checkbox-${task.id}'),
+                  value: completed,
+                  onChanged: (_) => onCompleted(task),
+                  activeColor: HeyBeanTheme.accentStrong,
+                ),
+          Expanded(
+            child: InkWell(
+              key: Key('task-row-action-${task.id}'),
+              borderRadius: BorderRadius.circular(12),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      task.title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        decoration: completed
+                            ? TextDecoration.lineThrough
+                            : null,
+                        color: completed
+                            ? HeyBeanTheme.muted
+                            : HeyBeanTheme.text,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-        controlAffinity: ListTileControlAffinity.leading,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 6),
-        activeColor: HeyBeanTheme.accentStrong,
-        title: Text(
-          task.title,
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            decoration: completed ? TextDecoration.lineThrough : null,
-            color: completed ? HeyBeanTheme.muted : HeyBeanTheme.text,
+            ),
           ),
-        ),
-        subtitle: Text(
-          subtitle,
-          style: const TextStyle(color: HeyBeanTheme.muted),
-        ),
+          if (onTap != null)
+            IconButton(
+              key: Key('task-edit-action-${task.id}'),
+              tooltip: 'Edit task',
+              onPressed: onTap,
+              icon: const Icon(Icons.edit_outlined),
+            ),
+        ],
       ),
     );
   }
@@ -6534,13 +6996,21 @@ class _ReminderItemTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final completed = _reminderIsCompleted(reminder);
+    final categoryColor = _safeCategoryColor(reminder.color);
+    final surfaceColor = completed
+        ? HeyBeanTheme.surface
+        : categoryColor.withValues(alpha: .14);
+    final borderColor = completed
+        ? HeyBeanTheme.border
+        : categoryColor.withValues(alpha: .34);
     return Container(
+      key: Key('reminder-row-surface-${reminder.id}'),
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       decoration: BoxDecoration(
-        color: completed ? HeyBeanTheme.surface : HeyBeanTheme.surface2,
+        color: surfaceColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HeyBeanTheme.border),
+        border: Border.all(color: borderColor),
       ),
       child: Row(
         children: [
@@ -6552,6 +7022,7 @@ class _ReminderItemTile extends StatelessWidget {
           ),
           Expanded(
             child: InkWell(
+              key: Key('reminder-row-action-${reminder.id}'),
               borderRadius: BorderRadius.circular(12),
               onTap: onTap,
               child: Padding(
@@ -6574,7 +7045,10 @@ class _ReminderItemTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: const TextStyle(color: HeyBeanTheme.muted),
+                      style: const TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -6989,10 +7463,19 @@ class _MiniSurface extends StatelessWidget {
 }
 
 class _HeyBeanBottomMenu extends StatelessWidget {
-  const _HeyBeanBottomMenu({required this.selected, required this.onSelected});
+  const _HeyBeanBottomMenu({
+    required this.selected,
+    required this.onSelected,
+    required this.beanListening,
+    required this.onBeanLongPressStart,
+    required this.onBeanLongPressEnd,
+  });
 
   final _HomeDestination selected;
   final ValueChanged<_HomeDestination> onSelected;
+  final bool beanListening;
+  final VoidCallback onBeanLongPressStart;
+  final VoidCallback onBeanLongPressEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -7072,7 +7555,10 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             top: 15,
             child: _BeanFab(
               selected: selected == _HomeDestination.bean,
+              listening: beanListening,
               onPressed: () => onSelected(_HomeDestination.bean),
+              onLongPressStart: onBeanLongPressStart,
+              onLongPressEnd: onBeanLongPressEnd,
             ),
           ),
         ],
@@ -7133,42 +7619,61 @@ class _MenuIconButton extends StatelessWidget {
 }
 
 class _BeanFab extends StatelessWidget {
-  const _BeanFab({required this.selected, required this.onPressed});
+  const _BeanFab({
+    required this.selected,
+    required this.listening,
+    required this.onPressed,
+    required this.onLongPressStart,
+    required this.onLongPressEnd,
+  });
 
   final bool selected;
+  final bool listening;
   final VoidCallback onPressed;
+  final VoidCallback onLongPressStart;
+  final VoidCallback onLongPressEnd;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: Colors.transparent,
-    child: InkWell(
-      key: const Key('nav-bean'),
-      customBorder: const CircleBorder(),
-      onTap: onPressed,
-      child: Container(
-        key: const Key('heybean-center-bean-button'),
-        width: 64,
-        height: 64,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF22C55E), Color(0xFF16A34A), Color(0xFF15803D)],
-          ),
-          border: Border.all(
-            color: selected ? Colors.white : const Color(0xFFE2E8F0),
-            width: 4,
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x3D16A34A),
-              blurRadius: 24,
-              offset: Offset(0, 10),
+  Widget build(BuildContext context) => GestureDetector(
+    key: const Key('nav-bean'),
+    onLongPressStart: (_) => onLongPressStart(),
+    onLongPressEnd: (_) => onLongPressEnd(),
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          key: const Key('heybean-center-bean-button'),
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF22C55E), Color(0xFF16A34A), Color(0xFF15803D)],
             ),
-          ],
+            border: Border.all(
+              color: listening
+                  ? const Color(0xFF86EFAC)
+                  : (selected ? Colors.white : const Color(0xFFE2E8F0)),
+              width: listening ? 7 : 4,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: listening
+                    ? const Color(0x7F22C55E)
+                    : const Color(0x3D16A34A),
+                blurRadius: listening ? 34 : 24,
+                spreadRadius: listening ? 5 : 0,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: const Icon(Icons.eco_rounded, color: Colors.white, size: 30),
         ),
-        child: const Icon(Icons.eco_rounded, color: Colors.white, size: 30),
       ),
     ),
   );
