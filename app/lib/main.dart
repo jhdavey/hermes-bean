@@ -4871,8 +4871,17 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
           writableGoogleCalendars.first.id;
     }
     _isCritical = event.isCritical;
-    _color = _colors.any((color) => color.value == event.color)
-        ? event.color!
+    final matchingCategoryColor = _categories
+        .where(
+          (category) =>
+              category.name.toLowerCase() ==
+              (event.category ?? '').trim().toLowerCase(),
+        )
+        .map((category) => category.color)
+        .firstOrNull;
+    final initialColor = event.color ?? matchingCategoryColor;
+    _color = _isHexColor(initialColor)
+        ? initialColor!.toUpperCase()
         : '#34C759';
     _recurrence =
         _recurrences.any((recurrence) => recurrence.value == event.recurrence)
@@ -5879,8 +5888,11 @@ class _EventFieldLabel extends StatelessWidget {
   );
 }
 
+bool _isHexColor(String? value) =>
+    value != null && RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(value);
+
 Color _colorFromHex(String value) {
-  if (!value.startsWith('#') || value.length != 7) {
+  if (!_isHexColor(value)) {
     return HeyBeanTheme.accentStrong;
   }
   return Color(int.parse('FF${value.substring(1)}', radix: 16));

@@ -1798,6 +1798,37 @@ void main() {
     expect(find.textContaining('Design review'), findsWidgets);
   });
 
+  testWidgets('event editor preserves custom category colors when resaving', (
+    WidgetTester tester,
+  ) async {
+    final api = _CustomColorEditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(
+      find.byKey(const Key('calendar-event-block-design-review')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('calendar-event-block-design-review')),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('event-category-chip-Studio')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('event-category-chip-Studio')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedEvent?.category, 'Studio');
+    expect(api.updatedEvent?.color, '#123ABC');
+  });
+
   testWidgets(
     'calendar events open an editable detail page with friendly date times category color recurrence and event reminders',
     (WidgetTester tester) async {
@@ -3518,6 +3549,41 @@ class _EditableCalendarFakeHermesApiClient
           ).toIso8601String(),
           category: 'Personal',
           color: '#34C759',
+          recurrence: 'none',
+        ),
+  ];
+}
+
+class _CustomColorEditableCalendarFakeHermesApiClient
+    extends _EditableCalendarFakeHermesApiClient {
+  @override
+  Future<List<HermesEventCategory>> listEventCategories() async => const [
+    HermesEventCategory(id: 20, name: 'Studio', color: '#123ABC'),
+  ];
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+    if (createdEvent != null) createdEvent!,
+    updatedEvent ??
+        HermesCalendarEvent(
+          id: 3,
+          title: 'Design review',
+          startsAt: DateTime.utc(
+            DateTime.now().year,
+            DateTime.now().month,
+            DateTime.now().day,
+            14,
+            30,
+          ).toIso8601String(),
+          endsAt: DateTime.utc(
+            DateTime.now().year,
+            DateTime.now().month,
+            DateTime.now().day,
+            15,
+            00,
+          ).toIso8601String(),
+          category: 'Studio',
+          color: '#123ABC',
           recurrence: 'none',
         ),
   ];
