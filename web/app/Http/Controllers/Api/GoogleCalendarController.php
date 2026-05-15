@@ -46,6 +46,21 @@ class GoogleCalendarController extends Controller
         return response()->json(['data' => $this->sync->sync($request->user())]);
     }
 
+    public function calendars(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'selected_calendar_ids' => ['required', 'array', 'min:1'],
+            'selected_calendar_ids.*' => ['required', 'string'],
+            'default_calendar_id' => ['nullable', 'string'],
+        ]);
+
+        return response()->json(['data' => $this->sync->updateSelectedCalendars(
+            $request->user(),
+            $validated['selected_calendar_ids'],
+            $validated['default_calendar_id'] ?? null,
+        )]);
+    }
+
     public function disconnect(Request $request): JsonResponse
     {
         $this->sync->disconnect($request->user());

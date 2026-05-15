@@ -1150,7 +1150,7 @@ void main() {
     expect(launchedUrls, hasLength(1));
     expect(launchedUrls.single.host, 'accounts.google.com');
     expect(
-      find.textContaining('sync automatically when you return'),
+      find.textContaining('Finish approving Google Calendar'),
       findsOneWidget,
     );
 
@@ -1171,6 +1171,23 @@ void main() {
     await tester.pumpAndSettle();
     expect(api.googleCalendarSyncCalls, 2);
     expect(find.textContaining('Synced 2 Google events'), findsOneWidget);
+
+    expect(find.text('Displayed Google calendars'), findsOneWidget);
+    expect(find.text('Personal'), findsOneWidget);
+    expect(find.text('Holidays'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const Key('google-calendar-source-holidays@example.com')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('google-calendar-source-holidays@example.com')),
+    );
+    await tester.pumpAndSettle();
+    expect(api.selectedGoogleCalendarIds, contains('holidays@example.com'));
+    expect(
+      find.text('Google calendar display preferences saved.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -1627,6 +1644,70 @@ void main() {
     expect(api.todaySummaryCalls, greaterThan(1));
   });
 
+  testWidgets('connected Google Calendar syncs on app load and pull refresh', (
+    WidgetTester tester,
+  ) async {
+    final api = _GoogleCalendarAutoSyncFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.googleCalendarSyncCalls, 1);
+    expect(find.text('Imported Google event'), findsOneWidget);
+
+    await tester.fling(
+      find.byKey(const Key('signed-in-refresh-scroll')),
+      const Offset(0, 320),
+      1000,
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.googleCalendarSyncCalls, 2);
+  });
+
+  testWidgets('calendar plus action creates a new event', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('calendar-add-event-action')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('calendar-add-event-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('calendar-event-detail-page')), findsOneWidget);
+    expect(find.text('Event Details'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('event-title-field')),
+      'Client kickoff',
+    );
+    await tester.enterText(
+      find.byKey(const Key('event-start-field')),
+      '4:00 PM',
+    );
+    await tester.enterText(find.byKey(const Key('event-end-field')), '5:00 PM');
+    await tester.ensureVisible(
+      find.byKey(const Key('event-google-calendar-sports@example.com')),
+    );
+    await tester.tap(
+      find.byKey(const Key('event-google-calendar-sports@example.com')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.createdEvent?.title, 'Client kickoff');
+    expect(
+      api.createdEvent?.metadata?['google_calendar_id'],
+      'sports@example.com',
+    );
+    expect(find.text('Client kickoff'), findsOneWidget);
+  });
+
   testWidgets(
     'calendar events open an editable detail page with friendly date times category color recurrence and event reminders',
     (WidgetTester tester) async {
@@ -1686,6 +1767,11 @@ void main() {
       expect(find.byKey(const Key('event-color-field')), findsNothing);
       expect(find.widgetWithText(ChoiceChip, 'Orange'), findsNothing);
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
+      expect(
+        find.byKey(const Key('event-google-calendar-field')),
+        findsOneWidget,
+      );
+      expect(find.text('Personal'), findsWidgets);
       final titleTop = tester
           .getTopLeft(find.byKey(const Key('event-title-field')))
           .dy;
@@ -1758,6 +1844,13 @@ void main() {
           )
           .onSelected
           ?.call(true);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('event-google-calendar-sports@example.com')),
+      );
+      await tester.tap(
+        find.byKey(const Key('event-google-calendar-sports@example.com')),
+      );
       await tester.pumpAndSettle();
       await tester.ensureVisible(
         find.byKey(const Key('event-reminder-minutes-field')),
@@ -1843,6 +1936,7 @@ void main() {
       expect(api.updatedEvent?.recurrence, 'specific_days');
       expect(api.updatedEvent?.metadata, {
         'recurrence': 'specific_days',
+        'google_calendar_id': 'sports@example.com',
         'days': ['thu', 'tue'],
         'interval': 1,
         'unit': 'days',
@@ -2415,6 +2509,8 @@ class _FakeHermesApiClient extends HermesApiClient {
   int todaySummaryCalls = 0;
   bool googleCalendarConnected = false;
   int googleCalendarSyncCalls = 0;
+  List<String> selectedGoogleCalendarIds = <String>['primary'];
+  String defaultGoogleCalendarId = 'primary';
   String? registeredAgentPersonality;
   List<String>? registeredPriorities;
   String? registeredContext;
@@ -2597,10 +2693,52 @@ class _FakeHermesApiClient extends HermesApiClient {
       GoogleCalendarSyncStatus(
         connected: googleCalendarConnected,
         status: googleCalendarConnected ? 'connected' : 'not_connected',
+        calendarId: defaultGoogleCalendarId,
+        defaultCalendarId: defaultGoogleCalendarId,
+        selectedCalendarIds: selectedGoogleCalendarIds,
+        calendars: googleCalendarConnected
+            ? [
+                GoogleCalendarInfo(
+                  id: 'primary',
+                  summary: 'Personal',
+                  primary: true,
+                  selected: selectedGoogleCalendarIds.contains('primary'),
+                  accessRole: 'owner',
+                ),
+                GoogleCalendarInfo(
+                  id: 'holidays@example.com',
+                  summary: 'Holidays',
+                  selected: selectedGoogleCalendarIds.contains(
+                    'holidays@example.com',
+                  ),
+                  accessRole: 'reader',
+                ),
+                GoogleCalendarInfo(
+                  id: 'sports@example.com',
+                  summary: 'Sports',
+                  selected: selectedGoogleCalendarIds.contains(
+                    'sports@example.com',
+                  ),
+                  accessRole: 'writer',
+                ),
+              ]
+            : const [],
         lastSyncedAt: googleCalendarConnected
             ? DateTime.now().toIso8601String()
             : null,
       );
+
+  @override
+  Future<GoogleCalendarSyncStatus> updateGoogleCalendarSelection({
+    required List<String> selectedCalendarIds,
+    String? defaultCalendarId,
+  }) async {
+    selectedGoogleCalendarIds = selectedCalendarIds;
+    this.defaultGoogleCalendarId =
+        defaultCalendarId ?? this.defaultGoogleCalendarId;
+    googleCalendarConnected = true;
+    return googleCalendarStatus();
+  }
 
   @override
   Future<String> googleCalendarAuthUrl() async {
@@ -3082,7 +3220,12 @@ class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
 
 class _EditableCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
+  _EditableCalendarFakeHermesApiClient() {
+    googleCalendarConnected = true;
+  }
+
   HermesCalendarEvent? updatedEvent;
+  HermesCalendarEvent? createdEvent;
   Map<String, Object?>? createdReminder;
   HermesEventCategory? savedCategory;
   int? deletedCategoryId;
@@ -3111,6 +3254,31 @@ class _EditableCalendarFakeHermesApiClient
       metadata: metadata,
     );
     return updatedEvent!;
+  }
+
+  @override
+  Future<HermesCalendarEvent> createCalendarEvent({
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    bool? isCritical,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+  }) async {
+    createdEvent = HermesCalendarEvent(
+      id: 44,
+      title: title,
+      startsAt: startsAt,
+      endsAt: endsAt,
+      category: category,
+      color: color,
+      recurrence: recurrence,
+      isCritical: isCritical ?? false,
+      metadata: metadata,
+    );
+    return createdEvent!;
   }
 
   @override
@@ -3164,6 +3332,7 @@ class _EditableCalendarFakeHermesApiClient
 
   @override
   Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+    if (createdEvent != null) createdEvent!,
     updatedEvent ??
         HermesCalendarEvent(
           id: 3,
@@ -3187,6 +3356,36 @@ class _EditableCalendarFakeHermesApiClient
           recurrence: 'none',
         ),
   ];
+}
+
+class _GoogleCalendarAutoSyncFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  _GoogleCalendarAutoSyncFakeHermesApiClient() {
+    googleCalendarConnected = true;
+  }
+
+  @override
+  Future<GoogleCalendarSyncResult> syncGoogleCalendar() async {
+    googleCalendarSyncCalls++;
+    googleCalendarConnected = true;
+    plannedToday = true;
+    return GoogleCalendarSyncResult(
+      imported: 1,
+      deleted: 0,
+      status: await googleCalendarStatus(),
+    );
+  }
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => plannedToday
+      ? [
+          HermesCalendarEvent(
+            id: 909,
+            title: 'Imported Google event',
+            startsAt: DateTime.now().toIso8601String(),
+          ),
+        ]
+      : super.listCalendarEvents();
 }
 
 class _MultiDayEditableCalendarFakeHermesApiClient

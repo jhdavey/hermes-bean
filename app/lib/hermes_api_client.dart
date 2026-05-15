@@ -257,6 +257,33 @@ class HermesApiClient {
     ).map((json) => HermesCalendarEvent.fromJson(_expectMap(json))).toList();
   }
 
+  Future<HermesCalendarEvent> createCalendarEvent({
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    bool? isCritical,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/calendar-events',
+      body: {
+        'title': title,
+        'starts_at': startsAt,
+        'ends_at': endsAt,
+        'category': category,
+        'color': color,
+        'recurrence': recurrence,
+        if (isCritical != null) 'is_critical': isCritical,
+        if (metadata != null) 'metadata': metadata,
+      },
+    );
+    return HermesCalendarEvent.fromJson(_expectMap(data['data']));
+  }
+
   Future<GoogleCalendarSyncStatus> googleCalendarStatus() async {
     final data = await _sendJson('GET', '/google-calendar/status');
     return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
@@ -270,6 +297,21 @@ class HermesApiClient {
   Future<GoogleCalendarSyncResult> syncGoogleCalendar() async {
     final data = await _sendJson('POST', '/google-calendar/sync');
     return GoogleCalendarSyncResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<GoogleCalendarSyncStatus> updateGoogleCalendarSelection({
+    required List<String> selectedCalendarIds,
+    String? defaultCalendarId,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/google-calendar/calendars',
+      body: {
+        'selected_calendar_ids': selectedCalendarIds,
+        if (defaultCalendarId != null) 'default_calendar_id': defaultCalendarId,
+      },
+    );
+    return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
   }
 
   Future<GoogleCalendarSyncStatus> disconnectGoogleCalendar() async {
@@ -594,6 +636,9 @@ class GoogleCalendarSyncStatus {
     required this.status,
     this.email,
     this.calendarId,
+    this.defaultCalendarId,
+    this.selectedCalendarIds = const [],
+    this.calendars = const [],
     this.lastSyncedAt,
     this.lastError,
   });
@@ -602,8 +647,14 @@ class GoogleCalendarSyncStatus {
   final String status;
   final String? email;
   final String? calendarId;
+  final String? defaultCalendarId;
+  final List<String> selectedCalendarIds;
+  final List<GoogleCalendarInfo> calendars;
   final String? lastSyncedAt;
   final String? lastError;
+
+  List<GoogleCalendarInfo> get writableCalendars =>
+      calendars.where((calendar) => calendar.canWrite).toList(growable: false);
 
   factory GoogleCalendarSyncStatus.fromJson(Map<String, Object?> json) =>
       GoogleCalendarSyncStatus(
@@ -611,8 +662,51 @@ class GoogleCalendarSyncStatus {
         status: _expectString(json['status']),
         email: json['email']?.toString(),
         calendarId: json['calendar_id']?.toString(),
+        defaultCalendarId: (json['default_calendar_id'] ?? json['calendar_id'])
+            ?.toString(),
+        selectedCalendarIds: _expectList(
+          json['selected_calendar_ids'] ?? const [],
+        ).map((item) => item.toString()).toList(),
+        calendars: _expectList(
+          json['calendars'] ?? const [],
+        ).map((item) => GoogleCalendarInfo.fromJson(_expectMap(item))).toList(),
         lastSyncedAt: json['last_synced_at']?.toString(),
         lastError: json['last_error']?.toString(),
+      );
+}
+
+class GoogleCalendarInfo {
+  const GoogleCalendarInfo({
+    required this.id,
+    required this.summary,
+    this.description,
+    this.primary = false,
+    this.selected = false,
+    this.accessRole = 'reader',
+    this.color = '#4285F4',
+  });
+
+  final String id;
+  final String summary;
+  final String? description;
+  final bool primary;
+  final bool selected;
+  final String accessRole;
+  final String color;
+
+  bool get canWrite => accessRole == 'owner' || accessRole == 'writer';
+
+  factory GoogleCalendarInfo.fromJson(Map<String, Object?> json) =>
+      GoogleCalendarInfo(
+        id: _expectString(json['id']),
+        summary: (json['summary'] ?? json['name'] ?? json['id']).toString(),
+        description: json['description']?.toString(),
+        primary: json['primary'] == true,
+        selected: json['selected'] == true,
+        accessRole: (json['access_role'] ?? json['accessRole'] ?? 'reader')
+            .toString(),
+        color: (json['color'] ?? json['backgroundColor'] ?? '#4285F4')
+            .toString(),
       );
 }
 
@@ -875,8 +969,19 @@ class HermesCalendarEvent {
   final String? recurrence;
   final Map<String, Object?>? metadata;
 
+  String? get googleCalendarId =>
+      (metadata?['google_calendar_id'] ?? metadata?['googleCalendarId'])
+          ?.toString();
+
   factory HermesCalendarEvent.fromJson(Map<String, Object?> json) {
-    final metadata = _expectMapOrNull(json['metadata']);
+    final parsedMetadata = _expectMapOrNull(json['metadata']);
+    final googleCalendarId = json['google_calendar_id']?.toString();
+    final metadata = googleCalendarId == null
+        ? parsedMetadata
+        : <String, Object?>{
+            ...?parsedMetadata,
+            'google_calendar_id': googleCalendarId,
+          };
     return HermesCalendarEvent(
       id: _expectInt(json['id']),
       title: _readTitle(json),

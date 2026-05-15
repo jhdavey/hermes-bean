@@ -262,6 +262,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   List<HermesReminder> _reminders = const [];
   List<HermesCalendarEvent> _calendar = const [];
   List<HermesEventCategory> _eventCategories = const [];
+  GoogleCalendarSyncStatus? _googleCalendarStatus;
   List<HermesApproval> _approvals = const [];
   List<HermesActivityEvent> _events = const [];
   final List<HermesMessage> _messages = const [
@@ -306,6 +307,24 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       error is HermesApiException &&
       (error.statusCode == 401 || error.statusCode == 403);
 
+  Future<GoogleCalendarSyncStatus> _syncGoogleCalendarIfConnected({
+    GoogleCalendarSyncStatus? fallback,
+  }) async {
+    try {
+      final status = await widget.apiClient.googleCalendarStatus();
+      if (!status.connected) return status;
+      final result = await widget.apiClient.syncGoogleCalendar();
+      return result.status;
+    } catch (_) {
+      return fallback ??
+          _googleCalendarStatus ??
+          const GoogleCalendarSyncStatus(
+            connected: false,
+            status: 'not_connected',
+          );
+    }
+  }
+
   Future<void> _loadSignedIn({
     HermesUser? knownUser,
     bool launchedFromRememberedToken = false,
@@ -319,6 +338,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final session = await widget.apiClient.startSession(
         title: 'Today',
         metadata: {'source': 'flutter'},
+      );
+      final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
+        fallback: const GoogleCalendarSyncStatus(
+          connected: false,
+          status: 'not_connected',
+        ),
       );
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
@@ -338,6 +363,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _tasks = summary.tasks;
         _pastTasks = results[1] as List<HermesTask>;
         _eventCategories = results[2] as List<HermesEventCategory>;
+        _googleCalendarStatus = googleCalendarStatus;
         _reminders = summary.reminders;
         _calendar = summary.calendarEvents;
         _approvals = summary.approvals;
@@ -364,6 +390,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _reminders = const [];
         _calendar = const [];
         _eventCategories = const [];
+        _googleCalendarStatus = null;
         _approvals = const [];
         _events = const [];
         _phase = _AuthPhase.signedOut;
@@ -873,6 +900,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     final session = _session;
     if (_phase != _AuthPhase.signedIn || session == null) return;
     try {
+      final googleCalendarStatus = await _syncGoogleCalendarIfConnected();
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
         widget.apiClient.listPastTasks().catchError(
@@ -889,6 +917,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _tasks = summary.tasks;
         _pastTasks = results[1] as List<HermesTask>;
         _eventCategories = results[2] as List<HermesEventCategory>;
+        _googleCalendarStatus = googleCalendarStatus;
         _reminders = summary.reminders;
         _calendar = summary.calendarEvents;
         _approvals = summary.approvals;
@@ -1172,6 +1201,64 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     });
   }
 
+  Future<void> _createCalendarEvent({
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+  }) async {
+    try {
+      final createdEvent = await widget.apiClient.createCalendarEvent(
+        title: title,
+        startsAt: startsAt,
+        endsAt: endsAt,
+        category: category,
+        color: color,
+        recurrence: recurrence,
+        metadata: metadata,
+        isCritical: isCritical ?? false,
+      );
+      if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
+        final start = _parseCalendarEventDateTime(startsAt);
+        if (start != null) {
+          await widget.apiClient.createEventReminder(
+            calendarEventId: createdEvent.id,
+            title: 'Reminder: $title',
+            remindAt: start
+                .subtract(Duration(minutes: reminderMinutesBefore))
+                .toIso8601String(),
+            metadata: {
+              'minutes_before': reminderMinutesBefore,
+              'recurrence': reminderRecurrence ?? 'none',
+              if ((reminderSpecificDays ?? const <String>[]).isNotEmpty)
+                'days': reminderSpecificDays,
+              if (reminderInterval != null && reminderInterval > 0)
+                'interval': reminderInterval,
+              if (reminderIntervalUnit != null) 'unit': reminderIntervalUnit,
+            },
+          );
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _calendar = [..._calendar, createdEvent];
+        _error = null;
+      });
+      await _refreshSignedInViews();
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Could not create event: $error');
+    }
+  }
+
   Future<void> _editCalendarEvent(
     HermesCalendarEvent event, {
     required String title,
@@ -1447,6 +1534,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     reminders: _reminders,
     calendar: _calendar,
     eventCategories: _eventCategories,
+    googleCalendarStatus: _googleCalendarStatus,
     approvals: _approvals,
     events: _events,
     messages: _messages,
@@ -1476,6 +1564,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     onReminderSaved: _createOrUpdateReminder,
     onReminderCompleted: _toggleReminderCompletion,
     onReminderDeleted: _deleteReminder,
+    onCalendarEventCreated: _createCalendarEvent,
     onCalendarEventEdited: _editCalendarEvent,
     onEventCategorySaved: _saveEventCategory,
     onEventCategoryDeleted: _deleteEventCategory,
@@ -2015,6 +2104,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.reminders,
     required this.calendar,
     required this.eventCategories,
+    required this.googleCalendarStatus,
     required this.approvals,
     required this.events,
     required this.messages,
@@ -2043,6 +2133,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onReminderSaved,
     required this.onReminderCompleted,
     required this.onReminderDeleted,
+    required this.onCalendarEventCreated,
     required this.onCalendarEventEdited,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
@@ -2059,6 +2150,7 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
   final List<HermesApproval> approvals;
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
@@ -2104,6 +2196,22 @@ class _CommandCenterContent extends StatelessWidget {
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
   final Future<void> Function(HermesReminder reminder) onReminderDeleted;
+  final Future<void> Function({
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+  })
+  onCalendarEventCreated;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -2161,6 +2269,7 @@ class _CommandCenterContent extends StatelessWidget {
             tasks: selectedDayTasks,
             calendar: calendar,
             eventCategories: eventCategories,
+            googleCalendarStatus: googleCalendarStatus,
             approvals: pendingApprovals,
             selectedDay: selectedCalendarDay,
             showMonth: showCalendarMonth,
@@ -2172,6 +2281,7 @@ class _CommandCenterContent extends StatelessWidget {
             onTaskCompleted: onTaskCompleted,
             onTaskSaved: onTaskSaved,
             onTaskDeleted: onTaskDeleted,
+            onCalendarEventCreated: onCalendarEventCreated,
             onCalendarEventEdited: onCalendarEventEdited,
             onEventCategorySaved: onEventCategorySaved,
             onEventCategoryDeleted: onEventCategoryDeleted,
@@ -2223,6 +2333,7 @@ class _CommandCenterContent extends StatelessWidget {
               child: _CalendarAgenda(
                 calendar: calendar,
                 eventCategories: eventCategories,
+                googleCalendarStatus: googleCalendarStatus,
                 onEventTap: onCalendarEventEdited,
                 onEventCategorySaved: onEventCategorySaved,
                 onEventCategoryDeleted: onEventCategoryDeleted,
@@ -3068,6 +3179,7 @@ class _TodayHomeView extends StatelessWidget {
     required this.tasks,
     required this.calendar,
     required this.eventCategories,
+    required this.googleCalendarStatus,
     required this.approvals,
     required this.selectedDay,
     required this.showMonth,
@@ -3079,6 +3191,7 @@ class _TodayHomeView extends StatelessWidget {
     required this.onTaskCompleted,
     required this.onTaskSaved,
     required this.onTaskDeleted,
+    required this.onCalendarEventCreated,
     required this.onCalendarEventEdited,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
@@ -3088,6 +3201,7 @@ class _TodayHomeView extends StatelessWidget {
   final List<HermesTask> tasks;
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
   final List<HermesApproval> approvals;
   final DateTime selectedDay;
   final bool showMonth;
@@ -3107,6 +3221,22 @@ class _TodayHomeView extends StatelessWidget {
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
+  final Future<void> Function({
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+  })
+  onCalendarEventCreated;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -3162,10 +3292,12 @@ class _TodayHomeView extends StatelessWidget {
               _AppleStyleTodayTimeline(
                 calendar: calendar,
                 eventCategories: eventCategories,
+                googleCalendarStatus: googleCalendarStatus,
                 selectedDay: selectedDay,
                 startHour: startHour,
                 endHour: endHour,
                 onDayChanged: onDateSelected,
+                onEventCreate: onCalendarEventCreated,
                 onEventTap: onCalendarEventEdited,
                 onEventCategorySaved: onEventCategorySaved,
                 onEventCategoryDeleted: onEventCategoryDeleted,
@@ -3379,10 +3511,12 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
   const _AppleStyleTodayTimeline({
     required this.calendar,
     required this.eventCategories,
+    required this.googleCalendarStatus,
     required this.selectedDay,
     required this.startHour,
     required this.endHour,
     required this.onDayChanged,
+    required this.onEventCreate,
     required this.onEventTap,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
@@ -3390,10 +3524,27 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
 
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
   final DateTime selectedDay;
   final int startHour;
   final int endHour;
   final ValueChanged<DateTime> onDayChanged;
+  final Future<void> Function({
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+  })
+  onEventCreate;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -3497,6 +3648,66 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     }
   }
 
+  Future<void> _showCreateEvent() async {
+    final selected = _dateOnly(widget.selectedDay);
+    final now = DateTime.now();
+    final defaultStartHour = _sameCalendarDay(selected, _dateOnly(now))
+        ? (now.hour + 1).clamp(widget.startHour, widget.endHour)
+        : widget.startHour.clamp(0, 23);
+    final start = DateTime(
+      selected.year,
+      selected.month,
+      selected.day,
+      defaultStartHour,
+    );
+    final end = start.add(const Duration(hours: 1));
+    final draft = HermesCalendarEvent(
+      id: 0,
+      title: '',
+      startsAt: start.toIso8601String(),
+      endsAt: end.toIso8601String(),
+    );
+    await _showCalendarEventDetails(
+      context,
+      draft,
+      eventCategories: widget.eventCategories,
+      googleCalendarStatus: widget.googleCalendarStatus,
+      onSave:
+          (
+            _, {
+            required String title,
+            required String startsAt,
+            String? endsAt,
+            String? category,
+            String? color,
+            String? recurrence,
+            Map<String, Object?>? metadata,
+            bool? isCritical,
+            int? reminderMinutesBefore,
+            String? reminderRecurrence,
+            List<String>? reminderSpecificDays,
+            int? reminderInterval,
+            String? reminderIntervalUnit,
+          }) => widget.onEventCreate(
+            title: title,
+            startsAt: startsAt,
+            endsAt: endsAt,
+            category: category,
+            color: color,
+            recurrence: recurrence,
+            metadata: metadata,
+            isCritical: isCritical,
+            reminderMinutesBefore: reminderMinutesBefore,
+            reminderRecurrence: reminderRecurrence,
+            reminderSpecificDays: reminderSpecificDays,
+            reminderInterval: reminderInterval,
+            reminderIntervalUnit: reminderIntervalUnit,
+          ),
+      onEventCategorySaved: widget.onEventCategorySaved,
+      onEventCategoryDeleted: widget.onEventCategoryDeleted,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -3514,14 +3725,29 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _WeekDateHeader(
-          today: today,
-          weekStartDay: weekStartDay,
-          selectedDay: selectedDay,
-          onDateSelected: widget.onDayChanged,
-          onHorizontalDayScrollStart: _handleHeaderWeekDragStart,
-          onHorizontalDayScrollUpdate: _handleHeaderWeekDragUpdate,
-          onHorizontalDayScrollEnd: _handleHeaderWeekScroll,
+        Stack(
+          children: [
+            _WeekDateHeader(
+              today: today,
+              weekStartDay: weekStartDay,
+              selectedDay: selectedDay,
+              onDateSelected: widget.onDayChanged,
+              onHorizontalDayScrollStart: _handleHeaderWeekDragStart,
+              onHorizontalDayScrollUpdate: _handleHeaderWeekDragUpdate,
+              onHorizontalDayScrollEnd: _handleHeaderWeekScroll,
+            ),
+            Positioned(
+              top: 0,
+              right: 0,
+              child: IconButton.filled(
+                key: const Key('calendar-add-event-action'),
+                onPressed: _showCreateEvent,
+                icon: const Icon(Icons.add_rounded),
+                tooltip: 'Create event',
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 10),
         Container(
@@ -3548,6 +3774,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                     key: ValueKey('two-day-timeline-page-$page'),
                     calendar: widget.calendar,
                     eventCategories: widget.eventCategories,
+                    googleCalendarStatus: widget.googleCalendarStatus,
                     selectedDay: _dateForPage(page),
                     today: today,
                     now: now,
@@ -3574,6 +3801,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     super.key,
     required this.calendar,
     required this.eventCategories,
+    required this.googleCalendarStatus,
     required this.selectedDay,
     required this.today,
     required this.now,
@@ -3588,6 +3816,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
 
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
   final DateTime selectedDay;
   final DateTime today;
   final DateTime now;
@@ -3708,6 +3937,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       columnIndex: 0,
                       timelineWidth: constraints.maxWidth,
                       eventCategories: eventCategories,
+                      googleCalendarStatus: googleCalendarStatus,
                       onTap: onEventTap,
                       onEventCategorySaved: onEventCategorySaved,
                       onEventCategoryDeleted: onEventCategoryDeleted,
@@ -3727,6 +3957,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       columnIndex: 1,
                       timelineWidth: constraints.maxWidth,
                       eventCategories: eventCategories,
+                      googleCalendarStatus: googleCalendarStatus,
                       onTap: onEventTap,
                       onEventCategorySaved: onEventCategorySaved,
                       onEventCategoryDeleted: onEventCategoryDeleted,
@@ -4038,6 +4269,7 @@ class _TimelineEventBlock extends StatelessWidget {
     required this.columnIndex,
     required this.timelineWidth,
     required this.eventCategories,
+    required this.googleCalendarStatus,
     required this.onTap,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
@@ -4050,6 +4282,7 @@ class _TimelineEventBlock extends StatelessWidget {
   final int columnIndex;
   final double timelineWidth;
   final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -4100,6 +4333,7 @@ class _TimelineEventBlock extends StatelessWidget {
           context,
           event,
           eventCategories: eventCategories,
+          googleCalendarStatus: googleCalendarStatus,
           onSave: onTap,
           onEventCategorySaved: onEventCategorySaved,
           onEventCategoryDeleted: onEventCategoryDeleted,
@@ -4136,6 +4370,7 @@ Future<void> _showCalendarEventDetails(
   BuildContext context,
   HermesCalendarEvent event, {
   required List<HermesEventCategory> eventCategories,
+  GoogleCalendarSyncStatus? googleCalendarStatus,
   required Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -4167,6 +4402,7 @@ Future<void> _showCalendarEventDetails(
       builder: (_) => _CalendarEventDetailPage(
         event: event,
         eventCategories: eventCategories,
+        googleCalendarStatus: googleCalendarStatus,
         onEventCategorySaved: onEventCategorySaved,
         onEventCategoryDeleted: onEventCategoryDeleted,
       ),
@@ -4199,12 +4435,14 @@ class _CalendarEventDetailPage extends StatefulWidget {
   const _CalendarEventDetailPage({
     required this.event,
     required this.eventCategories,
+    this.googleCalendarStatus,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
   });
 
   final HermesCalendarEvent event;
   final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -4233,6 +4471,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   String _eventIntervalUnit = 'days';
   String _reminderRecurrence = 'none';
   String _reminderIntervalUnit = 'days';
+  String? _googleCalendarId;
   String? _validationError;
   late bool _isCritical;
   final Set<String> _eventSpecificDays = <String>{};
@@ -4301,6 +4540,21 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
     _reminderInterval = TextEditingController(text: '1');
     _categories = [...widget.eventCategories];
+    final writableGoogleCalendars =
+        widget.googleCalendarStatus?.writableCalendars ??
+        const <GoogleCalendarInfo>[];
+    _googleCalendarId =
+        event.googleCalendarId ??
+        widget.googleCalendarStatus?.defaultCalendarId;
+    if (_googleCalendarId != null &&
+        writableGoogleCalendars.isNotEmpty &&
+        !writableGoogleCalendars.any(
+          (calendar) => calendar.id == _googleCalendarId,
+        )) {
+      _googleCalendarId =
+          widget.googleCalendarStatus?.defaultCalendarId ??
+          writableGoogleCalendars.first.id;
+    }
     _isCritical = event.isCritical;
     _color = _colors.any((color) => color.value == event.color)
         ? event.color!
@@ -4368,7 +4622,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
 
     final eventInterval = int.tryParse(_eventInterval.text.trim()) ?? 1;
     final eventMetadata = <String, Object?>{
+      ...?widget.event.metadata,
       'recurrence': _recurrence,
+      if (_googleCalendarId != null) 'google_calendar_id': _googleCalendarId,
       if (_recurrence == 'specific_days')
         'days': _eventSpecificDays.toList()..sort(),
       if (_recurrence == 'specific_days' || _recurrence == 'interval')
@@ -4728,6 +4984,53 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           ],
                         ),
                       ),
+                      if ((widget
+                              .googleCalendarStatus
+                              ?.writableCalendars
+                              .isNotEmpty ??
+                          false)) ...[
+                        const SizedBox(height: 14),
+                        _ShellCard(
+                          child: Column(
+                            key: const Key('event-google-calendar-field'),
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const _SectionTitle(
+                                icon: Icons.calendar_month_rounded,
+                                title: 'Google calendar',
+                                subtitle:
+                                    'Choose where Bean updates this event in Google Calendar.',
+                              ),
+                              const SizedBox(height: 12),
+                              for (final calendar
+                                  in widget
+                                      .googleCalendarStatus!
+                                      .writableCalendars)
+                                RadioListTile<String>(
+                                  key: Key(
+                                    'event-google-calendar-${calendar.id}',
+                                  ),
+                                  contentPadding: EdgeInsets.zero,
+                                  value: calendar.id,
+                                  groupValue: _googleCalendarId,
+                                  onChanged: (value) => setState(() {
+                                    _googleCalendarId = value;
+                                  }),
+                                  title: Text(calendar.summary),
+                                  subtitle:
+                                      calendar.id ==
+                                          widget
+                                              .googleCalendarStatus!
+                                              .defaultCalendarId
+                                      ? const Text(
+                                          'Default for new local events',
+                                        )
+                                      : null,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 14),
                       _ShellCard(
                         child: Column(
@@ -5745,6 +6048,7 @@ class _CalendarAgenda extends StatelessWidget {
   const _CalendarAgenda({
     required this.calendar,
     required this.eventCategories,
+    this.googleCalendarStatus,
     this.onEventTap,
     this.onEventCategorySaved,
     this.onEventCategoryDeleted,
@@ -5752,6 +6056,7 @@ class _CalendarAgenda extends StatelessWidget {
 
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -5806,6 +6111,7 @@ class _CalendarAgenda extends StatelessWidget {
                     context,
                     event,
                     eventCategories: eventCategories,
+                    googleCalendarStatus: googleCalendarStatus,
                     onSave: onEventTap!,
                     onEventCategorySaved: onEventCategorySaved!,
                     onEventCategoryDeleted: onEventCategoryDeleted!,
@@ -7001,6 +7307,75 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     }
   }
 
+  Future<void> _toggleCalendarSelection(
+    GoogleCalendarSyncStatus status,
+    GoogleCalendarInfo calendar,
+    bool selected,
+  ) async {
+    final nextSelected = status.selectedCalendarIds.toSet();
+    if (selected) {
+      nextSelected.add(calendar.id);
+    } else if (nextSelected.length > 1) {
+      nextSelected.remove(calendar.id);
+    }
+    final defaultCalendarId = nextSelected.contains(status.defaultCalendarId)
+        ? status.defaultCalendarId
+        : nextSelected.first;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final updatedStatus = await widget.apiClient
+          .updateGoogleCalendarSelection(
+            selectedCalendarIds: nextSelected.toList(),
+            defaultCalendarId: defaultCalendarId,
+          );
+      if (!mounted) return;
+      setState(() {
+        _message = 'Google calendar display preferences saved.';
+        _statusFuture = Future.value(updatedStatus);
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Could not save calendar selection: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _setDefaultCalendar(
+    GoogleCalendarSyncStatus status,
+    String calendarId,
+  ) async {
+    final selected = status.selectedCalendarIds.contains(calendarId)
+        ? status.selectedCalendarIds
+        : <String>[...status.selectedCalendarIds, calendarId];
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final updatedStatus = await widget.apiClient
+          .updateGoogleCalendarSelection(
+            selectedCalendarIds: selected,
+            defaultCalendarId: calendarId,
+          );
+      if (!mounted) return;
+      setState(() {
+        _message = 'Default Google calendar updated.';
+        _statusFuture = Future.value(updatedStatus);
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Could not update default calendar: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => FutureBuilder<GoogleCalendarSyncStatus>(
     future: _statusFuture,
@@ -7058,6 +7433,50 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                 _message!,
                 style: const TextStyle(color: HeyBeanTheme.muted),
               ),
+            ],
+            if (connected && (status?.calendars.isNotEmpty ?? false)) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Displayed Google calendars',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              for (final calendar in status!.calendars)
+                CheckboxListTile(
+                  key: Key('google-calendar-source-${calendar.id}'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: status.selectedCalendarIds.contains(calendar.id),
+                  onChanged: _busy
+                      ? null
+                      : (value) => _toggleCalendarSelection(
+                          status,
+                          calendar,
+                          value ?? false,
+                        ),
+                  title: Text(calendar.summary),
+                  subtitle: Text(
+                    calendar.canWrite
+                        ? (calendar.id == status.defaultCalendarId
+                              ? 'Default for new local events'
+                              : 'Can add local events')
+                        : 'Read only',
+                  ),
+                  secondary: calendar.canWrite
+                      ? Radio<String>(
+                          key: Key('google-calendar-default-${calendar.id}'),
+                          value: calendar.id,
+                          groupValue: status.defaultCalendarId,
+                          onChanged: _busy
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    _setDefaultCalendar(status, value);
+                                  }
+                                },
+                        )
+                      : const Icon(Icons.visibility_rounded),
+                ),
             ],
             const SizedBox(height: 12),
             Wrap(

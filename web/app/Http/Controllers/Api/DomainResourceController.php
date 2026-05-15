@@ -10,6 +10,7 @@ use App\Models\EventCategory;
 use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
+use App\Services\GoogleCalendarSyncService;
 use App\Services\StructuredHermesActionService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
@@ -19,7 +20,10 @@ use InvalidArgumentException;
 
 class DomainResourceController extends Controller
 {
-    public function __construct(private readonly StructuredHermesActionService $actions) {}
+    public function __construct(
+        private readonly StructuredHermesActionService $actions,
+        private readonly GoogleCalendarSyncService $googleCalendar,
+    ) {}
 
     public function listTasks(Request $request): JsonResponse
     {
@@ -52,6 +56,8 @@ class DomainResourceController extends Controller
 
     public function listCalendarEvents(Request $request): JsonResponse
     {
+        $this->googleCalendar->syncIfConnected($request->user());
+
         return $this->listed(CalendarEvent::where('user_id', $request->user()->id)->orderBy('starts_at')->orderBy('id')->get());
     }
 
@@ -173,7 +179,7 @@ class DomainResourceController extends Controller
 
     public function storeCalendarEvent(Request $request): JsonResponse
     {
-        return $this->created(CalendarEvent::create($this->owned($request, $request->validate([
+        $event = CalendarEvent::create($this->owned($request, $request->validate([
             'conversation_session_id' => $this->ownedSessionRule($request),
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
@@ -186,7 +192,9 @@ class DomainResourceController extends Controller
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'status' => ['nullable', 'string', 'max:50'],
             'metadata' => ['nullable', 'array'],
-        ]))));
+        ])));
+
+        return $this->created($this->googleCalendar->exportEvent($event));
     }
 
     public function updateCalendarEvent(Request $request, string $calendarEvent): JsonResponse
@@ -206,7 +214,7 @@ class DomainResourceController extends Controller
             'metadata' => ['sometimes', 'nullable', 'array'],
         ]));
 
-        return response()->json(['data' => $model->refresh()]);
+        return response()->json(['data' => $this->googleCalendar->exportEvent($model->refresh())]);
     }
 
     public function destroyCalendarEvent(Request $request, string $calendarEvent): JsonResponse

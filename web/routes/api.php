@@ -30,6 +30,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/google-calendar/status', [GoogleCalendarController::class, 'status']);
         Route::post('/google-calendar/auth-url', [GoogleCalendarController::class, 'authUrl']);
         Route::post('/google-calendar/sync', [GoogleCalendarController::class, 'sync']);
+        Route::patch('/google-calendar/calendars', [GoogleCalendarController::class, 'calendars']);
         Route::delete('/google-calendar', [GoogleCalendarController::class, 'disconnect']);
 
         Route::get('/tasks', [DomainResourceController::class, 'listTasks']);

@@ -294,6 +294,166 @@ void main() {
     expect((await client.listCalendarEvents()).single.title, 'Design review');
   });
 
+  test('parses and saves Google Calendar selection metadata', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        if (request.method == 'GET' &&
+            request.path == '/google-calendar/status') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'connected': true,
+                'status': 'connected',
+                'calendar_id': 'primary',
+                'default_calendar_id': 'work@example.com',
+                'selected_calendar_ids': ['primary', 'work@example.com'],
+                'calendars': [
+                  {
+                    'id': 'primary',
+                    'summary': 'Personal',
+                    'primary': true,
+                    'selected': true,
+                    'access_role': 'owner',
+                  },
+                  {
+                    'id': 'work@example.com',
+                    'summary': 'Work',
+                    'selected': true,
+                    'access_role': 'writer',
+                    'color': '#0B8043',
+                  },
+                  {
+                    'id': 'readonly@example.com',
+                    'summary': 'Readonly',
+                    'access_role': 'reader',
+                  },
+                ],
+              },
+            }),
+          );
+        }
+        if (request.method == 'PATCH' &&
+            request.path == '/google-calendar/calendars') {
+          expect(request.body, {
+            'selected_calendar_ids': ['work@example.com'],
+            'default_calendar_id': 'work@example.com',
+          });
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'connected': true,
+                'status': 'connected',
+                'default_calendar_id': 'work@example.com',
+                'selected_calendar_ids': ['work@example.com'],
+                'calendars': [],
+              },
+            }),
+          );
+        }
+        fail('Unexpected request: ${request.method} ${request.path}');
+      },
+    );
+
+    final status = await client.googleCalendarStatus();
+    expect(status.defaultCalendarId, 'work@example.com');
+    expect(status.selectedCalendarIds, ['primary', 'work@example.com']);
+    expect(status.calendars.map((calendar) => calendar.summary), [
+      'Personal',
+      'Work',
+      'Readonly',
+    ]);
+    expect(status.writableCalendars.map((calendar) => calendar.id), [
+      'primary',
+      'work@example.com',
+    ]);
+
+    await client.updateGoogleCalendarSelection(
+      selectedCalendarIds: ['work@example.com'],
+      defaultCalendarId: 'work@example.com',
+    );
+    expect(requests.map((request) => '${request.method} ${request.path}'), [
+      'GET /google-calendar/status',
+      'PATCH /google-calendar/calendars',
+    ]);
+  });
+
+  test(
+    'creates calendar events with Google Calendar routing metadata',
+    () async {
+      final requests = <HermesApiRequest>[];
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        bearerToken: 'token-123',
+        transport: (request) async {
+          requests.add(request);
+          expect(request.method, 'POST');
+          expect(request.path, '/calendar-events');
+          expect(request.headers['Authorization'], 'Bearer token-123');
+          expect(request.body, {
+            'title': 'Client kickoff',
+            'starts_at': '2026-05-20T15:00:00Z',
+            'ends_at': '2026-05-20T16:00:00Z',
+            'category': 'Work',
+            'color': '#007AFF',
+            'recurrence': 'none',
+            'is_critical': false,
+            'metadata': {'google_calendar_id': 'work@example.com'},
+          });
+          return HermesApiResponse(
+            201,
+            jsonEncode({
+              'data': {
+                'id': 77,
+                'title': 'Client kickoff',
+                'starts_at': '2026-05-20T15:00:00Z',
+                'ends_at': '2026-05-20T16:00:00Z',
+                'category': 'Work',
+                'color': '#007AFF',
+                'recurrence': 'none',
+                'google_calendar_id': 'work@example.com',
+              },
+            }),
+          );
+        },
+      );
+
+      final event = await client.createCalendarEvent(
+        title: 'Client kickoff',
+        startsAt: '2026-05-20T15:00:00Z',
+        endsAt: '2026-05-20T16:00:00Z',
+        category: 'Work',
+        color: '#007AFF',
+        recurrence: 'none',
+        isCritical: false,
+        metadata: {'google_calendar_id': 'work@example.com'},
+      );
+
+      expect(event.id, 77);
+      expect(event.googleCalendarId, 'work@example.com');
+      expect(requests, hasLength(1));
+    },
+  );
+
+  test('parses calendar event Google calendar ids', () async {
+    final event = HermesCalendarEvent.fromJson({
+      'id': 3,
+      'title': 'Design review',
+      'starts_at': '2026-05-10T14:30:00Z',
+      'google_calendar_id': 'work@example.com',
+      'metadata': {'recurrence': 'none'},
+    });
+
+    expect(event.googleCalendarId, 'work@example.com');
+    expect(event.metadata?['google_calendar_id'], 'work@example.com');
+  });
+
   test('loads today summary with live surfaces and blockers', () async {
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),
