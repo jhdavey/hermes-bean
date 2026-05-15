@@ -347,6 +347,13 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       );
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
+        widget.apiClient.listTasks().catchError((_) => const <HermesTask>[]),
+        widget.apiClient.listReminders().catchError(
+          (_) => const <HermesReminder>[],
+        ),
+        widget.apiClient.listCalendarEvents().catchError(
+          (_) => const <HermesCalendarEvent>[],
+        ),
         widget.apiClient.listPastTasks().catchError(
           (_) => const <HermesTask>[],
         ),
@@ -356,18 +363,25 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         widget.apiClient.pollActivityEvents(session.id),
       ]);
       final summary = results[0] as HermesTodaySummary;
+      final listedTasks = results[1] as List<HermesTask>;
+      final listedReminders = results[2] as List<HermesReminder>;
+      final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
       if (!mounted) return;
       setState(() {
         _user = user;
         _session = session;
-        _tasks = summary.tasks;
-        _pastTasks = results[1] as List<HermesTask>;
-        _eventCategories = results[2] as List<HermesEventCategory>;
+        _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
+        _pastTasks = results[4] as List<HermesTask>;
+        _eventCategories = results[5] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
-        _reminders = summary.reminders;
-        _calendar = summary.calendarEvents;
+        _reminders = listedReminders.isEmpty
+            ? summary.reminders
+            : listedReminders;
+        _calendar = listedCalendarEvents.isEmpty
+            ? summary.calendarEvents
+            : listedCalendarEvents;
         _approvals = summary.approvals;
-        _events = results[3] as List<HermesActivityEvent>;
+        _events = results[6] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
       });
     } catch (error) {
@@ -903,6 +917,13 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected();
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
+        widget.apiClient.listTasks().catchError((_) => const <HermesTask>[]),
+        widget.apiClient.listReminders().catchError(
+          (_) => const <HermesReminder>[],
+        ),
+        widget.apiClient.listCalendarEvents().catchError(
+          (_) => const <HermesCalendarEvent>[],
+        ),
         widget.apiClient.listPastTasks().catchError(
           (_) => const <HermesTask>[],
         ),
@@ -912,16 +933,23 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         widget.apiClient.pollActivityEvents(session.id),
       ]);
       final summary = results[0] as HermesTodaySummary;
+      final listedTasks = results[1] as List<HermesTask>;
+      final listedReminders = results[2] as List<HermesReminder>;
+      final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
       if (!mounted) return;
       setState(() {
-        _tasks = summary.tasks;
-        _pastTasks = results[1] as List<HermesTask>;
-        _eventCategories = results[2] as List<HermesEventCategory>;
+        _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
+        _pastTasks = results[4] as List<HermesTask>;
+        _eventCategories = results[5] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
-        _reminders = summary.reminders;
-        _calendar = summary.calendarEvents;
+        _reminders = listedReminders.isEmpty
+            ? summary.reminders
+            : listedReminders;
+        _calendar = listedCalendarEvents.isEmpty
+            ? summary.calendarEvents
+            : listedCalendarEvents;
         _approvals = summary.approvals;
-        _events = results[3] as List<HermesActivityEvent>;
+        _events = results[6] as List<HermesActivityEvent>;
         _error = null;
       });
     } catch (error) {
@@ -1060,7 +1088,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       initialTime: '',
       allowEmptyTime: false,
       categories: _eventCategories,
-      initialCritical: false,
+      showCritical: false,
     );
     if (result == null) return;
     final title = (result['title'] as String).trim();
@@ -1073,7 +1101,6 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       status: 'pending',
       category: result['category'] as String?,
       color: result['color'] as String?,
-      isCritical: result['isCritical'] as bool?,
     );
   }
 
@@ -1100,7 +1127,6 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String status = 'pending',
     String? category,
     String? color,
-    bool? isCritical,
   }) async {
     final normalizedRemindAt = _taskReminderInputToWireValue(remindAt);
     if (normalizedRemindAt == null) {
@@ -1115,7 +1141,6 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               status: status,
               category: category,
               color: color,
-              isCritical: isCritical ?? false,
             )
           : await widget.apiClient.updateReminder(
               reminder.id,
@@ -1124,7 +1149,6 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               status: status,
               category: category,
               color: color,
-              isCritical: isCritical,
               clearCategory: category == null,
               clearColor: color == null,
             );
@@ -1485,7 +1509,6 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                     const SizedBox(width: 8),
                     _CriticalTaskBadge(
                       tasks: _criticalTasksForToday(_tasks),
-                      reminders: _criticalRemindersForToday(_reminders),
                       events: _criticalEventsForToday(_calendar),
                     ),
                     if (_selectedDestination == _HomeDestination.tasks) ...[
@@ -2261,7 +2284,6 @@ class _CommandCenterContent extends StatelessWidget {
     String status,
     String? category,
     String? color,
-    bool? isCritical,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -3437,17 +3459,12 @@ class _TodayHomeView extends StatelessWidget {
 }
 
 class _CriticalTaskBadge extends StatelessWidget {
-  const _CriticalTaskBadge({
-    required this.tasks,
-    required this.reminders,
-    required this.events,
-  });
+  const _CriticalTaskBadge({required this.tasks, required this.events});
 
   final List<HermesTask> tasks;
-  final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> events;
 
-  int get count => tasks.length + reminders.length + events.length;
+  int get count => tasks.length + events.length;
 
   @override
   Widget build(BuildContext context) => PopupMenuButton<void>(
@@ -3485,13 +3502,6 @@ class _CriticalTaskBadge extends StatelessWidget {
                     icon: Icons.event_rounded,
                     title: event.title,
                     subtitle: _eventSubtitle(event),
-                  ),
-                for (final reminder in reminders)
-                  _CriticalDropdownRow(
-                    key: Key('critical-reminder-item-${reminder.id}'),
-                    icon: Icons.notifications_active_rounded,
-                    title: reminder.title,
-                    subtitle: _reminderSubtitle(reminder),
                   ),
               ],
             ],
@@ -3576,6 +3586,7 @@ const _defaultCalendarStartHour = 7;
 const _defaultCalendarEndHour = 22;
 const _calendarHourHeight = 52.5;
 const _calendarTimeColumnWidth = 48.0;
+const _calendarDayHeaderHeight = 36.0;
 const _calendarAllDayRowHeight = 42.0;
 
 class _AppleStyleTodayTimeline extends StatefulWidget {
@@ -3792,7 +3803,8 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
       widget.endHour,
     );
     final timelineHeight =
-        49 +
+        1 +
+        _calendarDayHeaderHeight +
         _calendarAllDayRowHeight +
         (visibleHours.length * _calendarHourHeight);
 
@@ -3813,7 +3825,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
             Positioned(
               top: 0,
               right: 0,
-              child: IconButton.filled(
+              child: IconButton.filledTonal(
                 key: const Key('calendar-add-event-action'),
                 onPressed: _showCreateEvent,
                 icon: const Icon(Icons.add_rounded),
@@ -4031,6 +4043,26 @@ class _TwoDayTimelinePage extends StatelessWidget {
                     right: 0,
                     child: Row(
                       children: [
+                        Container(
+                          key: const Key('calendar-current-time-label'),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: HeyBeanTheme.accent,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            _naturalTimeLabel(now),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
                         Expanded(
                           child: Container(
                             height: 2,
@@ -4259,7 +4291,7 @@ class _WeekDateHeaderCell extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 4),
           Container(
             key: pillKey,
             width: double.infinity,
@@ -4281,7 +4313,7 @@ class _WeekDateHeaderCell extends StatelessWidget {
               style: TextStyle(
                 color: textColor,
                 fontSize: 16,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w400,
               ),
             ),
           ),
@@ -4303,7 +4335,7 @@ class _DayColumnHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    height: 48,
+    height: _calendarDayHeaderHeight,
     alignment: Alignment.center,
     decoration: const BoxDecoration(
       border: Border(
@@ -4315,7 +4347,7 @@ class _DayColumnHeading extends StatelessWidget {
       '${_shortWeekdayName(date.weekday)} — ${_monthName(date.month)} ${date.day}',
       style: TextStyle(
         color: isToday ? HeyBeanTheme.accentStrong : HeyBeanTheme.text,
-        fontWeight: FontWeight.w900,
+        fontWeight: FontWeight.w400,
       ),
     ),
   );
@@ -4332,7 +4364,7 @@ class _FixedTimelineHoursColumn extends StatelessWidget {
     width: _calendarTimeColumnWidth,
     child: Column(
       children: [
-        const SizedBox(height: 48),
+        const SizedBox(height: _calendarDayHeaderHeight),
         SizedBox(
           key: const Key('calendar-all-day-label'),
           height: _calendarAllDayRowHeight,
@@ -4492,8 +4524,8 @@ class _AllDayEventRow extends StatelessWidget {
                   child: Text(
                     event.title,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: color,
+                    style: const TextStyle(
+                      color: Colors.black,
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                     ),
@@ -4610,13 +4642,11 @@ class _TimelineEventBlock extends StatelessWidget {
               ],
               Expanded(
                 child: Text(
-                  eventHeight >= 54
-                      ? '${event.title}\n${_eventTimeRangeShort(event)}'
-                      : event.title,
+                  '${event.title} ${_eventTimeRangeShort(event)}'.trim(),
                   maxLines: eventHeight >= 54 ? 2 : 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _calendarEventColor(event),
+                  style: const TextStyle(
+                    color: Colors.black,
                     fontWeight: FontWeight.w800,
                     fontSize: 12,
                   ),
@@ -6651,6 +6681,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   String? deleteLabel,
   String? completeLabel,
   bool initialCritical = false,
+  bool showCritical = true,
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
@@ -6688,23 +6719,25 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                       'These changes sync to Bean and are available to the agent.',
                 ),
                 const SizedBox(height: 14),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: FilterChip(
-                    key: const Key('title-time-editor-critical-toggle'),
-                    avatar: Icon(
-                      isCritical
-                          ? Icons.star_rounded
-                          : Icons.star_border_rounded,
-                      size: 18,
+                if (showCritical) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilterChip(
+                      key: const Key('title-time-editor-critical-toggle'),
+                      avatar: Icon(
+                        isCritical
+                            ? Icons.star_rounded
+                            : Icons.star_border_rounded,
+                        size: 18,
+                      ),
+                      label: const Text('Critical'),
+                      selected: isCritical,
+                      onSelected: (selected) =>
+                          setModalState(() => isCritical = selected),
                     ),
-                    label: const Text('Critical'),
-                    selected: isCritical,
-                    onSelected: (selected) =>
-                        setModalState(() => isCritical = selected),
                   ),
-                ),
-                const SizedBox(height: 12),
+                  const SizedBox(height: 12),
+                ],
                 TextFormField(
                   key: const Key('title-time-editor-title'),
                   controller: titleController,
@@ -7039,7 +7072,6 @@ class _ReminderListCard extends StatefulWidget {
     String status,
     String? category,
     String? color,
-    bool? isCritical,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -7113,7 +7145,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       categories: widget.eventCategories,
       initialCategory: reminder?.category,
       initialColor: reminder?.color,
-      initialCritical: reminder?.isCritical ?? false,
+      showCritical: false,
       deleteLabel: reminder == null ? null : 'Delete reminder',
       completeLabel: reminder == null
           ? null
@@ -7139,7 +7171,6 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       status: status,
       category: result['category'] as String?,
       color: result['color'] as String?,
-      isCritical: result['isCritical'] as bool?,
     );
   }
 }
@@ -7983,15 +8014,6 @@ class _ReminderItemTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        if (reminder.isCritical) ...[
-                          Icon(
-                            Icons.star_rounded,
-                            key: Key('reminder-critical-star-${reminder.id}'),
-                            color: categoryColor,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 4),
-                        ],
                         Expanded(
                           child: Text(
                             reminder.title,
@@ -8157,19 +8179,6 @@ List<HermesTask> _criticalTasksForToday(List<HermesTask> tasks) {
     tasks,
     DateTime.now(),
   ).where((task) => task.isCritical && !_taskIsCompleted(task)).toList();
-}
-
-List<HermesReminder> _criticalRemindersForToday(
-  List<HermesReminder> reminders,
-) {
-  final today = _dateOnly(DateTime.now());
-  final visible = reminders.where((reminder) {
-    if (!reminder.isCritical || _reminderIsCompleted(reminder)) return false;
-    final dueAt = _parseReminderDueDate(reminder);
-    return dueAt != null && _sameCalendarDay(_dateOnly(dueAt), today);
-  }).toList();
-  visible.sort(_compareRemindersByDueDate);
-  return visible;
 }
 
 List<HermesCalendarEvent> _criticalEventsForToday(

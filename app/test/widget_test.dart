@@ -106,7 +106,7 @@ void main() {
       expect(find.text('Agent online'), findsNothing);
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Stand up'), findsNothing);
-      expect(find.text('Design review'), findsWidgets);
+      expect(find.textContaining('Design review'), findsWidgets);
       expect(find.text('assistant.ready'), findsNothing);
 
       await tester.tap(find.byKey(const Key('nav-bean')));
@@ -417,7 +417,7 @@ void main() {
     expect(find.byKey(const Key('critical-task-item-1')), findsOneWidget);
     expect(find.byKey(const Key('critical-event-item-3')), findsOneWidget);
     expect(find.text('Plan launch'), findsWidgets);
-    expect(find.text('Design review'), findsWidgets);
+    expect(find.textContaining('Design review'), findsWidgets);
     expect(find.byKey(const Key('critical-reminder-item-2')), findsNothing);
   });
 
@@ -436,6 +436,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('reminder-edit-action-2')));
     await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('title-time-editor-critical-toggle')),
+      findsNothing,
+    );
     await tester.tap(find.byKey(const Key('title-time-editor-picker-button')));
     await tester.pumpAndSettle();
 
@@ -565,7 +569,7 @@ void main() {
     await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
     await tester.pumpAndSettle();
     await tester.enterText(
-      find.byKey(const Key('title-time-editor-secondary-time')),
+      find.byKey(const Key('title-time-editor-time')),
       'Today 6:00 PM',
     );
     await tester.tap(find.byKey(const Key('title-time-editor-save')));
@@ -573,11 +577,8 @@ void main() {
 
     expect(api.updatedTask?.category, 'Work');
     expect(api.updatedTask?.color, '#007AFF');
-    expect(api.createdReminder?.title, 'Categorize proposal');
-    expect(api.createdReminder?.category, 'Work');
-    expect(api.createdReminder?.color, '#007AFF');
-    expect(api.createdReminder?.metadata?['source'], 'task');
-    expect(api.createdReminder?.metadata?['task_id'], 501);
+    expect(api.updatedTask?.dueAt, isNotNull);
+    expect(api.createdReminder, isNull);
     expect(find.textContaining('Work'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('nav-reminders')));
@@ -600,7 +601,7 @@ void main() {
     expect(find.textContaining('Work'), findsWidgets);
   });
 
-  testWidgets('new task reminder time creates a linked reminder in reminders', (
+  testWidgets('new task date saves on the task without creating a reminder', (
     WidgetTester tester,
   ) async {
     final api = _TaskReminderCategoryFakeHermesApiClient();
@@ -618,20 +619,19 @@ void main() {
       'Order coffee beans',
     );
     await tester.enterText(
-      find.byKey(const Key('title-time-editor-secondary-time')),
+      find.byKey(const Key('title-time-editor-time')),
       'Today 6:00 PM',
     );
     await tester.tap(find.byKey(const Key('title-time-editor-save')));
     await tester.pumpAndSettle();
 
     expect(api.createdTask?.title, 'Order coffee beans');
-    expect(api.createdReminder?.title, 'Order coffee beans');
-    expect(api.createdReminder?.metadata?['source'], 'task');
-    expect(api.createdReminder?.metadata?['task_id'], api.createdTask?.id);
+    expect(api.createdTask?.dueAt, isNotNull);
+    expect(api.createdReminder, isNull);
 
     await tester.tap(find.byKey(const Key('nav-reminders')));
     await tester.pumpAndSettle();
-    expect(find.text('Order coffee beans'), findsOneWidget);
+    expect(find.text('Order coffee beans'), findsNothing);
   });
 
   testWidgets(
@@ -686,8 +686,32 @@ void main() {
         find.byKey(const Key('calendar-current-time-marker')),
         findsOneWidget,
       );
-      // The time label is conditional on the current time being in visible hours;
-      // the marker itself verifies the timeline is rendering live time state.
+      expect(
+        find.byKey(const Key('calendar-current-time-label')),
+        findsOneWidget,
+      );
+      final selectedWeekDateText = tester.widget<Text>(
+        find
+            .descendant(
+              of: find.byKey(const Key('week-date-pill-selected')),
+              matching: find.byType(Text),
+            )
+            .first,
+      );
+      expect(selectedWeekDateText.style?.fontWeight, FontWeight.w400);
+      final selectedDayHeadingText = tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(const Key('day-column-heading-selected')),
+          matching: find.byType(Text),
+        ),
+      );
+      expect(selectedDayHeadingText.style?.fontWeight, FontWeight.w400);
+      expect(
+        tester
+            .getSize(find.byKey(const Key('day-column-heading-selected')))
+            .height,
+        lessThan(48),
+      );
 
       expect(find.text('7 AM'), findsOneWidget);
       expect(find.text('Noon'), findsOneWidget);
@@ -696,7 +720,7 @@ void main() {
       expect(find.text('Today / upcoming'), findsNothing);
       expect(find.text('Tasks for Today'), findsOneWidget);
       expect(find.text('Plan launch'), findsOneWidget);
-      expect(find.text('Design review'), findsOneWidget);
+      expect(find.textContaining('Design review'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('calendar-month-chevron')));
       await tester.pumpAndSettle();
@@ -777,7 +801,7 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-tasks')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('tasks-view')), findsOneWidget);
-      expect(find.text('Task list'), findsOneWidget);
+      expect(find.text('Task list'), findsNothing);
       expect(find.text('Active'), findsWidgets);
 
       await tester.tap(find.byKey(const Key('nav-reminders')));
@@ -893,7 +917,7 @@ void main() {
     final fixedHourColumn = tester.getRect(
       find.byKey(const Key('calendar-fixed-hours-column')),
     );
-    expect(fixedHourColumn.height, closeTo(36 + (16 * 52.5), .1));
+    expect(fixedHourColumn.height, closeTo(36 + 42 + (16 * 52.5), .1));
     final scrollingDayColumns = tester.getRect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
     );
@@ -1328,7 +1352,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Persisted task'), findsOneWidget);
-      expect(find.text('Persisted calendar event'), findsOneWidget);
+      expect(find.textContaining('Persisted calendar event'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('nav-reminders')));
       await tester.pumpAndSettle();
@@ -1396,16 +1420,16 @@ void main() {
       expect(api.pastTaskListCalls, 1);
       expect(find.text('Past tasks'), findsOneWidget);
       expect(
-        find.text('1 completed task from the last 10 days'),
+        find.textContaining('Completed tasks that dropped off active lists'),
         findsOneWidget,
       );
-      expect(find.text('Archived oil change'), findsNothing);
-
-      await tester.tap(find.byKey(const Key('past-tasks-expansion')));
-      await tester.pumpAndSettle();
+      expect(find.text('Archived oil change'), findsOneWidget);
 
       expect(find.text('Archived oil change'), findsOneWidget);
-      expect(find.text('Completed · uncheck to restore'), findsOneWidget);
+      expect(
+        find.text('Completed · Permanently deletes after 10 days'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.byKey(const Key('task-complete-checkbox-201')));
       await tester.pumpAndSettle();
@@ -1419,7 +1443,7 @@ void main() {
     },
   );
 
-  testWidgets('settings lets the signed-in user edit email', (
+  testWidgets('settings shows signed-in user and Bean preferences entry', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -1430,23 +1454,10 @@ void main() {
 
     await tester.tap(find.byKey(const Key('nav-settings')));
     await tester.pumpAndSettle();
-    expect(find.text('Focused Hermes Bean preferences'), findsNothing);
-    expect(find.text('Bean preferences'), findsNothing);
+    expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
+    expect(find.byKey(const Key('open-bean-preferences')), findsOneWidget);
 
-    await tester.ensureVisible(
-      find.byKey(const Key('settings-edit-email-action')),
-    );
-    await tester.tap(find.byKey(const Key('settings-edit-email-action')));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('settings-email-editor-field')),
-      'new-bean@example.com',
-    );
-    await tester.tap(find.byKey(const Key('settings-email-editor-save')));
-    await tester.pumpAndSettle();
-
-    expect(api.updatedEmail, 'new-bean@example.com');
-    expect(find.text('new-bean@example.com'), findsWidgets);
+    expect(find.text('bean@example.com'), findsWidgets);
   });
 
   testWidgets(
@@ -1654,7 +1665,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.googleCalendarSyncCalls, 1);
-    expect(find.text('Imported Google event'), findsOneWidget);
+    expect(find.textContaining('Imported Google event'), findsOneWidget);
 
     await tester.fling(
       find.byKey(const Key('signed-in-refresh-scroll')),
@@ -1705,7 +1716,7 @@ void main() {
       api.createdEvent?.metadata?['google_calendar_id'],
       'sports@example.com',
     );
-    expect(find.text('Client kickoff'), findsOneWidget);
+    expect(find.textContaining('Client kickoff'), findsOneWidget);
   });
 
   testWidgets('critical event edits persist and update header critical count', (
@@ -1734,7 +1745,7 @@ void main() {
     await tester.tap(find.byKey(const Key('critical-task-count')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('critical-event-item-3')), findsOneWidget);
-    expect(find.text('Design review'), findsWidgets);
+    expect(find.textContaining('Design review'), findsWidgets);
   });
 
   testWidgets(
@@ -2014,7 +2025,7 @@ void main() {
   });
 
   testWidgets(
-    'task and reminder list cards show critical stars and compact headers',
+    'task list cards show critical stars and reminders omit critical stars with compact headers',
     (WidgetTester tester) async {
       await tester.pumpWidget(
         HermesBeanApp(
@@ -2035,7 +2046,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Create, edit, and review'), findsNothing);
       expect(find.byKey(const Key('reminder-add-action')), findsOneWidget);
-      expect(find.byKey(const Key('reminder-critical-star-2')), findsOneWidget);
+      expect(find.byKey(const Key('reminder-critical-star-2')), findsNothing);
     },
   );
 
@@ -2126,10 +2137,10 @@ void main() {
       expect(tomorrowSegment.right, lessThanOrEqualTo(nextHeading.right));
       expect(
         todaySegment.top,
-        closeTo(selectedHeading.bottom + (2 * 52.5) + 2, 1),
+        closeTo(selectedHeading.bottom + 42 + (2 * 52.5) + 2, 1),
       );
       expect(todaySegment.height, closeTo((14 * 52.5) - 4, 1));
-      expect(tomorrowSegment.top, closeTo(nextHeading.bottom + 2, 1));
+      expect(tomorrowSegment.top, closeTo(nextHeading.bottom + 42 + 2, 1));
       expect(tomorrowSegment.height, closeTo((3 * 52.5) - 4, 1));
     },
   );
