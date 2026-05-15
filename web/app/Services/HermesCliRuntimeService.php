@@ -246,7 +246,9 @@ Rules:
 - Existing dashboard resources are listed in dashboard_state; use their numeric id when updating, deleting, approving, denying, or resolving them.
 - Risky external, destructive outside the dashboard, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
 - If no concrete action is needed, return an empty actions array.
-- Adapt your tone to `agent_profile.settings.personality_prompt` when present, and use `agent_profile.settings.onboarding.priorities` plus `agent_profile.settings.onboarding.context` to understand what the user cares about.
+- If `user.onboard_complete` is false or `agent_profile.settings.onboarding.completed` is false, treat the conversation as Bean onboarding: ask the user to introduce themself, then ask follow-up questions to learn preferred Bean style/personality, top priorities, and any useful life/context constraints. When the user provides enough onboarding/preferences, emit a low-risk `agent_profile.update` action with `parameters.settings.personality_type`, `parameters.settings.onboarding.completed: true`, `parameters.settings.onboarding.priorities`, and `parameters.settings.onboarding.context` so the app saves settings and updates Bean memory.
+- When the user changes Bean preferences from Settings, the message metadata includes `settings_update: true`; acknowledge the update and emit a low-risk `agent_profile.update` action with the supplied preferences so runtime memory stays synchronized.
+- Adapt your tone to `agent_profile.settings.personality_prompt` when present, and use `agent_profile.settings.onboarding.priorities` plus `agent_profile.settings.onboarding.context` and `agent_profile.settings.memory.user_preferences.summary` to understand what the user cares about.
 - Use ISO-8601 timestamps for dates when you create or update reminders, calendar events, and scheduler jobs.
 - For user-facing requests to schedule, plan, book, block time, add an appointment, create a reminder, or create a task: emit visible dashboard resources (`calendar_event.*`, `reminder.*`, and/or `task.*`) so the item appears in `/api/today`. Do not use `scheduler_job.*` for ordinary user calendar/reminder/task planning.
 - Only use `scheduler_job.*` for internal/background agent automation. If you do emit `scheduler_job.create` with `scheduled_for` for a user-visible scheduled plan, the app will mirror it to a calendar event unless `parameters.kind` or `parameters.payload.kind` is `internal_automation`, `background_job`, or `system_job`.
@@ -275,6 +277,7 @@ PROMPT.$this->payloadFor($session, $message);
                 'id' => $user?->id,
                 'email' => $user?->email,
                 'name' => $user?->name,
+                'onboard_complete' => (bool) ($user?->onboard_complete ?? false),
             ],
             'agent_profile' => $profile ? [
                 'id' => $profile->id,

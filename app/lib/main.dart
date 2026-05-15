@@ -5,8 +5,42 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'hermes_api_client.dart';
+
+typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
+
+const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
+
+Future<bool> _defaultLaunchExternalUrl(Uri url) async {
+  try {
+    final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (launched) return true;
+  } on PlatformException {
+    // Some iOS builds can fail to attach the url_launcher_ios pigeon channel
+    // after the plugin is added. Fall back to the app-owned native channel so
+    // OAuth links can still open instead of surfacing a channel-error to users.
+  } on MissingPluginException {
+    // Same fallback path for stale/native shells that have not registered the
+    // url_launcher plugin yet.
+  }
+
+  return _launchExternalUrlWithNativeFallback(url);
+}
+
+Future<bool> _launchExternalUrlWithNativeFallback(Uri url) async {
+  try {
+    return await _heyBeanPlatformChannel.invokeMethod<bool>('openUrl', {
+          'url': url.toString(),
+        }) ??
+        false;
+  } on PlatformException {
+    return false;
+  } on MissingPluginException {
+    return false;
+  }
+}
 
 void main() {
   runApp(HermesBeanApp());
@@ -70,11 +104,14 @@ class HermesBeanApp extends StatelessWidget {
     super.key,
     HermesApiClient? apiClient,
     AuthTokenStore? tokenStore,
+    ExternalUrlLauncher? launchExternalUrl,
   }) : apiClient = apiClient ?? HermesApiClient(),
-       tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore();
+       tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore(),
+       launchExternalUrl = launchExternalUrl ?? _defaultLaunchExternalUrl;
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
+  final ExternalUrlLauncher launchExternalUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +119,11 @@ class HermesBeanApp extends StatelessWidget {
       title: 'Hermes Bean',
       debugShowCheckedModeBanner: false,
       theme: HeyBeanTheme.lightTheme,
-      home: CommandCenterShell(apiClient: apiClient, tokenStore: tokenStore),
+      home: CommandCenterShell(
+        apiClient: apiClient,
+        tokenStore: tokenStore,
+        launchExternalUrl: launchExternalUrl,
+      ),
     );
   }
 }
@@ -193,10 +234,12 @@ class CommandCenterShell extends StatefulWidget {
     super.key,
     required this.apiClient,
     required this.tokenStore,
+    required this.launchExternalUrl,
   });
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
+  final ExternalUrlLauncher launchExternalUrl;
 
   @override
   State<CommandCenterShell> createState() => _CommandCenterShellState();
@@ -375,6 +418,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     required List<String> onboardingPriorities,
     String? onboardingContext,
   }) async {
+    final wasEditingAgentPreferences = _editingAgentPreferences;
     setState(() {
       _busy = true;
       _error = null;
@@ -418,12 +462,79 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _forceAgentOnboarding = false;
         _editingAgentPreferences = false;
       });
+      if (wasEditingAgentPreferences) {
+        try {
+          await _notifyAgentPreferencesUpdated(
+            agentPersonality: agentPersonality,
+            onboardingPriorities: savedPriorities,
+            onboardingContext: onboardingContext,
+          );
+        } catch (_) {
+          // Preferences are already persisted in settings; a runtime-memory sync
+          // failure should not reopen the editor or make the save look lost.
+        }
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = 'Could not save Bean preferences: $error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  bool get _needsBeanIntroduction {
+    final user = _user;
+    if (user == null) return false;
+    return !user.onboardComplete &&
+        !(user.agentProfile?.onboardingCompleted ?? false);
+  }
+
+  void _selectDestination(_HomeDestination destination) {
+    setState(() {
+      _selectedDestination = destination;
+      if (destination == _HomeDestination.bean && _needsBeanIntroduction) {
+        _ensureBeanIntroductionPrompt();
+      }
+    });
+  }
+
+  void _ensureBeanIntroductionPrompt() {
+    const prompt =
+        'Hi, I’m Bean. Start by introducing yourself — tell me what you want help with, what matters most day to day, and how you’d like me to work with you.';
+    final alreadyPrompted = _messages.any(
+      (message) => message.role == 'assistant' && message.content == prompt,
+    );
+    if (!alreadyPrompted) {
+      _messages.add(
+        HermesMessage(
+          id: _messages.length + 1,
+          role: 'assistant',
+          content: prompt,
+        ),
+      );
+    }
+  }
+
+  Future<void> _notifyAgentPreferencesUpdated({
+    required String agentPersonality,
+    required List<String> onboardingPriorities,
+    String? onboardingContext,
+  }) async {
+    final session = _session;
+    if (session == null) return;
+
+    await widget.apiClient.sendMessage(
+      sessionId: session.id,
+      content:
+          'Bean preferences were updated in Settings. Save these as your current memory: personality=$agentPersonality; priorities=${onboardingPriorities.join(', ')}; context=${onboardingContext ?? ''}',
+      metadata: {
+        'source': 'settings',
+        'settings_update': true,
+        'agent_personality': agentPersonality,
+        'onboarding_priorities': onboardingPriorities,
+        'onboarding_context': onboardingContext,
+      },
+    );
   }
 
   Future<void> _startNewChatSession() async {
@@ -521,8 +632,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           blockers: const [],
         ),
       );
+      final refreshedUser = await widget.apiClient.me().catchError(
+        (_) => _user!,
+      );
       if (!mounted) return;
       setState(() {
+        _user = refreshedUser;
         _session = result.session;
         if (result.assistantMessage != null) {
           _messages.add(_displayableAssistantMessage(result.assistantMessage!));
@@ -836,6 +951,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? dueAt,
     String? category,
     String? color,
+    bool? isCritical,
   }) async {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
     try {
@@ -845,6 +961,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               dueAt: normalizedDueAt,
               category: category,
               color: color,
+              isCritical: isCritical ?? false,
             )
           : await widget.apiClient.updateTask(
               task.id,
@@ -853,6 +970,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               dueAt: normalizedDueAt,
               category: category,
               color: color,
+              isCritical: isCritical,
               clearCategory: category == null,
               clearColor: color == null,
             );
@@ -893,6 +1011,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String status = 'pending',
     String? category,
     String? color,
+    bool? isCritical,
   }) async {
     final normalizedRemindAt = _taskReminderInputToWireValue(remindAt);
     if (normalizedRemindAt == null) {
@@ -907,6 +1026,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               status: status,
               category: category,
               color: color,
+              isCritical: isCritical ?? false,
             )
           : await widget.apiClient.updateReminder(
               reminder.id,
@@ -915,6 +1035,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               status: status,
               category: category,
               color: color,
+              isCritical: isCritical,
               clearCategory: category == null,
               clearColor: color == null,
             );
@@ -1052,6 +1173,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? color,
     String? recurrence,
     Map<String, Object?>? metadata,
+    bool? isCritical,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -1067,6 +1189,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       color: color,
       recurrence: recurrence,
       metadata: metadata,
+      isCritical: isCritical ?? event.isCritical,
       clearEndsAt: endsAt == null,
       clearCategory: category == null,
       clearColor: color == null,
@@ -1092,6 +1215,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         color: color,
         recurrence: recurrence,
         metadata: metadata,
+        isCritical: isCritical,
       );
       if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
         final start = _parseCalendarEventDateTime(startsAt);
@@ -1183,14 +1307,15 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                 title: _phase == _AuthPhase.signedIn
                     ? _CalendarHeaderButton(
                         key: const Key('calendar-month-chevron'),
-                        label: _monthName(DateTime.now().month),
+                        label:
+                            '${_monthName(DateTime.now().month)} ${DateTime.now().year}',
                         icon: Icons.chevron_left_rounded,
-                        iconSize: 15,
-                        horizontalPadding: 9,
-                        verticalPadding: 6,
+                        iconSize: 16,
+                        horizontalPadding: 10,
+                        verticalPadding: 7,
                         labelStyle: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
                         ),
                         onTap: _openCurrentCalendarMonth,
                       )
@@ -1212,8 +1337,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                     ),
                     const SizedBox(width: 8),
                     _CriticalTaskBadge(
-                      tasks: _visibleSortedTasks(_tasks),
-                      reminders: _visibleActiveReminders(_reminders),
+                      tasks: _criticalTasksForToday(_tasks),
+                      reminders: _criticalRemindersForToday(_reminders),
+                      events: _criticalEventsForToday(_calendar),
                     ),
                   ],
                   const SizedBox(width: 16),
@@ -1224,8 +1350,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                   ? _HeyBeanBottomMenu(
                       selected: _selectedDestination,
                       beanListening: _beanVoiceListening,
-                      onSelected: (destination) =>
-                          setState(() => _selectedDestination = destination),
+                      onSelected: _selectDestination,
                       onBeanLongPressStart: _startBeanVoiceDraft,
                       onBeanLongPressEnd: _finishBeanVoiceDraft,
                     )
@@ -1252,71 +1377,41 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
     final user = _user!;
     final showAgentOnboarding =
-        _forceAgentOnboarding ||
-        _editingAgentPreferences ||
-        (!user.onboardComplete &&
-            !(user.agentProfile?.onboardingCompleted ?? false));
+        _forceAgentOnboarding || _editingAgentPreferences;
+    final showBeanIntroBubble =
+        _needsBeanIntroduction &&
+        _selectedDestination != _HomeDestination.bean &&
+        !_editingAgentPreferences &&
+        !_forceAgentOnboarding;
     final editingAgentPreferences = _editingAgentPreferences;
+    final signedInContent = _signedInContent(user);
+    final signedInSurface = _selectedDestination == _HomeDestination.bean
+        ? Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+            child: signedInContent,
+          )
+        : RefreshIndicator(
+            key: const Key('signed-in-refresh-indicator'),
+            onRefresh: _refreshSignedInViews,
+            child: SingleChildScrollView(
+              key: const Key('signed-in-refresh-scroll'),
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
+              child: signedInContent,
+            ),
+          );
     return Stack(
       children: [
-        RefreshIndicator(
-          key: const Key('signed-in-refresh-indicator'),
-          onRefresh: _refreshSignedInViews,
-          child: SingleChildScrollView(
-            key: const Key('signed-in-refresh-scroll'),
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
-            child: _CommandCenterContent(
-              apiClient: widget.apiClient,
-              user: user,
-              tasks: _tasks,
-              pastTasks: _pastTasks,
-              reminders: _reminders,
-              calendar: _calendar,
-              eventCategories: _eventCategories,
-              approvals: _approvals,
-              events: _events,
-              messages: _messages,
-              busy: _busy,
-              chatRunState: _chatRunState,
-              error: _error,
-              selectedDestination: _selectedDestination,
-              selectedCalendarDay: _selectedCalendarDay,
-              showCalendarMonth: _showCalendarMonth,
-              calendarStartHour: _calendarStartHour,
-              calendarEndHour: _calendarEndHour,
-              onCalendarDaySelected: _selectCalendarDay,
-              onCalendarMonthSelected: _selectCalendarMonth,
-              onBackToCalendarDay: _returnToCalendarDay,
-              onCalendarStartHourChanged: _setCalendarStartHour,
-              onCalendarEndHourChanged: _setCalendarEndHour,
-              onSelectDestination: (destination) =>
-                  setState(() => _selectedDestination = destination),
-              onSend: _sendChat,
-              onNewChatSession: _startNewChatSession,
-              beanVoiceListening: _beanVoiceListening,
-              beanVoiceDraft: _beanVoiceDraft,
-              onBeanVoiceDraftChanged: _updateBeanVoiceDraft,
-              onTaskCompleted: _toggleTaskCompletion,
-              pendingTaskIds: _pendingTaskIds,
-              onTaskSaved: _createOrUpdateTask,
-              onTaskDeleted: _deleteTask,
-              onReminderSaved: _createOrUpdateReminder,
-              onReminderCompleted: _toggleReminderCompletion,
-              onReminderDeleted: _deleteReminder,
-              onCalendarEventEdited: _editCalendarEvent,
-              onEventCategorySaved: _saveEventCategory,
-              onEventCategoryDeleted: _deleteEventCategory,
-              onDeleteAccount: _deleteAccount,
-              onEditAgentOnboarding: () {
-                setState(() {
-                  _editingAgentPreferences = true;
-                  _forceAgentOnboarding = false;
-                });
-              },
+        signedInSurface,
+        if (showBeanIntroBubble)
+          Positioned(
+            left: 24,
+            right: 24,
+            bottom: 104 + MediaQuery.paddingOf(context).bottom,
+            child: _BeanIntroCallout(
+              onTap: () => _selectDestination(_HomeDestination.bean),
             ),
           ),
-        ),
         if (showAgentOnboarding)
           _AgentOnboardingOverlay(
             key: const Key('agent-onboarding-overlay'),
@@ -1335,6 +1430,56 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       ],
     );
   }
+
+  Widget _signedInContent(HermesUser user) => _CommandCenterContent(
+    apiClient: widget.apiClient,
+    user: user,
+    tasks: _tasks,
+    pastTasks: _pastTasks,
+    reminders: _reminders,
+    calendar: _calendar,
+    eventCategories: _eventCategories,
+    approvals: _approvals,
+    events: _events,
+    messages: _messages,
+    busy: _busy,
+    chatRunState: _chatRunState,
+    error: _error,
+    selectedDestination: _selectedDestination,
+    selectedCalendarDay: _selectedCalendarDay,
+    showCalendarMonth: _showCalendarMonth,
+    calendarStartHour: _calendarStartHour,
+    calendarEndHour: _calendarEndHour,
+    onCalendarDaySelected: _selectCalendarDay,
+    onCalendarMonthSelected: _selectCalendarMonth,
+    onBackToCalendarDay: _returnToCalendarDay,
+    onCalendarStartHourChanged: _setCalendarStartHour,
+    onCalendarEndHourChanged: _setCalendarEndHour,
+    onSelectDestination: _selectDestination,
+    onSend: _sendChat,
+    onNewChatSession: _startNewChatSession,
+    beanVoiceListening: _beanVoiceListening,
+    beanVoiceDraft: _beanVoiceDraft,
+    onBeanVoiceDraftChanged: _updateBeanVoiceDraft,
+    onTaskCompleted: _toggleTaskCompletion,
+    pendingTaskIds: _pendingTaskIds,
+    onTaskSaved: _createOrUpdateTask,
+    onTaskDeleted: _deleteTask,
+    onReminderSaved: _createOrUpdateReminder,
+    onReminderCompleted: _toggleReminderCompletion,
+    onReminderDeleted: _deleteReminder,
+    onCalendarEventEdited: _editCalendarEvent,
+    onEventCategorySaved: _saveEventCategory,
+    onEventCategoryDeleted: _deleteEventCategory,
+    onDeleteAccount: _deleteAccount,
+    launchExternalUrl: widget.launchExternalUrl,
+    onEditAgentOnboarding: () {
+      setState(() {
+        _editingAgentPreferences = true;
+        _forceAgentOnboarding = false;
+      });
+    },
+  );
 }
 
 typedef _RegisterHandler =
@@ -1894,6 +2039,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
     required this.onDeleteAccount,
+    required this.launchExternalUrl,
     required this.onEditAgentOnboarding,
     this.error,
   });
@@ -1934,6 +2080,7 @@ class _CommandCenterContent extends StatelessWidget {
     String? dueAt,
     String? category,
     String? color,
+    bool? isCritical,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -1944,6 +2091,7 @@ class _CommandCenterContent extends StatelessWidget {
     String status,
     String? category,
     String? color,
+    bool? isCritical,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -1957,6 +2105,7 @@ class _CommandCenterContent extends StatelessWidget {
     String? color,
     String? recurrence,
     Map<String, Object?>? metadata,
+    bool? isCritical,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -1973,6 +2122,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted;
   final Future<void> Function() onDeleteAccount;
+  final ExternalUrlLauncher launchExternalUrl;
   final VoidCallback onEditAgentOnboarding;
   final String? error;
 
@@ -2036,6 +2186,7 @@ class _CommandCenterContent extends StatelessWidget {
           ),
           _HomeDestination.settings => _SettingsView(
             apiClient: apiClient,
+            launchExternalUrl: launchExternalUrl,
             user: user,
             approvals: pendingApprovals,
             pastTasks: pastTasks,
@@ -2175,15 +2326,15 @@ class _HeroChatCardState extends State<_HeroChatCard> {
     final pendingApprovals = widget.approvals
         .where((approval) => (approval.status ?? 'pending') == 'pending')
         .toList();
-    return SizedBox(
+    return SizedBox.expand(
       key: const Key('chat-view'),
-      height: MediaQuery.of(context).size.height - 178,
       child: Stack(
         children: [
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
+                key: const Key('chat-top-bar'),
                 children: [
                   _ChatRunStatePill(label: widget.runState),
                   const Spacer(),
@@ -2944,6 +3095,7 @@ class _TodayHomeView extends StatelessWidget {
     String? dueAt,
     String? category,
     String? color,
+    bool? isCritical,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -2956,6 +3108,7 @@ class _TodayHomeView extends StatelessWidget {
     String? color,
     String? recurrence,
     Map<String, Object?>? metadata,
+    bool? isCritical,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -3013,30 +3166,28 @@ class _TodayHomeView extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        _ShellCard(
+        Column(
           key: const Key('today-task-list'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionTitle(
-                icon: Icons.task_alt_rounded,
-                title: 'Tasks for $dayLabel',
-                subtitle: '${tasks.length} tasks',
-              ),
-              const SizedBox(height: 12),
-              if (tasks.isEmpty)
-                _EmptySurface(label: 'No tasks scheduled for $dayLabel')
-              else ...[
-                for (final task in tasks)
-                  _TaskItemTile(
-                    task: task,
-                    subtitle: _taskSubtitle(task),
-                    onCompleted: onTaskCompleted,
-                    onTap: () => _showTaskEditor(context, task: task),
-                  ),
-              ],
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionTitle(
+              icon: Icons.task_alt_rounded,
+              title: 'Tasks for $dayLabel',
+              subtitle: '${tasks.length} tasks',
+            ),
+            const SizedBox(height: 12),
+            if (tasks.isEmpty)
+              _EmptySurface(label: 'No tasks scheduled for $dayLabel')
+            else ...[
+              for (final task in tasks)
+                _TaskItemTile(
+                  task: task,
+                  subtitle: _taskSubtitle(task),
+                  onCompleted: onTaskCompleted,
+                  onTap: () => _showTaskEditor(context, task: task),
+                ),
             ],
-          ),
+          ],
         ),
       ],
     );
@@ -3054,6 +3205,7 @@ class _TodayHomeView extends StatelessWidget {
       categories: eventCategories,
       initialCategory: task?.category,
       initialColor: task?.color,
+      initialCritical: task?.isCritical ?? false,
       deleteLabel: task == null ? null : 'Delete task',
     );
     if (result == null) return;
@@ -3069,22 +3221,28 @@ class _TodayHomeView extends StatelessWidget {
       dueAt: result['time'] as String?,
       category: result['category'] as String?,
       color: result['color'] as String?,
+      isCritical: result['isCritical'] as bool?,
     );
   }
 }
 
 class _CriticalTaskBadge extends StatelessWidget {
-  const _CriticalTaskBadge({required this.tasks, required this.reminders});
+  const _CriticalTaskBadge({
+    required this.tasks,
+    required this.reminders,
+    required this.events,
+  });
 
   final List<HermesTask> tasks;
   final List<HermesReminder> reminders;
+  final List<HermesCalendarEvent> events;
 
-  int get count => tasks.length + reminders.length;
+  int get count => tasks.length + reminders.length + events.length;
 
   @override
   Widget build(BuildContext context) => PopupMenuButton<void>(
     key: const Key('critical-task-count-menu'),
-    tooltip: 'Critical tasks and reminders',
+    tooltip: 'Critical items',
     position: PopupMenuPosition.under,
     offset: const Offset(0, 8),
     itemBuilder: (context) => [
@@ -3097,24 +3255,11 @@ class _CriticalTaskBadge extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Critical',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: HeyBeanTheme.text,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Critical means open tasks visible today or later, plus active reminders due now or later. Completed items and expired one-off reminders are excluded.',
-                style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
-              ),
-              const SizedBox(height: 10),
               if (count == 0)
                 const _CriticalDropdownRow(
                   icon: Icons.check_circle_outline_rounded,
-                  title: 'Nothing critical right now',
-                  subtitle: 'You are clear.',
+                  title: 'Nothing critical today',
+                  subtitle: '',
                 )
               else ...[
                 for (final task in tasks)
@@ -3123,6 +3268,13 @@ class _CriticalTaskBadge extends StatelessWidget {
                     icon: Icons.checklist_rounded,
                     title: task.title,
                     subtitle: _taskSubtitle(task),
+                  ),
+                for (final event in events)
+                  _CriticalDropdownRow(
+                    key: Key('critical-event-item-${event.id}'),
+                    icon: Icons.event_rounded,
+                    title: event.title,
+                    subtitle: _eventSubtitle(event),
                   ),
                 for (final reminder in reminders)
                   _CriticalDropdownRow(
@@ -3243,6 +3395,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     String? color,
     String? recurrence,
     Map<String, Object?>? metadata,
+    bool? isCritical,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -3443,6 +3596,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     String? color,
     String? recurrence,
     Map<String, Object?>? metadata,
+    bool? isCritical,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -3897,6 +4051,7 @@ class _TimelineEventBlock extends StatelessWidget {
     String? color,
     String? recurrence,
     Map<String, Object?>? metadata,
+    bool? isCritical,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -3982,6 +4137,7 @@ Future<void> _showCalendarEventDetails(
     String? color,
     String? recurrence,
     Map<String, Object?>? metadata,
+    bool? isCritical,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -4019,6 +4175,7 @@ Future<void> _showCalendarEventDetails(
       color: result['color'] as String?,
       recurrence: result['recurrence'] as String?,
       metadata: result['metadata'] as Map<String, Object?>?,
+      isCritical: result['isCritical'] as bool?,
       reminderMinutesBefore: result['reminderMinutesBefore'] as int?,
       reminderRecurrence: result['reminderRecurrence'] as String?,
       reminderSpecificDays: (result['reminderSpecificDays'] as List?)
@@ -4069,6 +4226,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   String _reminderRecurrence = 'none';
   String _reminderIntervalUnit = 'days';
   String? _validationError;
+  late bool _isCritical;
   final Set<String> _eventSpecificDays = <String>{};
   final Set<String> _reminderSpecificDays = <String>{};
   bool _savingCategory = false;
@@ -4135,6 +4293,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
     _reminderInterval = TextEditingController(text: '1');
     _categories = [...widget.eventCategories];
+    _isCritical = event.isCritical;
     _color = _colors.any((color) => color.value == event.color)
         ? event.color!
         : '#34C759';
@@ -4220,6 +4379,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       'color': _color,
       'recurrence': _recurrence,
       'metadata': eventMetadata,
+      'isCritical': _isCritical,
       'reminderMinutesBefore': int.tryParse(_reminder.text.trim()),
       'reminderRecurrence': _reminderRecurrence,
       'reminderSpecificDays': _reminderSpecificDays.toList()..sort(),
@@ -4368,6 +4528,20 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       key: const Key('event-detail-back-action'),
                       onPressed: () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filledTonal(
+                      key: const Key('event-detail-critical-toggle'),
+                      tooltip: _isCritical
+                          ? 'Remove critical star'
+                          : 'Mark critical',
+                      onPressed: () =>
+                          setState(() => _isCritical = !_isCritical),
+                      icon: Icon(
+                        _isCritical
+                            ? Icons.star_rounded
+                            : Icons.star_border_rounded,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -5272,7 +5446,7 @@ bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
   return end.isAfter(dayStart) && start.isBefore(dayEnd);
 }
 
-class _MonthScroller extends StatelessWidget {
+class _MonthScroller extends StatefulWidget {
   const _MonthScroller({
     required this.selectedMonth,
     required this.onMonthSelected,
@@ -5282,19 +5456,40 @@ class _MonthScroller extends StatelessWidget {
   final ValueChanged<DateTime> onMonthSelected;
 
   @override
+  State<_MonthScroller> createState() => _MonthScrollerState();
+}
+
+class _MonthScrollerState extends State<_MonthScroller> {
+  ScrollController? _scrollController;
+
+  @override
+  void dispose() {
+    _scrollController?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final selected = DateTime(selectedMonth.year, selectedMonth.month);
+    final selected = DateTime(
+      widget.selectedMonth.year,
+      widget.selectedMonth.month,
+    );
+    final currentMonth = DateTime(DateTime.now().year, DateTime.now().month);
     final months = List<DateTime>.generate(
-      36,
-      (index) => DateTime(selected.year, selected.month + index),
+      37,
+      (index) => DateTime(currentMonth.year, currentMonth.month - 12 + index),
     );
     return LayoutBuilder(
       builder: (context, constraints) {
         final pillWidth = constraints.maxWidth / 6;
+        _scrollController ??= ScrollController(
+          initialScrollOffset: pillWidth * 12,
+        );
         return SizedBox(
           key: const Key('calendar-month-scroller'),
-          height: 42,
+          height: 48,
           child: SingleChildScrollView(
+            controller: _scrollController,
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
             child: Row(
@@ -5315,7 +5510,7 @@ class _MonthScroller extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(horizontal: 3),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(18),
-                            onTap: () => onMonthSelected(month),
+                            onTap: () => widget.onMonthSelected(month),
                             child: Container(
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
@@ -5329,15 +5524,34 @@ class _MonthScroller extends StatelessWidget {
                                       : HeyBeanTheme.border,
                                 ),
                               ),
-                              child: Text(
-                                _shortMonthName(month.month),
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : HeyBeanTheme.text,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w900,
-                                ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _shortMonthName(month.month),
+                                    style: TextStyle(
+                                      color: isSelected
+                                          ? Colors.white
+                                          : HeyBeanTheme.text,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w900,
+                                      height: 1,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${month.year}',
+                                    style: TextStyle(
+                                      color: isSelected
+                                          ? Colors.white.withValues(alpha: .88)
+                                          : HeyBeanTheme.muted,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      height: 1,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -5539,6 +5753,7 @@ class _CalendarAgenda extends StatelessWidget {
     String? color,
     String? recurrence,
     Map<String, Object?>? metadata,
+    bool? isCritical,
     int? reminderMinutesBefore,
     String? reminderRecurrence,
     List<String>? reminderSpecificDays,
@@ -5857,11 +6072,13 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   String? initialColor,
   String? deleteLabel,
   String? completeLabel,
+  bool initialCritical = false,
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
   var selectedCategory = initialCategory?.trim() ?? '';
   var selectedColor = initialColor?.trim() ?? '';
+  var isCritical = initialCritical;
   String? validationError;
 
   return showModalBottomSheet<Map<String, Object?>>(
@@ -5893,6 +6110,23 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                       'These changes sync to Bean and are available to the agent.',
                 ),
                 const SizedBox(height: 14),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilterChip(
+                    key: const Key('title-time-editor-critical-toggle'),
+                    avatar: Icon(
+                      isCritical
+                          ? Icons.star_rounded
+                          : Icons.star_border_rounded,
+                      size: 18,
+                    ),
+                    label: const Text('Critical'),
+                    selected: isCritical,
+                    onSelected: (selected) =>
+                        setModalState(() => isCritical = selected),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextFormField(
                   key: const Key('title-time-editor-title'),
                   controller: titleController,
@@ -6054,6 +6288,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                 : (selectedColor.isEmpty
                                       ? '#34C759'
                                       : selectedColor),
+                            'isCritical': isCritical,
                           });
                         },
                         icon: const Icon(Icons.check_rounded),
@@ -6082,6 +6317,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                             : (selectedColor.isEmpty
                                   ? '#34C759'
                                   : selectedColor),
+                        'isCritical': isCritical,
                       });
                     },
                     icon: const Icon(Icons.done_all_rounded),
@@ -6117,6 +6353,7 @@ class _TaskListCard extends StatefulWidget {
     String? dueAt,
     String? category,
     String? color,
+    bool? isCritical,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -6162,7 +6399,7 @@ class _TaskListCardState extends State<_TaskListCard> {
           children: [
             ChoiceChip(
               key: const Key('task-filter-open'),
-              label: const Text('Open'),
+              label: const Text('Active'),
               selected: !_showCompleted,
               onSelected: (_) => setState(() => _showCompleted = false),
             ),
@@ -6177,7 +6414,7 @@ class _TaskListCardState extends State<_TaskListCard> {
         const SizedBox(height: 12),
         if (visibleTasks.isEmpty)
           _EmptySurface(
-            label: _showCompleted ? 'No completed tasks' : 'No open tasks',
+            label: _showCompleted ? 'No completed tasks' : 'No active tasks',
           )
         else
           for (final task in visibleTasks)
@@ -6204,6 +6441,7 @@ class _TaskListCardState extends State<_TaskListCard> {
       categories: widget.eventCategories,
       initialCategory: task?.category,
       initialColor: task?.color,
+      initialCritical: task?.isCritical ?? false,
       deleteLabel: task == null ? null : 'Delete task',
     );
     if (result == null) return;
@@ -6219,6 +6457,7 @@ class _TaskListCardState extends State<_TaskListCard> {
       dueAt: result['time'] as String?,
       category: result['category'] as String?,
       color: result['color'] as String?,
+      isCritical: result['isCritical'] as bool?,
     );
   }
 }
@@ -6241,6 +6480,7 @@ class _ReminderListCard extends StatefulWidget {
     String status,
     String? category,
     String? color,
+    bool? isCritical,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -6333,6 +6573,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       categories: widget.eventCategories,
       initialCategory: reminder?.category,
       initialColor: reminder?.color,
+      initialCritical: reminder?.isCritical ?? false,
       deleteLabel: reminder == null ? null : 'Delete reminder',
       completeLabel: reminder == null
           ? null
@@ -6358,6 +6599,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       status: status,
       category: result['category'] as String?,
       color: result['color'] as String?,
+      isCritical: result['isCritical'] as bool?,
     );
   }
 }
@@ -6378,6 +6620,7 @@ String _agentPreferencesSummary(HermesAgentProfile? profile) {
 class _SettingsView extends StatelessWidget {
   const _SettingsView({
     required this.apiClient,
+    required this.launchExternalUrl,
     required this.user,
     required this.approvals,
     required this.pastTasks,
@@ -6391,6 +6634,7 @@ class _SettingsView extends StatelessWidget {
   });
 
   final HermesApiClient apiClient;
+  final ExternalUrlLauncher launchExternalUrl;
   final HermesUser user;
   final List<HermesApproval> approvals;
   final List<HermesTask> pastTasks;
@@ -6431,7 +6675,10 @@ class _SettingsView extends StatelessWidget {
                 child: const Text('Update'),
               ),
             ),
-            _GoogleCalendarSyncCard(apiClient: apiClient),
+            _GoogleCalendarSyncCard(
+              apiClient: apiClient,
+              launchExternalUrl: launchExternalUrl,
+            ),
             _CalendarPreferencesCard(
               startHour: calendarStartHour,
               endHour: calendarEndHour,
@@ -6567,24 +6814,44 @@ class _CalendarPreferencesCard extends StatelessWidget {
 }
 
 class _GoogleCalendarSyncCard extends StatefulWidget {
-  const _GoogleCalendarSyncCard({required this.apiClient});
+  const _GoogleCalendarSyncCard({
+    required this.apiClient,
+    required this.launchExternalUrl,
+  });
 
   final HermesApiClient apiClient;
+  final ExternalUrlLauncher launchExternalUrl;
 
   @override
   State<_GoogleCalendarSyncCard> createState() =>
       _GoogleCalendarSyncCardState();
 }
 
-class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard> {
+class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
+    with WidgetsBindingObserver {
   late Future<GoogleCalendarSyncStatus> _statusFuture;
   String? _message;
   bool _busy = false;
+  bool _waitingForGoogleReturn = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _statusFuture = widget.apiClient.googleCalendarStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _waitingForGoogleReturn) {
+      _syncAfterGoogleReturn();
+    }
   }
 
   void _reload() {
@@ -6599,17 +6866,61 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard> {
       _message = null;
     });
     try {
-      final url = await widget.apiClient.googleCalendarAuthUrl();
+      final rawUrl = await widget.apiClient.googleCalendarAuthUrl();
+      final url = Uri.parse(rawUrl);
+      var launched = false;
+      try {
+        launched = await widget.launchExternalUrl(url);
+      } catch (_) {
+        launched = false;
+      }
       if (!mounted) return;
-      setState(
-        () => _message =
-            'Open this Google authorization link, approve access, then come back and tap Sync now.\n\n$url',
-      );
+      setState(() {
+        _waitingForGoogleReturn = launched;
+        _message = launched
+            ? 'Finish approving Google Calendar in the browser. HeyBean will sync automatically when you return.'
+            : 'Could not open Google Calendar authorization automatically. Copy this link into your browser: $rawUrl';
+      });
       _reload();
     } catch (error) {
       if (mounted) {
         setState(
           () => _message = 'Could not start Google Calendar connection: $error',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _syncAfterGoogleReturn() async {
+    setState(() {
+      _busy = true;
+      _message = 'Checking Google Calendar connection…';
+    });
+    try {
+      final status = await widget.apiClient.googleCalendarStatus();
+      if (!mounted) return;
+      if (!status.connected) {
+        setState(() {
+          _statusFuture = Future.value(status);
+          _message =
+              'Google Calendar is not connected yet. Finish approval in the browser, then return to HeyBean.';
+        });
+        return;
+      }
+      final result = await widget.apiClient.syncGoogleCalendar();
+      if (!mounted) return;
+      setState(() {
+        _waitingForGoogleReturn = false;
+        _message =
+            'Google Calendar connected and synced ${result.imported} event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
+        _statusFuture = Future.value(result.status);
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = 'Google Calendar sync failed after return: $error',
         );
       }
     } finally {
@@ -7124,12 +7435,41 @@ int _compareTasksByCompletionAndDueDate(HermesTask a, HermesTask b) {
   return a.id.compareTo(b.id);
 }
 
-List<HermesReminder> _visibleActiveReminders(List<HermesReminder> reminders) {
-  final now = DateTime.now();
-  final visible = reminders
-      .where((reminder) => _reminderVisibleNowOrLater(reminder, now))
-      .toList();
+List<HermesTask> _criticalTasksForToday(List<HermesTask> tasks) {
+  return _tasksForDay(
+    tasks,
+    DateTime.now(),
+  ).where((task) => task.isCritical && !_taskIsCompleted(task)).toList();
+}
+
+List<HermesReminder> _criticalRemindersForToday(
+  List<HermesReminder> reminders,
+) {
+  final today = _dateOnly(DateTime.now());
+  final visible = reminders.where((reminder) {
+    if (!reminder.isCritical || _reminderIsCompleted(reminder)) return false;
+    final dueAt = _parseReminderDueDate(reminder);
+    return dueAt != null && _sameCalendarDay(_dateOnly(dueAt), today);
+  }).toList();
   visible.sort(_compareRemindersByDueDate);
+  return visible;
+}
+
+List<HermesCalendarEvent> _criticalEventsForToday(
+  List<HermesCalendarEvent> events,
+) {
+  final today = _dateOnly(DateTime.now());
+  final visible = events
+      .where((event) => event.isCritical && _eventFallsOnDay(event, today))
+      .toList();
+  visible.sort((a, b) {
+    final aStart = _parseCalendarEventDateTime(a.startsAt);
+    final bStart = _parseCalendarEventDateTime(b.startsAt);
+    if (aStart != null && bStart != null) return aStart.compareTo(bStart);
+    if (aStart != null) return -1;
+    if (bStart != null) return 1;
+    return a.id.compareTo(b.id);
+  });
   return visible;
 }
 
@@ -7145,24 +7485,6 @@ int _compareRemindersByDueDate(HermesReminder a, HermesReminder b) {
     return 1;
   }
   return a.id.compareTo(b.id);
-}
-
-bool _reminderVisibleNowOrLater(HermesReminder reminder, DateTime now) {
-  if (_reminderIsCompleted(reminder)) return false;
-  if (_reminderIsRecurring(reminder)) return true;
-  final dueAt = _parseReminderDueDate(reminder);
-  return dueAt == null || !dueAt.isBefore(now);
-}
-
-bool _reminderIsRecurring(HermesReminder reminder) {
-  final metadata = reminder.metadata;
-  if (metadata == null) return false;
-  final recurrence =
-      metadata['recurrence'] ?? metadata['recurring'] ?? metadata['rrule'];
-  return recurrence != null &&
-      recurrence != false &&
-      recurrence.toString().isNotEmpty &&
-      recurrence != 'none';
 }
 
 DateTime? _parseReminderDueDate(HermesReminder reminder) {
@@ -7192,7 +7514,7 @@ bool _reminderIsCompleted(HermesReminder reminder) {
 
 String _taskSubtitle(HermesTask task) {
   final parts = <String>[
-    _statusLabel(task.status),
+    if (_taskIsCompleted(task)) 'Completed',
     if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
     if (task.dueAt != null && task.dueAt!.trim().isNotEmpty)
       'Due ${_formatCalendarEventDateTime(task.dueAt)}',
@@ -7259,12 +7581,6 @@ DateTime? _parseTaskDueDate(HermesTask task) {
   final dueAt = task.dueAt;
   if (dueAt == null || dueAt.isEmpty) return null;
   return DateTime.tryParse(dueAt)?.toLocal();
-}
-
-String _statusLabel(String? status) {
-  final normalized = (status ?? 'open').replaceAll('_', ' ');
-  if (normalized.isEmpty) return 'Open';
-  return '${normalized[0].toUpperCase()}${normalized.substring(1)}';
 }
 
 class _AccountCard extends StatelessWidget {
@@ -7337,7 +7653,7 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _ShellCard extends StatelessWidget {
-  const _ShellCard({super.key, required this.child, this.glow = false});
+  const _ShellCard({required this.child, this.glow = false});
 
   final Widget child;
   final bool glow;
@@ -7398,6 +7714,74 @@ class _MiniSurface extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _BeanIntroCallout extends StatelessWidget {
+  const _BeanIntroCallout({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    key: const Key('bean-intro-callout'),
+    onTap: onTap,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: HeyBeanTheme.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: HeyBeanTheme.accent),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x2416A34A),
+                blurRadius: 24,
+                offset: Offset(0, 10),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.eco_rounded, color: HeyBeanTheme.accentStrong),
+              SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  'Start by introducing yourself to Bean',
+                  key: Key('bean-intro-callout-text'),
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ),
+        CustomPaint(
+          size: const Size(28, 22),
+          painter: _BeanIntroArrowPainter(),
+        ),
+      ],
+    ),
+  );
+}
+
+class _BeanIntroArrowPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = HeyBeanTheme.accentStrong
+      ..style = PaintingStyle.fill;
+    final path = Path()
+      ..moveTo(size.width / 2, size.height)
+      ..lineTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _HeyBeanBottomMenu extends StatelessWidget {

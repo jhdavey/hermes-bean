@@ -93,33 +93,119 @@ class AgentProfileService
         ];
     }
 
-    public function applyOnboarding(AgentProfile $profile, array $data): AgentProfile
+    public function applyOnboarding(AgentProfile $profile, array $data, string $source = 'settings'): AgentProfile
     {
-        $personalityKey = (string) ($data['agent_personality'] ?? 'balanced');
+        $personalityKey = (string) ($data['agent_personality'] ?? data_get($profile->settings, 'personality_type', 'balanced'));
         $personality = self::PERSONALITIES[$personalityKey] ?? self::PERSONALITIES['balanced'];
         $priorities = array_values(array_filter(
             array_map(
                 fn ($priority) => trim((string) $priority),
-                (array) ($data['onboarding_priorities'] ?? [])
+                (array) ($data['onboarding_priorities'] ?? data_get($profile->settings, 'onboarding.priorities', []))
             ),
             fn (string $priority) => $priority !== ''
         ));
-        $context = trim((string) ($data['onboarding_context'] ?? ''));
+        $context = trim((string) ($data['onboarding_context'] ?? data_get($profile->settings, 'onboarding.context', '')));
         $settings = $profile->settings ?? [];
 
         $settings['personality_type'] = $personalityKey;
         $settings['personality_label'] = $personality['label'];
         $settings['personality_prompt'] = $personality['prompt'];
         $settings['onboarding'] = [
+            ...((isset($settings['onboarding']) && is_array($settings['onboarding'])) ? $settings['onboarding'] : []),
             'completed' => true,
             'priorities' => array_slice($priorities, 0, 5),
             'context' => $context === '' ? null : $context,
-            'completed_at' => now()->toISOString(),
+            'completed_at' => data_get($settings, 'onboarding.completed_at') ?: now()->toISOString(),
+            'updated_at' => now()->toISOString(),
+            'source' => $source,
         ];
+        $settings['memory'] = $this->memorySettingsFor($settings, $source);
 
         $profile->forceFill(['settings' => $settings])->save();
+        $this->writeRuntimeMemory($profile, $settings['memory']);
 
         return $profile->refresh();
+    }
+
+    public function mergeSettings(AgentProfile $profile, array $settings, string $source = 'agent'): AgentProfile
+    {
+        $merged = $this->recursiveMerge($profile->settings ?? [], $settings);
+
+        if (array_key_exists('personality_type', $merged)) {
+            $personalityKey = (string) $merged['personality_type'];
+            $personality = self::PERSONALITIES[$personalityKey] ?? self::PERSONALITIES['balanced'];
+            $merged['personality_type'] = array_key_exists($personalityKey, self::PERSONALITIES) ? $personalityKey : 'balanced';
+            $merged['personality_label'] = $personality['label'];
+            $merged['personality_prompt'] = $personality['prompt'];
+        }
+
+        if (data_get($merged, 'onboarding.completed') === true) {
+            $merged['onboarding']['updated_at'] = now()->toISOString();
+            $merged['onboarding']['source'] = $source;
+            $merged['memory'] = $this->memorySettingsFor($merged, $source);
+            $this->writeRuntimeMemory($profile, $merged['memory']);
+        }
+
+        $profile->forceFill(['settings' => $merged])->save();
+
+        return $profile->refresh();
+    }
+
+    public function memorySettingsFor(array $settings, string $source = 'settings'): array
+    {
+        $priorities = array_values(array_filter((array) data_get($settings, 'onboarding.priorities', [])));
+        $context = data_get($settings, 'onboarding.context');
+        $personality = (string) data_get($settings, 'personality_type', 'balanced');
+
+        return [
+            'user_preferences' => [
+                'personality_type' => $personality,
+                'priorities' => $priorities,
+                'context' => is_string($context) && trim($context) !== '' ? trim($context) : null,
+                'summary' => $this->preferenceSummary($personality, $priorities, is_string($context) ? $context : null),
+                'source' => $source,
+                'updated_at' => now()->toISOString(),
+            ],
+        ];
+    }
+
+    private function preferenceSummary(string $personality, array $priorities, ?string $context): string
+    {
+        $parts = ['User prefers Bean personality: '.$personality.'.'];
+        if ($priorities !== []) {
+            $parts[] = 'User priorities: '.implode(', ', $priorities).'.';
+        }
+        if (is_string($context) && trim($context) !== '') {
+            $parts[] = 'Additional user context: '.trim($context);
+        }
+
+        return implode(' ', $parts);
+    }
+
+    private function writeRuntimeMemory(AgentProfile $profile, array $memory): void
+    {
+        if (! $profile->runtime_home) {
+            return;
+        }
+
+        File::ensureDirectoryExists($profile->runtime_home);
+        File::put(
+            rtrim($profile->runtime_home, '/').'/bean-preferences-memory.json',
+            json_encode($memory, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES).PHP_EOL
+        );
+    }
+
+    private function recursiveMerge(array $base, array $updates): array
+    {
+        foreach ($updates as $key => $value) {
+            if (is_array($value) && array_is_list($value) === false && isset($base[$key]) && is_array($base[$key]) && array_is_list($base[$key]) === false) {
+                $base[$key] = $this->recursiveMerge($base[$key], $value);
+            } else {
+                $base[$key] = $value;
+            }
+        }
+
+        return $base;
     }
 
     public static function personalityKeys(): array

@@ -106,7 +106,7 @@ class AuthController extends Controller
 
         if (array_key_exists('agent_personality', $data) || array_key_exists('onboarding_priorities', $data) || array_key_exists('onboarding_context', $data)) {
             $profile = app(AgentProfileService::class)->ensureForUser($user);
-            app(AgentProfileService::class)->applyOnboarding($profile, $data);
+            app(AgentProfileService::class)->applyOnboarding($profile, $data, 'settings');
             $user->forceFill(['onboard_complete' => true])->save();
             $user->unsetRelation('agentProfile');
         }

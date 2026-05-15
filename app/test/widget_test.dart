@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -72,45 +73,33 @@ void main() {
       expect(api.registeredPriorities, isNull);
       expect(api.registeredContext, isNull);
 
-      expect(find.byKey(const Key('agent-onboarding-overlay')), findsOneWidget);
-      expect(find.byKey(const Key('calendar-view')), findsOneWidget);
-      expect(find.text('Choose Bean’s personality'), findsOneWidget);
-      expect(find.byKey(const Key('agent-onboarding-next')), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('agent-personality-coach')));
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
-      await tester.pumpAndSettle();
-      expect(find.text('What should Bean prioritize?'), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('onboarding-priority-Family')));
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
-      await tester.pumpAndSettle();
-      expect(find.text('Anything Bean should know?'), findsOneWidget);
-
-      await tester.enterText(
-        find.byKey(const Key('onboarding-context')),
-        'I protect family dinner and need gentle nudges.',
-      );
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
-      await tester.pumpAndSettle();
-      expect(find.text('You’re all set'), findsOneWidget);
+      expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
+      expect(find.byKey(const Key('bean-intro-callout')), findsOneWidget);
       expect(
-        find.textContaining('Bean preferences section of Settings'),
+        find.text('Start by introducing yourself to Bean'),
         findsOneWidget,
       );
 
-      await tester.tap(find.byKey(const Key('agent-onboarding-finish')));
+      await tester.tap(find.byKey(const Key('bean-intro-callout')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
-      expect(api.updatedAgentPersonality, 'coach');
+      expect(find.byKey(const Key('nav-bean')), findsOneWidget);
       expect(
-        api.updatedPriorities,
-        containsAll(['Planning', 'Reminders', 'Family']),
+        find.textContaining('Hi, I’m Bean. Start by introducing yourself'),
+        findsOneWidget,
       );
-      expect(
-        api.updatedContext,
-        'I protect family dinner and need gentle nudges.',
+
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'I am Bean User. I care about family, reminders, and planning. Please be a motivating coach.',
       );
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+
+      expect(api.sentMessages.first, contains('I am Bean User'));
+      expect(find.byKey(const Key('bean-intro-callout')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('nav-today')));
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('calendar-view')), findsOneWidget);
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
@@ -130,7 +119,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pumpAndSettle();
 
-      expect(api.sentMessages, ['Schedule dentist tomorrow at 3pm']);
+      expect(api.sentMessages, contains('Schedule dentist tomorrow at 3pm'));
       expect(find.text('Done — I updated your day.'), findsOneWidget);
       tester.testTextInput.hide();
       await tester.pumpAndSettle();
@@ -248,21 +237,17 @@ void main() {
       await tester.tap(find.byKey(const Key('auth-submit')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('agent-onboarding-overlay')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('agent-onboarding-finish')), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('agent-onboarding-finish')));
-      await tester.pumpAndSettle();
-
-      expect(api.updatedAgentPersonality, 'balanced');
       expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
+      expect(find.byKey(const Key('bean-intro-callout')), findsOneWidget);
       expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
+      expect(
+        find.textContaining('Hi, I’m Bean. Start by introducing yourself'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -296,19 +281,21 @@ void main() {
       await tester.tap(find.byKey(const Key('auth-submit')));
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('open-bean-preferences')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('agent-personality-coach')));
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
-      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('onboarding-priority-Family')));
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
-      await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('onboarding-context')),
         'Protect dinner and use gentle nudges.',
       );
-      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.ensureVisible(
+        find.byKey(const Key('agent-preferences-save')),
+      );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('agent-onboarding-finish')));
+      await tester.tap(find.byKey(const Key('agent-preferences-save')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
@@ -487,6 +474,47 @@ void main() {
       expect(find.text('Tomorrow task'), findsNothing);
       expect(find.text('Rest of month'), findsNothing);
 
+      final now = DateTime.now();
+      final firstAllowedMonth = DateTime(now.year, now.month - 12);
+      final lastAllowedMonth = DateTime(now.year, now.month + 24);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-pill-0')),
+          matching: find.text(
+            _testShortMonthNames[firstAllowedMonth.month - 1],
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-pill-0')),
+          matching: find.text('${firstAllowedMonth.year}'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-pill-36')),
+          matching: find.text(_testShortMonthNames[lastAllowedMonth.month - 1]),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-pill-36')),
+          matching: find.text('${lastAllowedMonth.year}'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-pill-selected')),
+          matching: find.text('${now.year}'),
+        ),
+        findsOneWidget,
+      );
+
       final monthScrollerWidth = tester
           .getSize(find.byKey(const Key('calendar-month-scroller')))
           .width;
@@ -497,8 +525,8 @@ void main() {
         closeTo(monthScrollerWidth / 6, 1),
       );
 
-      final nextMonth = DateTime(DateTime.now().year, DateTime.now().month + 1);
-      await tester.tap(find.byKey(const Key('calendar-month-pill-1')));
+      final nextMonth = DateTime(now.year, now.month + 1);
+      await tester.tap(find.byKey(const Key('calendar-month-pill-13')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
@@ -506,6 +534,13 @@ void main() {
         find.descendant(
           of: find.byKey(const Key('calendar-month-pill-selected')),
           matching: find.text(_testShortMonthNames[nextMonth.month - 1]),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-pill-selected')),
+          matching: find.text('${nextMonth.year}'),
         ),
         findsOneWidget,
       );
@@ -697,24 +732,12 @@ void main() {
         find.byKey(const Key('calendar-month-pill-selected')),
         findsOneWidget,
       );
-      final currentFullMonthLabel = const [
-        'January',
-        'February',
-        'March',
-        'April',
-        'May',
-        'June',
-        'July',
-        'August',
-        'September',
-        'October',
-        'November',
-        'December',
-      ][DateTime.now().month - 1];
+      final currentFullMonthYearLabel =
+          '${const ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][DateTime.now().month - 1]} ${DateTime.now().year}';
       expect(
         find.descendant(
           of: find.byKey(const Key('calendar-month-chevron')),
-          matching: find.text(currentFullMonthLabel),
+          matching: find.text(currentFullMonthYearLabel),
         ),
         findsOneWidget,
       );
@@ -755,7 +778,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('tasks-view')), findsOneWidget);
       expect(find.text('Task list'), findsOneWidget);
-      expect(find.text('Open'), findsWidgets);
+      expect(find.text('Active'), findsWidgets);
 
       await tester.tap(find.byKey(const Key('nav-reminders')));
       await tester.pumpAndSettle();
@@ -767,7 +790,26 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('chat-view')), findsOneWidget);
+      expect(find.byKey(const Key('signed-in-refresh-scroll')), findsNothing);
       expect(find.byKey(const Key('quick-plan-today')), findsNothing);
+      final chatTopBeforeDrag = tester.getTopLeft(
+        find.byKey(const Key('chat-top-bar')),
+      );
+      await tester.drag(
+        find.byKey(const Key('chat-message-list')),
+        const Offset(0, -180),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.byKey(const Key('chat-top-bar'))),
+        chatTopBeforeDrag,
+      );
+      expect(
+        tester.getRect(find.byKey(const Key('chat-input-dock'))).bottom,
+        lessThanOrEqualTo(
+          tester.getRect(find.byKey(const Key('heybean-bottom-menu'))).top,
+        ),
+      );
       await tester.enterText(
         find.byKey(const Key('chat-input')),
         'Help me plan today',
@@ -788,7 +830,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
       expect(find.text('Settings'), findsWidgets);
-      expect(find.text('Bean preferences'), findsNothing);
+      expect(find.text('Bean preferences'), findsOneWidget);
       expect(find.text('Calendar preferences'), findsOneWidget);
       expect(find.text('Start hour'), findsOneWidget);
       expect(find.text('End hour'), findsOneWidget);
@@ -1075,8 +1117,16 @@ void main() {
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
+    final launchedUrls = <Uri>[];
     await tester.pumpWidget(
-      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        launchExternalUrl: (url) async {
+          launchedUrls.add(url);
+          return true;
+        },
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -1097,6 +1147,21 @@ void main() {
     await tester.tap(find.text('Connect Google'));
     await tester.pumpAndSettle();
     expect(api.googleCalendarConnected, isTrue);
+    expect(launchedUrls, hasLength(1));
+    expect(launchedUrls.single.host, 'accounts.google.com');
+    expect(
+      find.textContaining('sync automatically when you return'),
+      findsOneWidget,
+    );
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(api.googleCalendarSyncCalls, 1);
+    expect(
+      find.textContaining('Google Calendar connected and synced 2 events'),
+      findsOneWidget,
+    );
 
     await tester.ensureVisible(
       find.byKey(const Key('google-calendar-sync-action')),
@@ -1104,9 +1169,49 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Sync now'));
     await tester.pumpAndSettle();
-    expect(api.googleCalendarSyncCalls, 1);
+    expect(api.googleCalendarSyncCalls, 2);
     expect(find.textContaining('Synced 2 Google events'), findsOneWidget);
   });
+
+  testWidgets(
+    'Google Calendar connect falls back to copy link when iOS launcher channel fails',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: _MemoryAuthTokenStore(),
+          launchExternalUrl: (_) async {
+            throw PlatformException(
+              code: 'channel-error',
+              message:
+                  'Unable to establish connection on channel: "dev.flutter.pigeon.url_launcher_ios.UrlLauncherApi.launchUrl".',
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('google-calendar-connect-action')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect Google'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Could not start Google Calendar'),
+        findsNothing,
+      );
+      expect(
+        find.textContaining('Copy this link into your browser'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('accounts.google.com'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'signed-in app loads persisted resources from table list endpoints',
@@ -2441,16 +2546,41 @@ class _FakeHermesApiClient extends HermesApiClient {
     Map<String, Object?>? metadata,
   }) async {
     sentMessages.add(content);
-    plannedToday = true;
-    return const HermesMessageResult(
+    var isPreferenceOnlyMessage = false;
+    if (metadata?['settings_update'] == true) {
+      isPreferenceOnlyMessage = true;
+      updatedAgentPersonality =
+          metadata?['agent_personality']?.toString() ?? updatedAgentPersonality;
+      final metadataPriorities = metadata?['onboarding_priorities'];
+      if (metadataPriorities is List) {
+        updatedPriorities = metadataPriorities
+            .map((value) => value.toString())
+            .toList();
+      }
+      updatedContext =
+          metadata?['onboarding_context']?.toString() ?? updatedContext;
+    } else if (content.toLowerCase().contains('i am bean user')) {
+      updatedAgentPersonality = 'coach';
+      updatedPriorities = ['Family', 'Reminders', 'Planning'];
+      updatedContext = content;
+    }
+    final isIntroductionMessage = content.toLowerCase().contains(
+      'i am bean user',
+    );
+    if (!isPreferenceOnlyMessage && !isIntroductionMessage) {
+      plannedToday = true;
+    }
+    return HermesMessageResult(
       status: 'completed',
-      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      session: const HermesSession(id: 42, status: 'active', title: 'Today'),
       assistantMessage: HermesMessage(
         id: 8,
         role: 'assistant',
-        content: 'Done — I updated your day.',
+        content: isIntroductionMessage
+            ? 'Nice to meet you — I saved those Bean preferences.'
+            : 'Done — I updated your day.',
       ),
-      events: [
+      events: const [
         HermesActivityEvent(
           id: 2,
           eventType: 'assistant.calendar_event.created',

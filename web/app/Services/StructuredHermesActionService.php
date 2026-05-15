@@ -12,6 +12,7 @@ use App\Models\EventCategory;
 use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -568,7 +569,16 @@ class StructuredHermesActionService
             ['user_id' => $session->user_id],
             ['slug' => 'default', 'display_name' => 'Bean', 'status' => 'active']
         );
-        $profile->update($this->onlyPresent($parameters, ['slug', 'display_name', 'status', 'provider', 'model', 'router_mode', 'runtime_home', 'settings', 'tool_policy', 'approval_policy', 'metadata']));
+        $updates = $this->onlyPresent($parameters, ['slug', 'display_name', 'status', 'provider', 'model', 'router_mode', 'runtime_home', 'tool_policy', 'approval_policy', 'metadata']);
+        if (isset($parameters['settings']) && is_array($parameters['settings'])) {
+            app(AgentProfileService::class)->mergeSettings($profile, $parameters['settings'], 'agent');
+            if (data_get($parameters['settings'], 'onboarding.completed') === true) {
+                User::where('id', $session->user_id)->update(['onboard_complete' => true]);
+            }
+        }
+        if ($updates !== []) {
+            $profile->update($updates);
+        }
 
         return $this->recordEvent($session, 'assistant.agent_profile.updated', ['agent_profile_id' => $profile->id], 'agent_profile.update', 'succeeded');
     }

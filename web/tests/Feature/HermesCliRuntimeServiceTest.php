@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ActivityEvent;
+use App\Models\AgentProfile;
 use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\ConversationMessage;
@@ -308,6 +309,95 @@ PHP);
         $this->withToken($token)->postJson("/api/approvals/{$approval->id}/approve")
             ->assertStatus(409);
         $this->assertSame(1, Task::where('conversation_session_id', $sessionId)->where('title', 'Book flights')->count());
+    }
+
+    public function test_onboarding_agent_profile_update_marks_user_complete_and_saves_memory_settings(): void
+    {
+        $script = $this->writeExecutable('onboarding-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Great — I saved your Bean preferences.',
+    'actions' => [[
+        'type' => 'agent_profile.update',
+        'risk' => 'low',
+        'parameters' => [
+            'settings' => [
+                'personality_type' => 'coach',
+                'onboarding' => [
+                    'completed' => true,
+                    'priorities' => ['Family', 'Planning'],
+                    'context' => 'Protect family dinner.',
+                ],
+            ],
+        ],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.workdir', $this->tempDir);
+
+        $token = $this->apiToken('chat-onboarding@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'I am Harley. Family and planning matter most. Be a coach.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.agent_profile.updated']);
+
+        $profile = AgentProfile::query()->firstOrFail();
+        $this->assertTrue((bool) $profile->user->onboard_complete);
+        $this->assertSame('coach', $profile->settings['personality_type']);
+        $this->assertTrue($profile->settings['onboarding']['completed']);
+        $this->assertSame(['Family', 'Planning'], $profile->settings['onboarding']['priorities']);
+        $this->assertSame('Protect family dinner.', $profile->settings['memory']['user_preferences']['context']);
+        $this->assertFileExists($profile->runtime_home.'/bean-preferences-memory.json');
+    }
+
+    public function test_runtime_payload_includes_onboarding_status_and_preference_memory(): void
+    {
+        $script = $this->writeExecutable('payload-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = $argv[array_search('-q', $argv, true) + 1] ?? '';
+$payloadJson = trim(substr($prompt, strpos($prompt, "Runtime payload:") + strlen("Runtime payload:")));
+$payload = json_decode($payloadJson, true, flags: JSON_THROW_ON_ERROR);
+file_put_contents(getenv('HERMES_FAKE_LOG'), json_encode($payload, JSON_THROW_ON_ERROR));
+echo json_encode(['message' => 'Loaded preferences.', 'actions' => []], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.workdir', $this->tempDir);
+        config()->set('services.hermes_runtime.environment', [
+            'HERMES_FAKE_LOG' => $this->tempDir.'/payload.json',
+        ]);
+
+        $token = $this->apiToken('payload-preferences@example.com');
+        $userId = \App\Models\User::where('email', 'payload-preferences@example.com')->value('id');
+        $profile = AgentProfile::where('user_id', $userId)->firstOrFail();
+        app(\App\Services\AgentProfileService::class)->applyOnboarding($profile, [
+            'agent_personality' => 'organizer',
+            'onboarding_priorities' => ['Work', 'Focus'],
+            'onboarding_context' => 'Protect deep work.',
+        ], 'settings');
+        \App\Models\User::where('id', $userId)->update(['onboard_complete' => true]);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'What should I do?',
+        ])->assertCreated();
+
+        $payload = json_decode(File::get($this->tempDir.'/payload.json'), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertTrue($payload['user']['onboard_complete']);
+        $this->assertSame('organizer', $payload['agent_profile']['settings']['personality_type']);
+        $this->assertSame(['Work', 'Focus'], $payload['agent_profile']['settings']['onboarding']['priorities']);
+        $this->assertStringContainsString('Protect deep work', $payload['agent_profile']['settings']['memory']['user_preferences']['summary']);
     }
 
     private function writeExecutable(string $name, string $contents): string
