@@ -8,11 +8,11 @@ use Illuminate\Support\Carbon;
 
 class Task extends Model
 {
-    protected $fillable = ['user_id', 'conversation_session_id', 'title', 'type', 'status', 'notes', 'category', 'color', 'due_at', 'completed_at', 'metadata'];
+    protected $fillable = ['user_id', 'conversation_session_id', 'title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'due_at', 'completed_at', 'metadata'];
 
     protected function casts(): array
     {
-        return ['due_at' => 'datetime', 'completed_at' => 'datetime', 'metadata' => 'array'];
+        return ['due_at' => 'datetime', 'completed_at' => 'datetime', 'is_critical' => 'boolean', 'metadata' => 'array'];
     }
 
     public function isCompleted(): bool

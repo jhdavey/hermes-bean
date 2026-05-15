@@ -80,6 +80,7 @@ class DomainResourceController extends Controller
             'notes' => ['nullable', 'string'],
             'category' => ['nullable', 'string', 'max:80'],
             'color' => ['nullable', 'string', 'max:20'],
+            'is_critical' => ['nullable', 'boolean'],
             'due_at' => ['nullable', 'date'],
             'completed_at' => ['nullable', 'date'],
             'metadata' => ['nullable', 'array'],
@@ -102,6 +103,7 @@ class DomainResourceController extends Controller
             'notes' => ['sometimes', 'nullable', 'string'],
             'category' => ['sometimes', 'nullable', 'string', 'max:80'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'is_critical' => ['sometimes', 'boolean'],
             'due_at' => ['sometimes', 'nullable', 'date'],
             'completed_at' => ['sometimes', 'nullable', 'date'],
             'metadata' => ['sometimes', 'nullable', 'array'],
@@ -114,6 +116,9 @@ class DomainResourceController extends Controller
             }
             if (! $willBeCompleted && ! array_key_exists('completed_at', $validated)) {
                 $validated['completed_at'] = null;
+            }
+            if (! $willBeCompleted && ! array_key_exists('due_at', $validated) && $model->due_at !== null && $model->due_at->lt(now()->startOfDay())) {
+                $validated['due_at'] = null;
             }
         }
 
@@ -136,6 +141,7 @@ class DomainResourceController extends Controller
             'notes' => ['nullable', 'string'],
             'category' => ['nullable', 'string', 'max:80'],
             'color' => ['nullable', 'string', 'max:20'],
+            'is_critical' => ['nullable', 'boolean'],
             'remind_at' => ['required', 'date'],
             'status' => ['nullable', 'string', 'max:50'],
             'metadata' => ['nullable', 'array'],
@@ -151,6 +157,7 @@ class DomainResourceController extends Controller
             'calendar_event_id' => ['sometimes', 'nullable', Rule::exists('calendar_events', 'id')->where('user_id', $request->user()->id)],
             'category' => ['sometimes', 'nullable', 'string', 'max:80'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'is_critical' => ['sometimes', 'boolean'],
             'remind_at' => ['sometimes', 'required', 'date'],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'metadata' => ['sometimes', 'nullable', 'array'],
@@ -173,6 +180,7 @@ class DomainResourceController extends Controller
             'location' => ['nullable', 'string', 'max:255'],
             'category' => ['nullable', 'string', 'max:80'],
             'color' => ['nullable', 'string', 'max:20'],
+            'is_critical' => ['nullable', 'boolean'],
             'recurrence' => ['nullable', 'string', 'max:50'],
             'starts_at' => ['required', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
@@ -190,6 +198,7 @@ class DomainResourceController extends Controller
             'location' => ['sometimes', 'nullable', 'string', 'max:255'],
             'category' => ['sometimes', 'nullable', 'string', 'max:80'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'is_critical' => ['sometimes', 'boolean'],
             'recurrence' => ['sometimes', 'nullable', 'string', 'max:50'],
             'starts_at' => ['sometimes', 'required', 'date'],
             'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],

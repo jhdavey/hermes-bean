@@ -48,6 +48,22 @@ class AuthAndAccountLifecycleTest extends TestCase
             ->assertUnauthorized();
     }
 
+    public function test_signed_in_user_can_update_email(): void
+    {
+        $token = $this->registerToken('editable@example.com');
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'email' => 'updated@example.com',
+        ])->assertOk()
+            ->assertJsonPath('data.email', 'updated@example.com');
+
+        $this->assertDatabaseHas('users', ['email' => 'updated@example.com']);
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'email' => 'not-an-email',
+        ])->assertUnprocessable();
+    }
+
     public function test_registration_can_seed_visible_calendar_events_for_new_users(): void
     {
         config()->set('hermes_bean.seed_onboarding_resources', true);

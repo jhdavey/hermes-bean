@@ -16,7 +16,7 @@ void main() {
   testWidgets(
     'starts signed out, logs in, loads live data, sends chat, and exposes delete account',
     (WidgetTester tester) async {
-      final api = _FakeHermesApiClient();
+      final api = _FakeHermesApiClient(onboardingCompleted: false);
       final tokenStore = _MemoryAuthTokenStore();
       await tester.pumpWidget(
         HermesBeanApp(apiClient: api, tokenStore: tokenStore),
@@ -50,6 +50,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Create your Hermes Bean account'), findsOneWidget);
       expect(find.byKey(const Key('auth-name')), findsOneWidget);
+      expect(find.text('Choose Bean’s personality'), findsNothing);
+      expect(find.text('What should Bean prioritize?'), findsNothing);
 
       await tester.enterText(find.byKey(const Key('auth-name')), 'Bean User');
       await tester.enterText(
@@ -60,8 +62,55 @@ void main() {
         find.byKey(const Key('auth-password')),
         'correct-horse-battery-staple',
       );
+      tester.testTextInput.hide();
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('auth-submit')));
       await tester.tap(find.byKey(const Key('auth-submit')));
       await tester.pumpAndSettle();
+
+      expect(api.registeredAgentPersonality, isNull);
+      expect(api.registeredPriorities, isNull);
+      expect(api.registeredContext, isNull);
+
+      expect(find.byKey(const Key('agent-onboarding-overlay')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+      expect(find.text('Choose Bean’s personality'), findsOneWidget);
+      expect(find.byKey(const Key('agent-onboarding-next')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('agent-personality-coach')));
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      expect(find.text('What should Bean prioritize?'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('onboarding-priority-Family')));
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      expect(find.text('Anything Bean should know?'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('onboarding-context')),
+        'I protect family dinner and need gentle nudges.',
+      );
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      expect(find.text('You’re all set'), findsOneWidget);
+      expect(
+        find.textContaining('Bean preferences section of Settings'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('agent-onboarding-finish')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
+      expect(api.updatedAgentPersonality, 'coach');
+      expect(
+        api.updatedPriorities,
+        containsAll(['Planning', 'Reminders', 'Family']),
+      );
+      expect(
+        api.updatedContext,
+        'I protect family dinner and need gentle nudges.',
+      );
 
       expect(find.byKey(const Key('calendar-view')), findsOneWidget);
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
@@ -83,11 +132,27 @@ void main() {
 
       expect(api.sentMessages, ['Schedule dentist tomorrow at 3pm']);
       expect(find.text('Done — I updated your day.'), findsOneWidget);
-      expect(find.text('assistant.calendar_event.created'), findsOneWidget);
-      expect(find.text('Generated follow-up task'), findsOneWidget);
-      expect(find.text('Stretch and hydrate'), findsOneWidget);
-      expect(find.text('Updated focus block'), findsWidgets);
+      tester.testTextInput.hide();
+      await tester.pumpAndSettle();
+      final activityMenu = find.byKey(const Key('chat-activity-menu'));
+      if (activityMenu.evaluate().isNotEmpty) {
+        await tester.ensureVisible(activityMenu);
+        await tester.tap(activityMenu);
+        await tester.pumpAndSettle();
+        expect(find.text('assistant.calendar_event.created'), findsOneWidget);
+        await tester.tapAt(const Offset(10, 10));
+        await tester.pumpAndSettle();
+      }
 
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('open-bean-preferences')), findsOneWidget);
+      expect(
+        find.text(
+          'Update Bean’s personality, priorities, and context any time',
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('delete-account-action')), findsOneWidget);
       await tester.ensureVisible(
         find.byKey(const Key('delete-account-action')),
@@ -96,6 +161,192 @@ void main() {
       await tester.pumpAndSettle();
       expect(api.deletedAccount, isTrue);
       expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
+    },
+  );
+
+  testWidgets('settings edits current Bean preferences in one form', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient()
+      ..updatedAgentPersonality = 'coach'
+      ..updatedPriorities = ['Family', 'Focus']
+      ..updatedContext = 'Protect dinner and use gentle nudges.';
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Coach'), findsOneWidget);
+    expect(find.textContaining('Family, Focus'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('open-bean-preferences')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Bean preferences'), findsOneWidget);
+    expect(find.text('Choose Bean’s personality'), findsOneWidget);
+    expect(find.text('What should Bean prioritize?'), findsOneWidget);
+    expect(find.text('Anything Bean should know?'), findsOneWidget);
+    expect(
+      tester
+          .widget<ChoiceChip>(find.byKey(const Key('agent-personality-coach')))
+          .selected,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<FilterChip>(
+            find.byKey(const Key('onboarding-priority-Family')),
+          )
+          .selected,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<FilterChip>(
+            find.byKey(const Key('onboarding-priority-Focus')),
+          )
+          .selected,
+      isTrue,
+    );
+
+    await tester.tap(find.byKey(const Key('agent-personality-organizer')));
+    await tester.tap(find.byKey(const Key('onboarding-priority-Family')));
+    await tester.tap(find.byKey(const Key('onboarding-priority-Work')));
+    await tester.enterText(
+      find.byKey(const Key('onboarding-context')),
+      'Prioritize work blocks before lunch.',
+    );
+    await tester.ensureVisible(find.byKey(const Key('agent-preferences-save')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('agent-preferences-save')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Bean preferences'), findsNothing);
+    expect(api.updatedAgentPersonality, 'organizer');
+    expect(api.updatedPriorities, containsAll(['Focus', 'Work']));
+    expect(api.updatedPriorities, isNot(contains('Family')));
+    expect(api.updatedContext, 'Prioritize work blocks before lunch.');
+    expect(find.textContaining('Organizer'), findsOneWidget);
+    expect(find.textContaining('Focus, Work'), findsOneWidget);
+  });
+
+  testWidgets(
+    'finish closes onboarding even when save response returns stale profile',
+    (WidgetTester tester) async {
+      final api = _FakeHermesApiClient(
+        onboardingCompleted: false,
+        staleOnboardingAfterUpdate: true,
+      );
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('show-register-mode')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('auth-name')), 'Bean User');
+      await tester.enterText(
+        find.byKey(const Key('auth-email')),
+        'bean@example.com',
+      );
+      await tester.enterText(
+        find.byKey(const Key('auth-password')),
+        'correct-horse-battery-staple',
+      );
+      await tester.tap(find.byKey(const Key('auth-submit')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('agent-onboarding-overlay')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('agent-onboarding-finish')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('agent-onboarding-finish')));
+      await tester.pumpAndSettle();
+
+      expect(api.updatedAgentPersonality, 'balanced');
+      expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
+      expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'saved onboarding choices remain visible when save response returns stale profile',
+    (WidgetTester tester) async {
+      final api = _FakeHermesApiClient(
+        onboardingCompleted: false,
+        staleOnboardingAfterUpdate: true,
+        staleSettingsAfterUpdate: true,
+      );
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('show-register-mode')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('auth-name')), 'Bean User');
+      await tester.enterText(
+        find.byKey(const Key('auth-email')),
+        'bean@example.com',
+      );
+      await tester.enterText(
+        find.byKey(const Key('auth-password')),
+        'correct-horse-battery-staple',
+      );
+      tester.testTextInput.hide();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('auth-submit')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('agent-personality-coach')));
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('onboarding-priority-Family')));
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('onboarding-context')),
+        'Protect dinner and use gentle nudges.',
+      );
+      await tester.tap(find.byKey(const Key('agent-onboarding-next')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('agent-onboarding-finish')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Coach'), findsOneWidget);
+      expect(find.textContaining('Family'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('open-bean-preferences')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ChoiceChip>(find.byKey(const Key('agent-personality-coach')))
+            .selected,
+        isTrue,
+      );
+      expect(
+        tester
+            .widget<FilterChip>(
+              find.byKey(const Key('onboarding-priority-Family')),
+            )
+            .selected,
+        isTrue,
+      );
+      expect(find.text('Protect dinner and use gentle nudges.'), findsOneWidget);
     },
   );
 
@@ -145,20 +396,21 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
 
+      expect(find.byKey(const Key('chat-input-dock')), findsOneWidget);
+      expect(find.byKey(const Key('chat-new-session-action')), findsOneWidget);
+      expect(find.byKey(const Key('chat-activity-menu')), findsOneWidget);
+      expect(find.text('Agent progress'), findsNothing);
+      expect(find.text('Activity feed'), findsNothing);
+      expect(find.text('Pending approvals'), findsNothing);
       expect(
-        find.text('Ask Bean to create tasks, reminders, or calendar events...'),
+        find.byKey(const Key('chat-approval-bottom-dock')),
         findsOneWidget,
       );
-      expect(find.text('Agent progress'), findsOneWidget);
-      expect(find.text('Activity feed'), findsOneWidget);
-      expect(find.text('Pending approvals'), findsOneWidget);
-      expect(find.text('Approval needed'), findsOneWidget);
 
       for (final label in <String>[
         'Calendar',
         'Tasks',
         'Reminders',
-        'Bean',
         'Settings',
       ]) {
         expect(find.text(label), findsWidgets);
@@ -181,10 +433,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('critical-task-dropdown')), findsOneWidget);
-    expect(find.text('Critical'), findsOneWidget);
-    expect(find.textContaining('Critical means open tasks'), findsOneWidget);
+    expect(find.text('Critical'), findsNothing);
+    expect(find.textContaining('Critical means open tasks'), findsNothing);
     expect(find.byKey(const Key('critical-task-item-1')), findsOneWidget);
+    expect(find.byKey(const Key('critical-event-item-3')), findsOneWidget);
     expect(find.text('Plan launch'), findsWidgets);
+    expect(find.text('Design review'), findsWidgets);
     expect(find.byKey(const Key('critical-reminder-item-2')), findsNothing);
   });
 
@@ -235,15 +489,30 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
     await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('title-time-editor-secondary-time')),
+      'Today 6:00 PM',
+    );
     await tester.tap(find.byKey(const Key('title-time-editor-save')));
     await tester.pumpAndSettle();
 
     expect(api.updatedTask?.category, 'Work');
     expect(api.updatedTask?.color, '#007AFF');
+    expect(api.createdReminder?.title, 'Categorize proposal');
+    expect(api.createdReminder?.category, 'Work');
+    expect(api.createdReminder?.color, '#007AFF');
+    expect(api.createdReminder?.metadata?['source'], 'task');
+    expect(api.createdReminder?.metadata?['task_id'], 501);
     expect(find.textContaining('Work'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('nav-reminders')));
     await tester.pumpAndSettle();
+    final reminderSurface = tester.widget<Container>(
+      find.byKey(const Key('reminder-row-surface-601')),
+    );
+    final reminderDecoration = reminderSurface.decoration! as BoxDecoration;
+    expect(reminderDecoration.color?.a, closeTo(.14, .001));
+    expect(reminderDecoration.color?.b, 1);
     await tester.tap(find.byKey(const Key('reminder-edit-action-601')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
@@ -254,6 +523,40 @@ void main() {
     expect(api.updatedReminder?.category, 'Work');
     expect(api.updatedReminder?.color, '#007AFF');
     expect(find.textContaining('Work'), findsWidgets);
+  });
+
+  testWidgets('new task reminder time creates a linked reminder in reminders', (
+    WidgetTester tester,
+  ) async {
+    final api = _TaskReminderCategoryFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-add-action')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('title-time-editor-title')),
+      'Order coffee beans',
+    );
+    await tester.enterText(
+      find.byKey(const Key('title-time-editor-secondary-time')),
+      'Today 6:00 PM',
+    );
+    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.createdTask?.title, 'Order coffee beans');
+    expect(api.createdReminder?.title, 'Order coffee beans');
+    expect(api.createdReminder?.metadata?['source'], 'task');
+    expect(api.createdReminder?.metadata?['task_id'], api.createdTask?.id);
+
+    await tester.tap(find.byKey(const Key('nav-reminders')));
+    await tester.pumpAndSettle();
+    expect(find.text('Order coffee beans'), findsOneWidget);
   });
 
   testWidgets(
@@ -269,7 +572,7 @@ void main() {
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
       expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
       expect(find.text('Today'), findsOneWidget);
-      expect(find.text('1'), findsWidgets);
+      expect(find.text('2'), findsWidgets);
       expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
       expect(
         tester.getTopLeft(find.byKey(const Key('calendar-month-chevron'))).dx,
@@ -295,9 +598,22 @@ void main() {
       for (var index = 0; index < 7; index++) {
         expect(find.byKey(Key('week-date-cell-$index')), findsOneWidget);
       }
+      expect(
+        tester.getTopLeft(find.byKey(const Key('week-date-cell-0'))).dx,
+        closeTo(
+          tester
+              .getTopLeft(find.byKey(const Key('apple-style-week-date-header')))
+              .dx,
+          1,
+        ),
+      );
       expect(find.byKey(const Key('apple-style-day-timeline')), findsOneWidget);
       expect(
         find.byKey(const Key('calendar-current-time-marker')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('calendar-current-time-label')),
         findsOneWidget,
       );
       expect(find.text('7 AM'), findsOneWidget);
@@ -305,17 +621,93 @@ void main() {
       expect(find.text('10 PM'), findsOneWidget);
       expect(find.byKey(const Key('apple-style-day-strip')), findsNothing);
       expect(find.text('Today / upcoming'), findsNothing);
-      expect(find.text('Tasks for today'), findsOneWidget);
+      expect(find.text('Tasks for Today'), findsOneWidget);
       expect(find.text('Plan launch'), findsOneWidget);
       expect(find.text('Design review'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('calendar-month-chevron')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
-      expect(find.byKey(const Key('calendar-day-chevron')), findsOneWidget);
-      expect(find.text('Rest of month'), findsOneWidget);
+      expect(find.byKey(const Key('calendar-month-scroller')), findsOneWidget);
+      expect(
+        find.byKey(const Key('calendar-month-pill-selected')),
+        findsOneWidget,
+      );
+      final monthScrollerWidth = tester
+          .getSize(find.byKey(const Key('calendar-month-scroller')))
+          .width;
+      expect(
+        tester
+            .getSize(find.byKey(const Key('calendar-month-pill-selected')))
+            .width,
+        lessThan(monthScrollerWidth / 5.5),
+      );
+      expect(find.byKey(const Key('calendar-day-chevron')), findsNothing);
+      expect(find.text('Rest of month'), findsNothing);
       expect(find.text('Plan launch'), findsWidgets);
+      final monthGridBefore = tester.widget<Text>(find.text('1').first).data;
+      final scrollerTopLeft = tester.getTopLeft(
+        find.byKey(const Key('calendar-month-scroller')),
+      );
+      await tester.dragFrom(
+        scrollerTopLeft + const Offset(260, 20),
+        const Offset(-260, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
+      expect(
+        find.byKey(const Key('calendar-month-pill-selected')),
+        findsOneWidget,
+      );
+      final currentFullMonthLabel = const [
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December',
+      ][DateTime.now().month - 1];
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-chevron')),
+          matching: find.text(currentFullMonthLabel),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<Text>(find.text(monthGridBefore!).first).data,
+        monthGridBefore,
+      );
       expect(find.text('Stand up'), findsNothing);
+      await tester.tap(find.byKey(const Key('calendar-month-chevron')));
+      await tester.pumpAndSettle();
+      final currentMonthLabel = const [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ][DateTime.now().month - 1];
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-pill-selected')),
+          matching: find.text(currentMonthLabel),
+        ),
+        findsOneWidget,
+      );
       await tester.tap(find.text('1').first);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('apple-style-day-timeline')), findsOneWidget);
@@ -337,8 +729,12 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('chat-view')), findsOneWidget);
-      expect(find.byKey(const Key('quick-plan-today')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('quick-plan-today')));
+      expect(find.byKey(const Key('quick-plan-today')), findsNothing);
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Help me plan today',
+      );
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
       await tester.pumpAndSettle();
       expect(api.sentMessages, ['Help me plan today']);
       expect(find.text('Done — I updated your day.'), findsOneWidget);
@@ -354,7 +750,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
       expect(find.text('Settings'), findsWidgets);
-      expect(find.text('Bean preferences'), findsOneWidget);
+      expect(find.text('Bean preferences'), findsNothing);
       expect(find.text('Calendar preferences'), findsOneWidget);
       expect(find.text('Start hour'), findsOneWidget);
       expect(find.text('End hour'), findsOneWidget);
@@ -417,7 +813,7 @@ void main() {
     final fixedHourColumn = tester.getRect(
       find.byKey(const Key('calendar-fixed-hours-column')),
     );
-    expect(fixedHourColumn.height, closeTo(48 + (16 * 52.5), .1));
+    expect(fixedHourColumn.height, closeTo(36 + (16 * 52.5), .1));
     final scrollingDayColumns = tester.getRect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
     );
@@ -521,6 +917,14 @@ void main() {
 
       expect(find.text('Yesterday one-off'), findsNothing);
       expect(find.text('Recurring vitamins'), findsOneWidget);
+      expect(find.textContaining('Travel'), findsWidgets);
+      expect(find.textContaining('Due today at'), findsWidgets);
+      final taskSurface = tester.widget<Container>(
+        find.byKey(const Key('task-row-surface-101')),
+      );
+      final taskDecoration = taskSurface.decoration! as BoxDecoration;
+      expect(taskDecoration.color?.a, closeTo(.14, .001));
+      expect(taskDecoration.color?.b, 1);
 
       final firstOpenTaskBefore = tester.getRect(find.text('Pack bags'));
       final secondOpenTaskBefore = tester.getRect(find.text('Call pharmacy'));
@@ -564,6 +968,32 @@ void main() {
     },
   );
 
+  testWidgets('task row tap opens editor while checkbox toggles completion', (
+    WidgetTester tester,
+  ) async {
+    final api = _ActiveTasksFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-row-action-101')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit task'), findsOneWidget);
+    expect(api.completedTaskIds, isEmpty);
+
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-complete-checkbox-101')));
+    await tester.pumpAndSettle();
+
+    expect(api.completedTaskIds, [101]);
+    expect(find.text('Edit task'), findsNothing);
+  });
+
   testWidgets('tasks can be checked from the tasks page', (
     WidgetTester tester,
   ) async {
@@ -597,10 +1027,108 @@ void main() {
     expect(api.reopenedTaskIds, [102]);
     await tester.tap(find.byKey(const Key('task-filter-open')));
     await tester.pumpAndSettle();
-    final reopenedTask = tester.widget<CheckboxListTile>(
+    final reopenedTask = tester.widget<Checkbox>(
       find.byKey(const Key('task-complete-checkbox-102')),
     );
     expect(reopenedTask.value, isFalse);
+  });
+
+  testWidgets('settings exposes Google Calendar connect and sync controls', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('google-calendar-sync-settings')),
+      findsOneWidget,
+    );
+    expect(find.text('Google Calendar sync'), findsOneWidget);
+    expect(find.text('Connect Google'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('google-calendar-connect-action')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Connect Google'));
+    await tester.pumpAndSettle();
+    expect(api.googleCalendarConnected, isTrue);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('google-calendar-sync-action')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sync now'));
+    await tester.pumpAndSettle();
+    expect(api.googleCalendarSyncCalls, 1);
+    expect(find.textContaining('Synced 2 Google events'), findsOneWidget);
+  });
+
+  testWidgets(
+    'signed-in app loads persisted resources from table list endpoints',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _StaleTodayPersistedResourcesFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Persisted task'), findsOneWidget);
+      expect(find.text('Persisted calendar event'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('nav-reminders')));
+      await tester.pumpAndSettle();
+      expect(find.text('Persisted reminder'), findsOneWidget);
+    },
+  );
+
+  testWidgets('new tasks remain visible after the post-save refresh', (
+    WidgetTester tester,
+  ) async {
+    final api = _CreateTaskDatabaseTruthFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+    expect(find.text('Buy printer paper'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('task-add-action')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('title-time-editor-title')),
+      'Buy printer paper',
+    );
+    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.createdTaskTitles, ['Buy printer paper']);
+    expect(api.todaySummaryCalls, greaterThanOrEqualTo(2));
+    expect(api.taskListCalls, greaterThanOrEqualTo(2));
+    expect(find.text('Buy printer paper'), findsOneWidget);
+
+    await tester.fling(
+      find.byKey(const Key('signed-in-refresh-scroll')),
+      const Offset(0, 320),
+      1000,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(api.todaySummaryCalls, greaterThanOrEqualTo(3));
+    expect(api.taskListCalls, greaterThanOrEqualTo(3));
+    expect(find.text('Buy printer paper'), findsOneWidget);
   });
 
   testWidgets(
@@ -621,19 +1149,59 @@ void main() {
 
       expect(api.pastTaskListCalls, 1);
       expect(find.text('Past tasks'), findsOneWidget);
-      expect(find.text('Archived oil change'), findsOneWidget);
       expect(
-        find.text('Completed · Permanently deletes after 10 days'),
+        find.text('1 completed task from the last 10 days'),
         findsOneWidget,
       );
+      expect(find.text('Archived oil change'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('past-tasks-expansion')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Archived oil change'), findsOneWidget);
+      expect(find.text('Completed · uncheck to restore'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('task-complete-checkbox-201')));
       await tester.pumpAndSettle();
 
       expect(api.reopenedTaskIds, [201]);
       expect(find.text('Archived oil change'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('nav-tasks')));
+      await tester.pumpAndSettle();
+      expect(find.text('Archived oil change'), findsOneWidget);
     },
   );
+
+  testWidgets('settings lets the signed-in user edit email', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    expect(find.text('Focused Hermes Bean preferences'), findsNothing);
+    expect(find.text('Bean preferences'), findsNothing);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('settings-edit-email-action')),
+    );
+    await tester.tap(find.byKey(const Key('settings-edit-email-action')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('settings-email-editor-field')),
+      'new-bean@example.com',
+    );
+    await tester.tap(find.byKey(const Key('settings-email-editor-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedEmail, 'new-bean@example.com');
+    expect(find.text('new-bean@example.com'), findsWidgets);
+  });
 
   testWidgets(
     'invalid remembered tokens return to sign in instead of offline chat',
@@ -1330,7 +1898,7 @@ void main() {
     },
   );
 
-  testWidgets('day view task list only shows tasks for selected day', (
+  testWidgets('day view task list stays pinned to today', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -1341,7 +1909,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Tasks for today'), findsOneWidget);
+    expect(find.text('Tasks for Today'), findsOneWidget);
     expect(find.text('Today task'), findsOneWidget);
     expect(find.text('Today reminder'), findsNothing);
     expect(find.text('Tomorrow task'), findsNothing);
@@ -1350,10 +1918,10 @@ void main() {
     await tester.tap(find.byKey(const Key('week-date-pill-next-visible')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Tasks for tomorrow'), findsOneWidget);
-    expect(find.text('Today task'), findsNothing);
+    expect(find.text('Tasks for Today'), findsOneWidget);
+    expect(find.text('Today task'), findsOneWidget);
     expect(find.text('Today reminder'), findsNothing);
-    expect(find.text('Tomorrow task'), findsOneWidget);
+    expect(find.text('Tomorrow task'), findsNothing);
     expect(find.text('Tomorrow reminder'), findsNothing);
   });
 
@@ -1473,6 +2041,101 @@ class _MemoryAuthTokenStore implements AuthTokenStore {
   }
 }
 
+class _StaleTodayPersistedResourcesFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesTask>> listTasks() async => const [
+    HermesTask(id: 901, title: 'Persisted task', status: 'open'),
+  ];
+
+  @override
+  Future<List<HermesReminder>> listReminders() async => [
+    HermesReminder(
+      id: 902,
+      title: 'Persisted reminder',
+      dueAt: DateTime.now().toIso8601String(),
+      status: 'pending',
+    ),
+  ];
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+    HermesCalendarEvent(
+      id: 903,
+      title: 'Persisted calendar event',
+      startsAt: DateTime.now().copyWith(hour: 14).toIso8601String(),
+      endsAt: DateTime.now().copyWith(hour: 15).toIso8601String(),
+    ),
+  ];
+
+  @override
+  Future<HermesTodaySummary> todaySummary() async {
+    todaySummaryCalls++;
+    return HermesTodaySummary(
+      tasks: const [],
+      reminders: const [],
+      calendarEvents: const [],
+      activityEvents: await pollActivityEvents(42),
+      approvals: const [],
+      blockers: const [],
+    );
+  }
+}
+
+class _CreateTaskDatabaseTruthFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  final createdTaskTitles = <String>[];
+  final _databaseTasks = <HermesTask>[
+    const HermesTask(id: 1, title: 'Plan launch', status: 'open'),
+  ];
+  int taskListCalls = 0;
+
+  @override
+  Future<List<HermesTask>> listTasks() async {
+    taskListCalls++;
+    return List<HermesTask>.unmodifiable(_databaseTasks);
+  }
+
+  @override
+  Future<HermesTask> createTask({
+    required String title,
+    String type = 'todo',
+    String status = 'open',
+    String? dueAt,
+    String? category,
+    String? color,
+    bool isCritical = false,
+    Map<String, Object?>? metadata,
+  }) async {
+    createdTaskTitles.add(title);
+    final task = HermesTask(
+      id: 901,
+      title: title,
+      status: status,
+      dueAt: dueAt,
+      category: category,
+      color: color,
+      isCritical: isCritical,
+      metadata: metadata,
+    );
+    _databaseTasks.add(task);
+    return task;
+  }
+
+  @override
+  Future<HermesTodaySummary> todaySummary() async {
+    todaySummaryCalls++;
+    return HermesTodaySummary(
+      tasks: const [],
+      reminders: await listReminders(),
+      calendarEvents: await listCalendarEvents(),
+      activityEvents: await pollActivityEvents(42),
+      approvals: const [],
+      blockers: const [],
+    );
+  }
+}
+
 class _PastTasksUnavailableHermesApiClient extends _FakeHermesApiClient {
   int pastTaskCalls = 0;
 
@@ -1507,13 +2170,59 @@ class _NetworkDownRememberedTokenHermesApiClient extends HermesApiClient {
 }
 
 class _FakeHermesApiClient extends HermesApiClient {
-  _FakeHermesApiClient()
-    : super(transport: (_) async => const HermesApiResponse(500, 'unused'));
+  _FakeHermesApiClient({
+    this.onboardingCompleted = true,
+    this.staleOnboardingAfterUpdate = false,
+    this.staleSettingsAfterUpdate = false,
+  }) : super(transport: (_) async => const HermesApiResponse(500, 'unused'));
 
+  final bool onboardingCompleted;
+  final bool staleOnboardingAfterUpdate;
+  final bool staleSettingsAfterUpdate;
   final sentMessages = <String>[];
+  String? updatedEmail;
   bool deletedAccount = false;
   bool plannedToday = false;
   int todaySummaryCalls = 0;
+  bool googleCalendarConnected = false;
+  int googleCalendarSyncCalls = 0;
+  String? registeredAgentPersonality;
+  List<String>? registeredPriorities;
+  String? registeredContext;
+  String? updatedAgentPersonality;
+  List<String>? updatedPriorities;
+  String? updatedContext;
+
+  HermesUser _user({required String name, required String email}) {
+    final persistedPersonality = staleSettingsAfterUpdate
+        ? null
+        : updatedAgentPersonality;
+    final persistedPriorities = staleSettingsAfterUpdate
+        ? null
+        : updatedPriorities;
+    final persistedContext = staleSettingsAfterUpdate ? null : updatedContext;
+
+    return HermesUser(
+      id: 1,
+      name: name,
+      email: email,
+      onboardComplete:
+          !staleOnboardingAfterUpdate &&
+          (updatedAgentPersonality != null || onboardingCompleted),
+      agentProfile: HermesAgentProfile(
+        settings: {
+          'personality_type': persistedPersonality ?? 'balanced',
+          'onboarding': {
+            'completed':
+                !staleOnboardingAfterUpdate &&
+                (updatedAgentPersonality != null || onboardingCompleted),
+            'priorities': persistedPriorities ?? <String>[],
+            'context': persistedContext,
+          },
+        },
+      ),
+    );
+  }
 
   @override
   Future<HermesAuthResult> login({
@@ -1521,9 +2230,9 @@ class _FakeHermesApiClient extends HermesApiClient {
     required String password,
   }) async {
     bearerToken = 'fake-token';
-    return const HermesAuthResult(
+    return HermesAuthResult(
       token: 'fake-token',
-      user: HermesUser(id: 1, name: 'Bean User', email: 'bean@example.com'),
+      user: _user(name: 'Bean User', email: 'bean@example.com'),
     );
   }
 
@@ -1537,13 +2246,31 @@ class _FakeHermesApiClient extends HermesApiClient {
     bearerToken = 'fake-token';
     return HermesAuthResult(
       token: 'fake-token',
-      user: HermesUser(id: 1, name: name, email: email),
+      user: _user(name: name, email: email),
     );
   }
 
   @override
   Future<HermesUser> me() async =>
-      const HermesUser(id: 1, name: 'Bean User', email: 'bean@example.com');
+      _user(name: 'Bean User', email: updatedEmail ?? 'bean@example.com');
+
+  @override
+  Future<HermesUser> updateMe({
+    String? name,
+    String? email,
+    String? agentPersonality,
+    List<String>? onboardingPriorities,
+    String? onboardingContext,
+  }) async {
+    updatedEmail = email ?? updatedEmail;
+    updatedAgentPersonality = agentPersonality ?? updatedAgentPersonality;
+    updatedPriorities = onboardingPriorities ?? updatedPriorities;
+    updatedContext = onboardingContext ?? updatedContext;
+    return _user(
+      name: name ?? 'Bean User',
+      email: updatedEmail ?? 'bean@example.com',
+    );
+  }
 
   @override
   Future<HermesSession> startSession({
@@ -1557,7 +2284,14 @@ class _FakeHermesApiClient extends HermesApiClient {
       ? const [
           HermesTask(id: 10, title: 'Generated follow-up task', status: 'open'),
         ]
-      : const [HermesTask(id: 1, title: 'Plan launch', status: 'open')];
+      : const [
+          HermesTask(
+            id: 1,
+            title: 'Plan launch',
+            status: 'open',
+            isCritical: true,
+          ),
+        ];
 
   @override
   Future<List<HermesTask>> listPastTasks() async => const [];
@@ -1570,6 +2304,8 @@ class _FakeHermesApiClient extends HermesApiClient {
           id: 20,
           title: 'Stretch and hydrate',
           dueAt: DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
+          category: 'Health',
+          color: '#34C759',
         ),
       ];
     }
@@ -1577,6 +2313,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       HermesReminder(
         id: 2,
         title: 'Stand up',
+        isCritical: true,
         dueAt: DateTime.now()
             .subtract(const Duration(days: 1))
             .copyWith(hour: 9, minute: 0, second: 0, millisecond: 0)
@@ -1599,6 +2336,7 @@ class _FakeHermesApiClient extends HermesApiClient {
             id: 3,
             title: 'Design review',
             startsAt: '2:30 PM',
+            isCritical: true,
           ),
         ];
 
@@ -1624,6 +2362,39 @@ class _FakeHermesApiClient extends HermesApiClient {
   @override
   Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>
       const [HermesActivityEvent(id: 1, eventType: 'assistant.ready')];
+
+  @override
+  Future<GoogleCalendarSyncStatus> googleCalendarStatus() async =>
+      GoogleCalendarSyncStatus(
+        connected: googleCalendarConnected,
+        status: googleCalendarConnected ? 'connected' : 'not_connected',
+        lastSyncedAt: googleCalendarConnected
+            ? DateTime.now().toIso8601String()
+            : null,
+      );
+
+  @override
+  Future<String> googleCalendarAuthUrl() async {
+    googleCalendarConnected = true;
+    return 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fake';
+  }
+
+  @override
+  Future<GoogleCalendarSyncResult> syncGoogleCalendar() async {
+    googleCalendarSyncCalls++;
+    googleCalendarConnected = true;
+    return GoogleCalendarSyncResult(
+      imported: 2,
+      deleted: 0,
+      status: await googleCalendarStatus(),
+    );
+  }
+
+  @override
+  Future<GoogleCalendarSyncStatus> disconnectGoogleCalendar() async {
+    googleCalendarConnected = false;
+    return googleCalendarStatus();
+  }
 
   @override
   Future<HermesMessageResult> sendMessage({
@@ -1724,6 +2495,7 @@ class _EditableReminderFakeHermesApiClient
     int? calendarEventId,
     String? category,
     String? color,
+    bool? isCritical,
     Map<String, Object?>? metadata,
     bool clearCategory = false,
     bool clearColor = false,
@@ -1736,6 +2508,7 @@ class _EditableReminderFakeHermesApiClient
       dueAt: remindAt ?? existing.dueAt,
       category: clearCategory ? null : category ?? existing.category,
       color: clearColor ? null : color ?? existing.color,
+      isCritical: isCritical ?? existing.isCritical,
       calendarEventId: calendarEventId ?? existing.calendarEventId,
       metadata: metadata ?? existing.metadata,
     );
@@ -1750,7 +2523,9 @@ class _EditableReminderFakeHermesApiClient
 class _TaskReminderCategoryFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   HermesTask? updatedTask;
+  HermesTask? createdTask;
   HermesReminder? updatedReminder;
+  HermesReminder? createdReminder;
 
   @override
   Future<List<HermesEventCategory>> listEventCategories() async => const [
@@ -1759,6 +2534,7 @@ class _TaskReminderCategoryFakeHermesApiClient
 
   @override
   Future<List<HermesTask>> listTasks() async => [
+    if (createdTask != null) createdTask!,
     updatedTask ??
         HermesTask(
           id: 501,
@@ -1770,14 +2546,66 @@ class _TaskReminderCategoryFakeHermesApiClient
 
   @override
   Future<List<HermesReminder>> listReminders() async => [
+    if (createdReminder != null) createdReminder!,
     updatedReminder ??
         HermesReminder(
           id: 601,
           title: 'Categorize reminder',
           status: 'pending',
+          category: 'Work',
+          color: '#007AFF',
           dueAt: DateTime.now().add(const Duration(hours: 4)).toIso8601String(),
         ),
   ];
+
+  @override
+  Future<HermesTask> createTask({
+    required String title,
+    String type = 'todo',
+    String status = 'open',
+    String? dueAt,
+    String? category,
+    String? color,
+    bool isCritical = false,
+    Map<String, Object?>? metadata,
+  }) async {
+    createdTask = HermesTask(
+      id: 801,
+      title: title,
+      status: status,
+      dueAt: dueAt,
+      category: category,
+      color: color,
+      isCritical: isCritical,
+      metadata: metadata,
+    );
+    return createdTask!;
+  }
+
+  @override
+  Future<HermesReminder> createReminder({
+    required String title,
+    required String remindAt,
+    String status = 'pending',
+    int? calendarEventId,
+    String? category,
+    String? color,
+    bool isCritical = false,
+    Map<String, Object?>? metadata,
+  }) async {
+    createdReminder = HermesReminder(
+      id: 701,
+      title: title,
+      dueAt: remindAt,
+      category: category,
+      color: color,
+      isCritical: isCritical,
+      status: status,
+      calendarEventId: calendarEventId,
+      metadata: metadata,
+    );
+    return createdReminder!;
+  }
 
   @override
   Future<HermesTask> updateTask(
@@ -1788,6 +2616,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     String? completedAt,
     String? category,
     String? color,
+    bool? isCritical,
     Map<String, Object?>? metadata,
     bool clearCategory = false,
     bool clearColor = false,
@@ -1802,6 +2631,7 @@ class _TaskReminderCategoryFakeHermesApiClient
       dueAt: dueAt ?? existing.dueAt,
       category: clearCategory ? null : category ?? existing.category,
       color: clearColor ? null : color ?? existing.color,
+      isCritical: isCritical ?? existing.isCritical,
       completedAt: completedAt ?? existing.completedAt,
       metadata: metadata ?? existing.metadata,
     );
@@ -1817,6 +2647,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     int? calendarEventId,
     String? category,
     String? color,
+    bool? isCritical,
     Map<String, Object?>? metadata,
     bool clearCategory = false,
     bool clearColor = false,
@@ -1830,6 +2661,7 @@ class _TaskReminderCategoryFakeHermesApiClient
       dueAt: remindAt ?? existing.dueAt,
       category: clearCategory ? null : category ?? existing.category,
       color: clearColor ? null : color ?? existing.color,
+      isCritical: isCritical ?? existing.isCritical,
       status: status ?? existing.status,
       completedAt: existing.completedAt,
       calendarEventId: calendarEventId ?? existing.calendarEventId,
@@ -1880,6 +2712,8 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
       title: 'Pack bags',
       status: 'open',
       dueAt: DateTime.now().toIso8601String(),
+      category: 'Travel',
+      color: '#007AFF',
     ),
     HermesTask(
       id: 102,
@@ -1903,7 +2737,16 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   ];
 
   @override
-  Future<List<HermesTask>> listTasks() async => _activeTasks;
+  Future<List<HermesTask>> listTasks() async => [
+    if (_pastTaskReopened)
+      HermesTask(
+        id: 201,
+        title: 'Archived oil change',
+        status: 'open',
+        dueAt: DateTime.now().toIso8601String(),
+      ),
+    ..._activeTasks,
+  ];
 
   @override
   Future<List<HermesTask>> listPastTasks() async {
@@ -1999,6 +2842,7 @@ class _EditableCalendarFakeHermesApiClient
     String? category,
     String? color,
     String? recurrence,
+    bool? isCritical,
     Map<String, Object?>? metadata,
   }) async {
     updatedEvent = HermesCalendarEvent(
@@ -2009,6 +2853,7 @@ class _EditableCalendarFakeHermesApiClient
       category: category,
       color: color,
       recurrence: recurrence,
+      isCritical: isCritical ?? false,
       metadata: metadata,
     );
     return updatedEvent!;

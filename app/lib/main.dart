@@ -229,6 +229,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   int _calendarStartHour = _defaultCalendarStartHour;
   int _calendarEndHour = _defaultCalendarEndHour;
   final Set<int> _pendingTaskIds = <int>{};
+  bool _forceAgentOnboarding = false;
+  bool _editingAgentPreferences = false;
 
   @override
   void initState() {
@@ -361,6 +363,62 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       await _loadSignedIn(knownUser: auth.user);
     } catch (error) {
       setState(() => _error = 'Registration failed: $error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _completeAgentOnboarding({
+    required String agentPersonality,
+    required List<String> onboardingPriorities,
+    String? onboardingContext,
+  }) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final updatedUser = await widget.apiClient.updateMe(
+        agentPersonality: agentPersonality,
+        onboardingPriorities: onboardingPriorities,
+        onboardingContext: onboardingContext,
+      );
+      if (!mounted) return;
+      final savedPriorities = List<String>.from(onboardingPriorities);
+      final savedProfile = HermesAgentProfile(
+        id: updatedUser.agentProfile?.id ?? _user?.agentProfile?.id,
+        settings: {
+          ...?updatedUser.agentProfile?.settings,
+          ...?_user?.agentProfile?.settings,
+          'personality_type': agentPersonality,
+          'onboarding': {
+            ...?((updatedUser.agentProfile?.settings['onboarding'] is Map)
+                ? Map<String, Object?>.from(
+                    updatedUser.agentProfile!.settings['onboarding'] as Map,
+                  )
+                : null),
+            ...?((_user?.agentProfile?.settings['onboarding'] is Map)
+                ? Map<String, Object?>.from(
+                    _user!.agentProfile!.settings['onboarding'] as Map,
+                  )
+                : null),
+            'completed': true,
+            'priorities': savedPriorities,
+            'context': onboardingContext,
+          },
+        },
+      );
+      setState(() {
+        _user = updatedUser.copyWith(
+          onboardComplete: true,
+          agentProfile: savedProfile,
+        );
+        _forceAgentOnboarding = false;
+        _editingAgentPreferences = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not save Bean preferences: $error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1101,53 +1159,403 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         error: _error,
       );
     }
-    return RefreshIndicator(
-      key: const Key('signed-in-refresh-indicator'),
-      onRefresh: _refreshSignedInViews,
-      child: SingleChildScrollView(
-        key: const Key('signed-in-refresh-scroll'),
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
-        child: _CommandCenterContent(
-          user: _user!,
-          tasks: _tasks,
-          pastTasks: _pastTasks,
-          reminders: _reminders,
-          calendar: _calendar,
-          eventCategories: _eventCategories,
-          approvals: _approvals,
-          events: _events,
-          messages: _messages,
-          busy: _busy,
-          chatRunState: _chatRunState,
-          error: _error,
-          selectedDestination: _selectedDestination,
-          selectedCalendarDay: _selectedCalendarDay,
-          showCalendarMonth: _showCalendarMonth,
-          calendarStartHour: _calendarStartHour,
-          calendarEndHour: _calendarEndHour,
-          onCalendarDaySelected: _selectCalendarDay,
-          onBackToCalendarDay: _returnToCalendarDay,
-          onCalendarStartHourChanged: _setCalendarStartHour,
-          onCalendarEndHourChanged: _setCalendarEndHour,
-          onSelectDestination: (destination) =>
-              setState(() => _selectedDestination = destination),
-          onSend: _sendChat,
-          onTaskCompleted: _toggleTaskCompletion,
-          pendingTaskIds: _pendingTaskIds,
-          onTaskSaved: _createOrUpdateTask,
-          onTaskDeleted: _deleteTask,
-          onReminderSaved: _createOrUpdateReminder,
-          onReminderCompleted: _toggleReminderCompletion,
-          onReminderDeleted: _deleteReminder,
-          onCalendarEventEdited: _editCalendarEvent,
-          onEventCategorySaved: _saveEventCategory,
-          onEventCategoryDeleted: _deleteEventCategory,
-          onDeleteAccount: _deleteAccount,
+    final user = _user!;
+    final showAgentOnboarding =
+        _forceAgentOnboarding ||
+        _editingAgentPreferences ||
+        (!user.onboardComplete &&
+            !(user.agentProfile?.onboardingCompleted ?? false));
+    final editingAgentPreferences = _editingAgentPreferences;
+    return Stack(
+      children: [
+        RefreshIndicator(
+          key: const Key('signed-in-refresh-indicator'),
+          onRefresh: _refreshSignedInViews,
+          child: SingleChildScrollView(
+            key: const Key('signed-in-refresh-scroll'),
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
+            child: _CommandCenterContent(
+              apiClient: widget.apiClient,
+              user: user,
+              tasks: _tasks,
+              pastTasks: _pastTasks,
+              reminders: _reminders,
+              calendar: _calendar,
+              eventCategories: _eventCategories,
+              approvals: _approvals,
+              events: _events,
+              messages: _messages,
+              busy: _busy,
+              chatRunState: _chatRunState,
+              error: _error,
+              selectedDestination: _selectedDestination,
+              selectedCalendarDay: _selectedCalendarDay,
+              showCalendarMonth: _showCalendarMonth,
+              calendarStartHour: _calendarStartHour,
+              calendarEndHour: _calendarEndHour,
+              onCalendarDaySelected: _selectCalendarDay,
+              onBackToCalendarDay: _returnToCalendarDay,
+              onCalendarStartHourChanged: _setCalendarStartHour,
+              onCalendarEndHourChanged: _setCalendarEndHour,
+              onSelectDestination: (destination) =>
+                  setState(() => _selectedDestination = destination),
+              onSend: _sendChat,
+              onTaskCompleted: _toggleTaskCompletion,
+              pendingTaskIds: _pendingTaskIds,
+              onTaskSaved: _createOrUpdateTask,
+              onTaskDeleted: _deleteTask,
+              onReminderSaved: _createOrUpdateReminder,
+              onReminderCompleted: _toggleReminderCompletion,
+              onReminderDeleted: _deleteReminder,
+              onCalendarEventEdited: _editCalendarEvent,
+              onEventCategorySaved: _saveEventCategory,
+              onEventCategoryDeleted: _deleteEventCategory,
+              onDeleteAccount: _deleteAccount,
+              onEditAgentOnboarding: () {
+                setState(() {
+                  _editingAgentPreferences = true;
+                  _forceAgentOnboarding = false;
+                });
+              },
+            ),
+          ),
+        ),
+        if (showAgentOnboarding)
+          _AgentOnboardingOverlay(
+            key: const Key('agent-onboarding-overlay'),
+            initialPersonality:
+                user.agentProfile?.personalityType ?? 'balanced',
+            initialPriorities:
+                user.agentProfile?.onboardingPriorities ?? const [],
+            initialContext: user.agentProfile?.onboardingContext ?? '',
+            busy: _busy,
+            editMode: editingAgentPreferences,
+            onCancel: editingAgentPreferences
+                ? () => setState(() => _editingAgentPreferences = false)
+                : null,
+            onComplete: _completeAgentOnboarding,
+          ),
+      ],
+    );
+  }
+}
+
+typedef _RegisterHandler =
+    Future<void> Function(String name, String email, String password);
+
+class _AgentPersonalityOption {
+  const _AgentPersonalityOption({
+    required this.key,
+    required this.label,
+    required this.description,
+    required this.icon,
+  });
+
+  final String key;
+  final String label;
+  final String description;
+  final IconData icon;
+}
+
+const List<_AgentPersonalityOption> _agentPersonalityOptions = [
+  _AgentPersonalityOption(
+    key: 'balanced',
+    label: 'Balanced',
+    description: 'Calm, practical, and concise.',
+    icon: Icons.tune_rounded,
+  ),
+  _AgentPersonalityOption(
+    key: 'coach',
+    label: 'Coach',
+    description: 'Encouraging with gentle accountability.',
+    icon: Icons.emoji_events_rounded,
+  ),
+  _AgentPersonalityOption(
+    key: 'organizer',
+    label: 'Organizer',
+    description: 'Structured, precise, schedule-first.',
+    icon: Icons.view_agenda_rounded,
+  ),
+  _AgentPersonalityOption(
+    key: 'creative',
+    label: 'Creative',
+    description: 'Idea-forward while staying useful.',
+    icon: Icons.auto_awesome_rounded,
+  ),
+];
+
+const List<String> _onboardingPriorityOptions = [
+  'Work',
+  'Family',
+  'Health',
+  'Planning',
+  'Reminders',
+  'Focus',
+];
+
+class _AgentOnboardingOverlay extends StatefulWidget {
+  const _AgentOnboardingOverlay({
+    super.key,
+    required this.initialPersonality,
+    required this.initialPriorities,
+    required this.initialContext,
+    required this.busy,
+    this.editMode = false,
+    this.onCancel,
+    required this.onComplete,
+  });
+
+  final String initialPersonality;
+  final List<String> initialPriorities;
+  final String initialContext;
+  final bool busy;
+  final bool editMode;
+  final VoidCallback? onCancel;
+  final Future<void> Function({
+    required String agentPersonality,
+    required List<String> onboardingPriorities,
+    String? onboardingContext,
+  })
+  onComplete;
+
+  @override
+  State<_AgentOnboardingOverlay> createState() =>
+      _AgentOnboardingOverlayState();
+}
+
+class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
+  late String _selectedPersonality;
+  late Set<String> _selectedPriorities;
+  late TextEditingController _context;
+  int _step = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedPersonality = widget.initialPersonality;
+    _selectedPriorities = widget.initialPriorities.isEmpty
+        ? {'Planning', 'Reminders'}
+        : widget.initialPriorities.toSet();
+    _context = TextEditingController(text: widget.initialContext);
+  }
+
+  @override
+  void dispose() {
+    _context.dispose();
+    super.dispose();
+  }
+
+  void _togglePriority(String priority) {
+    setState(() {
+      if (_selectedPriorities.contains(priority)) {
+        _selectedPriorities.remove(priority);
+      } else {
+        _selectedPriorities.add(priority);
+      }
+    });
+  }
+
+  Future<void> _save() async {
+    await widget.onComplete(
+      agentPersonality: _selectedPersonality,
+      onboardingPriorities: _selectedPriorities.toList(),
+      onboardingContext: _context.text.trim().isEmpty
+          ? null
+          : _context.text.trim(),
+    );
+  }
+
+  Future<void> _next() async {
+    if (widget.editMode) {
+      await _save();
+      return;
+    }
+    if (_step < 3) {
+      setState(() => _step += 1);
+      return;
+    }
+    await _save();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: .45),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: _ShellCard(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: Column(
+                      key: ValueKey('agent-onboarding-step-$_step'),
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _SectionTitle(
+                          icon: widget.editMode
+                              ? Icons.tune_rounded
+                              : _step == 3
+                              ? Icons.check_circle_rounded
+                              : Icons.auto_awesome_rounded,
+                          title: widget.editMode
+                              ? 'Edit Bean preferences'
+                              : _step == 3
+                              ? 'You’re all set'
+                              : 'Let’s personalize Bean',
+                          subtitle: widget.editMode
+                              ? 'Review the current settings and save only what you want to change.'
+                              : _step == 3
+                              ? 'You can update these settings any time in the Bean preferences section of Settings.'
+                              : 'A few quick choices help Bean understand your style and priorities.',
+                        ),
+                        const SizedBox(height: 18),
+                        if (widget.editMode) ...[
+                          _personalityStep(),
+                          const SizedBox(height: 18),
+                          _prioritiesStep(),
+                          const SizedBox(height: 18),
+                          _contextStep(),
+                        ] else ...[
+                          if (_step == 0) _personalityStep(),
+                          if (_step == 1) _prioritiesStep(),
+                          if (_step == 2) _contextStep(),
+                          if (_step == 3)
+                            const Text(
+                              'Bean will use your personality, priorities, and context to shape tone, planning, reminders, and follow-up. Look for Bean preferences in Settings whenever you want to change them.',
+                              style: TextStyle(color: HeyBeanTheme.muted),
+                            ),
+                        ],
+                        const SizedBox(height: 18),
+                        if (widget.editMode)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  key: const Key('agent-preferences-cancel'),
+                                  onPressed: widget.busy
+                                      ? null
+                                      : widget.onCancel,
+                                  child: const Text('Cancel'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton(
+                                  key: const Key('agent-preferences-save'),
+                                  onPressed: widget.busy ? null : _save,
+                                  child: Text(widget.busy ? 'Saving…' : 'Save'),
+                                ),
+                              ),
+                            ],
+                          )
+                        else
+                          FilledButton(
+                            key: Key(
+                              _step == 3
+                                  ? 'agent-onboarding-finish'
+                                  : 'agent-onboarding-next',
+                            ),
+                            onPressed: widget.busy ? null : _next,
+                            child: Text(
+                              widget.busy
+                                  ? 'Saving…'
+                                  : _step == 3
+                                  ? 'Finish'
+                                  : 'Next',
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
+
+  Widget _personalityStep() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Choose Bean’s personality',
+        style: TextStyle(fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 10),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _agentPersonalityOptions.map((option) {
+          final selected = option.key == _selectedPersonality;
+          return ChoiceChip(
+            key: Key('agent-personality-${option.key}'),
+            selected: selected,
+            avatar: Icon(
+              option.icon,
+              size: 18,
+              color: selected ? Colors.white : HeyBeanTheme.accent,
+            ),
+            label: Text(option.label),
+            onSelected: widget.busy
+                ? null
+                : (_) => setState(() => _selectedPersonality = option.key),
+          );
+        }).toList(),
+      ),
+      const SizedBox(height: 8),
+      Text(
+        _agentPersonalityOptions
+            .firstWhere((option) => option.key == _selectedPersonality)
+            .description,
+        style: const TextStyle(color: HeyBeanTheme.muted),
+      ),
+    ],
+  );
+
+  Widget _prioritiesStep() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'What should Bean prioritize?',
+        style: TextStyle(fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 10),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _onboardingPriorityOptions.map((priority) {
+          final selected = _selectedPriorities.contains(priority);
+          return FilterChip(
+            key: Key('onboarding-priority-$priority'),
+            selected: selected,
+            label: Text(priority),
+            onSelected: widget.busy ? null : (_) => _togglePriority(priority),
+          );
+        }).toList(),
+      ),
+    ],
+  );
+
+  Widget _contextStep() => TextField(
+    key: const Key('onboarding-context'),
+    controller: _context,
+    minLines: 3,
+    maxLines: 4,
+    textInputAction: TextInputAction.newline,
+    decoration: const InputDecoration(
+      labelText: 'Anything Bean should know?',
+      hintText:
+          'Example: I work nights, protect family time, and need gentle nudges.',
+    ),
+  );
 }
 
 class _SignedOutScreen extends StatefulWidget {
@@ -1165,8 +1573,7 @@ class _SignedOutScreen extends StatefulWidget {
     required bool rememberMe,
   })
   onLogin;
-  final Future<void> Function(String name, String email, String password)
-  onRegister;
+  final _RegisterHandler onRegister;
   final AuthTokenStore tokenStore;
   final bool busy;
   final String? error;
@@ -1352,6 +1759,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
 
 class _CommandCenterContent extends StatelessWidget {
   const _CommandCenterContent({
+    required this.apiClient,
     required this.user,
     required this.tasks,
     required this.pastTasks,
@@ -1385,9 +1793,11 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
     required this.onDeleteAccount,
+    required this.onEditAgentOnboarding,
     this.error,
   });
 
+  final HermesApiClient apiClient;
   final HermesUser user;
   final List<HermesTask> tasks;
   final List<HermesTask> pastTasks;
@@ -1457,6 +1867,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted;
   final Future<void> Function() onDeleteAccount;
+  final VoidCallback onEditAgentOnboarding;
   final String? error;
 
   @override
@@ -1537,6 +1948,7 @@ class _CommandCenterContent extends StatelessWidget {
             onReminderDeleted: onReminderDeleted,
           ),
           _HomeDestination.settings => _SettingsView(
+            apiClient: apiClient,
             user: user,
             approvals: pendingApprovals,
             pastTasks: pastTasks,
@@ -1546,6 +1958,7 @@ class _CommandCenterContent extends StatelessWidget {
             onCalendarStartHourChanged: onCalendarStartHourChanged,
             onCalendarEndHourChanged: onCalendarEndHourChanged,
             onDeleteAccount: onDeleteAccount,
+            onEditAgentOnboarding: onEditAgentOnboarding,
           ),
         };
         final right = Column(
@@ -1615,79 +2028,77 @@ class _HeroChatCardState extends State<_HeroChatCard> {
   }
 
   @override
-  Widget build(BuildContext context) => _ShellCard(
+  Widget build(BuildContext context) => Column(
     key: const Key('chat-view'),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _SectionTitle(
-          icon: Icons.chat_bubble_rounded,
-          title: 'Bean',
-          subtitle: 'Chat-first command center for your household',
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const _SectionTitle(
+        icon: Icons.chat_bubble_rounded,
+        title: 'Bean',
+        subtitle: 'Chat-first command center for your household',
+      ),
+      const SizedBox(height: 10),
+      _ChatRunStatePill(label: widget.runState),
+      const SizedBox(height: 14),
+      _QuickPromptRail(onPrompt: widget.onSend),
+      const SizedBox(height: 18),
+      for (final message in widget.messages) ...[
+        _MessageBubble(
+          sender: message.role == 'user' ? 'You' : 'Hermes',
+          message: message.content ?? '',
+          alignRight: message.role == 'user',
         ),
         const SizedBox(height: 10),
-        _ChatRunStatePill(label: widget.runState),
-        const SizedBox(height: 14),
-        _QuickPromptRail(onPrompt: widget.onSend),
-        const SizedBox(height: 18),
-        for (final message in widget.messages) ...[
-          _MessageBubble(
-            sender: message.role == 'user' ? 'You' : 'Hermes',
-            message: message.content ?? '',
-            alignRight: message.role == 'user',
-          ),
-          const SizedBox(height: 10),
-        ],
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: HeyBeanTheme.surface2,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: HeyBeanTheme.border),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: TextField(
-                  key: const Key('chat-input'),
-                  controller: _controller,
-                  minLines: 1,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: widget.busy
-                      ? null
-                      : (text) {
-                          _controller.clear();
-                          widget.onSend(text);
-                        },
-                  decoration: const InputDecoration(
-                    hintText:
-                        'Ask Bean to create tasks, reminders, or calendar events...',
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    filled: false,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                key: const Key('primary-chat-action'),
-                onPressed: widget.busy
+      ],
+      Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface2,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: HeyBeanTheme.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: TextField(
+                key: const Key('chat-input'),
+                controller: _controller,
+                minLines: 1,
+                maxLines: 4,
+                textInputAction: TextInputAction.send,
+                onSubmitted: widget.busy
                     ? null
-                    : () {
-                        final text = _controller.text;
+                    : (text) {
                         _controller.clear();
                         widget.onSend(text);
                       },
-                child: const Icon(Icons.arrow_upward_rounded, size: 18),
+                decoration: const InputDecoration(
+                  hintText:
+                      'Ask Bean to create tasks, reminders, or calendar events...',
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  filled: false,
+                ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              key: const Key('primary-chat-action'),
+              onPressed: widget.busy
+                  ? null
+                  : () {
+                      final text = _controller.text;
+                      _controller.clear();
+                      widget.onSend(text);
+                    },
+              child: const Icon(Icons.arrow_upward_rounded, size: 18),
+            ),
+          ],
         ),
-      ],
-    ),
+      ),
+    ],
   );
 }
 
@@ -2203,43 +2614,41 @@ class _TodayHomeView extends StatelessWidget {
           _ApprovalBanner(approval: approvals.first),
           const SizedBox(height: 16),
         ],
-        _ShellCard(
+        Column(
           key: const Key('calendar-view'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (showMonth) ...[
-                _MonthCalendarHeader(
-                  month: selectedDay,
-                  onBackToDay: onBackToDay,
-                ),
-                const SizedBox(height: 16),
-                _MonthGrid(
-                  calendar: calendar,
-                  selectedDay: selectedDay,
-                  onDateSelected: onDateSelected,
-                ),
-                const SizedBox(height: 16),
-                _CalendarMonthTaskList(
-                  tasks: tasks,
-                  calendar: calendar,
-                  onTaskCompleted: onTaskCompleted,
-                ),
-              ] else ...[
-                _AppleStyleTodayTimeline(
-                  calendar: calendar,
-                  eventCategories: eventCategories,
-                  selectedDay: selectedDay,
-                  startHour: startHour,
-                  endHour: endHour,
-                  onDayChanged: onDateSelected,
-                  onEventTap: onCalendarEventEdited,
-                  onEventCategorySaved: onEventCategorySaved,
-                  onEventCategoryDeleted: onEventCategoryDeleted,
-                ),
-              ],
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (showMonth) ...[
+              _MonthCalendarHeader(
+                month: selectedDay,
+                onBackToDay: onBackToDay,
+              ),
+              const SizedBox(height: 16),
+              _MonthGrid(
+                calendar: calendar,
+                selectedDay: selectedDay,
+                onDateSelected: onDateSelected,
+              ),
+              const SizedBox(height: 16),
+              _CalendarMonthTaskList(
+                tasks: tasks,
+                calendar: calendar,
+                onTaskCompleted: onTaskCompleted,
+              ),
+            ] else ...[
+              _AppleStyleTodayTimeline(
+                calendar: calendar,
+                eventCategories: eventCategories,
+                selectedDay: selectedDay,
+                startHour: startHour,
+                endHour: endHour,
+                onDayChanged: onDateSelected,
+                onEventTap: onCalendarEventEdited,
+                onEventCategorySaved: onEventCategorySaved,
+                onEventCategoryDeleted: onEventCategoryDeleted,
+              ),
             ],
-          ),
+          ],
         ),
         const SizedBox(height: 16),
         _ShellCard(
@@ -5360,65 +5769,62 @@ class _TaskListCardState extends State<_TaskListCard> {
     final visibleTasks = widget.tasks
         .where((task) => _taskIsCompleted(task) == _showCompleted)
         .toList();
-    return _ShellCard(
+    return Column(
       key: const Key('tasks-view'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Expanded(
-                child: _SectionTitle(
-                  icon: Icons.task_alt_rounded,
-                  title: 'Task list',
-                  subtitle:
-                      'Create, edit, complete, and hand off tasks to Bean.',
-                ),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Expanded(
+              child: _SectionTitle(
+                icon: Icons.task_alt_rounded,
+                title: 'Task list',
+                subtitle: 'Create, edit, complete, and hand off tasks to Bean.',
               ),
-              IconButton.filledTonal(
-                key: const Key('task-add-action'),
-                tooltip: 'Add task',
-                onPressed: () => _showTaskEditor(context),
-                icon: const Icon(Icons.add_rounded),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ChoiceChip(
-                key: const Key('task-filter-open'),
-                label: const Text('Open'),
-                selected: !_showCompleted,
-                onSelected: (_) => setState(() => _showCompleted = false),
-              ),
-              ChoiceChip(
-                key: const Key('task-filter-done'),
-                label: const Text('Done'),
-                selected: _showCompleted,
-                onSelected: (_) => setState(() => _showCompleted = true),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (visibleTasks.isEmpty)
-            _EmptySurface(
-              label: _showCompleted ? 'No completed tasks' : 'No open tasks',
-            )
-          else
-            for (final task in visibleTasks)
-              _TaskItemTile(
-                task: task,
-                subtitle: _taskSubtitle(task),
-                pending: widget.pendingTaskIds.contains(task.id),
-                onTap: () => _showTaskEditor(context, task: task),
-                onCompleted: widget.onTaskCompleted,
-              ),
-        ],
-      ),
+            ),
+            IconButton.filledTonal(
+              key: const Key('task-add-action'),
+              tooltip: 'Add task',
+              onPressed: () => _showTaskEditor(context),
+              icon: const Icon(Icons.add_rounded),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              key: const Key('task-filter-open'),
+              label: const Text('Open'),
+              selected: !_showCompleted,
+              onSelected: (_) => setState(() => _showCompleted = false),
+            ),
+            ChoiceChip(
+              key: const Key('task-filter-done'),
+              label: const Text('Done'),
+              selected: _showCompleted,
+              onSelected: (_) => setState(() => _showCompleted = true),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (visibleTasks.isEmpty)
+          _EmptySurface(
+            label: _showCompleted ? 'No completed tasks' : 'No open tasks',
+          )
+        else
+          for (final task in visibleTasks)
+            _TaskItemTile(
+              task: task,
+              subtitle: _taskSubtitle(task),
+              pending: widget.pendingTaskIds.contains(task.id),
+              onTap: () => _showTaskEditor(context, task: task),
+              onCompleted: widget.onTaskCompleted,
+            ),
+      ],
     );
   }
 
@@ -5488,65 +5894,63 @@ class _ReminderListCardState extends State<_ReminderListCard> {
     final visibleReminders = widget.reminders
         .where((reminder) => _reminderIsCompleted(reminder) == _showCompleted)
         .toList();
-    return _ShellCard(
+    return Column(
       key: const Key('reminders-view'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Expanded(
-                child: _SectionTitle(
-                  icon: Icons.notifications_active_rounded,
-                  title: 'Reminders',
-                  subtitle: 'Create, edit, and review Bean reminders.',
-                ),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Expanded(
+              child: _SectionTitle(
+                icon: Icons.notifications_active_rounded,
+                title: 'Reminders',
+                subtitle: 'Create, edit, and review Bean reminders.',
               ),
-              IconButton.filledTonal(
-                key: const Key('reminder-add-action'),
-                tooltip: 'Add reminder',
-                onPressed: () => _showReminderEditor(context),
-                icon: const Icon(Icons.add_rounded),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ChoiceChip(
-                key: const Key('reminder-filter-pending'),
-                label: const Text('Pending'),
-                selected: !_showCompleted,
-                onSelected: (_) => setState(() => _showCompleted = false),
-              ),
-              ChoiceChip(
-                key: const Key('reminder-filter-completed'),
-                label: const Text('Completed'),
-                selected: _showCompleted,
-                onSelected: (_) => setState(() => _showCompleted = true),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (visibleReminders.isEmpty)
-            _EmptySurface(
-              label: _showCompleted
-                  ? 'No completed reminders'
-                  : 'No pending reminders',
-            )
-          else
-            for (final reminder in visibleReminders)
-              _ReminderItemTile(
-                reminder: reminder,
-                subtitle: _reminderSubtitle(reminder),
-                onTap: () => _showReminderEditor(context, reminder: reminder),
-                onCompleted: widget.onReminderCompleted,
-              ),
-        ],
-      ),
+            ),
+            IconButton.filledTonal(
+              key: const Key('reminder-add-action'),
+              tooltip: 'Add reminder',
+              onPressed: () => _showReminderEditor(context),
+              icon: const Icon(Icons.add_rounded),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              key: const Key('reminder-filter-pending'),
+              label: const Text('Pending'),
+              selected: !_showCompleted,
+              onSelected: (_) => setState(() => _showCompleted = false),
+            ),
+            ChoiceChip(
+              key: const Key('reminder-filter-completed'),
+              label: const Text('Completed'),
+              selected: _showCompleted,
+              onSelected: (_) => setState(() => _showCompleted = true),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (visibleReminders.isEmpty)
+          _EmptySurface(
+            label: _showCompleted
+                ? 'No completed reminders'
+                : 'No pending reminders',
+          )
+        else
+          for (final reminder in visibleReminders)
+            _ReminderItemTile(
+              reminder: reminder,
+              subtitle: _reminderSubtitle(reminder),
+              onTap: () => _showReminderEditor(context, reminder: reminder),
+              onCompleted: widget.onReminderCompleted,
+            ),
+      ],
     );
   }
 
@@ -5594,8 +5998,22 @@ class _ReminderListCardState extends State<_ReminderListCard> {
   }
 }
 
+String _agentPreferencesSummary(HermesAgentProfile? profile) {
+  final personalityKey = profile?.personalityType ?? 'balanced';
+  final personality = _agentPersonalityOptions.firstWhere(
+    (option) => option.key == personalityKey,
+    orElse: () => _agentPersonalityOptions.first,
+  );
+  final priorities = profile?.onboardingPriorities ?? const <String>[];
+  final prioritySummary = priorities.isEmpty
+      ? 'No priorities selected yet'
+      : priorities.join(', ');
+  return '${personality.label} • $prioritySummary';
+}
+
 class _SettingsView extends StatelessWidget {
   const _SettingsView({
+    required this.apiClient,
     required this.user,
     required this.approvals,
     required this.pastTasks,
@@ -5605,8 +6023,10 @@ class _SettingsView extends StatelessWidget {
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
     required this.onDeleteAccount,
+    required this.onEditAgentOnboarding,
   });
 
+  final HermesApiClient apiClient;
   final HermesUser user;
   final List<HermesApproval> approvals;
   final List<HermesTask> pastTasks;
@@ -5616,6 +6036,7 @@ class _SettingsView extends StatelessWidget {
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
   final Future<void> Function() onDeleteAccount;
+  final VoidCallback onEditAgentOnboarding;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -5636,12 +6057,17 @@ class _SettingsView extends StatelessWidget {
               title: user.name,
               subtitle: user.email,
             ),
-            const _CompactItemTile(
+            _CompactItemTile(
               icon: Icons.tune_rounded,
               title: 'Bean preferences',
-              subtitle:
-                  'Chat guidance and assistant behavior are managed by Hermes Bean',
+              subtitle: _agentPreferencesSummary(user.agentProfile),
+              trailing: TextButton(
+                key: const Key('open-bean-preferences'),
+                onPressed: onEditAgentOnboarding,
+                child: const Text('Update'),
+              ),
             ),
+            _GoogleCalendarSyncCard(apiClient: apiClient),
             _CalendarPreferencesCard(
               startHour: calendarStartHour,
               endHour: calendarEndHour,
@@ -5774,6 +6200,198 @@ class _CalendarPreferencesCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _GoogleCalendarSyncCard extends StatefulWidget {
+  const _GoogleCalendarSyncCard({required this.apiClient});
+
+  final HermesApiClient apiClient;
+
+  @override
+  State<_GoogleCalendarSyncCard> createState() =>
+      _GoogleCalendarSyncCardState();
+}
+
+class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard> {
+  late Future<GoogleCalendarSyncStatus> _statusFuture;
+  String? _message;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _statusFuture = widget.apiClient.googleCalendarStatus();
+  }
+
+  void _reload() {
+    setState(() {
+      _statusFuture = widget.apiClient.googleCalendarStatus();
+    });
+  }
+
+  Future<void> _connect() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final url = await widget.apiClient.googleCalendarAuthUrl();
+      if (!mounted) return;
+      setState(
+        () => _message =
+            'Open this Google authorization link, approve access, then come back and tap Sync now.\n\n$url',
+      );
+      _reload();
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = 'Could not start Google Calendar connection: $error',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _sync() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final result = await widget.apiClient.syncGoogleCalendar();
+      if (!mounted) return;
+      setState(() {
+        _message =
+            'Synced ${result.imported} Google event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
+        _statusFuture = Future.value(result.status);
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Google Calendar sync failed: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _disconnect() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final status = await widget.apiClient.disconnectGoogleCalendar();
+      if (!mounted) return;
+      setState(() {
+        _message = 'Google Calendar disconnected.';
+        _statusFuture = Future.value(status);
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = 'Could not disconnect Google Calendar: $error',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<GoogleCalendarSyncStatus>(
+    future: _statusFuture,
+    builder: (context, snapshot) {
+      final status = snapshot.data;
+      final connected = status?.connected ?? false;
+      return Container(
+        key: const Key('google-calendar-sync-settings'),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface2,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: HeyBeanTheme.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.sync_rounded,
+                  color: HeyBeanTheme.accentStrong,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Google Calendar sync',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      Text(
+                        connected
+                            ? 'Connected${status?.lastSyncedAt == null ? '' : ' · last sync ${_formatCalendarEventDateTime(status?.lastSyncedAt)}'}'
+                            : 'Connect Google Calendar to import events into HeyBean.',
+                        style: const TextStyle(color: HeyBeanTheme.muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (status?.lastError != null && status!.lastError!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                status.lastError!,
+                style: const TextStyle(color: Colors.redAccent),
+              ),
+            ],
+            if (_message != null) ...[
+              const SizedBox(height: 8),
+              SelectableText(
+                _message!,
+                style: const TextStyle(color: HeyBeanTheme.muted),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  key: const Key('google-calendar-connect-action'),
+                  onPressed: _busy ? null : _connect,
+                  icon: const Icon(Icons.login_rounded),
+                  label: Text(connected ? 'Reconnect' : 'Connect Google'),
+                ),
+                FilledButton.icon(
+                  key: const Key('google-calendar-sync-action'),
+                  onPressed: _busy || !connected ? null : _sync,
+                  icon: _busy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded),
+                  label: const Text('Sync now'),
+                ),
+                if (connected)
+                  TextButton(
+                    key: const Key('google-calendar-disconnect-action'),
+                    onPressed: _busy ? null : _disconnect,
+                    child: const Text('Disconnect'),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 class _PastTasksSettingsCard extends StatelessWidget {
@@ -5981,12 +6599,14 @@ class _CompactItemTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.onTap,
+    this.trailing,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback? onTap;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) => InkWell(
@@ -6019,6 +6639,7 @@ class _CompactItemTile extends StatelessWidget {
               ],
             ),
           ),
+          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
         ],
       ),
     ),

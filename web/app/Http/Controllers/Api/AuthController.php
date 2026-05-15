@@ -20,6 +20,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
@@ -32,12 +33,12 @@ class AuthController extends Controller
             'password' => ['required', 'confirmed', Password::min(12)],
         ]);
 
-        $user = User::create($data);
-        app(AgentProfileService::class)->ensureForUser($user);
+        $user = User::create(collect($data)->only(['name', 'email', 'password'])->all());
+        $profile = app(AgentProfileService::class)->ensureForUser($user);
         if (config('hermes_bean.seed_onboarding_resources', true)) {
             app(OnboardingSeedService::class)->ensureForUser($user);
         }
-        $user->load('agentProfile');
+        $user->refresh()->load('agentProfile');
 
         return response()->json(['data' => [
             'user' => $user,
@@ -58,7 +59,9 @@ class AuthController extends Controller
             return response()->json(['message' => 'Invalid credentials.'], 422);
         }
 
-        $user->loadMissing('agentProfile');
+        app(AgentProfileService::class)->ensureForUser($user);
+        $user->unsetRelation('agentProfile');
+        $user->load('agentProfile');
         if (config('hermes_bean.seed_onboarding_resources', true)) {
             app(OnboardingSeedService::class)->ensureForUser($user);
         }
@@ -71,7 +74,44 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        $user = $request->user()->loadMissing('agentProfile');
+        $user = $request->user();
+        app(AgentProfileService::class)->ensureForUser($user);
+        $user->unsetRelation('agentProfile');
+        $user->load('agentProfile');
+
+        return response()->json(['data' => $user]);
+    }
+
+    public function update(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $data = $request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'email' => [
+                'sometimes',
+                'required',
+                'string',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')->ignore($user->id),
+            ],
+            'agent_personality' => ['sometimes', 'string', Rule::in(AgentProfileService::personalityKeys())],
+            'onboarding_priorities' => ['sometimes', 'array', 'max:5'],
+            'onboarding_priorities.*' => ['string', 'max:80'],
+            'onboarding_context' => ['sometimes', 'nullable', 'string', 'max:500'],
+        ]);
+
+        $user->fill(collect($data)->only(['name', 'email'])->all());
+        $user->save();
+
+        if (array_key_exists('agent_personality', $data) || array_key_exists('onboarding_priorities', $data) || array_key_exists('onboarding_context', $data)) {
+            $profile = app(AgentProfileService::class)->ensureForUser($user);
+            app(AgentProfileService::class)->applyOnboarding($profile, $data);
+            $user->forceFill(['onboard_complete' => true])->save();
+            $user->unsetRelation('agentProfile');
+        }
+
+        $user->load('agentProfile');
 
         return response()->json(['data' => $user]);
     }

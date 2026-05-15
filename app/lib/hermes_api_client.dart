@@ -64,6 +64,28 @@ class HermesApiClient {
     return HermesUser.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesUser> updateMe({
+    String? name,
+    String? email,
+    String? agentPersonality,
+    List<String>? onboardingPriorities,
+    String? onboardingContext,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/auth/me',
+      body: {
+        if (name != null) 'name': name,
+        if (email != null) 'email': email,
+        if (agentPersonality != null) 'agent_personality': agentPersonality,
+        if (onboardingPriorities != null)
+          'onboarding_priorities': onboardingPriorities,
+        if (onboardingContext != null) 'onboarding_context': onboardingContext,
+      },
+    );
+    return HermesUser.fromJson(_expectMap(data['data']));
+  }
+
   Future<void> deleteAccount() async {
     await _sendJson('DELETE', '/account');
     bearerToken = null;
@@ -100,6 +122,7 @@ class HermesApiClient {
     String? dueAt,
     String? category,
     String? color,
+    bool isCritical = false,
     Map<String, Object?>? metadata,
   }) async {
     final body = <String, Object?>{
@@ -109,6 +132,7 @@ class HermesApiClient {
       'due_at': dueAt,
       'category': category,
       'color': color,
+      'is_critical': isCritical,
       if (metadata != null) 'metadata': metadata,
     };
     final data = await _sendJson('POST', '/tasks', body: body);
@@ -123,6 +147,7 @@ class HermesApiClient {
     String? completedAt,
     String? category,
     String? color,
+    bool? isCritical,
     Map<String, Object?>? metadata,
     bool clearCategory = false,
     bool clearColor = false,
@@ -134,6 +159,7 @@ class HermesApiClient {
       if (completedAt != null || status == 'open') 'completed_at': completedAt,
       if (category != null || clearCategory) 'category': category,
       if (color != null || clearColor) 'color': color,
+      if (isCritical != null) 'is_critical': isCritical,
       if (metadata != null) 'metadata': metadata,
     };
     final data = await _sendJson('PATCH', '/tasks/$taskId', body: body);
@@ -176,6 +202,7 @@ class HermesApiClient {
     int? calendarEventId,
     String? category,
     String? color,
+    bool isCritical = false,
     Map<String, Object?>? metadata,
   }) async {
     final body = <String, Object?>{
@@ -184,6 +211,7 @@ class HermesApiClient {
       'status': status,
       'category': category,
       'color': color,
+      'is_critical': isCritical,
       if (calendarEventId != null) 'calendar_event_id': calendarEventId,
       if (metadata != null) 'metadata': metadata,
     };
@@ -199,6 +227,7 @@ class HermesApiClient {
     int? calendarEventId,
     String? category,
     String? color,
+    bool? isCritical,
     Map<String, Object?>? metadata,
     bool clearCategory = false,
     bool clearColor = false,
@@ -210,6 +239,7 @@ class HermesApiClient {
       if (calendarEventId != null) 'calendar_event_id': calendarEventId,
       if (category != null || clearCategory) 'category': category,
       if (color != null || clearColor) 'color': color,
+      if (isCritical != null) 'is_critical': isCritical,
       if (metadata != null) 'metadata': metadata,
     };
     final data = await _sendJson('PATCH', '/reminders/$reminderId', body: body);
@@ -225,6 +255,26 @@ class HermesApiClient {
     return _expectList(
       data['data'],
     ).map((json) => HermesCalendarEvent.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<GoogleCalendarSyncStatus> googleCalendarStatus() async {
+    final data = await _sendJson('GET', '/google-calendar/status');
+    return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
+  }
+
+  Future<String> googleCalendarAuthUrl() async {
+    final data = await _sendJson('POST', '/google-calendar/auth-url');
+    return _expectString(_expectMap(data['data'])['auth_url']);
+  }
+
+  Future<GoogleCalendarSyncResult> syncGoogleCalendar() async {
+    final data = await _sendJson('POST', '/google-calendar/sync');
+    return GoogleCalendarSyncResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<GoogleCalendarSyncStatus> disconnectGoogleCalendar() async {
+    final data = await _sendJson('DELETE', '/google-calendar');
+    return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
   }
 
   Future<List<HermesEventCategory>> listEventCategories() async {
@@ -270,6 +320,7 @@ class HermesApiClient {
     String? endsAt,
     String? category,
     String? color,
+    bool? isCritical,
     String? recurrence,
     Map<String, Object?>? metadata,
   }) async {
@@ -283,6 +334,7 @@ class HermesApiClient {
         'category': category,
         'color': color,
         'recurrence': recurrence,
+        if (isCritical != null) 'is_critical': isCritical,
         if (metadata != null) 'metadata': metadata,
       },
     );
@@ -461,17 +513,126 @@ class HermesAuthResult {
 }
 
 class HermesUser {
-  const HermesUser({required this.id, required this.name, required this.email});
+  const HermesUser({
+    required this.id,
+    required this.name,
+    required this.email,
+    this.onboardComplete = false,
+    this.agentProfile,
+  });
 
   final int id;
   final String name;
   final String email;
+  final bool onboardComplete;
+  final HermesAgentProfile? agentProfile;
+
+  HermesUser copyWith({
+    String? name,
+    String? email,
+    bool? onboardComplete,
+    HermesAgentProfile? agentProfile,
+  }) => HermesUser(
+    id: id,
+    name: name ?? this.name,
+    email: email ?? this.email,
+    onboardComplete: onboardComplete ?? this.onboardComplete,
+    agentProfile: agentProfile ?? this.agentProfile,
+  );
 
   factory HermesUser.fromJson(Map<String, Object?> json) => HermesUser(
     id: _expectInt(json['id']),
     name: _expectString(json['name']),
     email: _expectString(json['email']),
+    onboardComplete: json['onboard_complete'] == true,
+    agentProfile: json['agent_profile'] is Map<String, Object?>
+        ? HermesAgentProfile.fromJson(_expectMap(json['agent_profile']))
+        : null,
   );
+}
+
+class HermesAgentProfile {
+  const HermesAgentProfile({this.id, this.settings = const {}});
+
+  final int? id;
+  final Map<String, Object?> settings;
+
+  bool get onboardingCompleted {
+    final onboarding = settings['onboarding'];
+    return onboarding is Map && onboarding['completed'] == true;
+  }
+
+  String get personalityType =>
+      settings['personality_type']?.toString() ?? 'balanced';
+
+  List<String> get onboardingPriorities {
+    final onboarding = settings['onboarding'];
+    if (onboarding is! Map) return const [];
+    final priorities = onboarding['priorities'];
+    if (priorities is! List) return const [];
+    return priorities.map((priority) => priority.toString()).toList();
+  }
+
+  String get onboardingContext {
+    final onboarding = settings['onboarding'];
+    if (onboarding is! Map) return '';
+    return onboarding['context']?.toString() ?? '';
+  }
+
+  factory HermesAgentProfile.fromJson(Map<String, Object?> json) =>
+      HermesAgentProfile(
+        id: json['id'] == null ? null : _expectInt(json['id']),
+        settings: json['settings'] is Map<String, Object?>
+            ? Map<String, Object?>.from(_expectMap(json['settings']))
+            : const {},
+      );
+}
+
+class GoogleCalendarSyncStatus {
+  const GoogleCalendarSyncStatus({
+    required this.connected,
+    required this.status,
+    this.email,
+    this.calendarId,
+    this.lastSyncedAt,
+    this.lastError,
+  });
+
+  final bool connected;
+  final String status;
+  final String? email;
+  final String? calendarId;
+  final String? lastSyncedAt;
+  final String? lastError;
+
+  factory GoogleCalendarSyncStatus.fromJson(Map<String, Object?> json) =>
+      GoogleCalendarSyncStatus(
+        connected: json['connected'] == true,
+        status: _expectString(json['status']),
+        email: json['email']?.toString(),
+        calendarId: json['calendar_id']?.toString(),
+        lastSyncedAt: json['last_synced_at']?.toString(),
+        lastError: json['last_error']?.toString(),
+      );
+}
+
+class GoogleCalendarSyncResult {
+  const GoogleCalendarSyncResult({
+    required this.imported,
+    required this.deleted,
+    required this.status,
+  });
+
+  final int imported;
+  final int deleted;
+  final GoogleCalendarSyncStatus status;
+
+  factory GoogleCalendarSyncResult.fromJson(Map<String, Object?> json) =>
+      GoogleCalendarSyncResult(
+        imported: _expectInt(json['imported']),
+        deleted: _expectInt(json['deleted']),
+        status: GoogleCalendarSyncStatus.fromJson(_expectMap(json['status'])),
+      );
 }
 
 class HermesTodaySummary {
@@ -527,6 +688,7 @@ class HermesTask {
     this.dueAt,
     this.category,
     this.color,
+    this.isCritical = false,
     this.completedAt,
     this.metadata,
   });
@@ -537,6 +699,7 @@ class HermesTask {
   final String? dueAt;
   final String? category;
   final String? color;
+  final bool isCritical;
   final String? completedAt;
   final Map<String, Object?>? metadata;
 
@@ -550,6 +713,12 @@ class HermesTask {
       category:
           json['category'] as String? ?? (metadata?['category'] as String?),
       color: json['color'] as String? ?? (metadata?['color'] as String?),
+      isCritical: _readBool(
+        json['is_critical'] ??
+            json['isCritical'] ??
+            metadata?['is_critical'] ??
+            metadata?['isCritical'],
+      ),
       completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
       metadata: metadata,
     );
@@ -561,6 +730,7 @@ class HermesTask {
     String? dueAt,
     String? category,
     String? color,
+    bool? isCritical,
     String? completedAt,
     Map<String, Object?>? metadata,
     bool clearDueAt = false,
@@ -574,6 +744,7 @@ class HermesTask {
     dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
     category: clearCategory ? null : category ?? this.category,
     color: clearColor ? null : color ?? this.color,
+    isCritical: isCritical ?? this.isCritical,
     completedAt: clearCompletedAt ? null : completedAt ?? this.completedAt,
     metadata: metadata ?? this.metadata,
   );
@@ -586,6 +757,7 @@ class HermesReminder {
     this.dueAt,
     this.category,
     this.color,
+    this.isCritical = false,
     this.status,
     this.completedAt,
     this.calendarEventId,
@@ -597,6 +769,7 @@ class HermesReminder {
   final String? dueAt;
   final String? category;
   final String? color;
+  final bool isCritical;
   final String? status;
   final String? completedAt;
   final int? calendarEventId;
@@ -611,6 +784,12 @@ class HermesReminder {
       category:
           json['category'] as String? ?? (metadata?['category'] as String?),
       color: json['color'] as String? ?? (metadata?['color'] as String?),
+      isCritical: _readBool(
+        json['is_critical'] ??
+            json['isCritical'] ??
+            metadata?['is_critical'] ??
+            metadata?['isCritical'],
+      ),
       status: json['status'] as String?,
       completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
       calendarEventId: json['calendar_event_id'] == null
@@ -625,6 +804,7 @@ class HermesReminder {
     String? dueAt,
     String? category,
     String? color,
+    bool? isCritical,
     String? status,
     String? completedAt,
     int? calendarEventId,
@@ -638,6 +818,7 @@ class HermesReminder {
     dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
     category: clearCategory ? null : category ?? this.category,
     color: clearColor ? null : color ?? this.color,
+    isCritical: isCritical ?? this.isCritical,
     status: status ?? this.status,
     completedAt: completedAt ?? this.completedAt,
     calendarEventId: calendarEventId ?? this.calendarEventId,
@@ -679,6 +860,7 @@ class HermesCalendarEvent {
     this.endsAt,
     this.category,
     this.color,
+    this.isCritical = false,
     this.recurrence,
     this.metadata,
   });
@@ -689,6 +871,7 @@ class HermesCalendarEvent {
   final String? endsAt;
   final String? category;
   final String? color;
+  final bool isCritical;
   final String? recurrence;
   final Map<String, Object?>? metadata;
 
@@ -702,6 +885,12 @@ class HermesCalendarEvent {
       category:
           json['category'] as String? ?? (metadata?['category'] as String?),
       color: json['color'] as String? ?? (metadata?['color'] as String?),
+      isCritical: _readBool(
+        json['is_critical'] ??
+            json['isCritical'] ??
+            metadata?['is_critical'] ??
+            metadata?['isCritical'],
+      ),
       recurrence:
           json['recurrence'] as String? ?? (metadata?['recurrence'] as String?),
       metadata: metadata,
@@ -714,6 +903,7 @@ class HermesCalendarEvent {
     String? endsAt,
     String? category,
     String? color,
+    bool? isCritical,
     String? recurrence,
     Map<String, Object?>? metadata,
     bool clearEndsAt = false,
@@ -728,6 +918,7 @@ class HermesCalendarEvent {
     endsAt: clearEndsAt ? null : endsAt ?? this.endsAt,
     category: clearCategory ? null : category ?? this.category,
     color: clearColor ? null : color ?? this.color,
+    isCritical: isCritical ?? this.isCritical,
     recurrence: clearRecurrence ? null : recurrence ?? this.recurrence,
     metadata: clearMetadata ? null : metadata ?? this.metadata,
   );
@@ -868,4 +1059,14 @@ int _expectInt(Object? value) {
 String _expectString(Object? value) {
   if (value is String) return value;
   throw FormatException('Expected string, got ${value.runtimeType}');
+}
+
+bool _readBool(Object? value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final normalized = value.toLowerCase();
+    return normalized == 'true' || normalized == '1' || normalized == 'yes';
+  }
+  return false;
 }

@@ -5,15 +5,18 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ConversationMessageController;
 use App\Http\Controllers\Api\ConversationSessionController;
 use App\Http\Controllers\Api\DomainResourceController;
+use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\TodaySummaryController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('api.rate_limit')->group(function (): void {
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::get('/google-calendar/callback', [GoogleCalendarController::class, 'callback']);
 
     Route::middleware('auth.bearer')->group(function (): void {
         Route::get('/auth/me', [AuthController::class, 'me']);
+        Route::patch('/auth/me', [AuthController::class, 'update']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::delete('/account', [AuthController::class, 'destroy']);
         Route::get('/account/export', [AuthController::class, 'export']);
@@ -24,6 +27,10 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/assistant/sessions/{session}/events', [ActivityEventController::class, 'index']);
 
         Route::get('/today', [TodaySummaryController::class, 'show']);
+        Route::get('/google-calendar/status', [GoogleCalendarController::class, 'status']);
+        Route::post('/google-calendar/auth-url', [GoogleCalendarController::class, 'authUrl']);
+        Route::post('/google-calendar/sync', [GoogleCalendarController::class, 'sync']);
+        Route::delete('/google-calendar', [GoogleCalendarController::class, 'disconnect']);
 
         Route::get('/tasks', [DomainResourceController::class, 'listTasks']);
         Route::get('/tasks/past', [DomainResourceController::class, 'listPastTasks']);

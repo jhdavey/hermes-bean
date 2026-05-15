@@ -101,7 +101,26 @@ class AssistantDomainApiTest extends TestCase
         $this->assertDatabaseHas('scheduler_job_records', ['name' => 'daily-review']);
     }
 
-    public function test_calendar_events_support_editable_details_categories_recurrence_and_event_reminders(): void
+    public function test_created_tasks_are_immediately_visible_from_database_task_list(): void
+    {
+        $token = $this->apiToken();
+
+        $created = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Database source task',
+            'type' => 'todo',
+            'status' => 'open',
+        ])->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->getJson('/api/tasks')
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $created,
+                'title' => 'Database source task',
+            ]);
+    }
+
+    public function test_calendar_events_support_editable_details_categories_recurrence_and_reminders(): void
     {
         $token = $this->apiToken();
 
@@ -340,7 +359,11 @@ PHP);
             ->assertJsonPath('data.status', 'open')
             ->assertJsonPath('data.completed_at', null);
 
-        $this->assertDatabaseHas('tasks', ['id' => $pastTaskId, 'completed_at' => null]);
+        $this->assertDatabaseHas('tasks', ['id' => $pastTaskId, 'completed_at' => null, 'due_at' => null]);
+
+        $this->withToken($token)->getJson('/api/tasks')
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Archived oil change']);
     }
 
     public function test_completed_tasks_are_purged_after_ten_days(): void

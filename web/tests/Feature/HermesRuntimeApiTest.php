@@ -132,6 +132,62 @@ PHP);
             ->assertJsonPath('data.5.event_type', 'runtime.message_completed');
     }
 
+    public function test_runtime_persists_saved_events_tasks_and_reminders_to_their_domain_tables(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Saved the task, reminder, and event.',
+    'actions' => [
+        ['type' => 'task.create', 'risk' => 'low', 'parameters' => ['title' => 'Persist DB task', 'due_at' => '2026-05-13T17:00:00Z']],
+        ['type' => 'reminder.create', 'risk' => 'low', 'parameters' => ['title' => 'Persist DB reminder', 'remind_at' => '2026-05-13T18:00:00Z']],
+        ['type' => 'calendar_event.create', 'risk' => 'low', 'parameters' => ['title' => 'Persist DB event', 'starts_at' => '2026-05-13T19:00:00Z', 'ends_at' => '2026-05-13T20:00:00Z']],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $userId = User::where('email', 'test@example.com')->value('id');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Persistence contract',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Save a task, a reminder, and a calendar event.',
+        ])->assertCreated()
+            ->assertJsonFragment(['event_type' => 'assistant.task.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.reminder.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $this->assertDatabaseHas('tasks', [
+            'user_id' => $userId,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Persist DB task',
+        ]);
+        $this->assertDatabaseHas('reminders', [
+            'user_id' => $userId,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Persist DB reminder',
+        ]);
+        $this->assertDatabaseHas('calendar_events', [
+            'user_id' => $userId,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Persist DB event',
+        ]);
+
+        $this->withToken($token)->getJson('/api/tasks')->assertOk()
+            ->assertJsonFragment(['title' => 'Persist DB task']);
+        $this->withToken($token)->getJson('/api/reminders')->assertOk()
+            ->assertJsonFragment(['title' => 'Persist DB reminder']);
+        $this->withToken($token)->getJson('/api/calendar-events')->assertOk()
+            ->assertJsonFragment(['title' => 'Persist DB event']);
+        $this->withToken($token)->getJson('/api/today')->assertOk()
+            ->assertJsonFragment(['title' => 'Persist DB task'])
+            ->assertJsonFragment(['title' => 'Persist DB reminder'])
+            ->assertJsonFragment(['title' => 'Persist DB event']);
+    }
+
     public function test_runtime_executes_complex_multi_step_dashboard_crud_actions(): void
     {
         $this->configureFakeHermes(<<<'PHP'
@@ -190,7 +246,7 @@ PHP);
 #!/usr/bin/env php
 <?php
 $prompt = implode(' ', $argv);
-$required = ['task.update', 'task.delete', 'reminder.update', 'calendar_event.delete', 'approval.approve', 'blocker.resolve', 'agent_profile.update', 'ask a follow-up about whether it should recur'];
+$required = ['task.update', 'task.delete', 'reminder.update', 'calendar_event.delete', 'approval.approve', 'blocker.resolve', 'agent_profile.update', 'is_critical', 'task_id', 'ask whether the user wants a reminder time', 'ask a follow-up about whether it should recur'];
 $missing = array_values(array_filter($required, fn ($needle) => ! str_contains($prompt, $needle)));
 echo json_encode([
     'message' => empty($missing) ? 'Schema includes universal dashboard controls.' : 'Missing schema controls: '.implode(', ', $missing),

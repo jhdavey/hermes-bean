@@ -246,10 +246,13 @@ Rules:
 - Existing dashboard resources are listed in dashboard_state; use their numeric id when updating, deleting, approving, denying, or resolving them.
 - Risky external, destructive outside the dashboard, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
 - If no concrete action is needed, return an empty actions array.
+- Adapt your tone to `agent_profile.settings.personality_prompt` when present, and use `agent_profile.settings.onboarding.priorities` plus `agent_profile.settings.onboarding.context` to understand what the user cares about.
 - Use ISO-8601 timestamps for dates when you create or update reminders, calendar events, and scheduler jobs.
 - For user-facing requests to schedule, plan, book, block time, add an appointment, create a reminder, or create a task: emit visible dashboard resources (`calendar_event.*`, `reminder.*`, and/or `task.*`) so the item appears in `/api/today`. Do not use `scheduler_job.*` for ordinary user calendar/reminder/task planning.
 - Only use `scheduler_job.*` for internal/background agent automation. If you do emit `scheduler_job.create` with `scheduled_for` for a user-visible scheduled plan, the app will mirror it to a calendar event unless `parameters.kind` or `parameters.payload.kind` is `internal_automation`, `background_job`, or `system_job`.
-- Calendar event parameters support `title`, `description`, `location`, `category`, `color`, `recurrence`, `starts_at`, `ends_at`, `status`, and `metadata`. Reminder metadata can include recurrence details. Task due dates use `due_at`.
+- Task parameters support `title`, `type`, `status`, `notes`, `category`, `color`, `is_critical`, `due_at`, and `metadata`. Reminder parameters support `title`, `notes`, `category`, `color`, `is_critical`, `remind_at`, `status`, `calendar_event_id`, and `metadata`. Calendar event parameters support `title`, `description`, `location`, `category`, `color`, `is_critical`, `recurrence`, `starts_at`, `ends_at`, `status`, and `metadata`.
+- To add a reminder for a task, emit an ordered `task.create` or `task.update` plus a `reminder.create` or `reminder.update`; link them by putting `task_id` and `task_title` in reminder `metadata` when the task id is known, or by using matching titles when creating both in one response.
+- Ask useful follow-up questions when a request is underspecified. For task creation, ask whether the user wants a reminder time, due date, category, critical/starred status, recurrence, notes, or any other sensible detail unless the user's request already makes the answer clear.
 - If the user asks for a named event on multiple weekdays without explicitly saying recurring, weekly, every week, repeats, or recurrence: create one-off calendar events for the next matching days in the current week, then ask a follow-up about whether it should recur. Only set recurrence metadata when the user explicitly requests recurrence.
 
 Runtime payload:
@@ -281,10 +284,11 @@ PROMPT.$this->payloadFor($session, $message);
                 'runtime_home' => $profile->runtime_home,
                 'tool_policy' => $profile->tool_policy,
                 'approval_policy' => $profile->approval_policy,
+                'settings' => $profile->settings,
             ] : null,
             'dashboard_state' => [
-                'tasks' => Task::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'type', 'status', 'notes', 'due_at', 'metadata']),
-                'reminders' => Reminder::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'notes', 'status', 'remind_at', 'metadata']),
+                'tasks' => Task::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'due_at', 'metadata']),
+                'reminders' => Reminder::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'notes', 'status', 'category', 'color', 'is_critical', 'remind_at', 'metadata']),
                 'calendar_events' => CalendarEvent::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'description', 'location', 'category', 'color', 'recurrence', 'status', 'starts_at', 'ends_at', 'metadata']),
                 'approvals' => Approval::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'status', 'description', 'payload']),
                 'blockers' => Blocker::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'reason', 'status', 'context']),

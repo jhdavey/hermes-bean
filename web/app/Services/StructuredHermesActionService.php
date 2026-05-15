@@ -248,8 +248,14 @@ class StructuredHermesActionService
             'type' => $this->stringParameter($parameters, 'type', 'todo'),
             'status' => $this->stringParameter($parameters, 'status', 'open'),
             'notes' => $parameters['notes'] ?? null,
+            'category' => $parameters['category'] ?? null,
+            'color' => $parameters['color'] ?? null,
+            'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
             'due_at' => isset($parameters['due_at']) ? Carbon::parse((string) $parameters['due_at']) : null,
-            'metadata' => ['created_by' => 'structured_hermes_action'],
+            'metadata' => array_merge(
+                ['created_by' => 'structured_hermes_action'],
+                is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []
+            ),
         ]);
 
         return $this->recordEvent($session, 'assistant.task.created', [
@@ -266,6 +272,9 @@ class StructuredHermesActionService
             'calendar_event_id' => $parameters['calendar_event_id'] ?? null,
             'title' => $this->stringParameter($parameters, 'title', 'Untitled reminder'),
             'notes' => $parameters['notes'] ?? null,
+            'category' => $parameters['category'] ?? null,
+            'color' => $parameters['color'] ?? null,
+            'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
             'remind_at' => Carbon::parse((string) ($parameters['remind_at'] ?? now()->addDay()->toIso8601String())),
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
             'metadata' => array_merge(
@@ -296,6 +305,7 @@ class StructuredHermesActionService
             'location' => $parameters['location'] ?? null,
             'category' => $parameters['category'] ?? null,
             'color' => $parameters['color'] ?? null,
+            'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
             'recurrence' => $parameters['recurrence'] ?? null,
             'starts_at' => $startsAt,
             'ends_at' => $endsAt,
@@ -317,7 +327,7 @@ class StructuredHermesActionService
     private function updateTask(ConversationSession $session, array $parameters): ActivityEvent
     {
         $task = $this->ownedModel(Task::class, $session, $parameters);
-        $updates = $this->onlyPresent($parameters, ['title', 'type', 'status', 'notes', 'metadata']);
+        $updates = $this->onlyPresent($parameters, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'metadata']);
         if (array_key_exists('due_at', $parameters)) {
             $updates['due_at'] = $parameters['due_at'] ? Carbon::parse((string) $parameters['due_at']) : null;
         }
@@ -329,7 +339,7 @@ class StructuredHermesActionService
     private function updateReminder(ConversationSession $session, array $parameters): ActivityEvent
     {
         $reminder = $this->ownedModel(Reminder::class, $session, $parameters);
-        $updates = $this->onlyPresent($parameters, ['title', 'notes', 'status', 'metadata']);
+        $updates = $this->onlyPresent($parameters, ['title', 'notes', 'status', 'category', 'color', 'is_critical', 'metadata']);
         if (array_key_exists('remind_at', $parameters)) {
             $updates['remind_at'] = Carbon::parse((string) $parameters['remind_at']);
         }
@@ -341,7 +351,7 @@ class StructuredHermesActionService
     private function updateCalendarEvent(ConversationSession $session, array $parameters): ActivityEvent
     {
         $calendarEvent = $this->ownedModel(CalendarEvent::class, $session, $parameters);
-        $updates = $this->onlyPresent($parameters, ['title', 'description', 'location', 'category', 'color', 'recurrence', 'status', 'metadata']);
+        $updates = $this->onlyPresent($parameters, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'status', 'metadata']);
         if (array_key_exists('starts_at', $parameters)) {
             $updates['starts_at'] = Carbon::parse((string) $parameters['starts_at']);
         }

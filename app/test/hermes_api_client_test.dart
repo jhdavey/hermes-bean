@@ -101,6 +101,59 @@ void main() {
     },
   );
 
+  test(
+    'updates Bean onboarding preferences through auth profile update',
+    () async {
+      final requests = <HermesApiRequest>[];
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        bearerToken: 'token-123',
+        transport: (request) async {
+          requests.add(request);
+          expect(request.method, 'PATCH');
+          expect(request.path, '/auth/me');
+          expect(request.headers['Authorization'], 'Bearer token-123');
+          expect(request.body, {
+            'agent_personality': 'coach',
+            'onboarding_priorities': ['Family', 'Planning'],
+            'onboarding_context': 'Protect dinner.',
+          });
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'id': 9,
+                'name': 'Bean User',
+                'email': 'bean@example.com',
+                'onboard_complete': true,
+                'agent_profile': {
+                  'settings': {
+                    'personality_type': 'coach',
+                    'onboarding': {
+                      'completed': true,
+                      'priorities': ['Family', 'Planning'],
+                      'context': 'Protect dinner.',
+                    },
+                  },
+                },
+              },
+            }),
+          );
+        },
+      );
+
+      final user = await client.updateMe(
+        agentPersonality: 'coach',
+        onboardingPriorities: ['Family', 'Planning'],
+        onboardingContext: 'Protect dinner.',
+      );
+
+      expect(user.onboardComplete, isTrue);
+      expect(user.agentProfile?.settings['personality_type'], 'coach');
+      expect(requests, hasLength(1));
+    },
+  );
+
   test('marks tasks complete with bearer token', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
