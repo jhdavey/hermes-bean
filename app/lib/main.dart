@@ -692,6 +692,19 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     });
   }
 
+  void _selectCalendarMonth(DateTime month) {
+    final selected = _dateOnly(_selectedCalendarDay);
+    final daysInTargetMonth = DateTime(month.year, month.month + 1, 0).day;
+    setState(() {
+      _selectedCalendarDay = DateTime(
+        month.year,
+        month.month,
+        selected.day.clamp(1, daysInTargetMonth),
+      );
+      _showCalendarMonth = true;
+    });
+  }
+
   Future<void> _loadCalendarPreferences() async {
     final preferences = await SharedPreferences.getInstance();
     final startHour = preferences.getInt(_calendarStartHourPreferenceKey);
@@ -1273,6 +1286,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               calendarStartHour: _calendarStartHour,
               calendarEndHour: _calendarEndHour,
               onCalendarDaySelected: _selectCalendarDay,
+              onCalendarMonthSelected: _selectCalendarMonth,
               onBackToCalendarDay: _returnToCalendarDay,
               onCalendarStartHourChanged: _setCalendarStartHour,
               onCalendarEndHourChanged: _setCalendarEndHour,
@@ -1859,6 +1873,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.calendarStartHour,
     required this.calendarEndHour,
     required this.onCalendarDaySelected,
+    required this.onCalendarMonthSelected,
     required this.onBackToCalendarDay,
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
@@ -1901,6 +1916,7 @@ class _CommandCenterContent extends StatelessWidget {
   final int calendarStartHour;
   final int calendarEndHour;
   final ValueChanged<DateTime> onCalendarDaySelected;
+  final ValueChanged<DateTime> onCalendarMonthSelected;
   final VoidCallback onBackToCalendarDay;
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
@@ -1993,6 +2009,7 @@ class _CommandCenterContent extends StatelessWidget {
             startHour: calendarStartHour,
             endHour: calendarEndHour,
             onDateSelected: onCalendarDaySelected,
+            onMonthSelected: onCalendarMonthSelected,
             onBackToDay: onBackToCalendarDay,
             onTaskCompleted: onTaskCompleted,
             onTaskSaved: onTaskSaved,
@@ -2898,6 +2915,7 @@ class _TodayHomeView extends StatelessWidget {
     required this.startHour,
     required this.endHour,
     required this.onDateSelected,
+    required this.onMonthSelected,
     required this.onBackToDay,
     required this.onTaskCompleted,
     required this.onTaskSaved,
@@ -2917,6 +2935,7 @@ class _TodayHomeView extends StatelessWidget {
   final int startHour;
   final int endHour;
   final ValueChanged<DateTime> onDateSelected;
+  final ValueChanged<DateTime> onMonthSelected;
   final VoidCallback onBackToDay;
   final Future<void> Function(HermesTask task) onTaskCompleted;
   final Future<void> Function(
@@ -2968,24 +2987,15 @@ class _TodayHomeView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (showMonth) ...[
-              _MonthCalendarHeader(
-                month: selectedDay,
-                onBackToDay: onBackToDay,
+              _MonthScroller(
+                selectedMonth: selectedDay,
+                onMonthSelected: onMonthSelected,
               ),
               const SizedBox(height: 16),
               _MonthGrid(
                 calendar: calendar,
                 selectedDay: selectedDay,
                 onDateSelected: onDateSelected,
-              ),
-              const SizedBox(height: 16),
-              _CalendarMonthTaskList(
-                tasks: tasks,
-                calendar: calendar,
-                onTaskCompleted: onTaskCompleted,
-                onTaskSaved: onTaskSaved,
-                onTaskDeleted: onTaskDeleted,
-                eventCategories: eventCategories,
               ),
             ] else ...[
               _AppleStyleTodayTimeline(
@@ -5070,11 +5080,6 @@ int? _monthNumber(String name) {
 String _formatCalendarEventDateTime(String? value) =>
     _formatNaturalDateTime(value);
 
-String _naturalDateTimeOrFallback(String? value, {required String fallback}) {
-  final formatted = _formatNaturalDateTime(value);
-  return formatted.isEmpty ? fallback : formatted;
-}
-
 String _formatNaturalDateTime(String? value, {DateTime? now}) {
   if (value == null || value.trim().isEmpty) return '';
   final parsed = _parseCalendarEventDateTime(value);
@@ -5251,21 +5256,6 @@ DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
 bool _sameCalendarDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
 
-String _relativeDayLabel(DateTime day, {DateTime? now}) {
-  final anchor = _dateOnly(now ?? DateTime.now());
-  final selectedDay = _dateOnly(day);
-  final daysFromToday = selectedDay.difference(anchor).inDays;
-  if (daysFromToday == 0) return 'today';
-  if (daysFromToday == 1) return 'tomorrow';
-  if (daysFromToday == -1) return 'yesterday';
-  if (daysFromToday > 1 && daysFromToday < 7) {
-    return _shortWeekdayName(selectedDay.weekday);
-  }
-  return selectedDay.year == anchor.year
-      ? '${_shortMonthName(selectedDay.month)} ${selectedDay.day}'
-      : '${_shortMonthName(selectedDay.month)} ${selectedDay.day}, ${selectedDay.year}';
-}
-
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 
 bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
@@ -5282,138 +5272,86 @@ bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
   return end.isAfter(dayStart) && start.isBefore(dayEnd);
 }
 
-class _CalendarMonthTaskList extends StatelessWidget {
-  const _CalendarMonthTaskList({
-    required this.tasks,
-    required this.calendar,
-    required this.onTaskCompleted,
-    required this.onTaskSaved,
-    required this.onTaskDeleted,
-    required this.eventCategories,
+class _MonthScroller extends StatelessWidget {
+  const _MonthScroller({
+    required this.selectedMonth,
+    required this.onMonthSelected,
   });
 
-  final List<HermesTask> tasks;
-  final List<HermesCalendarEvent> calendar;
-  final Future<void> Function(HermesTask task) onTaskCompleted;
-  final Future<void> Function(
-    HermesTask? task, {
-    required String title,
-    String? dueAt,
-    String? category,
-    String? color,
-  })
-  onTaskSaved;
-  final Future<void> Function(HermesTask task) onTaskDeleted;
-  final List<HermesEventCategory> eventCategories;
+  final DateTime selectedMonth;
+  final ValueChanged<DateTime> onMonthSelected;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        'Rest of month',
-        style: Theme.of(
-          context,
-        ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
-      ),
-      const SizedBox(height: 8),
-      if (tasks.isEmpty && calendar.isEmpty)
-        const _EmptySurface(label: 'No tasks for the rest of the month')
-      else ...[
-        for (final task in tasks)
-          _TaskItemTile(
-            task: task,
-            subtitle: _taskSubtitle(task),
-            onCompleted: onTaskCompleted,
-            onTap: () => _showTaskEditor(context, task: task),
-          ),
-        for (final event in calendar)
-          _CompactItemTile(
-            icon: Icons.event_available_rounded,
-            title: event.title,
-            subtitle: _naturalDateTimeOrFallback(
-              event.startsAt,
-              fallback: 'This month',
+  Widget build(BuildContext context) {
+    final selected = DateTime(selectedMonth.year, selectedMonth.month);
+    final months = List<DateTime>.generate(
+      36,
+      (index) => DateTime(selected.year, selected.month + index),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final pillWidth = constraints.maxWidth / 6;
+        return SizedBox(
+          key: const Key('calendar-month-scroller'),
+          height: 42,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              children: [
+                for (var index = 0; index < months.length; index++)
+                  Builder(
+                    builder: (context) {
+                      final month = months[index];
+                      final isSelected =
+                          month.year == selected.year &&
+                          month.month == selected.month;
+                      return SizedBox(
+                        key: isSelected
+                            ? const Key('calendar-month-pill-selected')
+                            : Key('calendar-month-pill-$index'),
+                        width: pillWidth,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: () => onMonthSelected(month),
+                            child: Container(
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? HeyBeanTheme.accent
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? HeyBeanTheme.accentStrong
+                                      : HeyBeanTheme.border,
+                                ),
+                              ),
+                              child: Text(
+                                _shortMonthName(month.month),
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : HeyBeanTheme.text,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+              ],
             ),
           ),
-      ],
-    ],
-  );
-
-  Future<void> _showTaskEditor(BuildContext context, {HermesTask? task}) async {
-    final result = await _showTitleTimeEditor(
-      context,
-      title: task == null ? 'New task' : 'Edit task',
-      titleLabel: 'Task title',
-      timeLabel: 'Due date',
-      initialTitle: task?.title ?? '',
-      initialTime: _formatCalendarEventDateTime(task?.dueAt),
-      allowEmptyTime: true,
-      categories: eventCategories,
-      initialCategory: task?.category,
-      initialColor: task?.color,
-      deleteLabel: task == null ? null : 'Delete task',
-    );
-    if (result == null) return;
-    if (result['delete'] == true && task != null) {
-      await onTaskDeleted(task);
-      return;
-    }
-    final title = (result['title'] as String).trim();
-    if (title.isEmpty) return;
-    await onTaskSaved(
-      task,
-      title: title,
-      dueAt: result['time'] as String?,
-      category: result['category'] as String?,
-      color: result['color'] as String?,
+        );
+      },
     );
   }
-}
-
-class _MonthCalendarHeader extends StatelessWidget {
-  const _MonthCalendarHeader({required this.month, required this.onBackToDay});
-
-  final DateTime month;
-  final VoidCallback onBackToDay;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      InkWell(
-        key: const Key('calendar-day-chevron'),
-        borderRadius: BorderRadius.circular(22),
-        onTap: onBackToDay,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: HeyBeanTheme.border),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x12000000),
-                blurRadius: 14,
-                offset: Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.chevron_right_rounded, size: 20),
-              const SizedBox(width: 4),
-              Text(
-                _monthName(month.month),
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ],
-          ),
-        ),
-      ),
-      const Spacer(),
-    ],
-  );
 }
 
 class _MonthGrid extends StatelessWidget {

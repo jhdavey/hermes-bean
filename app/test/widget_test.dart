@@ -466,6 +466,54 @@ void main() {
     );
   });
 
+  testWidgets(
+    'month view has six-wide month scroller and keeps task list scoped to today',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _TomorrowReminderFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('calendar-month-chevron')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('calendar-month-scroller')), findsOneWidget);
+      expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
+      expect(find.text('Tasks for Today'), findsOneWidget);
+      expect(find.text('Today task'), findsOneWidget);
+      expect(find.text('Tomorrow task'), findsNothing);
+      expect(find.text('Rest of month'), findsNothing);
+
+      final monthScrollerWidth = tester
+          .getSize(find.byKey(const Key('calendar-month-scroller')))
+          .width;
+      expect(
+        tester
+            .getSize(find.byKey(const Key('calendar-month-pill-selected')))
+            .width,
+        closeTo(monthScrollerWidth / 6, 1),
+      );
+
+      final nextMonth = DateTime(DateTime.now().year, DateTime.now().month + 1);
+      await tester.tap(find.byKey(const Key('calendar-month-pill-1')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-pill-selected')),
+          matching: find.text(_testShortMonthNames[nextMonth.month - 1]),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Today task'), findsOneWidget);
+      expect(find.text('Tomorrow task'), findsNothing);
+    },
+  );
+
   testWidgets('task and reminder editors can assign event-style categories', (
     WidgetTester tester,
   ) async {
@@ -3033,6 +3081,21 @@ String? _headingDaysAfter(String? heading, int days) {
   final date = DateTime(2026, month, day).add(Duration(days: days));
   return '${_testShortWeekdayNames[date.weekday - 1]} — ${_testMonthNames[date.month - 1]} ${date.day}';
 }
+
+const _testShortMonthNames = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
 const _testMonthNames = [
   'January',
