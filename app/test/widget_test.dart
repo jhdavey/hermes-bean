@@ -917,6 +917,11 @@ void main() {
     final fixedHourColumn = tester.getRect(
       find.byKey(const Key('calendar-fixed-hours-column')),
     );
+    final currentTimeLabel = tester.getRect(
+      find.byKey(const Key('calendar-current-time-label')),
+    );
+    expect(currentTimeLabel.left, greaterThanOrEqualTo(fixedHourColumn.left));
+    expect(currentTimeLabel.right, lessThanOrEqualTo(fixedHourColumn.right));
     expect(fixedHourColumn.height, closeTo(36 + 42 + (16 * 52.5), .1));
     final scrollingDayColumns = tester.getRect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
@@ -1401,49 +1406,27 @@ void main() {
     expect(find.text('Buy printer paper'), findsOneWidget);
   });
 
-  testWidgets(
-    'settings lists completed past tasks that dropped off active lists',
-    (WidgetTester tester) async {
-      final api = _ActiveTasksFakeHermesApiClient();
-      await tester.pumpWidget(
-        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('settings no longer shows completed past tasks section', (
+    WidgetTester tester,
+  ) async {
+    final api = _ActiveTasksFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
 
-      expect(find.text('Archived oil change'), findsNothing);
+    expect(find.text('Archived oil change'), findsNothing);
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const Key('past-tasks-settings')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
 
-      expect(api.pastTaskListCalls, 1);
-      expect(find.text('Past tasks'), findsOneWidget);
-      expect(
-        find.textContaining('Completed tasks that dropped off active lists'),
-        findsOneWidget,
-      );
-      expect(find.text('Archived oil change'), findsOneWidget);
+    expect(api.pastTaskListCalls, 1);
+    expect(find.byKey(const Key('past-tasks-settings')), findsNothing);
+    expect(find.text('Past tasks'), findsNothing);
+    expect(find.text('Archived oil change'), findsNothing);
+  });
 
-      expect(find.text('Archived oil change'), findsOneWidget);
-      expect(
-        find.text('Completed · Permanently deletes after 10 days'),
-        findsOneWidget,
-      );
-
-      await tester.tap(find.byKey(const Key('task-complete-checkbox-201')));
-      await tester.pumpAndSettle();
-
-      expect(api.reopenedTaskIds, [201]);
-      expect(find.text('Archived oil change'), findsNothing);
-
-      await tester.tap(find.byKey(const Key('nav-tasks')));
-      await tester.pumpAndSettle();
-      expect(find.text('Archived oil change'), findsOneWidget);
-    },
-  );
-
-  testWidgets('settings shows signed-in user and Bean preferences entry', (
+  testWidgets('settings lets the signed-in user edit email', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -1458,6 +1441,20 @@ void main() {
     expect(find.byKey(const Key('open-bean-preferences')), findsOneWidget);
 
     expect(find.text('bean@example.com'), findsWidgets);
+    await tester.ensureVisible(
+      find.byKey(const Key('settings-edit-email-action')).last,
+    );
+    await tester.tap(find.byKey(const Key('settings-edit-email-action')).last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('settings-email-editor-field')),
+      'new-bean@example.com',
+    );
+    await tester.tap(find.byKey(const Key('settings-email-editor-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedEmail, 'new-bean@example.com');
+    expect(find.text('new-bean@example.com'), findsWidgets);
   });
 
   testWidgets(

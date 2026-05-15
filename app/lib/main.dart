@@ -1428,6 +1428,30 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
+  Future<void> _updateAccountEmail(String email) async {
+    final trimmedEmail = email.trim();
+    if (trimmedEmail.isEmpty || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final updatedUser = await widget.apiClient.updateMe(email: trimmedEmail);
+      if (!mounted) return;
+      setState(() {
+        _user = updatedUser;
+        _busy = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'Could not update email: $error';
+      });
+    }
+  }
+
   Future<void> _deleteAccount() async {
     setState(() => _busy = true);
     try {
@@ -1662,6 +1686,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     onEventCategorySaved: _saveEventCategory,
     onEventCategoryDeleted: _deleteEventCategory,
     onDeleteAccount: _deleteAccount,
+    onAccountEmailChanged: _updateAccountEmail,
     launchExternalUrl: widget.launchExternalUrl,
     onEditAgentOnboarding: () {
       setState(() {
@@ -2231,6 +2256,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
     required this.onDeleteAccount,
+    required this.onAccountEmailChanged,
     required this.launchExternalUrl,
     required this.onEditAgentOnboarding,
     this.error,
@@ -2330,6 +2356,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted;
   final Future<void> Function() onDeleteAccount;
+  final Future<void> Function(String email) onAccountEmailChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final VoidCallback onEditAgentOnboarding;
   final String? error;
@@ -2399,19 +2426,22 @@ class _CommandCenterContent extends StatelessWidget {
             launchExternalUrl: launchExternalUrl,
             user: user,
             approvals: pendingApprovals,
-            pastTasks: pastTasks,
-            onTaskCompleted: onTaskCompleted,
             calendarStartHour: calendarStartHour,
             calendarEndHour: calendarEndHour,
             onCalendarStartHourChanged: onCalendarStartHourChanged,
             onCalendarEndHourChanged: onCalendarEndHourChanged,
             onDeleteAccount: onDeleteAccount,
+            onAccountEmailChanged: onAccountEmailChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
           ),
         };
         final right = Column(
           children: [
-            _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
+            _AccountCard(
+              user: user,
+              onEmailChanged: onAccountEmailChanged,
+              onDeleteAccount: onDeleteAccount,
+            ),
             const SizedBox(height: 16),
             _ProgressCard(
               user: user,
@@ -3807,6 +3837,17 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
         _calendarDayHeaderHeight +
         _calendarAllDayRowHeight +
         (visibleHours.length * _calendarHourHeight);
+    final markerOffset =
+        _calendarDayHeaderHeight +
+        _calendarAllDayRowHeight +
+        ((now.hour + (now.minute / 60)) - visibleHours.first).clamp(
+              0.0,
+              visibleHours.length.toDouble(),
+            ) *
+            _calendarHourHeight;
+    final showCurrentTimeMarker =
+        _sameCalendarDay(selectedDay, today) ||
+        _sameCalendarDay(selectedDay.add(const Duration(days: 1)), today);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3842,38 +3883,86 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
             border: Border(top: BorderSide(color: HeyBeanTheme.border)),
           ),
           height: timelineHeight,
-          child: Row(
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              _FixedTimelineHoursColumn(visibleHours: visibleHours),
-              Expanded(
-                child: PageView.builder(
-                  key: const PageStorageKey<String>(
-                    'apple-style-day-page-view',
+              Row(
+                children: [
+                  _FixedTimelineHoursColumn(visibleHours: visibleHours),
+                  Expanded(
+                    child: PageView.builder(
+                      key: const PageStorageKey<String>(
+                        'apple-style-day-page-view',
+                      ),
+                      controller: _dayPageController,
+                      physics: const BouncingScrollPhysics(
+                        parent: PageScrollPhysics(),
+                      ),
+                      allowImplicitScrolling: true,
+                      onPageChanged: _handlePageChanged,
+                      itemBuilder: (context, page) => _TwoDayTimelinePage(
+                        key: ValueKey('two-day-timeline-page-$page'),
+                        calendar: widget.calendar,
+                        eventCategories: widget.eventCategories,
+                        googleCalendarStatus: widget.googleCalendarStatus,
+                        selectedDay: _dateForPage(page),
+                        today: today,
+                        startHour: widget.startHour,
+                        endHour: widget.endHour,
+                        visibleHours: visibleHours,
+                        isActivePage: page == _visibleDayPage,
+                        onEventTap: widget.onEventTap,
+                        onEventCategorySaved: widget.onEventCategorySaved,
+                        onEventCategoryDeleted: widget.onEventCategoryDeleted,
+                      ),
+                    ),
                   ),
-                  controller: _dayPageController,
-                  physics: const BouncingScrollPhysics(
-                    parent: PageScrollPhysics(),
-                  ),
-                  allowImplicitScrolling: true,
-                  onPageChanged: _handlePageChanged,
-                  itemBuilder: (context, page) => _TwoDayTimelinePage(
-                    key: ValueKey('two-day-timeline-page-$page'),
-                    calendar: widget.calendar,
-                    eventCategories: widget.eventCategories,
-                    googleCalendarStatus: widget.googleCalendarStatus,
-                    selectedDay: _dateForPage(page),
-                    today: today,
-                    now: now,
-                    startHour: widget.startHour,
-                    endHour: widget.endHour,
-                    visibleHours: visibleHours,
-                    isActivePage: page == _visibleDayPage,
-                    onEventTap: widget.onEventTap,
-                    onEventCategorySaved: widget.onEventCategorySaved,
-                    onEventCategoryDeleted: widget.onEventCategoryDeleted,
+                ],
+              ),
+              if (showCurrentTimeMarker)
+                Positioned(
+                  key: const Key('calendar-current-time-marker'),
+                  top: markerOffset,
+                  left: 0,
+                  right: 0,
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: _calendarTimeColumnWidth,
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Container(
+                            key: const Key('calendar-current-time-label'),
+                            margin: const EdgeInsets.only(right: 3),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: HeyBeanTheme.accent,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                _naturalTimeLabel(now),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Container(height: 2, color: HeyBeanTheme.accent),
+                      ),
+                    ],
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -3890,7 +3979,6 @@ class _TwoDayTimelinePage extends StatelessWidget {
     required this.googleCalendarStatus,
     required this.selectedDay,
     required this.today,
-    required this.now,
     required this.startHour,
     required this.endHour,
     required this.visibleHours,
@@ -3905,7 +3993,6 @@ class _TwoDayTimelinePage extends StatelessWidget {
   final GoogleCalendarSyncStatus? googleCalendarStatus;
   final DateTime selectedDay;
   final DateTime today;
-  final DateTime now;
   final int startHour;
   final int endHour;
   final List<int> visibleHours;
@@ -3939,17 +4026,6 @@ class _TwoDayTimelinePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selectedNextDay = selectedDay.add(const Duration(days: 1));
-    final firstVisibleHour = visibleHours.first;
-    final markerOffset =
-        48 +
-        ((now.hour + (now.minute / 60)) - firstVisibleHour).clamp(
-              0.0,
-              visibleHours.length.toDouble(),
-            ) *
-            _calendarHourHeight;
-    final showCurrentTimeMarker =
-        _sameCalendarDay(selectedDay, today) ||
-        _sameCalendarDay(selectedNextDay, today);
     final selectedAllDayEvents = calendar
         .where(
           (event) =>
@@ -4035,43 +4111,6 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       const _TimelineDayGridRow(),
                   ],
                 ),
-                if (showCurrentTimeMarker)
-                  Positioned(
-                    key: const Key('calendar-current-time-marker'),
-                    top: markerOffset - 48,
-                    left: 0,
-                    right: 0,
-                    child: Row(
-                      children: [
-                        Container(
-                          key: const Key('calendar-current-time-label'),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: HeyBeanTheme.accent,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            _naturalTimeLabel(now),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Container(
-                            height: 2,
-                            color: HeyBeanTheme.accent,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 for (final event in calendar) ...[
                   if (!_eventIsAllDay(event) &&
                       _eventFallsOnDay(event, selectedDay) &&
@@ -7194,13 +7233,12 @@ class _SettingsView extends StatelessWidget {
     required this.launchExternalUrl,
     required this.user,
     required this.approvals,
-    required this.pastTasks,
-    required this.onTaskCompleted,
     required this.calendarStartHour,
     required this.calendarEndHour,
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
     required this.onDeleteAccount,
+    required this.onAccountEmailChanged,
     required this.onEditAgentOnboarding,
   });
 
@@ -7208,13 +7246,12 @@ class _SettingsView extends StatelessWidget {
   final ExternalUrlLauncher launchExternalUrl;
   final HermesUser user;
   final List<HermesApproval> approvals;
-  final List<HermesTask> pastTasks;
-  final Future<void> Function(HermesTask task) onTaskCompleted;
   final int calendarStartHour;
   final int calendarEndHour;
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
   final Future<void> Function() onDeleteAccount;
+  final Future<void> Function(String email) onAccountEmailChanged;
   final VoidCallback onEditAgentOnboarding;
 
   @override
@@ -7256,10 +7293,6 @@ class _SettingsView extends StatelessWidget {
               onStartHourChanged: onCalendarStartHourChanged,
               onEndHourChanged: onCalendarEndHourChanged,
             ),
-            _PastTasksSettingsCard(
-              tasks: pastTasks,
-              onTaskCompleted: onTaskCompleted,
-            ),
             _CompactItemTile(
               icon: Icons.verified_user_outlined,
               title: 'Approval rules',
@@ -7271,7 +7304,11 @@ class _SettingsView extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 16),
-      _AccountCard(user: user, onDeleteAccount: onDeleteAccount),
+      _AccountCard(
+        user: user,
+        onEmailChanged: onAccountEmailChanged,
+        onDeleteAccount: onDeleteAccount,
+      ),
     ],
   );
 }
@@ -8328,10 +8365,21 @@ DateTime? _parseTaskDueDate(HermesTask task) {
 }
 
 class _AccountCard extends StatelessWidget {
-  const _AccountCard({required this.user, required this.onDeleteAccount});
+  const _AccountCard({
+    required this.user,
+    required this.onEmailChanged,
+    required this.onDeleteAccount,
+  });
 
   final HermesUser user;
+  final Future<void> Function(String email) onEmailChanged;
   final Future<void> Function() onDeleteAccount;
+
+  Future<void> _editEmail(BuildContext context) async {
+    final nextEmail = await _showEmailEditor(context, initialEmail: user.email);
+    if (nextEmail == null || nextEmail.trim() == user.email) return;
+    await onEmailChanged(nextEmail);
+  }
 
   @override
   Widget build(BuildContext context) => _ShellCard(
@@ -8344,7 +8392,16 @@ class _AccountCard extends StatelessWidget {
           subtitle: 'Account and app settings',
         ),
         const SizedBox(height: 10),
-        Text(user.email),
+        _CompactItemTile(
+          icon: Icons.email_outlined,
+          title: 'Email',
+          subtitle: user.email,
+          trailing: TextButton(
+            key: const Key('settings-edit-email-action'),
+            onPressed: () => _editEmail(context),
+            child: const Text('Edit'),
+          ),
+        ),
         const SizedBox(height: 10),
         OutlinedButton.icon(
           key: const Key('delete-account-action'),
@@ -8354,6 +8411,62 @@ class _AccountCard extends StatelessWidget {
         ),
       ],
     ),
+  );
+}
+
+Future<String?> _showEmailEditor(
+  BuildContext context, {
+  required String initialEmail,
+}) => showDialog<String>(
+  context: context,
+  builder: (context) => _EmailEditorDialog(initialEmail: initialEmail),
+);
+
+class _EmailEditorDialog extends StatefulWidget {
+  const _EmailEditorDialog({required this.initialEmail});
+
+  final String initialEmail;
+
+  @override
+  State<_EmailEditorDialog> createState() => _EmailEditorDialogState();
+}
+
+class _EmailEditorDialogState extends State<_EmailEditorDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialEmail);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Update email'),
+    content: TextField(
+      key: const Key('settings-email-editor-field'),
+      controller: _controller,
+      keyboardType: TextInputType.emailAddress,
+      autofocus: true,
+      decoration: const InputDecoration(labelText: 'Email address'),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const Key('settings-email-editor-save'),
+        onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+        child: const Text('Save'),
+      ),
+    ],
   );
 }
 
