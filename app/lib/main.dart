@@ -8017,31 +8017,16 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
   }
 
   Future<void> _createHousehold() async {
-    final controller = TextEditingController();
     final name = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create household'),
-        content: TextField(
-          key: const Key('workspace-create-name-field'),
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Household name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const Key('workspace-create-save'),
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('Create'),
-          ),
-        ],
+      builder: (context) => const _WorkspaceTextInputDialog(
+        title: 'Create household',
+        labelText: 'Household name',
+        fieldKey: Key('workspace-create-name-field'),
+        submitKey: Key('workspace-create-save'),
+        submitLabel: 'Create',
       ),
     );
-    controller.dispose();
     if (name == null || name.trim().isEmpty) return;
     await _run(
       () => widget.apiClient.createWorkspace(name: name.trim()),
@@ -8052,31 +8037,17 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
   Future<void> _inviteMember(HermesWorkspace workspace) async {
     final workspaceId = workspace.numericId;
     if (workspaceId == null) return;
-    final controller = TextEditingController();
     final email = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Invite to ${workspace.name}'),
-        content: TextField(
-          key: Key('workspace-invite-email-${workspace.id}'),
-          controller: controller,
-          keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(labelText: 'Email'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: Key('workspace-invite-save-${workspace.id}'),
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('Invite'),
-          ),
-        ],
+      builder: (context) => _WorkspaceTextInputDialog(
+        title: 'Invite to ${workspace.name}',
+        labelText: 'Email',
+        fieldKey: Key('workspace-invite-email-${workspace.id}'),
+        submitKey: Key('workspace-invite-save-${workspace.id}'),
+        submitLabel: 'Invite',
+        keyboardType: TextInputType.emailAddress,
       ),
     );
-    controller.dispose();
     if (email == null || email.trim().isEmpty) return;
     await _run(
       () => widget.apiClient.inviteWorkspaceMember(
@@ -8090,31 +8061,17 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
   Future<void> _renameWorkspace(HermesWorkspace workspace) async {
     final workspaceId = workspace.numericId;
     if (workspaceId == null || workspace.isPersonal) return;
-    final controller = TextEditingController(text: workspace.name);
     final name = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename household'),
-        content: TextField(
-          key: Key('workspace-rename-field-${workspace.id}'),
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Household name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: Key('workspace-rename-save-${workspace.id}'),
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
+      builder: (context) => _WorkspaceTextInputDialog(
+        title: 'Rename household',
+        labelText: 'Household name',
+        fieldKey: Key('workspace-rename-field-${workspace.id}'),
+        submitKey: Key('workspace-rename-save-${workspace.id}'),
+        submitLabel: 'Save',
+        initialValue: workspace.name,
       ),
     );
-    controller.dispose();
     if (name == null || name.trim().isEmpty) return;
     await _run(
       () => widget.apiClient.updateWorkspace(workspaceId, name: name.trim()),
@@ -8464,6 +8421,69 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
         ),
       );
     },
+  );
+}
+
+class _WorkspaceTextInputDialog extends StatefulWidget {
+  const _WorkspaceTextInputDialog({
+    required this.title,
+    required this.labelText,
+    required this.fieldKey,
+    required this.submitKey,
+    required this.submitLabel,
+    this.initialValue = '',
+    this.keyboardType,
+  });
+
+  final String title;
+  final String labelText;
+  final Key fieldKey;
+  final Key submitKey;
+  final String submitLabel;
+  final String initialValue;
+  final TextInputType? keyboardType;
+
+  @override
+  State<_WorkspaceTextInputDialog> createState() =>
+      _WorkspaceTextInputDialogState();
+}
+
+class _WorkspaceTextInputDialogState extends State<_WorkspaceTextInputDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: TextField(
+      key: widget.fieldKey,
+      controller: _controller,
+      autofocus: true,
+      keyboardType: widget.keyboardType,
+      decoration: InputDecoration(labelText: widget.labelText),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: widget.submitKey,
+        onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+        child: Text(widget.submitLabel),
+      ),
+    ],
   );
 }
 

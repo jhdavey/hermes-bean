@@ -140,6 +140,39 @@ void main() {
     },
   );
 
+  testWidgets(
+    'creating a household keeps settings mounted without Flutter tree errors',
+    (WidgetTester tester) async {
+      final api = _WorkspaceFakeHermesApiClient();
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('workspace-create-household-action')),
+      );
+      await tester.tap(
+        find.byKey(const Key('workspace-create-household-action')),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('workspace-create-name-field')),
+        'Family',
+      );
+      await tester.tap(find.byKey(const Key('workspace-create-save')));
+      await tester.pumpAndSettle();
+
+      expect(api.createdWorkspaceNames, ['Family']);
+      expect(find.byKey(const Key('settings-view')), findsOneWidget);
+      expect(find.text('Family'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('settings edits current Bean preferences in one form', (
     WidgetTester tester,
   ) async {
@@ -2711,6 +2744,57 @@ class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {
   }
 }
 
+class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  final createdWorkspaceNames = <String>[];
+  var workspaces = <HermesWorkspace>[
+    const HermesWorkspace(
+      id: '1',
+      name: 'Personal',
+      type: 'personal',
+      role: 'owner',
+      active: true,
+      isDefault: true,
+    ),
+  ];
+
+  @override
+  Future<HermesUser> me() async => HermesUser(
+    id: 1,
+    name: 'Bean User',
+    email: updatedEmail ?? 'bean@example.com',
+    onboardComplete: true,
+    defaultWorkspaceId: 1,
+    personalWorkspace: workspaces.first,
+    activeWorkspace: workspaces.firstWhere(
+      (workspace) => workspace.active,
+      orElse: () => workspaces.first,
+    ),
+    workspaces: workspaces,
+    agentProfile: const HermesAgentProfile(
+      settings: {
+        'personality_type': 'balanced',
+        'onboarding': {'completed': true, 'priorities': <String>[]},
+      },
+    ),
+  );
+
+  @override
+  Future<List<HermesWorkspace>> listWorkspaces() async => workspaces;
+
+  @override
+  Future<HermesWorkspace> createWorkspace({required String name}) async {
+    createdWorkspaceNames.add(name);
+    final workspace = HermesWorkspace(
+      id: (workspaces.length + 1).toString(),
+      name: name,
+      type: 'household',
+      role: 'owner',
+    );
+    workspaces = [...workspaces, workspace];
+    return workspace;
+  }
+}
+
 class _ExpiredTokenHermesApiClient extends HermesApiClient {
   _ExpiredTokenHermesApiClient()
     : super(transport: (_) async => const HermesApiResponse(500, 'unused'));
@@ -2970,8 +3054,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? defaultCalendarId,
   }) async {
     selectedGoogleCalendarIds = selectedCalendarIds;
-    this.defaultGoogleCalendarId =
-        defaultCalendarId ?? this.defaultGoogleCalendarId;
+    defaultGoogleCalendarId = defaultCalendarId ?? defaultGoogleCalendarId;
     googleCalendarConnected = true;
     return googleCalendarStatus();
   }
