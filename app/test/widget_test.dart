@@ -1174,9 +1174,29 @@ void main() {
   });
 
   testWidgets(
-    'Google Calendar connect falls back to copy link when iOS launcher channel fails',
+    'Google Calendar connect opens automatically when iOS launcher channel fails',
     (WidgetTester tester) async {
       final api = _SignedInFakeHermesApiClient();
+      final nativeOpenedUrls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('heybean/platform'), (
+            call,
+          ) async {
+            if (call.method == 'openUrl') {
+              final args = call.arguments! as Map<Object?, Object?>;
+              nativeOpenedUrls.add(args['url']! as String);
+              return true;
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('heybean/platform'),
+              null,
+            );
+      });
+
       await tester.pumpWidget(
         HermesBeanApp(
           apiClient: api,
@@ -1207,9 +1227,14 @@ void main() {
       );
       expect(
         find.textContaining('Copy this link into your browser'),
+        findsNothing,
+      );
+      expect(
+        find.textContaining('sync automatically when you return'),
         findsOneWidget,
       );
-      expect(find.textContaining('accounts.google.com'), findsOneWidget);
+      expect(nativeOpenedUrls, hasLength(1));
+      expect(Uri.parse(nativeOpenedUrls.single).host, 'accounts.google.com');
     },
   );
 

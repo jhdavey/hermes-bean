@@ -14,16 +14,24 @@ typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
 const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
 
 Future<bool> _defaultLaunchExternalUrl(Uri url) async {
-  try {
-    final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
-    if (launched) return true;
-  } on PlatformException {
-    // Some iOS builds can fail to attach the url_launcher_ios pigeon channel
-    // after the plugin is added. Fall back to the app-owned native channel so
-    // OAuth links can still open instead of surfacing a channel-error to users.
-  } on MissingPluginException {
-    // Same fallback path for stale/native shells that have not registered the
-    // url_launcher plugin yet.
+  for (final mode in [
+    LaunchMode.platformDefault,
+    LaunchMode.externalApplication,
+    LaunchMode.inAppBrowserView,
+  ]) {
+    try {
+      final launched = await launchUrl(url, mode: mode);
+      if (launched) return true;
+    } on PlatformException {
+      // Some iOS builds can fail to attach the url_launcher_ios pigeon channel
+      // after the plugin is added. Fall through to the next launch path instead
+      // of surfacing a copy-link fallback to the user.
+    } on MissingPluginException {
+      // Same fallback path for stale/native shells that have not registered the
+      // url_launcher plugin yet.
+    } on ArgumentError {
+      // A launch mode may be unavailable on a platform; try the next one.
+    }
   }
 
   return _launchExternalUrlWithNativeFallback(url);
@@ -6873,6 +6881,9 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
         launched = await widget.launchExternalUrl(url);
       } catch (_) {
         launched = false;
+      }
+      if (!launched) {
+        launched = await _launchExternalUrlWithNativeFallback(url);
       }
       if (!mounted) return;
       setState(() {
