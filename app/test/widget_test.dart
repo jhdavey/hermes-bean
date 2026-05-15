@@ -1708,6 +1708,35 @@ void main() {
     expect(find.text('Client kickoff'), findsOneWidget);
   });
 
+  testWidgets('critical event edits persist and update header critical count', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.updatedEvent?.isCritical, isNull);
+    final eventBlock = find.byKey(
+      const Key('calendar-event-block-design-review'),
+    );
+    await tester.ensureVisible(eventBlock);
+    await tester.pumpAndSettle();
+    await tester.tap(eventBlock);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('event-detail-critical-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedEvent?.isCritical, isTrue);
+    await tester.tap(find.byKey(const Key('critical-task-count')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('critical-event-item-3')), findsOneWidget);
+    expect(find.text('Design review'), findsWidgets);
+  });
+
   testWidgets(
     'calendar events open an editable detail page with friendly date times category color recurrence and event reminders',
     (WidgetTester tester) async {
@@ -1960,6 +1989,53 @@ void main() {
         'interval': 1,
         'unit': 'days',
       });
+    },
+  );
+
+  testWidgets('all day Google events render in the all-day row only', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _AllDayGoogleCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('calendar-all-day-label')), findsOneWidget);
+    expect(find.byKey(const Key('calendar-all-day-event-901')), findsOneWidget);
+    expect(find.text('All Day'), findsOneWidget);
+    expect(find.text('Google holiday'), findsOneWidget);
+    expect(
+      find.byKey(const Key('calendar-event-block-google-holiday')),
+      findsNothing,
+    );
+  });
+
+  testWidgets(
+    'task and reminder list cards show critical stars and compact headers',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _SignedInFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-tasks')));
+      await tester.pumpAndSettle();
+      expect(find.text('Task list'), findsNothing);
+      expect(find.textContaining('Create, edit, complete'), findsNothing);
+      expect(find.byKey(const Key('task-add-action')), findsOneWidget);
+      expect(find.byKey(const Key('task-critical-star-1')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('nav-reminders')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Create, edit, and review'), findsNothing);
+      expect(find.byKey(const Key('reminder-add-action')), findsOneWidget);
+      expect(find.byKey(const Key('reminder-critical-star-2')), findsOneWidget);
     },
   );
 
@@ -3386,6 +3462,30 @@ class _GoogleCalendarAutoSyncFakeHermesApiClient
           ),
         ]
       : super.listCalendarEvents();
+}
+
+class _AllDayGoogleCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final today = DateTime.now();
+    final start = DateTime(today.year, today.month, today.day);
+    return [
+      HermesCalendarEvent(
+        id: 901,
+        title: 'Google holiday',
+        startsAt: start.toIso8601String(),
+        endsAt: start.add(const Duration(days: 1)).toIso8601String(),
+        category: 'Google Calendar',
+        color: '#4285F4',
+        metadata: const {
+          'source': 'google_calendar',
+          'google_calendar_id': 'holidays@example.com',
+          'all_day': true,
+        },
+      ),
+    ];
+  }
 }
 
 class _MultiDayEditableCalendarFakeHermesApiClient

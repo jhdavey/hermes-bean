@@ -156,6 +156,8 @@ class GoogleCalendarSyncTest extends TestCase
             'google_event_id' => 'holiday-event-1',
             'google_calendar_id' => 'holiday@group.v.calendar.google.com',
         ]);
+        $holiday = CalendarEvent::where('google_event_id', 'holiday-event-1')->firstOrFail();
+        $this->assertTrue($holiday->metadata['all_day']);
     }
 
     public function test_local_calendar_create_and_update_write_to_selected_google_calendar(): void

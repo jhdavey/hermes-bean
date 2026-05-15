@@ -1025,6 +1025,58 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
+  Future<void> _showNewTaskEditor() async {
+    final result = await _showTitleTimeEditor(
+      context,
+      title: 'New task',
+      titleLabel: 'Task title',
+      timeLabel: 'Due date',
+      initialTitle: '',
+      initialTime: '',
+      allowEmptyTime: true,
+      categories: _eventCategories,
+      initialCritical: false,
+    );
+    if (result == null) return;
+    final title = (result['title'] as String).trim();
+    if (title.isEmpty) return;
+    await _createOrUpdateTask(
+      null,
+      title: title,
+      dueAt: result['time'] as String?,
+      category: result['category'] as String?,
+      color: result['color'] as String?,
+      isCritical: result['isCritical'] as bool?,
+    );
+  }
+
+  Future<void> _showNewReminderEditor() async {
+    final result = await _showTitleTimeEditor(
+      context,
+      title: 'New reminder',
+      titleLabel: 'Reminder title',
+      timeLabel: 'Remind me at',
+      initialTitle: '',
+      initialTime: '',
+      allowEmptyTime: false,
+      categories: _eventCategories,
+      initialCritical: false,
+    );
+    if (result == null) return;
+    final title = (result['title'] as String).trim();
+    final time = (result['time'] as String?)?.trim() ?? '';
+    if (title.isEmpty || time.isEmpty) return;
+    await _createOrUpdateReminder(
+      null,
+      title: title,
+      remindAt: time,
+      status: 'pending',
+      category: result['category'] as String?,
+      color: result['color'] as String?,
+      isCritical: result['isCritical'] as bool?,
+    );
+  }
+
   Future<void> _deleteTask(HermesTask task) async {
     final previousTasks = _tasks;
     setState(() => _tasks = _removeTask(_tasks, task.id));
@@ -1436,6 +1488,24 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                       reminders: _criticalRemindersForToday(_reminders),
                       events: _criticalEventsForToday(_calendar),
                     ),
+                    if (_selectedDestination == _HomeDestination.tasks) ...[
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        key: const Key('task-add-action'),
+                        tooltip: 'Add task',
+                        onPressed: _showNewTaskEditor,
+                        icon: const Icon(Icons.add_rounded),
+                      ),
+                    ],
+                    if (_selectedDestination == _HomeDestination.reminders) ...[
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        key: const Key('reminder-add-action'),
+                        tooltip: 'Add reminder',
+                        onPressed: _showNewReminderEditor,
+                        icon: const Icon(Icons.add_rounded),
+                      ),
+                    ],
                   ],
                   const SizedBox(width: 16),
                 ],
@@ -3506,6 +3576,7 @@ const _defaultCalendarStartHour = 7;
 const _defaultCalendarEndHour = 22;
 const _calendarHourHeight = 52.5;
 const _calendarTimeColumnWidth = 48.0;
+const _calendarAllDayRowHeight = 42.0;
 
 class _AppleStyleTodayTimeline extends StatefulWidget {
   const _AppleStyleTodayTimeline({
@@ -3720,7 +3791,10 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
       widget.startHour,
       widget.endHour,
     );
-    final timelineHeight = 49 + (visibleHours.length * _calendarHourHeight);
+    final timelineHeight =
+        49 +
+        _calendarAllDayRowHeight +
+        (visibleHours.length * _calendarHourHeight);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3864,6 +3938,18 @@ class _TwoDayTimelinePage extends StatelessWidget {
     final showCurrentTimeMarker =
         _sameCalendarDay(selectedDay, today) ||
         _sameCalendarDay(selectedNextDay, today);
+    final selectedAllDayEvents = calendar
+        .where(
+          (event) =>
+              _eventIsAllDay(event) && _eventFallsOnDay(event, selectedDay),
+        )
+        .toList();
+    final nextAllDayEvents = calendar
+        .where(
+          (event) =>
+              _eventIsAllDay(event) && _eventFallsOnDay(event, selectedNextDay),
+        )
+        .toList();
 
     return Column(
       children: [
@@ -3892,6 +3978,39 @@ class _TwoDayTimelinePage extends StatelessWidget {
               ),
             ),
           ],
+        ),
+        SizedBox(
+          height: _calendarAllDayRowHeight,
+          child: Row(
+            children: [
+              Expanded(
+                child: _AllDayEventRow(
+                  key: Key(
+                    'calendar-all-day-row-${selectedDay.toIso8601String()}',
+                  ),
+                  events: selectedAllDayEvents,
+                  eventCategories: eventCategories,
+                  googleCalendarStatus: googleCalendarStatus,
+                  onEventTap: onEventTap,
+                  onEventCategorySaved: onEventCategorySaved,
+                  onEventCategoryDeleted: onEventCategoryDeleted,
+                ),
+              ),
+              Expanded(
+                child: _AllDayEventRow(
+                  key: Key(
+                    'calendar-all-day-row-${selectedNextDay.toIso8601String()}',
+                  ),
+                  events: nextAllDayEvents,
+                  eventCategories: eventCategories,
+                  googleCalendarStatus: googleCalendarStatus,
+                  onEventTap: onEventTap,
+                  onEventCategorySaved: onEventCategorySaved,
+                  onEventCategoryDeleted: onEventCategoryDeleted,
+                ),
+              ),
+            ],
+          ),
         ),
         Expanded(
           child: LayoutBuilder(
@@ -3922,7 +4041,8 @@ class _TwoDayTimelinePage extends StatelessWidget {
                     ),
                   ),
                 for (final event in calendar) ...[
-                  if (_eventFallsOnDay(event, selectedDay) &&
+                  if (!_eventIsAllDay(event) &&
+                      _eventFallsOnDay(event, selectedDay) &&
                       _eventFallsWithinHours(
                         event,
                         selectedDay,
@@ -3942,7 +4062,8 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       onEventCategorySaved: onEventCategorySaved,
                       onEventCategoryDeleted: onEventCategoryDeleted,
                     ),
-                  if (_eventFallsOnDay(event, selectedNextDay) &&
+                  if (!_eventIsAllDay(event) &&
+                      _eventFallsOnDay(event, selectedNextDay) &&
                       _eventFallsWithinHours(
                         event,
                         selectedNextDay,
@@ -4212,6 +4333,25 @@ class _FixedTimelineHoursColumn extends StatelessWidget {
     child: Column(
       children: [
         const SizedBox(height: 48),
+        SizedBox(
+          key: const Key('calendar-all-day-label'),
+          height: _calendarAllDayRowHeight,
+          child: const Padding(
+            padding: EdgeInsets.only(top: 10, right: 6),
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Text(
+                'All Day',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  color: HeyBeanTheme.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ),
         for (final hour in visibleHours)
           SizedBox(
             height: _calendarHourHeight,
@@ -4256,6 +4396,114 @@ class _TimelineDayGridRow extends StatelessWidget {
             ),
           ),
       ],
+    ),
+  );
+}
+
+class _AllDayEventRow extends StatelessWidget {
+  const _AllDayEventRow({
+    super.key,
+    required this.events,
+    required this.eventCategories,
+    required this.googleCalendarStatus,
+    required this.onEventTap,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
+  });
+
+  final List<HermesCalendarEvent> events;
+  final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+  })
+  onEventTap;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(HermesEventCategory category)
+  onEventCategoryDeleted;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: const BoxDecoration(
+      border: Border(
+        left: BorderSide(color: HeyBeanTheme.border),
+        bottom: BorderSide(color: HeyBeanTheme.border),
+      ),
+    ),
+    child: ListView.separated(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      itemCount: events.length,
+      separatorBuilder: (_, __) => const SizedBox(width: 6),
+      itemBuilder: (context, index) {
+        final event = events[index];
+        final color = _calendarEventColor(event);
+        return InkWell(
+          key: Key('calendar-all-day-event-${event.id}'),
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _showCalendarEventDetails(
+            context,
+            event,
+            eventCategories: eventCategories,
+            googleCalendarStatus: googleCalendarStatus,
+            onSave: onEventTap,
+            onEventCategorySaved: onEventCategorySaved,
+            onEventCategoryDeleted: onEventCategoryDeleted,
+          ),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: .14),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withValues(alpha: .35)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (event.isCritical) ...[
+                  Icon(
+                    Icons.star_rounded,
+                    key: Key('event-critical-star-${event.id}'),
+                    color: color,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Flexible(
+                  child: Text(
+                    event.title,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     ),
   );
 }
@@ -4348,17 +4596,33 @@ class _TimelineEventBlock extends StatelessWidget {
               color: _calendarEventColor(event).withValues(alpha: .35),
             ),
           ),
-          child: Text(
-            eventHeight >= 54
-                ? '${event.title}\n${_eventTimeRangeShort(event)}'
-                : event.title,
-            maxLines: eventHeight >= 54 ? 2 : 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: _calendarEventColor(event),
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
-            ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (event.isCritical) ...[
+                Icon(
+                  Icons.star_rounded,
+                  key: Key('event-critical-star-${event.id}'),
+                  color: _calendarEventColor(event),
+                  size: 14,
+                ),
+                const SizedBox(width: 4),
+              ],
+              Expanded(
+                child: Text(
+                  eventHeight >= 54
+                      ? '${event.title}\n${_eventTimeRangeShort(event)}'
+                      : event.title,
+                  maxLines: eventHeight >= 54 ? 2 : 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _calendarEventColor(event),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -6688,25 +6952,6 @@ class _TaskListCardState extends State<_TaskListCard> {
       key: const Key('tasks-view'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Expanded(
-              child: _SectionTitle(
-                icon: Icons.task_alt_rounded,
-                title: 'Task list',
-                subtitle: 'Create, edit, complete, and hand off tasks to Bean.',
-              ),
-            ),
-            IconButton.filledTonal(
-              key: const Key('task-add-action'),
-              tooltip: 'Add task',
-              onPressed: () => _showTaskEditor(context),
-              icon: const Icon(Icons.add_rounded),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -6816,25 +7061,6 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       key: const Key('reminders-view'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Expanded(
-              child: _SectionTitle(
-                icon: Icons.notifications_active_rounded,
-                title: 'Reminders',
-                subtitle: 'Create, edit, and review Bean reminders.',
-              ),
-            ),
-            IconButton.filledTonal(
-              key: const Key('reminder-add-action'),
-              tooltip: 'Add reminder',
-              onPressed: () => _showReminderEditor(context),
-              icon: const Icon(Icons.add_rounded),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -7652,17 +7878,32 @@ class _TaskItemTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      task.title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        decoration: completed
-                            ? TextDecoration.lineThrough
-                            : null,
-                        color: completed
-                            ? HeyBeanTheme.muted
-                            : HeyBeanTheme.text,
-                      ),
+                    Row(
+                      children: [
+                        if (task.isCritical) ...[
+                          Icon(
+                            Icons.star_rounded,
+                            key: Key('task-critical-star-${task.id}'),
+                            color: categoryColor,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        Expanded(
+                          child: Text(
+                            task.title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              decoration: completed
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              color: completed
+                                  ? HeyBeanTheme.muted
+                                  : HeyBeanTheme.text,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -7740,17 +7981,32 @@ class _ReminderItemTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      reminder.title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        decoration: completed
-                            ? TextDecoration.lineThrough
-                            : null,
-                        color: completed
-                            ? HeyBeanTheme.muted
-                            : HeyBeanTheme.text,
-                      ),
+                    Row(
+                      children: [
+                        if (reminder.isCritical) ...[
+                          Icon(
+                            Icons.star_rounded,
+                            key: Key('reminder-critical-star-${reminder.id}'),
+                            color: categoryColor,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        Expanded(
+                          child: Text(
+                            reminder.title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              decoration: completed
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              color: completed
+                                  ? HeyBeanTheme.muted
+                                  : HeyBeanTheme.text,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -8006,6 +8262,24 @@ Color _safeCategoryColor(String? value) {
     return HeyBeanTheme.accentStrong;
   }
   return Color(int.parse('FF${color.substring(1)}', radix: 16));
+}
+
+bool _eventIsAllDay(HermesCalendarEvent event) {
+  final metadata = event.metadata;
+  final marker = metadata?['all_day'] ?? metadata?['allDay'];
+  final markerText = marker?.toString().toLowerCase();
+  if (marker == true || markerText == 'true' || markerText == '1') return true;
+  final source = metadata?['source']?.toString() ?? '';
+  if (source != 'google_calendar') return false;
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  if (start == null || end == null) return false;
+  final startsAtMidnight =
+      start.hour == 0 && start.minute == 0 && start.second == 0;
+  final endsAtMidnight = end.hour == 0 && end.minute == 0 && end.second == 0;
+  return startsAtMidnight &&
+      endsAtMidnight &&
+      !end.isBefore(start.add(const Duration(days: 1)));
 }
 
 String _eventTimeRangeShort(HermesCalendarEvent event) {

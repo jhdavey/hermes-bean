@@ -188,6 +188,7 @@ class GoogleCalendarSyncService
                 if (! $startsAt) {
                     continue;
                 }
+                $isAllDay = isset($item['start']['date']);
                 $endsAt = $this->googleDateTime($item['end'] ?? []) ?? $startsAt;
                 CalendarEvent::updateOrCreate(
                     ['user_id' => $user->id, 'google_event_id' => $item['id']],
@@ -207,6 +208,7 @@ class GoogleCalendarSyncService
                             'google_html_link' => $item['htmlLink'] ?? null,
                             'google_calendar_id' => $calendarId,
                             'google_calendar_summary' => $this->calendarSummary($connection, $calendarId),
+                            'all_day' => $isAllDay,
                         ],
                     ]
                 );
