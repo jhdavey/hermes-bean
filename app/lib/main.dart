@@ -6839,6 +6839,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     with WidgetsBindingObserver {
   late Future<GoogleCalendarSyncStatus> _statusFuture;
   String? _message;
+  String? _googleAuthUrl;
   bool _busy = false;
   bool _waitingForGoogleReturn = false;
 
@@ -6876,6 +6877,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     try {
       final rawUrl = await widget.apiClient.googleCalendarAuthUrl();
       final url = Uri.parse(rawUrl);
+      _googleAuthUrl = rawUrl;
       var launched = false;
       try {
         launched = await widget.launchExternalUrl(url);
@@ -6889,8 +6891,8 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       setState(() {
         _waitingForGoogleReturn = launched;
         _message = launched
-            ? 'Finish approving Google Calendar in the browser. HeyBean will sync automatically when you return.'
-            : 'Could not open Google Calendar authorization automatically. Copy this link into your browser: $rawUrl';
+            ? 'Finish approving Google Calendar in the browser. If Google shows a QR prompt in the simulator, tap Copy auth link, finish it in your Mac browser, then tap Check connection here.'
+            : 'Could not open Google Calendar automatically. Tap Copy auth link, finish it in any browser, then tap Check connection here.';
       });
       _reload();
     } catch (error) {
@@ -6924,6 +6926,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       if (!mounted) return;
       setState(() {
         _waitingForGoogleReturn = false;
+        _googleAuthUrl = null;
         _message =
             'Google Calendar connected and synced ${result.imported} event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
         _statusFuture = Future.value(result.status);
@@ -6939,6 +6942,19 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     }
   }
 
+  Future<void> _copyGoogleAuthLink() async {
+    final rawUrl = _googleAuthUrl;
+    if (rawUrl == null) return;
+    await Clipboard.setData(ClipboardData(text: rawUrl));
+    if (!mounted) return;
+    setState(() {
+      _message =
+          'Copied Google authorization link. Open it in your Mac browser, approve Calendar access, then tap Check connection here.';
+    });
+  }
+
+  Future<void> _checkGoogleConnection() => _syncAfterGoogleReturn();
+
   Future<void> _sync() async {
     setState(() {
       _busy = true;
@@ -6950,6 +6966,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       setState(() {
         _message =
             'Synced ${result.imported} Google event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
+        _googleAuthUrl = null;
         _statusFuture = Future.value(result.status);
       });
     } catch (error) {
@@ -7053,6 +7070,20 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                   icon: const Icon(Icons.login_rounded),
                   label: Text(connected ? 'Reconnect' : 'Connect Google'),
                 ),
+                if (_googleAuthUrl != null) ...[
+                  OutlinedButton.icon(
+                    key: const Key('google-calendar-copy-link-action'),
+                    onPressed: _busy ? null : _copyGoogleAuthLink,
+                    icon: const Icon(Icons.copy_rounded),
+                    label: const Text('Copy auth link'),
+                  ),
+                  OutlinedButton.icon(
+                    key: const Key('google-calendar-check-connection-action'),
+                    onPressed: _busy ? null : _checkGoogleConnection,
+                    icon: const Icon(Icons.verified_rounded),
+                    label: const Text('Check connection'),
+                  ),
+                ],
                 FilledButton.icon(
                   key: const Key('google-calendar-sync-action'),
                   onPressed: _busy || !connected ? null : _sync,

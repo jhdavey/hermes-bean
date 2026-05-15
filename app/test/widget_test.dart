@@ -1229,14 +1229,75 @@ void main() {
         find.textContaining('Copy this link into your browser'),
         findsNothing,
       );
-      expect(
-        find.textContaining('sync automatically when you return'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('Copy auth link'), findsWidgets);
       expect(nativeOpenedUrls, hasLength(1));
       expect(Uri.parse(nativeOpenedUrls.single).host, 'accounts.google.com');
     },
   );
+
+  testWidgets('Google Calendar connect can be copied and checked manually', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    api.googleCalendarConnected = false;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('heybean/platform'), (
+          call,
+        ) async {
+          if (call.method == 'openUrl') return false;
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('heybean/platform'),
+            null,
+          );
+    });
+
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        launchExternalUrl: (_) async => false,
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(
+      find.byKey(const Key('google-calendar-connect-action')),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Connect Google'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.byKey(const Key('google-calendar-copy-link-action')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('google-calendar-check-connection-action')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('finish it in any browser'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const Key('google-calendar-check-connection-action')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(api.googleCalendarSyncCalls, 1);
+    expect(
+      find.textContaining('Google Calendar connected and synced 2 events'),
+      findsOneWidget,
+    );
+  });
 
   testWidgets(
     'signed-in app loads persisted resources from table list endpoints',
