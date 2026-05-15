@@ -5630,8 +5630,6 @@ class _EventCategoryCreateDialogState
   late final TextEditingController _nameController;
   late String _selectedColor;
   late double _hue;
-  late double _saturation;
-  late double _value;
 
   @override
   void initState() {
@@ -5640,8 +5638,6 @@ class _EventCategoryCreateDialogState
     _selectedColor = widget.initialColor.toUpperCase();
     final hsv = HSVColor.fromColor(_colorFromHex(_selectedColor));
     _hue = hsv.hue;
-    _saturation = hsv.saturation;
-    _value = hsv.value;
   }
 
   @override
@@ -5656,19 +5652,13 @@ class _EventCategoryCreateDialogState
     setState(() {
       _selectedColor = normalized;
       _hue = hsv.hue;
-      _saturation = hsv.saturation;
-      _value = hsv.value;
     });
   }
 
-  void _setHsv({double? hue, double? saturation, double? value}) {
+  void _setHue(double hue) {
     setState(() {
-      _hue = hue ?? _hue;
-      _saturation = saturation ?? _saturation;
-      _value = value ?? _value;
-      _selectedColor = _hexFromColor(
-        HSVColor.fromAHSV(1, _hue, _saturation, _value).toColor(),
-      );
+      _hue = hue.clamp(0, 360);
+      _selectedColor = _colorHexFromHue(_hue);
     });
   }
 
@@ -5736,33 +5726,11 @@ class _EventCategoryCreateDialogState
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            Text('Hue', style: Theme.of(context).textTheme.labelMedium),
-            Slider(
-              key: const Key('event-category-hue-slider'),
-              min: 0,
-              max: 360,
-              divisions: 360,
+            const SizedBox(height: 12),
+            _RainbowColorSlider(
               value: _hue.clamp(0, 360),
-              onChanged: (value) => _setHsv(hue: value),
-            ),
-            Text('Saturation', style: Theme.of(context).textTheme.labelMedium),
-            Slider(
-              key: const Key('event-category-saturation-slider'),
-              min: 0,
-              max: 1,
-              divisions: 100,
-              value: _saturation.clamp(0, 1),
-              onChanged: (value) => _setHsv(saturation: value),
-            ),
-            Text('Brightness', style: Theme.of(context).textTheme.labelMedium),
-            Slider(
-              key: const Key('event-category-value-slider'),
-              min: 0,
-              max: 1,
-              divisions: 100,
-              value: _value.clamp(0, 1),
-              onChanged: (value) => _setHsv(value: value),
+              selectedColor: previewColor,
+              onChanged: _setHue,
             ),
           ],
         ),
@@ -5780,6 +5748,111 @@ class _EventCategoryCreateDialogState
           child: const Text('Create'),
         ),
       ],
+    );
+  }
+}
+
+class _RainbowColorSlider extends StatelessWidget {
+  const _RainbowColorSlider({
+    required this.value,
+    required this.selectedColor,
+    required this.onChanged,
+  });
+
+  final double value;
+  final Color selectedColor;
+  final ValueChanged<double> onChanged;
+
+  static const double _width = 280;
+  static const double _height = 48;
+  static const double _horizontalInset = 12;
+  static const double _thumbSize = 28;
+
+  static const _gradientColors = <Color>[
+    Color(0xFFFF2D2D),
+    Color(0xFFFF9500),
+    Color(0xFFFFFF00),
+    Color(0xFF00E436),
+    Color(0xFF00D5FF),
+    Color(0xFF1F5BFF),
+    Color(0xFF9B00FF),
+    Color(0xFFFF00CC),
+    Color(0xFFFF2D2D),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final trackWidth = _width - _horizontalInset * 2;
+    final left = _horizontalInset + trackWidth * (value.clamp(0, 360) / 360);
+    return SizedBox(
+      width: _width,
+      height: _height,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(
+            left: _horizontalInset,
+            right: _horizontalInset,
+            child: Center(
+              child: Container(
+                key: const Key('event-category-color-slider-gradient'),
+                height: 10,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: const LinearGradient(colors: _gradientColors),
+                  boxShadow: [
+                    BoxShadow(
+                      color: selectedColor.withValues(alpha: .24),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: (left - _thumbSize / 2).clamp(0.0, _width - _thumbSize),
+            top: 10,
+            child: Container(
+              key: const Key('event-category-color-slider-thumb'),
+              width: _thumbSize,
+              height: _thumbSize,
+              decoration: BoxDecoration(
+                color: selectedColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: selectedColor.withValues(alpha: .45),
+                    blurRadius: 12,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 10,
+              activeTrackColor: Colors.transparent,
+              inactiveTrackColor: Colors.transparent,
+              thumbColor: Colors.transparent,
+              overlayColor: selectedColor.withValues(alpha: .10),
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 14),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
+            ),
+            child: Slider(
+              key: const Key('event-category-color-slider'),
+              min: 0,
+              max: 360,
+              divisions: 360,
+              value: value.clamp(0, 360),
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -5812,6 +5885,9 @@ Color _colorFromHex(String value) {
   }
   return Color(int.parse('FF${value.substring(1)}', radix: 16));
 }
+
+String _colorHexFromHue(double hue) =>
+    _hexFromColor(HSVColor.fromAHSV(1, hue.clamp(0, 360), .85, .95).toColor());
 
 String _hexFromColor(Color color) {
   final red = (color.r * 255).round().clamp(0, 255);

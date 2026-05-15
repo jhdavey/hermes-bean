@@ -2247,39 +2247,38 @@ void main() {
         'Travel',
       );
       expect(
-        find.byKey(const Key('event-category-hue-slider')),
+        find.byKey(const Key('event-category-color-slider')),
         findsOneWidget,
       );
       expect(
-        find.byKey(const Key('event-category-saturation-slider')),
+        find.byKey(const Key('event-category-color-slider-gradient')),
         findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('event-category-color-slider-thumb')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('event-category-hue-slider')), findsNothing);
+      expect(
+        find.byKey(const Key('event-category-saturation-slider')),
+        findsNothing,
       );
       expect(
         find.byKey(const Key('event-category-value-slider')),
-        findsOneWidget,
+        findsNothing,
       );
       tester
-          .widget<Slider>(find.byKey(const Key('event-category-hue-slider')))
+          .widget<Slider>(find.byKey(const Key('event-category-color-slider')))
           .onChanged
-          ?.call(210);
-      tester
-          .widget<Slider>(
-            find.byKey(const Key('event-category-saturation-slider')),
-          )
-          .onChanged
-          ?.call(.70);
-      tester
-          .widget<Slider>(find.byKey(const Key('event-category-value-slider')))
-          .onChanged
-          ?.call(.90);
+          ?.call(180);
       await tester.pumpAndSettle();
-      expect(find.text('#4595E6'), findsOneWidget);
+      expect(find.text('#24F2F2'), findsOneWidget);
       await tester.tap(
         find.byKey(const Key('event-category-modal-save-action')),
       );
       await tester.pumpAndSettle();
       expect(api.savedCategory?.name, 'Travel');
-      expect(api.savedCategory?.color, '#4595E6');
+      expect(api.savedCategory?.color, '#24F2F2');
 
       await tester.ensureVisible(find.byKey(const Key('event-start-field')));
       await tester.pumpAndSettle();
