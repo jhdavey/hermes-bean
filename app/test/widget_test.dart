@@ -986,6 +986,41 @@ void main() {
     expect(headingAfterSwipe, _headingDaysAfter(headingBeforeSwipe, 2));
   });
 
+  testWidgets('calendar event blocks place time span under the title', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _TwoDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final eventBlock = find.byKey(
+      const Key('calendar-event-block-today-workout'),
+    );
+    final title = find.descendant(
+      of: eventBlock,
+      matching: find.text('Today workout'),
+    );
+    final time = find.descendant(of: eventBlock, matching: find.text('10am'));
+
+    expect(
+      find.descendant(
+        of: eventBlock,
+        matching: find.text('Today workout 10am'),
+      ),
+      findsNothing,
+    );
+    expect(title, findsOneWidget);
+    expect(time, findsOneWidget);
+    expect(
+      tester.getTopLeft(time).dy,
+      greaterThan(tester.getTopLeft(title).dy),
+    );
+  });
+
   testWidgets('week header horizontal scroll jumps by whole weeks', (
     WidgetTester tester,
   ) async {

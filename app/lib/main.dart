@@ -4713,6 +4713,7 @@ class _TimelineEventBlock extends StatelessWidget {
     final dayColumnWidth = timelineWidth / 2;
     final left = (dayColumnWidth * columnIndex) + 8;
     final width = (dayColumnWidth - 16).clamp(0.0, double.infinity);
+    final timeLabel = _eventTimeRangeShort(event);
     return Positioned(
       top: hourPosition + 2,
       left: left,
@@ -4763,7 +4764,7 @@ class _TimelineEventBlock extends StatelessWidget {
         ),
         child: Container(
           height: eventHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
             color: _calendarEventColor(event).withValues(alpha: .14),
             borderRadius: BorderRadius.circular(10),
@@ -4784,15 +4785,34 @@ class _TimelineEventBlock extends StatelessWidget {
                 const SizedBox(width: 4),
               ],
               Expanded(
-                child: Text(
-                  '${event.title} ${_eventTimeRangeShort(event)}'.trim(),
-                  maxLines: eventHeight >= 54 ? 2 : 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.black,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      event.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        height: 1.05,
+                      ),
+                    ),
+                    if (timeLabel.isNotEmpty)
+                      Text(
+                        timeLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 10,
+                          height: 1.05,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
