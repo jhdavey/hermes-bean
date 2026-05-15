@@ -621,6 +621,389 @@ void main() {
     },
   );
 
+  test('supports workspace endpoints and parses workspace fields', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.headers['Authorization'], 'Bearer token-123');
+
+        if (request.method == 'GET' && request.path == '/workspaces') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': [
+                {
+                  'id': 1,
+                  'type': 'personal',
+                  'name': 'Bean Personal Workspace',
+                  'status': 'active',
+                  'memberships': [
+                    {
+                      'id': 10,
+                      'workspace_id': 1,
+                      'user_id': 9,
+                      'role': 'owner',
+                    },
+                  ],
+                },
+              ],
+            }),
+          );
+        }
+        if (request.method == 'POST' && request.path == '/workspaces') {
+          expect(request.body, {'name': 'Family'});
+          return HermesApiResponse(
+            201,
+            jsonEncode({
+              'data': {'id': 2, 'type': 'household', 'name': 'Family'},
+            }),
+          );
+        }
+        if (request.method == 'GET' && request.path == '/workspaces/2') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {'id': 2, 'type': 'household', 'name': 'Family'},
+            }),
+          );
+        }
+        if (request.method == 'PATCH' && request.path == '/workspaces/2') {
+          expect(request.body, {
+            'name': 'Home',
+            'settings': {'timezone': 'UTC'},
+          });
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'id': 2,
+                'type': 'household',
+                'name': 'Home',
+                'settings': {'timezone': 'UTC'},
+              },
+            }),
+          );
+        }
+        if (request.method == 'POST' &&
+            request.path == '/workspaces/2/invitations') {
+          expect(request.body, {'email': 'parent@example.com'});
+          return HermesApiResponse(
+            201,
+            jsonEncode({
+              'data': {
+                'id': 20,
+                'workspace_id': 2,
+                'role': 'member',
+                'status': 'invited',
+                'invited_email': 'parent@example.com',
+                'metadata': {'invitation_token': 'invite-token'},
+              },
+            }),
+          );
+        }
+        if (request.method == 'POST' &&
+            request.path == '/workspace-invitations/invite-token/accept') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'id': 20,
+                'workspace_id': 2,
+                'user_id': 9,
+                'role': 'member',
+                'status': 'active',
+                'workspace': {'id': 2, 'name': 'Home'},
+              },
+            }),
+          );
+        }
+        if (request.method == 'PATCH' &&
+            request.path == '/workspaces/2/members/20') {
+          expect(request.body, {'role': 'owner'});
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {'id': 20, 'workspace_id': 2, 'role': 'owner'},
+            }),
+          );
+        }
+        if (request.method == 'DELETE' &&
+            request.path == '/workspaces/2/members/20') {
+          return const HermesApiResponse(204, '');
+        }
+        if (request.method == 'POST' && request.path == '/workspaces/2/leave') {
+          return const HermesApiResponse(204, '');
+        }
+        if (request.method == 'PATCH' &&
+            request.path == '/workspaces/default') {
+          expect(request.body, {'workspace_id': 2});
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {'id': 2, 'type': 'household', 'name': 'Home'},
+            }),
+          );
+        }
+        if (request.method == 'POST' &&
+            request.path == '/workspaces/1/sync-all') {
+          expect(request.body, {
+            'target_workspace_id': 2,
+            'resource_types': ['tasks', 'reminders'],
+          });
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {'tasks': 3, 'reminders': 2, 'calendar_events': 0},
+            }),
+          );
+        }
+        if (request.method == 'PATCH' &&
+            request.path == '/workspaces/2/google-calendars') {
+          expect(request.body, {
+            'google_calendar_ids': ['primary', 'family@example.com'],
+            'default_export_calendar_id': 'family@example.com',
+          });
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': [
+                {'id': 1, 'google_calendar_id': 'family@example.com'},
+              ],
+            }),
+          );
+        }
+        if (request.method == 'GET' && request.path == '/auth/me') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'id': 9,
+                'name': 'Bean User',
+                'email': 'bean@example.com',
+                'default_workspace_id': 2,
+                'personal_workspace': {
+                  'id': 1,
+                  'name': 'Bean Personal Workspace',
+                },
+                'active_workspace': {'id': 2, 'name': 'Home'},
+                'workspaces': [
+                  {'id': 1, 'name': 'Bean Personal Workspace'},
+                  {'id': 2, 'name': 'Home'},
+                ],
+              },
+            }),
+          );
+        }
+        if (request.method == 'GET' &&
+            request.path == '/today?workspace_id=2') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'user': {
+                  'id': 9,
+                  'name': 'Bean User',
+                  'email': 'bean@example.com',
+                },
+                'workspace': {'id': 2, 'name': 'Home'},
+                'workspaces': [
+                  {'id': 2, 'name': 'Home'},
+                ],
+                'session': null,
+                'tasks': [],
+                'reminders': [],
+                'calendar_events': [],
+                'activity_events': [],
+                'approvals': [],
+                'blockers': [],
+              },
+            }),
+          );
+        }
+
+        fail('Unexpected request: ${request.method} ${request.path}');
+      },
+    );
+
+    expect(
+      (await client.listWorkspaces()).single.memberships.single.role,
+      'owner',
+    );
+    expect((await client.createWorkspace(name: 'Family')).id, '2');
+    expect((await client.getWorkspace(2)).name, 'Family');
+    expect(
+      (await client.updateWorkspace(
+        2,
+        name: 'Home',
+        settings: {'timezone': 'UTC'},
+      )).settings['timezone'],
+      'UTC',
+    );
+    expect(
+      (await client.inviteWorkspaceMember(
+        2,
+        email: 'parent@example.com',
+      )).invitationToken,
+      'invite-token',
+    );
+    expect(
+      (await client.acceptWorkspaceInvitation('invite-token')).workspace?.id,
+      '2',
+    );
+    expect(
+      (await client.updateWorkspaceMember(2, 20, role: 'owner')).role,
+      'owner',
+    );
+    await client.removeWorkspaceMember(2, 20);
+    await client.leaveWorkspace(2);
+    expect((await client.setDefaultWorkspace(2)).name, 'Home');
+    expect(
+      (await client.syncWorkspaceAll(
+        1,
+        targetWorkspaceId: 2,
+        resourceTypes: ['tasks', 'reminders'],
+      )).tasks,
+      3,
+    );
+    expect(
+      (await client.updateWorkspaceGoogleCalendars(
+        2,
+        googleCalendarIds: ['primary', 'family@example.com'],
+        defaultExportCalendarId: 'family@example.com',
+      )).single['google_calendar_id'],
+      'family@example.com',
+    );
+    final me = await client.me();
+    expect(me.defaultWorkspaceId, 2);
+    expect(me.activeWorkspace?.name, 'Home');
+    final today = await client.todaySummary(workspaceId: 2);
+    expect(today.workspace?.id, '2');
+    expect(today.workspaces.single.name, 'Home');
+
+    expect(
+      requests.last.uri,
+      Uri.parse('http://local.test/api/today?workspace_id=2'),
+    );
+  });
+
+  test(
+    'adds workspace and sync parameters to domain resource payloads',
+    () async {
+      final requests = <HermesApiRequest>[];
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        bearerToken: 'token-123',
+        transport: (request) async {
+          requests.add(request);
+          if (request.path == '/tasks' && request.method == 'POST') {
+            expect(request.body, {
+              'title': 'Buy milk',
+              'type': 'todo',
+              'status': 'open',
+              'due_at': null,
+              'category': null,
+              'color': null,
+              'is_critical': false,
+              'workspace_id': 1,
+              'sync_to_workspace_ids': [2, 3],
+            });
+            return HermesApiResponse(
+              201,
+              jsonEncode({
+                'data': {'id': 1, 'title': 'Buy milk'},
+              }),
+            );
+          }
+          if (request.path == '/tasks/1' && request.method == 'PATCH') {
+            expect(request.body, {
+              'due_at': null,
+              'sync_to_workspace_ids': [2],
+            });
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {'id': 1, 'title': 'Buy milk'},
+              }),
+            );
+          }
+          if (request.path == '/reminders' && request.method == 'POST') {
+            expect(request.body, containsPair('workspace_id', 1));
+            expect(request.body, containsPair('sync_to_workspace_ids', [2]));
+            return HermesApiResponse(
+              201,
+              jsonEncode({
+                'data': {'id': 2, 'title': 'Ping'},
+              }),
+            );
+          }
+          if (request.path == '/reminders/2' && request.method == 'PATCH') {
+            expect(request.body, {
+              'sync_to_workspace_ids': [3],
+            });
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {'id': 2, 'title': 'Ping'},
+              }),
+            );
+          }
+          if (request.path == '/calendar-events' && request.method == 'POST') {
+            expect(request.body, containsPair('workspace_id', 1));
+            expect(request.body, containsPair('sync_to_workspace_ids', [2]));
+            return HermesApiResponse(
+              201,
+              jsonEncode({
+                'data': {'id': 3, 'title': 'Meet'},
+              }),
+            );
+          }
+          if (request.path == '/calendar-events/3' &&
+              request.method == 'PATCH') {
+            expect(request.body, containsPair('sync_to_workspace_ids', [2, 3]));
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {'id': 3, 'title': 'Meet'},
+              }),
+            );
+          }
+          fail('Unexpected request: ${request.method} ${request.path}');
+        },
+      );
+
+      await client.createTask(
+        title: 'Buy milk',
+        workspaceId: 1,
+        syncToWorkspaceIds: [2, 3],
+      );
+      await client.updateTask(1, syncToWorkspaceIds: [2]);
+      await client.createReminder(
+        title: 'Ping',
+        remindAt: '2026-05-20T10:00:00Z',
+        workspaceId: 1,
+        syncToWorkspaceIds: [2],
+      );
+      await client.updateReminder(2, syncToWorkspaceIds: [3]);
+      await client.createCalendarEvent(
+        title: 'Meet',
+        startsAt: '2026-05-20T10:00:00Z',
+        workspaceId: 1,
+        syncToWorkspaceIds: [2],
+      );
+      await client.updateCalendarEvent(
+        3,
+        title: 'Meet',
+        startsAt: '2026-05-20T10:00:00Z',
+        syncToWorkspaceIds: [2, 3],
+      );
+
+      expect(requests, hasLength(6));
+    },
+  );
+
   test('throws useful error for non-success API responses', () async {
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),

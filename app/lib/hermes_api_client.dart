@@ -96,9 +96,135 @@ class HermesApiClient {
     return _expectMap(data['data']);
   }
 
-  Future<HermesTodaySummary> todaySummary() async {
-    final data = await _sendJson('GET', '/today');
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/today', {
+        if (workspaceId != null) 'workspace_id': workspaceId.toString(),
+      }),
+    );
     return HermesTodaySummary.fromJson(_expectMap(data['data']));
+  }
+
+  Future<List<HermesWorkspace>> listWorkspaces() async {
+    final data = await _sendJson('GET', '/workspaces');
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesWorkspace.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<HermesWorkspace> createWorkspace({required String name}) async {
+    final data = await _sendJson('POST', '/workspaces', body: {'name': name});
+    return HermesWorkspace.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesWorkspace> getWorkspace(int workspaceId) async {
+    final data = await _sendJson('GET', '/workspaces/$workspaceId');
+    return HermesWorkspace.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesWorkspace> updateWorkspace(
+    int workspaceId, {
+    String? name,
+    Map<String, Object?>? settings,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/workspaces/$workspaceId',
+      body: {
+        if (name != null) 'name': name,
+        if (settings != null) 'settings': settings,
+      },
+    );
+    return HermesWorkspace.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesWorkspaceMembership> inviteWorkspaceMember(
+    int workspaceId, {
+    required String email,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/workspaces/$workspaceId/invitations',
+      body: {'email': email},
+    );
+    return HermesWorkspaceMembership.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesWorkspaceMembership> acceptWorkspaceInvitation(
+    String token,
+  ) async {
+    final data = await _sendJson(
+      'POST',
+      '/workspace-invitations/$token/accept',
+    );
+    return HermesWorkspaceMembership.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesWorkspaceMembership> updateWorkspaceMember(
+    int workspaceId,
+    int memberId, {
+    required String role,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/workspaces/$workspaceId/members/$memberId',
+      body: {'role': role},
+    );
+    return HermesWorkspaceMembership.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> removeWorkspaceMember(int workspaceId, int memberId) async {
+    await _sendJson('DELETE', '/workspaces/$workspaceId/members/$memberId');
+  }
+
+  Future<void> leaveWorkspace(int workspaceId) async {
+    await _sendJson('POST', '/workspaces/$workspaceId/leave');
+  }
+
+  Future<HermesWorkspace> setDefaultWorkspace(int workspaceId) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/workspaces/default',
+      body: {'workspace_id': workspaceId},
+    );
+    return HermesWorkspace.fromJson(_expectMap(data['data']));
+  }
+
+  Future<WorkspaceSyncResult> syncWorkspaceAll(
+    int sourceWorkspaceId, {
+    required int targetWorkspaceId,
+    List<String>? resourceTypes,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/workspaces/$sourceWorkspaceId/sync-all',
+      body: {
+        'target_workspace_id': targetWorkspaceId,
+        if (resourceTypes != null && resourceTypes.isNotEmpty)
+          'resource_types': resourceTypes,
+      },
+    );
+    return WorkspaceSyncResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<List<Map<String, Object?>>> updateWorkspaceGoogleCalendars(
+    int workspaceId, {
+    required List<String> googleCalendarIds,
+    String? defaultExportCalendarId,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/workspaces/$workspaceId/google-calendars',
+      body: {
+        'google_calendar_ids': googleCalendarIds,
+        if (defaultExportCalendarId != null)
+          'default_export_calendar_id': defaultExportCalendarId,
+      },
+    );
+    return _expectList(
+      data['data'],
+    ).map((json) => Map<String, Object?>.from(_expectMap(json))).toList();
   }
 
   Future<List<HermesTask>> listTasks() async {
@@ -124,6 +250,8 @@ class HermesApiClient {
     String? color,
     bool isCritical = false,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final body = <String, Object?>{
       'title': title,
@@ -134,6 +262,9 @@ class HermesApiClient {
       'color': color,
       'is_critical': isCritical,
       if (metadata != null) 'metadata': metadata,
+      if (workspaceId != null) 'workspace_id': workspaceId,
+      if (syncToWorkspaceIds.isNotEmpty)
+        'sync_to_workspace_ids': syncToWorkspaceIds,
     };
     final data = await _sendJson('POST', '/tasks', body: body);
     return HermesTask.fromJson(_expectMap(data['data']));
@@ -149,6 +280,7 @@ class HermesApiClient {
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -161,6 +293,8 @@ class HermesApiClient {
       if (color != null || clearColor) 'color': color,
       if (isCritical != null) 'is_critical': isCritical,
       if (metadata != null) 'metadata': metadata,
+      if (syncToWorkspaceIds.isNotEmpty)
+        'sync_to_workspace_ids': syncToWorkspaceIds,
     };
     final data = await _sendJson('PATCH', '/tasks/$taskId', body: body);
     return HermesTask.fromJson(_expectMap(data['data']));
@@ -204,6 +338,8 @@ class HermesApiClient {
     String? color,
     bool isCritical = false,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final body = <String, Object?>{
       'title': title,
@@ -214,6 +350,9 @@ class HermesApiClient {
       'is_critical': isCritical,
       if (calendarEventId != null) 'calendar_event_id': calendarEventId,
       if (metadata != null) 'metadata': metadata,
+      if (workspaceId != null) 'workspace_id': workspaceId,
+      if (syncToWorkspaceIds.isNotEmpty)
+        'sync_to_workspace_ids': syncToWorkspaceIds,
     };
     final data = await _sendJson('POST', '/reminders', body: body);
     return HermesReminder.fromJson(_expectMap(data['data']));
@@ -229,6 +368,7 @@ class HermesApiClient {
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -241,6 +381,8 @@ class HermesApiClient {
       if (color != null || clearColor) 'color': color,
       if (isCritical != null) 'is_critical': isCritical,
       if (metadata != null) 'metadata': metadata,
+      if (syncToWorkspaceIds.isNotEmpty)
+        'sync_to_workspace_ids': syncToWorkspaceIds,
     };
     final data = await _sendJson('PATCH', '/reminders/$reminderId', body: body);
     return HermesReminder.fromJson(_expectMap(data['data']));
@@ -266,6 +408,8 @@ class HermesApiClient {
     bool? isCritical,
     String? recurrence,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final data = await _sendJson(
       'POST',
@@ -279,6 +423,9 @@ class HermesApiClient {
         'recurrence': recurrence,
         if (isCritical != null) 'is_critical': isCritical,
         if (metadata != null) 'metadata': metadata,
+        if (workspaceId != null) 'workspace_id': workspaceId,
+        if (syncToWorkspaceIds.isNotEmpty)
+          'sync_to_workspace_ids': syncToWorkspaceIds,
       },
     );
     return HermesCalendarEvent.fromJson(_expectMap(data['data']));
@@ -365,6 +512,7 @@ class HermesApiClient {
     bool? isCritical,
     String? recurrence,
     Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final data = await _sendJson(
       'PATCH',
@@ -378,6 +526,8 @@ class HermesApiClient {
         'recurrence': recurrence,
         if (isCritical != null) 'is_critical': isCritical,
         if (metadata != null) 'metadata': metadata,
+        if (syncToWorkspaceIds.isNotEmpty)
+          'sync_to_workspace_ids': syncToWorkspaceIds,
       },
     );
     return HermesCalendarEvent.fromJson(_expectMap(data['data']));
@@ -388,11 +538,16 @@ class HermesApiClient {
     required String title,
     required String remindAt,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final body = <String, Object?>{
       'calendar_event_id': calendarEventId,
       'title': title,
       'remind_at': remindAt,
+      if (workspaceId != null) 'workspace_id': workspaceId,
+      if (syncToWorkspaceIds.isNotEmpty)
+        'sync_to_workspace_ids': syncToWorkspaceIds,
     };
     if (metadata != null) body['metadata'] = metadata;
     final data = await _sendJson('POST', '/reminders', body: body);
@@ -482,12 +637,21 @@ class HermesApiClient {
     return decoded;
   }
 
+  String _pathWithQuery(String path, Map<String, String> queryParameters) {
+    if (queryParameters.isEmpty) return path;
+    final uri = Uri(path: path, queryParameters: queryParameters);
+    return uri.toString();
+  }
+
   Uri _resolveApiPath(String path) {
     final basePath = baseUrl.path.endsWith('/')
         ? baseUrl.path.substring(0, baseUrl.path.length - 1)
         : baseUrl.path;
-    final requestPath = path.startsWith('/') ? path : '/$path';
-    return baseUrl.replace(path: '$basePath$requestPath');
+    final request = Uri.parse(path.startsWith('/') ? path : '/$path');
+    return baseUrl.replace(
+      path: '$basePath${request.path}',
+      query: request.hasQuery ? request.query : null,
+    );
   }
 
   static Future<HermesApiResponse> _defaultTransport(
@@ -561,6 +725,11 @@ class HermesUser {
     required this.email,
     this.onboardComplete = false,
     this.agentProfile,
+    this.defaultWorkspaceId,
+    this.personalWorkspace,
+    this.activeWorkspace,
+    this.workspaces = const [],
+    this.activeWorkspaceAgentProfile,
   });
 
   final int id;
@@ -568,18 +737,34 @@ class HermesUser {
   final String email;
   final bool onboardComplete;
   final HermesAgentProfile? agentProfile;
+  final int? defaultWorkspaceId;
+  final HermesWorkspace? personalWorkspace;
+  final HermesWorkspace? activeWorkspace;
+  final List<HermesWorkspace> workspaces;
+  final HermesAgentProfile? activeWorkspaceAgentProfile;
 
   HermesUser copyWith({
     String? name,
     String? email,
     bool? onboardComplete,
     HermesAgentProfile? agentProfile,
+    int? defaultWorkspaceId,
+    HermesWorkspace? personalWorkspace,
+    HermesWorkspace? activeWorkspace,
+    List<HermesWorkspace>? workspaces,
+    HermesAgentProfile? activeWorkspaceAgentProfile,
   }) => HermesUser(
     id: id,
     name: name ?? this.name,
     email: email ?? this.email,
     onboardComplete: onboardComplete ?? this.onboardComplete,
     agentProfile: agentProfile ?? this.agentProfile,
+    defaultWorkspaceId: defaultWorkspaceId ?? this.defaultWorkspaceId,
+    personalWorkspace: personalWorkspace ?? this.personalWorkspace,
+    activeWorkspace: activeWorkspace ?? this.activeWorkspace,
+    workspaces: workspaces ?? this.workspaces,
+    activeWorkspaceAgentProfile:
+        activeWorkspaceAgentProfile ?? this.activeWorkspaceAgentProfile,
   );
 
   factory HermesUser.fromJson(Map<String, Object?> json) => HermesUser(
@@ -590,7 +775,226 @@ class HermesUser {
     agentProfile: json['agent_profile'] is Map<String, Object?>
         ? HermesAgentProfile.fromJson(_expectMap(json['agent_profile']))
         : null,
+    defaultWorkspaceId: _readIntOrNull(json['default_workspace_id']),
+    personalWorkspace: json['personal_workspace'] is Map<String, Object?>
+        ? HermesWorkspace.fromJson(_expectMap(json['personal_workspace']))
+        : null,
+    activeWorkspace: json['active_workspace'] is Map<String, Object?>
+        ? HermesWorkspace.fromJson(_expectMap(json['active_workspace']))
+        : null,
+    workspaces: _expectList(json['workspaces'] ?? const [])
+        .map((workspace) => HermesWorkspace.fromJson(_expectMap(workspace)))
+        .toList(),
+    activeWorkspaceAgentProfile:
+        json['active_workspace_agent_profile'] is Map<String, Object?>
+        ? HermesAgentProfile.fromJson(
+            _expectMap(json['active_workspace_agent_profile']),
+          )
+        : null,
   );
+}
+
+class HermesWorkspace {
+  const HermesWorkspace({
+    required this.id,
+    required this.name,
+    String? type,
+    String? kind,
+    this.slug,
+    this.status = 'active',
+    this.role = 'member',
+    this.active = false,
+    this.isDefault = false,
+    this.googleCalendarId,
+    this.personalOwnerUserId,
+    this.createdByUserId,
+    this.settings = const {},
+    this.metadata = const {},
+    this.memberships = const [],
+    this.members = const [],
+    this.agentProfile,
+    this.googleCalendarMappings = const [],
+  }) : type = type ?? kind ?? 'household';
+
+  final String id;
+  final String name;
+  final String type;
+  String get kind => type;
+  final String? slug;
+  final String status;
+  final String role;
+  final bool active;
+  final bool isDefault;
+  final String? googleCalendarId;
+  final int? personalOwnerUserId;
+  final int? createdByUserId;
+  final Map<String, Object?> settings;
+  final Map<String, Object?> metadata;
+  final List<HermesWorkspaceMembership> memberships;
+  final List<HermesWorkspaceMemberUser> members;
+  final HermesAgentProfile? agentProfile;
+  final List<Map<String, Object?>> googleCalendarMappings;
+
+  int? get numericId => _readIntOrNull(id);
+  bool get isPersonal => type == 'personal' || id == 'personal';
+  bool get canManageMembers => role == 'owner';
+
+  HermesWorkspace copyWith({
+    String? name,
+    String? role,
+    bool? active,
+    bool? isDefault,
+    String? googleCalendarId,
+    List<HermesWorkspaceMemberUser>? members,
+  }) => HermesWorkspace(
+    id: id,
+    name: name ?? this.name,
+    type: type,
+    slug: slug,
+    status: status,
+    role: role ?? this.role,
+    active: active ?? this.active,
+    isDefault: isDefault ?? this.isDefault,
+    googleCalendarId: googleCalendarId ?? this.googleCalendarId,
+    personalOwnerUserId: personalOwnerUserId,
+    createdByUserId: createdByUserId,
+    settings: settings,
+    metadata: metadata,
+    memberships: memberships,
+    members: members ?? this.members,
+    agentProfile: agentProfile,
+    googleCalendarMappings: googleCalendarMappings,
+  );
+
+  factory HermesWorkspace.fromJson(Map<String, Object?> json) {
+    final rawId = json['id'] ?? json['workspace_id'] ?? 'personal';
+    final parsedMemberships = _expectList(json['memberships'] ?? const [])
+        .map(
+          (membership) =>
+              HermesWorkspaceMembership.fromJson(_expectMap(membership)),
+        )
+        .toList();
+    final parsedMembers = _expectList(json['members'] ?? const [])
+        .map((member) => HermesWorkspaceMemberUser.fromJson(_expectMap(member)))
+        .toList();
+    return HermesWorkspace(
+      id: rawId.toString(),
+      name: (json['name'] ?? 'Workspace').toString(),
+      type: (json['type'] ?? json['kind'] ?? 'household').toString(),
+      slug: json['slug']?.toString(),
+      status: json['status']?.toString() ?? 'active',
+      role: (json['role'] ?? json['membership_role'] ?? 'member').toString(),
+      active: json['active'] == true || json['is_active'] == true,
+      isDefault: json['default'] == true || json['is_default'] == true,
+      googleCalendarId: (json['google_calendar_id'] ?? json['calendar_id'])
+          ?.toString(),
+      personalOwnerUserId: _readIntOrNull(json['personal_owner_user_id']),
+      createdByUserId: _readIntOrNull(json['created_by_user_id']),
+      settings: _expectMapOrNull(json['settings']) ?? const {},
+      metadata: _expectMapOrNull(json['metadata']) ?? const {},
+      memberships: parsedMemberships,
+      members: parsedMembers.isNotEmpty
+          ? parsedMembers
+          : parsedMemberships
+                .where((membership) => membership.user != null)
+                .map((membership) => membership.user!)
+                .toList(),
+      agentProfile: json['agent_profile'] is Map<String, Object?>
+          ? HermesAgentProfile.fromJson(_expectMap(json['agent_profile']))
+          : null,
+      googleCalendarMappings:
+          _expectList(json['google_calendar_mappings'] ?? const [])
+              .map((mapping) => Map<String, Object?>.from(_expectMap(mapping)))
+              .toList(),
+    );
+  }
+}
+
+class HermesWorkspaceMembership {
+  const HermesWorkspaceMembership({
+    required this.id,
+    required this.workspaceId,
+    this.userId,
+    this.role = 'member',
+    this.status = 'active',
+    this.invitedByUserId,
+    this.invitedEmail,
+    this.acceptedAt,
+    this.metadata = const {},
+    this.user,
+    this.workspace,
+  });
+
+  final int id;
+  final int workspaceId;
+  final int? userId;
+  final String role;
+  final String status;
+  final int? invitedByUserId;
+  final String? invitedEmail;
+  final String? acceptedAt;
+  final Map<String, Object?> metadata;
+  final HermesWorkspaceMemberUser? user;
+  final HermesWorkspace? workspace;
+
+  String? get invitationToken => metadata['invitation_token']?.toString();
+
+  factory HermesWorkspaceMembership.fromJson(Map<String, Object?> json) =>
+      HermesWorkspaceMembership(
+        id: _expectInt(json['id']),
+        workspaceId: _expectInt(json['workspace_id']),
+        userId: _readIntOrNull(json['user_id']),
+        role: json['role']?.toString() ?? 'member',
+        status: json['status']?.toString() ?? 'active',
+        invitedByUserId: _readIntOrNull(json['invited_by_user_id']),
+        invitedEmail: json['invited_email']?.toString(),
+        acceptedAt: json['accepted_at']?.toString(),
+        metadata: _expectMapOrNull(json['metadata']) ?? const {},
+        user: json['user'] is Map<String, Object?>
+            ? HermesWorkspaceMemberUser.fromJson(_expectMap(json['user']))
+            : null,
+        workspace: json['workspace'] is Map<String, Object?>
+            ? HermesWorkspace.fromJson(_expectMap(json['workspace']))
+            : null,
+      );
+}
+
+class HermesWorkspaceMemberUser {
+  const HermesWorkspaceMemberUser({
+    required this.id,
+    required this.name,
+    required this.email,
+  });
+
+  final int id;
+  final String name;
+  final String email;
+
+  factory HermesWorkspaceMemberUser.fromJson(Map<String, Object?> json) =>
+      HermesWorkspaceMemberUser(
+        id: _expectInt(json['id']),
+        name: _expectString(json['name']),
+        email: _expectString(json['email']),
+      );
+}
+
+class WorkspaceSyncResult {
+  const WorkspaceSyncResult({
+    this.tasks = 0,
+    this.reminders = 0,
+    this.calendarEvents = 0,
+  });
+
+  final int tasks;
+  final int reminders;
+  final int calendarEvents;
+
+  factory WorkspaceSyncResult.fromJson(Map<String, Object?> json) =>
+      WorkspaceSyncResult(
+        tasks: _readIntOrNull(json['tasks']) ?? 0,
+        reminders: _readIntOrNull(json['reminders']) ?? 0,
+        calendarEvents: _readIntOrNull(json['calendar_events']) ?? 0,
+      );
 }
 
 class HermesAgentProfile {
@@ -731,6 +1135,10 @@ class GoogleCalendarSyncResult {
 
 class HermesTodaySummary {
   const HermesTodaySummary({
+    this.user,
+    this.agentProfile,
+    this.workspace,
+    this.workspaces = const [],
     this.session,
     required this.tasks,
     required this.reminders,
@@ -740,6 +1148,10 @@ class HermesTodaySummary {
     required this.blockers,
   });
 
+  final HermesUser? user;
+  final HermesAgentProfile? agentProfile;
+  final HermesWorkspace? workspace;
+  final List<HermesWorkspace> workspaces;
   final HermesSession? session;
   final List<HermesTask> tasks;
   final List<HermesReminder> reminders;
@@ -750,6 +1162,18 @@ class HermesTodaySummary {
 
   factory HermesTodaySummary.fromJson(Map<String, Object?> json) =>
       HermesTodaySummary(
+        user: json['user'] == null
+            ? null
+            : HermesUser.fromJson(_expectMap(json['user'])),
+        agentProfile: json['agent_profile'] == null
+            ? null
+            : HermesAgentProfile.fromJson(_expectMap(json['agent_profile'])),
+        workspace: json['workspace'] == null
+            ? null
+            : HermesWorkspace.fromJson(_expectMap(json['workspace'])),
+        workspaces: _expectList(json['workspaces'] ?? const [])
+            .map((workspace) => HermesWorkspace.fromJson(_expectMap(workspace)))
+            .toList(),
         session: json['session'] == null
             ? null
             : HermesSession.fromJson(_expectMap(json['session'])),
@@ -1158,6 +1582,14 @@ List<Object?> _expectList(Object? value) {
 
 int _expectInt(Object? value) {
   if (value is int) return value;
+  throw FormatException('Expected integer, got ${value.runtimeType}');
+}
+
+int? _readIntOrNull(Object? value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value);
   throw FormatException('Expected integer, got ${value.runtimeType}');
 }
 

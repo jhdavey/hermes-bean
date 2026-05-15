@@ -16,6 +16,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\AgentProfileService;
 use App\Services\OnboardingSeedService;
+use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,7 @@ class AuthController extends Controller
         if (config('hermes_bean.seed_onboarding_resources', true)) {
             app(OnboardingSeedService::class)->ensureForUser($user);
         }
+        app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $user->refresh()->load('agentProfile');
 
         return response()->json(['data' => [
@@ -65,6 +67,7 @@ class AuthController extends Controller
         if (config('hermes_bean.seed_onboarding_resources', true)) {
             app(OnboardingSeedService::class)->ensureForUser($user);
         }
+        app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
 
         return response()->json(['data' => [
             'user' => $user,
@@ -75,9 +78,18 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         $user = $request->user();
+        $workspaceService = app(WorkspaceService::class);
         app(AgentProfileService::class)->ensureForUser($user);
+        $workspaceService->ensurePersonalWorkspaceForUser($user);
         $user->unsetRelation('agentProfile');
         $user->load('agentProfile');
+        $personalWorkspace = \App\Models\Workspace::where('personal_owner_user_id', $user->id)->first();
+        $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh());
+        $agentProfile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
+        $user->setAttribute('personal_workspace', $personalWorkspace);
+        $user->setAttribute('active_workspace', $activeWorkspace);
+        $user->setAttribute('workspaces', $workspaceService->accessibleWorkspaces($user));
+        $user->setAttribute('active_workspace_agent_profile', $agentProfile);
 
         return response()->json(['data' => $user]);
     }

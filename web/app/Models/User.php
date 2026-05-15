@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'onboard_complete'])]
+#[Fillable(['name', 'email', 'password', 'onboard_complete', 'default_workspace_id'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -81,6 +81,19 @@ class User extends Authenticatable
     public function agentProfile(): HasOne
     {
         return $this->hasOne(AgentProfile::class);
+    }
+
+    public function workspaceMemberships(): HasMany
+    {
+        return $this->hasMany(WorkspaceMembership::class);
+    }
+
+    public function workspaces()
+    {
+        return $this->belongsToMany(Workspace::class, 'workspace_memberships')
+            ->withPivot(['role', 'status', 'invited_email', 'accepted_at'])
+            ->wherePivot('status', 'active')
+            ->withTimestamps();
     }
 
     public function schedulerJobRecords(): HasMany

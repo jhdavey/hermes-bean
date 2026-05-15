@@ -1017,6 +1017,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? category,
     String? color,
     bool? isCritical,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
     try {
@@ -1027,6 +1028,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               category: category,
               color: color,
               isCritical: isCritical ?? false,
+              workspaceId: _user?.activeWorkspace?.numericId,
+              syncToWorkspaceIds: syncToWorkspaceIds,
             )
           : await widget.apiClient.updateTask(
               task.id,
@@ -1038,6 +1041,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               isCritical: isCritical,
               clearCategory: category == null,
               clearColor: color == null,
+              syncToWorkspaceIds: syncToWorkspaceIds,
             );
       if (!mounted) return;
       setState(() {
@@ -1065,6 +1069,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       categories: _eventCategories,
       initialCritical: false,
       onEventCategorySaved: _saveEventCategory,
+      workspaces: _user?.workspaces ?? const [],
+      activeWorkspaceId: _user?.activeWorkspace?.id,
     );
     if (result == null) return;
     final title = (result['title'] as String).trim();
@@ -1076,6 +1082,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       category: result['category'] as String?,
       color: result['color'] as String?,
       isCritical: result['isCritical'] as bool?,
+      syncToWorkspaceIds:
+          (result['syncToWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
     );
   }
 
@@ -1092,6 +1103,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       showCritical: false,
       showTimeTextField: false,
       onEventCategorySaved: _saveEventCategory,
+      workspaces: _user?.workspaces ?? const [],
+      activeWorkspaceId: _user?.activeWorkspace?.id,
     );
     if (result == null) return;
     final title = (result['title'] as String).trim();
@@ -1104,6 +1117,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       status: 'pending',
       category: result['category'] as String?,
       color: result['color'] as String?,
+      syncToWorkspaceIds:
+          (result['syncToWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
     );
   }
 
@@ -1130,6 +1148,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String status = 'pending',
     String? category,
     String? color,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final normalizedRemindAt = _taskReminderInputToWireValue(remindAt);
     if (normalizedRemindAt == null) {
@@ -1144,6 +1163,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               status: status,
               category: category,
               color: color,
+              workspaceId: _user?.activeWorkspace?.numericId,
+              syncToWorkspaceIds: syncToWorkspaceIds,
             )
           : await widget.apiClient.updateReminder(
               reminder.id,
@@ -1154,6 +1175,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               color: color,
               clearCategory: category == null,
               clearColor: color == null,
+              syncToWorkspaceIds: syncToWorkspaceIds,
             );
       if (!mounted) return;
       setState(() {
@@ -1294,6 +1316,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     try {
       final createdEvent = await widget.apiClient.createCalendarEvent(
@@ -1305,6 +1328,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         recurrence: recurrence,
         metadata: metadata,
         isCritical: isCritical ?? false,
+        workspaceId: _user?.activeWorkspace?.numericId,
+        syncToWorkspaceIds: syncToWorkspaceIds,
       );
       if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
         final start = _parseCalendarEventDateTime(startsAt);
@@ -1353,6 +1378,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final previousCalendar = _calendar;
     final optimisticEvent = event.copyWith(
@@ -1390,6 +1416,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         recurrence: recurrence,
         metadata: metadata,
         isCritical: isCritical,
+        syncToWorkspaceIds: syncToWorkspaceIds,
       );
       if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
         final start = _parseCalendarEventDateTime(startsAt);
@@ -1429,6 +1456,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _error = 'Could not update event: $error';
       });
     }
+  }
+
+  Future<void> _reloadSignedInViewsFromSettings() async {
+    await _loadSignedIn();
   }
 
   Future<void> _updateAccountEmail(String email) async {
@@ -1479,6 +1510,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       draft,
       eventCategories: _eventCategories,
       googleCalendarStatus: _googleCalendarStatus,
+      workspaces: _user?.workspaces ?? const [],
+      activeWorkspaceId: _user?.activeWorkspace?.id,
       onSave:
           (
             _, {
@@ -1495,6 +1528,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
             List<String>? reminderSpecificDays,
             int? reminderInterval,
             String? reminderIntervalUnit,
+            List<Object> syncToWorkspaceIds = const [],
           }) => _createCalendarEvent(
             title: title,
             startsAt: startsAt,
@@ -1509,6 +1543,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
             reminderSpecificDays: reminderSpecificDays,
             reminderInterval: reminderInterval,
             reminderIntervalUnit: reminderIntervalUnit,
+            syncToWorkspaceIds: syncToWorkspaceIds,
           ),
       onEventCategorySaved: _saveEventCategory,
       onEventCategoryDeleted: _deleteEventCategory,
@@ -1766,6 +1801,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _forceAgentOnboarding = false;
       });
     },
+    onWorkspacesChanged: _reloadSignedInViewsFromSettings,
   );
 }
 
@@ -2331,6 +2367,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onAccountEmailChanged,
     required this.launchExternalUrl,
     required this.onEditAgentOnboarding,
+    required this.onWorkspacesChanged,
     this.error,
   });
 
@@ -2372,6 +2409,7 @@ class _CommandCenterContent extends StatelessWidget {
     String? category,
     String? color,
     bool? isCritical,
+    List<Object> syncToWorkspaceIds,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -2382,6 +2420,7 @@ class _CommandCenterContent extends StatelessWidget {
     String status,
     String? category,
     String? color,
+    List<Object> syncToWorkspaceIds,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -2400,6 +2439,7 @@ class _CommandCenterContent extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds,
   })
   onCalendarEventCreated;
   final Future<void> Function(
@@ -2417,6 +2457,7 @@ class _CommandCenterContent extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds,
   })
   onCalendarEventEdited;
   final Future<HermesEventCategory> Function({
@@ -2431,6 +2472,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(String email) onAccountEmailChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final VoidCallback onEditAgentOnboarding;
+  final Future<void> Function() onWorkspacesChanged;
   final String? error;
 
   @override
@@ -2485,6 +2527,8 @@ class _CommandCenterContent extends StatelessWidget {
             onTaskSaved: onTaskSaved,
             onTaskDeleted: onTaskDeleted,
             onEventCategorySaved: onEventCategorySaved,
+            workspaces: user.workspaces,
+            activeWorkspaceId: user.activeWorkspace?.id,
           ),
           _HomeDestination.bean => beanPanel,
           _HomeDestination.reminders => _ReminderListCard(
@@ -2494,11 +2538,14 @@ class _CommandCenterContent extends StatelessWidget {
             onReminderCompleted: onReminderCompleted,
             onReminderDeleted: onReminderDeleted,
             onEventCategorySaved: onEventCategorySaved,
+            workspaces: user.workspaces,
+            activeWorkspaceId: user.activeWorkspace?.id,
           ),
           _HomeDestination.settings => _SettingsView(
             apiClient: apiClient,
             launchExternalUrl: launchExternalUrl,
             user: user,
+            googleCalendarStatus: googleCalendarStatus,
             approvals: pendingApprovals,
             calendarStartHour: calendarStartHour,
             calendarEndHour: calendarEndHour,
@@ -2507,6 +2554,7 @@ class _CommandCenterContent extends StatelessWidget {
             onDeleteAccount: onDeleteAccount,
             onAccountEmailChanged: onAccountEmailChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
+            onWorkspacesChanged: onWorkspacesChanged,
           ),
         };
         final right = Column(
@@ -3414,6 +3462,7 @@ class _TodayHomeView extends StatelessWidget {
     String? category,
     String? color,
     bool? isCritical,
+    List<Object> syncToWorkspaceIds,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -3431,6 +3480,7 @@ class _TodayHomeView extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds,
   })
   onCalendarEventCreated;
   final Future<void> Function(
@@ -3448,6 +3498,7 @@ class _TodayHomeView extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds,
   })
   onCalendarEventEdited;
   final Future<HermesEventCategory> Function({
@@ -3543,6 +3594,8 @@ class _TodayHomeView extends StatelessWidget {
       initialCritical: task?.isCritical ?? false,
       deleteLabel: task == null ? null : 'Delete task',
       onEventCategorySaved: onEventCategorySaved,
+      workspaces: user.workspaces,
+      activeWorkspaceId: user.activeWorkspace?.id,
     );
     if (result == null) return;
     if (result['delete'] == true && task != null) {
@@ -3558,6 +3611,11 @@ class _TodayHomeView extends StatelessWidget {
       category: result['category'] as String?,
       color: result['color'] as String?,
       isCritical: result['isCritical'] as bool?,
+      syncToWorkspaceIds:
+          (result['syncToWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
     );
   }
 }
@@ -4517,7 +4575,39 @@ class _AllDayEventRow extends StatelessWidget {
             event,
             eventCategories: eventCategories,
             googleCalendarStatus: googleCalendarStatus,
-            onSave: onEventTap,
+            onSave:
+                (
+                  savedEvent, {
+                  required String title,
+                  required String startsAt,
+                  String? endsAt,
+                  String? category,
+                  String? color,
+                  String? recurrence,
+                  Map<String, Object?>? metadata,
+                  bool? isCritical,
+                  int? reminderMinutesBefore,
+                  String? reminderRecurrence,
+                  List<String>? reminderSpecificDays,
+                  int? reminderInterval,
+                  String? reminderIntervalUnit,
+                  List<Object> syncToWorkspaceIds = const [],
+                }) => onEventTap(
+                  savedEvent,
+                  title: title,
+                  startsAt: startsAt,
+                  endsAt: endsAt,
+                  category: category,
+                  color: color,
+                  recurrence: recurrence,
+                  metadata: metadata,
+                  isCritical: isCritical,
+                  reminderMinutesBefore: reminderMinutesBefore,
+                  reminderRecurrence: reminderRecurrence,
+                  reminderSpecificDays: reminderSpecificDays,
+                  reminderInterval: reminderInterval,
+                  reminderIntervalUnit: reminderIntervalUnit,
+                ),
             onEventCategorySaved: onEventCategorySaved,
             onEventCategoryDeleted: onEventCategoryDeleted,
           ),
@@ -4635,7 +4725,39 @@ class _TimelineEventBlock extends StatelessWidget {
           event,
           eventCategories: eventCategories,
           googleCalendarStatus: googleCalendarStatus,
-          onSave: onTap,
+          onSave:
+              (
+                savedEvent, {
+                required String title,
+                required String startsAt,
+                String? endsAt,
+                String? category,
+                String? color,
+                String? recurrence,
+                Map<String, Object?>? metadata,
+                bool? isCritical,
+                int? reminderMinutesBefore,
+                String? reminderRecurrence,
+                List<String>? reminderSpecificDays,
+                int? reminderInterval,
+                String? reminderIntervalUnit,
+                List<Object> syncToWorkspaceIds = const [],
+              }) => onTap(
+                savedEvent,
+                title: title,
+                startsAt: startsAt,
+                endsAt: endsAt,
+                category: category,
+                color: color,
+                recurrence: recurrence,
+                metadata: metadata,
+                isCritical: isCritical,
+                reminderMinutesBefore: reminderMinutesBefore,
+                reminderRecurrence: reminderRecurrence,
+                reminderSpecificDays: reminderSpecificDays,
+                reminderInterval: reminderInterval,
+                reminderIntervalUnit: reminderIntervalUnit,
+              ),
           onEventCategorySaved: onEventCategorySaved,
           onEventCategoryDeleted: onEventCategoryDeleted,
         ),
@@ -4701,6 +4823,7 @@ Future<void> _showCalendarEventDetails(
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds,
   })
   onSave,
   required Future<HermesEventCategory> Function({
@@ -4711,6 +4834,8 @@ Future<void> _showCalendarEventDetails(
   onEventCategorySaved,
   required Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted,
+  List<HermesWorkspace> workspaces = const [],
+  String? activeWorkspaceId,
 }) async {
   final result = await Navigator.of(context).push<Map<String, Object?>>(
     MaterialPageRoute(
@@ -4718,6 +4843,8 @@ Future<void> _showCalendarEventDetails(
         event: event,
         eventCategories: eventCategories,
         googleCalendarStatus: googleCalendarStatus,
+        workspaces: workspaces,
+        activeWorkspaceId: activeWorkspaceId,
         onEventCategorySaved: onEventCategorySaved,
         onEventCategoryDeleted: onEventCategoryDeleted,
       ),
@@ -4742,6 +4869,11 @@ Future<void> _showCalendarEventDetails(
           .toList(),
       reminderInterval: result['reminderInterval'] as int?,
       reminderIntervalUnit: result['reminderIntervalUnit'] as String?,
+      syncToWorkspaceIds:
+          (result['syncToWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
     );
   }
 }
@@ -4751,6 +4883,8 @@ class _CalendarEventDetailPage extends StatefulWidget {
     required this.event,
     required this.eventCategories,
     this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
   });
@@ -4758,6 +4892,8 @@ class _CalendarEventDetailPage extends StatefulWidget {
   final HermesCalendarEvent event;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -4787,6 +4923,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   String _reminderRecurrence = 'none';
   String _reminderIntervalUnit = 'days';
   String? _googleCalendarId;
+  final Set<Object> _syncWorkspaceIds = <Object>{};
   String? _validationError;
   late bool _isCritical;
   final Set<String> _eventSpecificDays = <String>{};
@@ -4973,6 +5110,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       'reminderSpecificDays': _reminderSpecificDays.toList()..sort(),
       'reminderInterval': int.tryParse(_reminderInterval.text.trim()),
       'reminderIntervalUnit': _reminderIntervalUnit,
+      'syncToWorkspaceIds': _syncWorkspaceIds.toList(),
     });
   }
 
@@ -5351,6 +5489,59 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                         )
                                       : null,
                                 ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (widget.workspaces
+                          .where(
+                            (workspace) =>
+                                workspace.id != widget.activeWorkspaceId,
+                          )
+                          .isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        _ShellCard(
+                          child: Column(
+                            key: const Key('event-workspace-sync-field'),
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const _SectionTitle(
+                                icon: Icons.home_work_outlined,
+                                title: 'Workspace sync',
+                                subtitle:
+                                    'Copy this event only to selected workspaces.',
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final workspace
+                                      in widget.workspaces.where(
+                                        (workspace) =>
+                                            workspace.id !=
+                                            widget.activeWorkspaceId,
+                                      ))
+                                    FilterChip(
+                                      key: Key(
+                                        'event-sync-workspace-${workspace.id}',
+                                      ),
+                                      label: Text(workspace.name),
+                                      selected: _syncWorkspaceIds.contains(
+                                        workspace.numericId ?? workspace.id,
+                                      ),
+                                      onSelected: (selected) => setState(() {
+                                        final value =
+                                            workspace.numericId ?? workspace.id;
+                                        if (selected) {
+                                          _syncWorkspaceIds.add(value);
+                                        } else {
+                                          _syncWorkspaceIds.remove(value);
+                                        }
+                                      }),
+                                    ),
+                                ],
+                              ),
                             ],
                           ),
                         ),
@@ -6606,7 +6797,39 @@ class _CalendarAgenda extends StatelessWidget {
                     event,
                     eventCategories: eventCategories,
                     googleCalendarStatus: googleCalendarStatus,
-                    onSave: onEventTap!,
+                    onSave:
+                        (
+                          savedEvent, {
+                          required String title,
+                          required String startsAt,
+                          String? endsAt,
+                          String? category,
+                          String? color,
+                          String? recurrence,
+                          Map<String, Object?>? metadata,
+                          bool? isCritical,
+                          int? reminderMinutesBefore,
+                          String? reminderRecurrence,
+                          List<String>? reminderSpecificDays,
+                          int? reminderInterval,
+                          String? reminderIntervalUnit,
+                          List<Object> syncToWorkspaceIds = const [],
+                        }) => onEventTap!(
+                          savedEvent,
+                          title: title,
+                          startsAt: startsAt,
+                          endsAt: endsAt,
+                          category: category,
+                          color: color,
+                          recurrence: recurrence,
+                          metadata: metadata,
+                          isCritical: isCritical,
+                          reminderMinutesBefore: reminderMinutesBefore,
+                          reminderRecurrence: reminderRecurrence,
+                          reminderSpecificDays: reminderSpecificDays,
+                          reminderInterval: reminderInterval,
+                          reminderIntervalUnit: reminderIntervalUnit,
+                        ),
                     onEventCategorySaved: onEventCategorySaved!,
                     onEventCategoryDeleted: onEventCategoryDeleted!,
                   ),
@@ -6889,6 +7112,8 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
     required String color,
   })?
   onEventCategorySaved,
+  List<HermesWorkspace> workspaces = const [],
+  String? activeWorkspaceId,
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
@@ -6897,6 +7122,10 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   var modalCategories = [...categories];
   var savingCategory = false;
   var isCritical = initialCritical;
+  final syncWorkspaceIds = <Object>{};
+  final syncTargets = workspaces
+      .where((workspace) => workspace.id != activeWorkspaceId)
+      .toList();
   String? validationError;
 
   return showModalBottomSheet<Map<String, Object?>>(
@@ -7155,6 +7384,58 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                     label: const Text('Choose date and time'),
                   ),
                 ),
+                if (syncTargets.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    key: const Key('title-time-editor-workspace-sync'),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: HeyBeanTheme.surface2,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: HeyBeanTheme.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Sync to workspaces',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Copy this item only to selected workspaces.',
+                          style: TextStyle(color: HeyBeanTheme.muted),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final workspace in syncTargets)
+                              FilterChip(
+                                key: Key(
+                                  'title-time-editor-sync-workspace-${workspace.id}',
+                                ),
+                                label: Text(workspace.name),
+                                selected: syncWorkspaceIds.contains(
+                                  workspace.numericId ?? workspace.id,
+                                ),
+                                onSelected: (selected) => setModalState(() {
+                                  final value =
+                                      workspace.numericId ?? workspace.id;
+                                  if (selected) {
+                                    syncWorkspaceIds.add(value);
+                                  } else {
+                                    syncWorkspaceIds.remove(value);
+                                  }
+                                }),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (validationError != null) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -7214,6 +7495,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                       ? '#34C759'
                                       : selectedColor),
                             'isCritical': isCritical,
+                            'syncToWorkspaceIds': syncWorkspaceIds.toList(),
                           });
                         },
                         icon: const Icon(Icons.check_rounded),
@@ -7243,6 +7525,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                   ? '#34C759'
                                   : selectedColor),
                         'isCritical': isCritical,
+                        'syncToWorkspaceIds': syncWorkspaceIds.toList(),
                       });
                     },
                     icon: const Icon(Icons.done_all_rounded),
@@ -7267,6 +7550,8 @@ class _TaskListCard extends StatefulWidget {
     required this.onTaskSaved,
     required this.onTaskDeleted,
     required this.onEventCategorySaved,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
   });
 
   final List<HermesTask> tasks;
@@ -7280,6 +7565,7 @@ class _TaskListCard extends StatefulWidget {
     String? category,
     String? color,
     bool? isCritical,
+    List<Object> syncToWorkspaceIds,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -7289,6 +7575,8 @@ class _TaskListCard extends StatefulWidget {
     required String color,
   })
   onEventCategorySaved;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
 
   @override
   State<_TaskListCard> createState() => _TaskListCardState();
@@ -7357,6 +7645,8 @@ class _TaskListCardState extends State<_TaskListCard> {
       initialCritical: task?.isCritical ?? false,
       deleteLabel: task == null ? null : 'Delete task',
       onEventCategorySaved: widget.onEventCategorySaved,
+      workspaces: widget.workspaces,
+      activeWorkspaceId: widget.activeWorkspaceId,
     );
     if (result == null) return;
     if (result['delete'] == true && task != null) {
@@ -7372,6 +7662,11 @@ class _TaskListCardState extends State<_TaskListCard> {
       category: result['category'] as String?,
       color: result['color'] as String?,
       isCritical: result['isCritical'] as bool?,
+      syncToWorkspaceIds:
+          (result['syncToWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
     );
   }
 }
@@ -7384,6 +7679,8 @@ class _ReminderListCard extends StatefulWidget {
     required this.onReminderCompleted,
     required this.onReminderDeleted,
     required this.onEventCategorySaved,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
   });
 
   final List<HermesReminder> reminders;
@@ -7395,6 +7692,7 @@ class _ReminderListCard extends StatefulWidget {
     String status,
     String? category,
     String? color,
+    List<Object> syncToWorkspaceIds,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -7405,6 +7703,8 @@ class _ReminderListCard extends StatefulWidget {
     required String color,
   })
   onEventCategorySaved;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
 
   @override
   State<_ReminderListCard> createState() => _ReminderListCardState();
@@ -7481,6 +7781,8 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       completeLabel: reminder == null
           ? null
           : (_reminderIsCompleted(reminder) ? 'Mark pending' : 'Mark complete'),
+      workspaces: widget.workspaces,
+      activeWorkspaceId: widget.activeWorkspaceId,
     );
     if (result == null) return;
     if (result['delete'] == true && reminder != null) {
@@ -7502,6 +7804,11 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       status: status,
       category: result['category'] as String?,
       color: result['color'] as String?,
+      syncToWorkspaceIds:
+          (result['syncToWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
     );
   }
 }
@@ -7524,6 +7831,7 @@ class _SettingsView extends StatelessWidget {
     required this.apiClient,
     required this.launchExternalUrl,
     required this.user,
+    this.googleCalendarStatus,
     required this.approvals,
     required this.calendarStartHour,
     required this.calendarEndHour,
@@ -7532,11 +7840,13 @@ class _SettingsView extends StatelessWidget {
     required this.onDeleteAccount,
     required this.onAccountEmailChanged,
     required this.onEditAgentOnboarding,
+    required this.onWorkspacesChanged,
   });
 
   final HermesApiClient apiClient;
   final ExternalUrlLauncher launchExternalUrl;
   final HermesUser user;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
   final List<HermesApproval> approvals;
   final int calendarStartHour;
   final int calendarEndHour;
@@ -7545,6 +7855,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function(String email) onAccountEmailChanged;
   final VoidCallback onEditAgentOnboarding;
+  final Future<void> Function() onWorkspacesChanged;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -7575,6 +7886,12 @@ class _SettingsView extends StatelessWidget {
                 child: const Text('Update'),
               ),
             ),
+            _WorkspacesSettingsCard(
+              apiClient: apiClient,
+              user: user,
+              googleCalendarStatus: googleCalendarStatus,
+              onChanged: onWorkspacesChanged,
+            ),
             _GoogleCalendarSyncCard(
               apiClient: apiClient,
               launchExternalUrl: launchExternalUrl,
@@ -7602,6 +7919,531 @@ class _SettingsView extends StatelessWidget {
         onDeleteAccount: onDeleteAccount,
       ),
     ],
+  );
+}
+
+class _WorkspacesSettingsCard extends StatefulWidget {
+  const _WorkspacesSettingsCard({
+    required this.apiClient,
+    required this.user,
+    required this.onChanged,
+    this.googleCalendarStatus,
+  });
+
+  final HermesApiClient apiClient;
+  final HermesUser user;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final Future<void> Function() onChanged;
+
+  @override
+  State<_WorkspacesSettingsCard> createState() =>
+      _WorkspacesSettingsCardState();
+}
+
+class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
+  late Future<List<HermesWorkspace>> _workspacesFuture;
+  String? _message;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _workspacesFuture = _loadWorkspaces();
+  }
+
+  Future<List<HermesWorkspace>> _loadWorkspaces() async {
+    try {
+      final workspaces = await widget.apiClient.listWorkspaces();
+      if (workspaces.isNotEmpty) return workspaces;
+    } catch (_) {}
+    if (widget.user.workspaces.isNotEmpty) return widget.user.workspaces;
+    final personal =
+        widget.user.personalWorkspace ??
+        HermesWorkspace(
+          id: (widget.user.defaultWorkspaceId ?? 0).toString(),
+          name: 'Personal',
+          type: 'personal',
+          role: 'owner',
+          active: true,
+          isDefault: true,
+        );
+    return [personal];
+  }
+
+  void _reload() {
+    setState(() {
+      _workspacesFuture = _loadWorkspaces();
+    });
+  }
+
+  Future<T?> _run<T>(Future<T> Function() action, String success) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final result = await action();
+      if (!mounted) return result;
+      setState(() => _message = success);
+      _reload();
+      await widget.onChanged();
+      return result;
+    } catch (error) {
+      if (mounted) setState(() => _message = 'Workspace action failed: $error');
+      return null;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _createHousehold() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Create household'),
+        content: TextField(
+          key: const Key('workspace-create-name-field'),
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Household name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('workspace-create-save'),
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.trim().isEmpty) return;
+    await _run(
+      () => widget.apiClient.createWorkspace(name: name.trim()),
+      'Household created.',
+    );
+  }
+
+  Future<void> _inviteMember(HermesWorkspace workspace) async {
+    final workspaceId = workspace.numericId;
+    if (workspaceId == null) return;
+    final controller = TextEditingController();
+    final email = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Invite to ${workspace.name}'),
+        content: TextField(
+          key: Key('workspace-invite-email-${workspace.id}'),
+          controller: controller,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(labelText: 'Email'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: Key('workspace-invite-save-${workspace.id}'),
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Invite'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (email == null || email.trim().isEmpty) return;
+    await _run(
+      () => widget.apiClient.inviteWorkspaceMember(
+        workspaceId,
+        email: email.trim(),
+      ),
+      'Invitation sent.',
+    );
+  }
+
+  Future<void> _renameWorkspace(HermesWorkspace workspace) async {
+    final workspaceId = workspace.numericId;
+    if (workspaceId == null || workspace.isPersonal) return;
+    final controller = TextEditingController(text: workspace.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename household'),
+        content: TextField(
+          key: Key('workspace-rename-field-${workspace.id}'),
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Household name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: Key('workspace-rename-save-${workspace.id}'),
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.trim().isEmpty) return;
+    await _run(
+      () => widget.apiClient.updateWorkspace(workspaceId, name: name.trim()),
+      'Workspace renamed.',
+    );
+  }
+
+  Future<void> _syncAll(List<HermesWorkspace> workspaces) async {
+    final source =
+        widget.user.activeWorkspace ??
+        workspaces.firstWhere(
+          (workspace) => workspace.isDefault,
+          orElse: () => workspaces.first,
+        );
+    final targets = workspaces
+        .where((workspace) => workspace.id != source.id)
+        .toList();
+    if (source.numericId == null || targets.isEmpty) return;
+    String? targetId = targets.first.id;
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sync all items'),
+        content: StatefulBuilder(
+          builder: (context, setDialogState) => DropdownButtonFormField<String>(
+            key: const Key('workspace-sync-all-target'),
+            initialValue: targetId,
+            decoration: const InputDecoration(
+              labelText: 'Copy current workspace to',
+            ),
+            items: [
+              for (final workspace in targets)
+                DropdownMenuItem(
+                  value: workspace.id,
+                  child: Text(workspace.name),
+                ),
+            ],
+            onChanged: (value) => setDialogState(() => targetId = value),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('workspace-sync-all-run'),
+            onPressed: () => Navigator.of(context).pop(targetId),
+            child: const Text('Sync'),
+          ),
+        ],
+      ),
+    );
+    final target = targets
+        .where((workspace) => workspace.id == selected)
+        .firstOrNull;
+    if (target?.numericId == null) return;
+    final result = await _run(
+      () => widget.apiClient.syncWorkspaceAll(
+        source.numericId!,
+        targetWorkspaceId: target!.numericId!,
+        resourceTypes: const ['tasks', 'reminders', 'calendar_events'],
+      ),
+      'Workspace sync completed.',
+    );
+    if (result != null && mounted) {
+      setState(() {
+        _message =
+            'Copied ${result.tasks} tasks, ${result.reminders} reminders, and ${result.calendarEvents} events.';
+      });
+    }
+  }
+
+  Future<void> _toggleGoogleCalendar(
+    HermesWorkspace workspace,
+    String calendarId,
+    bool selected,
+  ) async {
+    final workspaceId = workspace.numericId;
+    if (workspaceId == null) return;
+    final current = workspace.googleCalendarMappings
+        .map((mapping) => mapping['google_calendar_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    if (selected) {
+      current.add(calendarId);
+    } else {
+      current.remove(calendarId);
+    }
+    await _run(
+      () => widget.apiClient.updateWorkspaceGoogleCalendars(
+        workspaceId,
+        googleCalendarIds: current.toList(),
+        defaultExportCalendarId: current.isEmpty ? null : current.first,
+      ),
+      'Workspace Google calendar mapping saved.',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<HermesWorkspace>>(
+    future: _workspacesFuture,
+    builder: (context, snapshot) {
+      final workspaces = snapshot.data ?? widget.user.workspaces;
+      final activeId =
+          widget.user.activeWorkspace?.id ??
+          widget.user.defaultWorkspaceId?.toString();
+      final googleCalendars =
+          widget.googleCalendarStatus?.calendars ??
+          const <GoogleCalendarInfo>[];
+      return Container(
+        key: const Key('workspaces-settings'),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface2,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: HeyBeanTheme.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.home_work_outlined,
+                  color: HeyBeanTheme.accentStrong,
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Workspaces',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      Text(
+                        'Personal and household spaces with their own Bean, calendar, tasks, reminders, and settings.',
+                        style: TextStyle(color: HeyBeanTheme.muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (_message != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _message!,
+                style: const TextStyle(color: HeyBeanTheme.muted),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final workspace in workspaces)
+                  ChoiceChip(
+                    key: Key('workspace-switch-${workspace.id}'),
+                    label: Text(
+                      workspace.isPersonal ? 'Personal' : workspace.name,
+                    ),
+                    selected: workspace.id == activeId || workspace.active,
+                    onSelected: _busy || workspace.numericId == null
+                        ? null
+                        : (_) => _run(
+                            () => widget.apiClient.setDefaultWorkspace(
+                              workspace.numericId!,
+                            ),
+                            'Switched to ${workspace.name}.',
+                          ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            for (final workspace in workspaces)
+              Container(
+                key: Key('workspace-row-${workspace.id}'),
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: HeyBeanTheme.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: HeyBeanTheme.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            workspace.isPersonal ? 'Personal' : workspace.name,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        Text(
+                          workspace.role,
+                          style: const TextStyle(color: HeyBeanTheme.muted),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (!workspace.isPersonal && workspace.canManageMembers)
+                          TextButton(
+                            key: Key('workspace-rename-${workspace.id}'),
+                            onPressed: _busy
+                                ? null
+                                : () => _renameWorkspace(workspace),
+                            child: const Text('Rename'),
+                          ),
+                        if (workspace.canManageMembers && !workspace.isPersonal)
+                          TextButton(
+                            key: Key('workspace-invite-${workspace.id}'),
+                            onPressed: _busy
+                                ? null
+                                : () => _inviteMember(workspace),
+                            child: const Text('Invite'),
+                          ),
+                        if (!workspace.isPersonal &&
+                            workspace.numericId != null)
+                          TextButton(
+                            key: Key('workspace-leave-${workspace.id}'),
+                            onPressed: _busy
+                                ? null
+                                : () => _run(
+                                    () => widget.apiClient.leaveWorkspace(
+                                      workspace.numericId!,
+                                    ),
+                                    'Left ${workspace.name}.',
+                                  ),
+                            child: const Text('Leave'),
+                          ),
+                      ],
+                    ),
+                    for (final member in workspace.members)
+                      ListTile(
+                        key: Key(
+                          'workspace-member-${workspace.id}-${member.id}',
+                        ),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(member.name),
+                        subtitle: Text(member.email),
+                        trailing:
+                            workspace.canManageMembers &&
+                                !workspace.isPersonal &&
+                                workspace.numericId != null
+                            ? PopupMenuButton<String>(
+                                key: Key(
+                                  'workspace-member-actions-${workspace.id}-${member.id}',
+                                ),
+                                onSelected: (value) {
+                                  if (value == 'owner') {
+                                    _run(
+                                      () => widget.apiClient
+                                          .updateWorkspaceMember(
+                                            workspace.numericId!,
+                                            member.id,
+                                            role: 'owner',
+                                          ),
+                                      'Member is now an owner.',
+                                    );
+                                  } else if (value == 'remove') {
+                                    _run(
+                                      () => widget.apiClient
+                                          .removeWorkspaceMember(
+                                            workspace.numericId!,
+                                            member.id,
+                                          ),
+                                      'Member removed.',
+                                    );
+                                  }
+                                },
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'owner',
+                                    child: Text('Make owner'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'remove',
+                                    child: Text('Remove'),
+                                  ),
+                                ],
+                              )
+                            : null,
+                      ),
+                    if (googleCalendars.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Google calendars for this workspace',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      for (final calendar in googleCalendars)
+                        CheckboxListTile(
+                          key: Key(
+                            'workspace-google-calendar-${workspace.id}-${calendar.id}',
+                          ),
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          value: workspace.googleCalendarMappings.any(
+                            (mapping) =>
+                                mapping['google_calendar_id']?.toString() ==
+                                calendar.id,
+                          ),
+                          onChanged: _busy || workspace.numericId == null
+                              ? null
+                              : (value) => _toggleGoogleCalendar(
+                                  workspace,
+                                  calendar.id,
+                                  value ?? false,
+                                ),
+                          title: Text(calendar.summary),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  key: const Key('workspace-create-household-action'),
+                  onPressed: _busy ? null : _createHousehold,
+                  icon: const Icon(Icons.add_home_rounded),
+                  label: const Text('Add household'),
+                ),
+                OutlinedButton.icon(
+                  key: const Key('workspace-sync-all-action'),
+                  onPressed: _busy || workspaces.length < 2
+                      ? null
+                      : () => _syncAll(workspaces),
+                  icon: const Icon(Icons.copy_all_rounded),
+                  label: const Text('Sync all to workspace'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    },
   );
 }
 

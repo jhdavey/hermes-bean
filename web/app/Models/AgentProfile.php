@@ -9,6 +9,7 @@ class AgentProfile extends Model
 {
     protected $fillable = [
         'user_id',
+        'workspace_id',
         'slug',
         'display_name',
         'status',

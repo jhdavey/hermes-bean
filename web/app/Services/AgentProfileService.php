@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AgentProfile;
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
@@ -30,14 +31,49 @@ class AgentProfileService
 
     public function ensureForUser(User $user): AgentProfile
     {
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $profile = AgentProfile::firstOrCreate(
-            ['user_id' => $user->id],
-            $this->defaultsFor($user)
+            ['workspace_id' => $workspaceId],
+            ['user_id' => $user->id] + $this->defaultsFor($user)
+        );
+
+        if (! $profile->user_id) {
+            $profile->forceFill(['user_id' => $user->id])->save();
+        }
+
+        $this->bootstrapRuntimeHome($profile);
+
+        return $profile;
+    }
+
+    public function ensureForWorkspace(Workspace $workspace, ?User $actor = null): AgentProfile
+    {
+        $owner = $actor ?: $workspace->creator ?: $workspace->personalOwner ?: $workspace->memberships()->where('role', 'owner')->with('user')->first()?->user;
+        if (! $owner) {
+            throw new \InvalidArgumentException('Workspace agent profile requires an owner or actor.');
+        }
+
+        $profile = AgentProfile::firstOrCreate(
+            ['workspace_id' => $workspace->id],
+            $this->defaultsForWorkspace($workspace, $owner)
         );
 
         $this->bootstrapRuntimeHome($profile);
 
         return $profile;
+    }
+
+    public function defaultsForWorkspace(Workspace $workspace, User $actor): array
+    {
+        $defaults = $this->defaultsFor($actor);
+        $slug = 'workspace-'.$workspace->id.'-'.Str::lower(Str::random(8));
+        $defaults['user_id'] = $actor->id;
+        $defaults['slug'] = $slug;
+        $defaults['display_name'] = $workspace->name.' Hermes';
+        $defaults['runtime_home'] = rtrim((string) config('services.hermes_runtime.users_home', ''), '/').'/workspaces/'.$workspace->id.'/'.$slug;
+        $defaults['metadata'] = [...($defaults['metadata'] ?? []), 'workspace_id' => $workspace->id, 'workspace_type' => $workspace->type];
+
+        return $defaults;
     }
 
     public function defaultsFor(User $user): array

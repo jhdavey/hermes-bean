@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\CalendarEvent;
 use App\Models\GoogleCalendarConnection;
 use App\Models\User;
+use App\Models\Workspace;
+use App\Models\WorkspaceGoogleCalendarMapping;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
@@ -138,16 +140,17 @@ class GoogleCalendarSyncService
         return $this->status($user);
     }
 
-    public function sync(User $user): array
+    public function sync(User $user, ?Workspace $workspace = null): array
     {
         $connection = $this->connectedConnection($user);
+        $workspace ??= Workspace::find(app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user));
         $token = $this->validAccessToken($connection);
         $imported = 0;
         $deleted = 0;
         $metadata = $connection->metadata ?? [];
         $syncTokens = is_array($metadata['sync_tokens'] ?? null) ? $metadata['sync_tokens'] : [];
 
-        foreach ($this->selectedCalendarIds($connection) as $calendarId) {
+        foreach ($this->selectedCalendarIds($connection, $workspace) as $calendarId) {
             $query = [
                 'singleEvents' => 'true',
                 'orderBy' => 'startTime',
@@ -175,7 +178,7 @@ class GoogleCalendarSyncService
             $payload = $response->json();
             foreach (($payload['items'] ?? []) as $item) {
                 if (($item['status'] ?? '') === 'cancelled') {
-                    $deleted += CalendarEvent::where('user_id', $user->id)
+                    $deleted += CalendarEvent::where('workspace_id', $workspace->id)
                         ->where('google_event_id', $item['id'])
                         ->where(function ($query) use ($calendarId): void {
                             $query->where('google_calendar_id', $calendarId)->orWhereNull('google_calendar_id');
@@ -191,8 +194,10 @@ class GoogleCalendarSyncService
                 $isAllDay = isset($item['start']['date']);
                 $endsAt = $this->googleDateTime($item['end'] ?? []) ?? $startsAt;
                 CalendarEvent::updateOrCreate(
-                    ['user_id' => $user->id, 'google_event_id' => $item['id']],
+                    ['workspace_id' => $workspace->id, 'google_calendar_id' => $calendarId, 'google_event_id' => $item['id']],
                     [
+                        'user_id' => $user->id,
+                        'created_by_user_id' => $user->id,
                         'google_calendar_id' => $calendarId,
                         'title' => $item['summary'] ?? 'Untitled Google event',
                         'description' => $item['description'] ?? null,

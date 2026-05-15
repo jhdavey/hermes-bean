@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\ConversationSessionController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\TodaySummaryController;
+use App\Http\Controllers\Api\WorkspaceController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('api.rate_limit')->group(function (): void {
@@ -20,6 +21,19 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::delete('/account', [AuthController::class, 'destroy']);
         Route::get('/account/export', [AuthController::class, 'export']);
+
+        Route::get('/workspaces', [WorkspaceController::class, 'index']);
+        Route::post('/workspaces', [WorkspaceController::class, 'store']);
+        Route::patch('/workspaces/default', [WorkspaceController::class, 'setDefault']);
+        Route::get('/workspaces/{workspace}', [WorkspaceController::class, 'show']);
+        Route::patch('/workspaces/{workspace}', [WorkspaceController::class, 'update']);
+        Route::post('/workspaces/{workspace}/invitations', [WorkspaceController::class, 'invite']);
+        Route::post('/workspace-invitations/{token}/accept', [WorkspaceController::class, 'accept']);
+        Route::patch('/workspaces/{workspace}/members/{member}', [WorkspaceController::class, 'updateMember']);
+        Route::delete('/workspaces/{workspace}/members/{member}', [WorkspaceController::class, 'destroyMember']);
+        Route::post('/workspaces/{workspace}/leave', [WorkspaceController::class, 'leave']);
+        Route::post('/workspaces/{source}/sync-all', [WorkspaceController::class, 'syncAll']);
+        Route::patch('/workspaces/{workspace}/google-calendars', [WorkspaceController::class, 'calendars']);
 
         Route::post('/assistant/sessions', [ConversationSessionController::class, 'store']);
         Route::get('/assistant/sessions/{session}', [ConversationSessionController::class, 'show']);

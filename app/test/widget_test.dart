@@ -1243,8 +1243,22 @@ void main() {
     expect(find.textContaining('Synced 2 Google events'), findsOneWidget);
 
     expect(find.text('Displayed Google calendars'), findsOneWidget);
-    expect(find.text('Personal'), findsOneWidget);
-    expect(find.text('Holidays'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('google-calendar-source-primary')),
+        matching: find.text('Personal'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(
+          const Key('google-calendar-source-holidays@example.com'),
+        ),
+        matching: find.text('Holidays'),
+      ),
+      findsOneWidget,
+    );
     await tester.ensureVisible(
       find.byKey(const Key('google-calendar-source-holidays@example.com')),
     );
@@ -2577,7 +2591,7 @@ class _StaleTodayPersistedResourcesFakeHermesApiClient
   ];
 
   @override
-  Future<HermesTodaySummary> todaySummary() async {
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
     todaySummaryCalls++;
     return HermesTodaySummary(
       tasks: const [],
@@ -2614,6 +2628,8 @@ class _CreateTaskDatabaseTruthFakeHermesApiClient
     String? color,
     bool isCritical = false,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     createdTaskTitles.add(title);
     final task = HermesTask(
@@ -2631,7 +2647,7 @@ class _CreateTaskDatabaseTruthFakeHermesApiClient
   }
 
   @override
-  Future<HermesTodaySummary> todaySummary() async {
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
     todaySummaryCalls++;
     return HermesTodaySummary(
       tasks: const [],
@@ -2851,7 +2867,7 @@ class _FakeHermesApiClient extends HermesApiClient {
         ];
 
   @override
-  Future<HermesTodaySummary> todaySummary() async {
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
     todaySummaryCalls++;
     return HermesTodaySummary(
       tasks: await listTasks(),
@@ -3074,6 +3090,7 @@ class _EditableReminderFakeHermesApiClient
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -3156,6 +3173,8 @@ class _TaskReminderCategoryFakeHermesApiClient
     String? color,
     bool isCritical = false,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     createdTask = HermesTask(
       id: 801,
@@ -3180,6 +3199,8 @@ class _TaskReminderCategoryFakeHermesApiClient
     String? color,
     bool isCritical = false,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     createdReminder = HermesReminder(
       id: 701,
@@ -3206,6 +3227,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -3237,6 +3259,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -3437,6 +3460,7 @@ class _EditableCalendarFakeHermesApiClient
     String? recurrence,
     bool? isCritical,
     Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     updatedEvent = HermesCalendarEvent(
       id: eventId,
@@ -3462,6 +3486,8 @@ class _EditableCalendarFakeHermesApiClient
     bool? isCritical,
     String? recurrence,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     createdEvent = HermesCalendarEvent(
       id: 44,
@@ -3483,6 +3509,8 @@ class _EditableCalendarFakeHermesApiClient
     required String title,
     required String remindAt,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     createdReminder = {
       'calendar_event_id': calendarEventId,

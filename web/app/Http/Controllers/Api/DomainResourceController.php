@@ -12,9 +12,12 @@ use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\StructuredHermesActionService;
+use App\Services\WorkspaceItemSyncService;
+use App\Services\WorkspaceService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 
@@ -27,13 +30,13 @@ class DomainResourceController extends Controller
 
     public function listTasks(Request $request): JsonResponse
     {
-        return $this->listed(Task::where('user_id', $request->user()->id)->visibleInActiveViews()->orderBy('id')->get());
+        return $this->listed($this->scoped(Task::query(), $request)->visibleInActiveViews()->orderBy('id')->get());
     }
 
     public function listPastTasks(Request $request): JsonResponse
     {
         return $this->listed(
-            Task::where('user_id', $request->user()->id)
+            $this->scoped(Task::query(), $request)
                 ->whereNotNull('completed_at')
                 ->where('completed_at', '>=', now()->subDays(10))
                 ->where(function ($query): void {
@@ -51,19 +54,19 @@ class DomainResourceController extends Controller
 
     public function listReminders(Request $request): JsonResponse
     {
-        return $this->listed(Reminder::where('user_id', $request->user()->id)->orderBy('remind_at')->orderBy('id')->get());
+        return $this->listed($this->scoped(Reminder::query(), $request)->orderBy('remind_at')->orderBy('id')->get());
     }
 
     public function listCalendarEvents(Request $request): JsonResponse
     {
-        $this->googleCalendar->syncIfConnected($request->user());
+        $this->googleCalendar->syncIfConnected($request->user(), $this->workspace($request));
 
-        return $this->listed(CalendarEvent::where('user_id', $request->user()->id)->orderBy('starts_at')->orderBy('id')->get());
+        return $this->listed($this->scoped(CalendarEvent::query(), $request)->orderBy('starts_at')->orderBy('id')->get());
     }
 
     public function listEventCategories(Request $request): JsonResponse
     {
-        return $this->listed(EventCategory::where('user_id', $request->user()->id)->orderBy('name')->orderBy('id')->get());
+        return $this->listed($this->scoped(EventCategory::query(), $request)->orderBy('name')->orderBy('id')->get());
     }
 
     public function listApprovals(Request $request): JsonResponse
@@ -90,18 +93,26 @@ class DomainResourceController extends Controller
             'due_at' => ['nullable', 'date'],
             'completed_at' => ['nullable', 'date'],
             'metadata' => ['nullable', 'array'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'sync_to_workspace_ids' => ['nullable', 'array'],
+            'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
 
         if ($this->taskStatusIsCompleted($validated['status'] ?? null) && empty($validated['completed_at'])) {
             $validated['completed_at'] = now();
         }
 
-        return $this->created(Task::create($this->owned($request, $validated)));
+        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        unset($validated['sync_to_workspace_ids']);
+        $task = Task::create($this->owned($request, $validated));
+        $this->syncTo($request, $task, $syncTo);
+
+        return $this->created($task->refresh());
     }
 
     public function updateTask(Request $request, string $task): JsonResponse
     {
-        $model = Task::where('user_id', $request->user()->id)->findOrFail($task);
+        $model = $this->scoped(Task::query(), $request, false)->findOrFail($task);
         $validated = $request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'type' => ['sometimes', 'required', Rule::in(['todo', 'chore', 'maintenance'])],
@@ -113,6 +124,8 @@ class DomainResourceController extends Controller
             'due_at' => ['sometimes', 'nullable', 'date'],
             'completed_at' => ['sometimes', 'nullable', 'date'],
             'metadata' => ['sometimes', 'nullable', 'array'],
+            'sync_to_workspace_ids' => ['nullable', 'array'],
+            'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
 
         if (array_key_exists('status', $validated)) {
@@ -128,21 +141,24 @@ class DomainResourceController extends Controller
             }
         }
 
+        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
+        $this->syncTo($request, $model->refresh(), $syncTo);
 
         return response()->json(['data' => $model->refresh()]);
     }
 
     public function destroyTask(Request $request, string $task): JsonResponse
     {
-        return $this->destroyed(Task::where('user_id', $request->user()->id)->findOrFail($task));
+        return $this->destroyed($this->scoped(Task::query(), $request, false)->findOrFail($task));
     }
 
     public function storeReminder(Request $request): JsonResponse
     {
-        return $this->created(Reminder::create($this->owned($request, $request->validate([
+        $validated = $request->validate([
             'conversation_session_id' => $this->ownedSessionRule($request),
-            'calendar_event_id' => ['nullable', Rule::exists('calendar_events', 'id')->where('user_id', $request->user()->id)],
+            'calendar_event_id' => ['nullable', Rule::exists('calendar_events', 'id')->where('workspace_id', $this->workspace($request)->id)],
             'title' => ['required', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
             'category' => ['nullable', 'string', 'max:80'],
@@ -151,35 +167,50 @@ class DomainResourceController extends Controller
             'remind_at' => ['required', 'date'],
             'status' => ['nullable', 'string', 'max:50'],
             'metadata' => ['nullable', 'array'],
-        ]))));
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'sync_to_workspace_ids' => ['nullable', 'array'],
+            'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        unset($validated['sync_to_workspace_ids']);
+        $reminder = Reminder::create($this->owned($request, $validated));
+        $this->syncTo($request, $reminder, $syncTo);
+
+        return $this->created($reminder->refresh());
     }
 
     public function updateReminder(Request $request, string $reminder): JsonResponse
     {
-        $model = Reminder::where('user_id', $request->user()->id)->findOrFail($reminder);
-        $model->update($request->validate([
+        $model = $this->scoped(Reminder::query(), $request, false)->findOrFail($reminder);
+        $validated = $request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'notes' => ['sometimes', 'nullable', 'string'],
-            'calendar_event_id' => ['sometimes', 'nullable', Rule::exists('calendar_events', 'id')->where('user_id', $request->user()->id)],
+            'calendar_event_id' => ['sometimes', 'nullable', Rule::exists('calendar_events', 'id')->where('workspace_id', $model->workspace_id)],
             'category' => ['sometimes', 'nullable', 'string', 'max:80'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'is_critical' => ['sometimes', 'boolean'],
             'remind_at' => ['sometimes', 'required', 'date'],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'metadata' => ['sometimes', 'nullable', 'array'],
-        ]));
+            'sync_to_workspace_ids' => ['nullable', 'array'],
+            'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        unset($validated['sync_to_workspace_ids']);
+        $model->update($validated);
+        $this->syncTo($request, $model->refresh(), $syncTo);
 
         return response()->json(['data' => $model->refresh()]);
     }
 
     public function destroyReminder(Request $request, string $reminder): JsonResponse
     {
-        return $this->destroyed(Reminder::where('user_id', $request->user()->id)->findOrFail($reminder));
+        return $this->destroyed($this->scoped(Reminder::query(), $request, false)->findOrFail($reminder));
     }
 
     public function storeCalendarEvent(Request $request): JsonResponse
     {
-        $event = CalendarEvent::create($this->owned($request, $request->validate([
+        $validated = $request->validate([
             'conversation_session_id' => $this->ownedSessionRule($request),
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
@@ -192,15 +223,22 @@ class DomainResourceController extends Controller
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'status' => ['nullable', 'string', 'max:50'],
             'metadata' => ['nullable', 'array'],
-        ])));
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'sync_to_workspace_ids' => ['nullable', 'array'],
+            'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        unset($validated['sync_to_workspace_ids']);
+        $event = CalendarEvent::create($this->owned($request, $validated));
+        $this->syncTo($request, $event, $syncTo);
 
-        return $this->created($this->googleCalendar->exportEvent($event));
+        return $this->created($this->googleCalendar->exportEvent($event->refresh()));
     }
 
     public function updateCalendarEvent(Request $request, string $calendarEvent): JsonResponse
     {
-        $model = CalendarEvent::where('user_id', $request->user()->id)->findOrFail($calendarEvent);
-        $model->update($request->validate([
+        $model = $this->scoped(CalendarEvent::query(), $request, false)->findOrFail($calendarEvent);
+        $validated = $request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string'],
             'location' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -212,14 +250,20 @@ class DomainResourceController extends Controller
             'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'metadata' => ['sometimes', 'nullable', 'array'],
-        ]));
+            'sync_to_workspace_ids' => ['nullable', 'array'],
+            'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        unset($validated['sync_to_workspace_ids']);
+        $model->update($validated);
+        $this->syncTo($request, $model->refresh(), $syncTo);
 
         return response()->json(['data' => $this->googleCalendar->exportEvent($model->refresh())]);
     }
 
     public function destroyCalendarEvent(Request $request, string $calendarEvent): JsonResponse
     {
-        return $this->destroyed(CalendarEvent::where('user_id', $request->user()->id)->findOrFail($calendarEvent));
+        return $this->destroyed($this->scoped(CalendarEvent::query(), $request, false)->findOrFail($calendarEvent));
     }
 
     public function storeEventCategory(Request $request): JsonResponse
@@ -228,12 +272,13 @@ class DomainResourceController extends Controller
             'name' => ['required', 'string', 'max:80'],
             'color' => ['required', 'string', 'max:20'],
             'metadata' => ['nullable', 'array'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
         ]))));
     }
 
     public function updateEventCategory(Request $request, string $eventCategory): JsonResponse
     {
-        $model = EventCategory::where('user_id', $request->user()->id)->findOrFail($eventCategory);
+        $model = $this->scoped(EventCategory::query(), $request, false)->findOrFail($eventCategory);
         $model->update($request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:80'],
             'color' => ['sometimes', 'required', 'string', 'max:20'],
@@ -245,14 +290,14 @@ class DomainResourceController extends Controller
 
     public function destroyEventCategory(Request $request, string $eventCategory): JsonResponse
     {
-        $model = EventCategory::where('user_id', $request->user()->id)->findOrFail($eventCategory);
-        CalendarEvent::where('user_id', $request->user()->id)
+        $model = $this->scoped(EventCategory::query(), $request, false)->findOrFail($eventCategory);
+        CalendarEvent::where('workspace_id', $model->workspace_id)
             ->where('category', $model->name)
             ->update(['category' => null, 'color' => null]);
-        Task::where('user_id', $request->user()->id)
+        Task::where('workspace_id', $model->workspace_id)
             ->where('category', $model->name)
             ->update(['category' => null, 'color' => null]);
-        Reminder::where('user_id', $request->user()->id)
+        Reminder::where('workspace_id', $model->workspace_id)
             ->where('category', $model->name)
             ->update(['category' => null, 'color' => null]);
 
@@ -410,7 +455,62 @@ class DomainResourceController extends Controller
      */
     private function owned(Request $request, array $attributes): array
     {
-        return ['user_id' => $request->user()->id] + $attributes;
+        $workspace = app(WorkspaceService::class)->resolveWorkspace($request->user(), $attributes['workspace_id'] ?? $request->input('workspace_id'));
+        unset($attributes['workspace_id']);
+
+        $owned = [
+            'user_id' => $request->user()->id,
+            'workspace_id' => $workspace->id,
+        ] + $attributes;
+
+        $modelClass = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? '';
+        if (Schema::hasColumn($this->tableForStoreCaller($modelClass), 'created_by_user_id')) {
+            $owned['created_by_user_id'] = $request->user()->id;
+        }
+
+        return $owned;
+    }
+
+    private function workspace(Request $request)
+    {
+        return app(WorkspaceService::class)->resolveWorkspace($request->user(), $request->input('workspace_id'));
+    }
+
+    private function tableForStoreCaller(string $caller): string
+    {
+        return match ($caller) {
+            'storeTask' => 'tasks',
+            'storeReminder' => 'reminders',
+            'storeCalendarEvent' => 'calendar_events',
+            'storeEventCategory' => 'event_categories',
+            'storeApproval' => 'approvals',
+            'storeBlocker' => 'blockers',
+            'storeSchedulerJob' => 'scheduler_job_records',
+            default => 'tasks',
+        };
+    }
+
+    private function scoped($query, Request $request, bool $useRequestWorkspace = true)
+    {
+        if ($useRequestWorkspace || $request->filled('workspace_id')) {
+            $workspace = $this->workspace($request);
+            return $query->where('workspace_id', $workspace->id);
+        }
+
+        $workspaceIds = app(WorkspaceService::class)->accessibleWorkspaces($request->user())->pluck('id')->all();
+        return $query->whereIn('workspace_id', $workspaceIds);
+    }
+
+    private function syncTo(Request $request, Model $model, array $workspaceIds): void
+    {
+        if ($workspaceIds === []) {
+            return;
+        }
+        $workspaceService = app(WorkspaceService::class);
+        foreach ($workspaceIds as $workspaceId) {
+            $workspaceService->authorizeMember($request->user(), \App\Models\Workspace::findOrFail($workspaceId));
+        }
+        app(WorkspaceItemSyncService::class)->syncToWorkspaceIds($model, $workspaceIds, $request->user());
     }
 
     private function taskStatusIsCompleted(?string $status): bool
