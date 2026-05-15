@@ -1452,6 +1452,66 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
+  Future<void> _showNewCalendarEventEditor() async {
+    final selected = _dateOnly(_selectedCalendarDay);
+    final now = DateTime.now();
+    final defaultStartHour = _sameCalendarDay(selected, _dateOnly(now))
+        ? (now.hour + 1).clamp(_calendarStartHour, _calendarEndHour)
+        : _calendarStartHour.clamp(0, 23);
+    final start = DateTime(
+      selected.year,
+      selected.month,
+      selected.day,
+      defaultStartHour,
+    );
+    final end = start.add(const Duration(hours: 1));
+    final draft = HermesCalendarEvent(
+      id: 0,
+      title: '',
+      startsAt: start.toIso8601String(),
+      endsAt: end.toIso8601String(),
+    );
+    await _showCalendarEventDetails(
+      context,
+      draft,
+      eventCategories: _eventCategories,
+      googleCalendarStatus: _googleCalendarStatus,
+      onSave:
+          (
+            _, {
+            required String title,
+            required String startsAt,
+            String? endsAt,
+            String? category,
+            String? color,
+            String? recurrence,
+            Map<String, Object?>? metadata,
+            bool? isCritical,
+            int? reminderMinutesBefore,
+            String? reminderRecurrence,
+            List<String>? reminderSpecificDays,
+            int? reminderInterval,
+            String? reminderIntervalUnit,
+          }) => _createCalendarEvent(
+            title: title,
+            startsAt: startsAt,
+            endsAt: endsAt,
+            category: category,
+            color: color,
+            recurrence: recurrence,
+            metadata: metadata,
+            isCritical: isCritical,
+            reminderMinutesBefore: reminderMinutesBefore,
+            reminderRecurrence: reminderRecurrence,
+            reminderSpecificDays: reminderSpecificDays,
+            reminderInterval: reminderInterval,
+            reminderIntervalUnit: reminderIntervalUnit,
+          ),
+      onEventCategorySaved: _saveEventCategory,
+      onEventCategoryDeleted: _deleteEventCategory,
+    );
+  }
+
   Future<void> _deleteAccount() async {
     setState(() => _busy = true);
     try {
@@ -1535,6 +1595,15 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                       tasks: _criticalTasksForToday(_tasks),
                       events: _criticalEventsForToday(_calendar),
                     ),
+                    if (_selectedDestination == _HomeDestination.today) ...[
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        key: const Key('calendar-add-event-action'),
+                        tooltip: 'Create event',
+                        onPressed: _showNewCalendarEventEditor,
+                        icon: const Icon(Icons.add_rounded),
+                      ),
+                    ],
                     if (_selectedDestination == _HomeDestination.tasks) ...[
                       const SizedBox(width: 8),
                       IconButton.filledTonal(
@@ -3419,7 +3488,6 @@ class _TodayHomeView extends StatelessWidget {
                 startHour: startHour,
                 endHour: endHour,
                 onDayChanged: onDateSelected,
-                onEventCreate: onCalendarEventCreated,
                 onEventTap: onCalendarEventEdited,
                 onEventCategorySaved: onEventCategorySaved,
                 onEventCategoryDeleted: onEventCategoryDeleted,
@@ -3628,7 +3696,6 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     required this.startHour,
     required this.endHour,
     required this.onDayChanged,
-    required this.onEventCreate,
     required this.onEventTap,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
@@ -3641,22 +3708,6 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
   final int startHour;
   final int endHour;
   final ValueChanged<DateTime> onDayChanged;
-  final Future<void> Function({
-    required String title,
-    required String startsAt,
-    String? endsAt,
-    String? category,
-    String? color,
-    String? recurrence,
-    Map<String, Object?>? metadata,
-    bool? isCritical,
-    int? reminderMinutesBefore,
-    String? reminderRecurrence,
-    List<String>? reminderSpecificDays,
-    int? reminderInterval,
-    String? reminderIntervalUnit,
-  })
-  onEventCreate;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -3760,66 +3811,6 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     }
   }
 
-  Future<void> _showCreateEvent() async {
-    final selected = _dateOnly(widget.selectedDay);
-    final now = DateTime.now();
-    final defaultStartHour = _sameCalendarDay(selected, _dateOnly(now))
-        ? (now.hour + 1).clamp(widget.startHour, widget.endHour)
-        : widget.startHour.clamp(0, 23);
-    final start = DateTime(
-      selected.year,
-      selected.month,
-      selected.day,
-      defaultStartHour,
-    );
-    final end = start.add(const Duration(hours: 1));
-    final draft = HermesCalendarEvent(
-      id: 0,
-      title: '',
-      startsAt: start.toIso8601String(),
-      endsAt: end.toIso8601String(),
-    );
-    await _showCalendarEventDetails(
-      context,
-      draft,
-      eventCategories: widget.eventCategories,
-      googleCalendarStatus: widget.googleCalendarStatus,
-      onSave:
-          (
-            _, {
-            required String title,
-            required String startsAt,
-            String? endsAt,
-            String? category,
-            String? color,
-            String? recurrence,
-            Map<String, Object?>? metadata,
-            bool? isCritical,
-            int? reminderMinutesBefore,
-            String? reminderRecurrence,
-            List<String>? reminderSpecificDays,
-            int? reminderInterval,
-            String? reminderIntervalUnit,
-          }) => widget.onEventCreate(
-            title: title,
-            startsAt: startsAt,
-            endsAt: endsAt,
-            category: category,
-            color: color,
-            recurrence: recurrence,
-            metadata: metadata,
-            isCritical: isCritical,
-            reminderMinutesBefore: reminderMinutesBefore,
-            reminderRecurrence: reminderRecurrence,
-            reminderSpecificDays: reminderSpecificDays,
-            reminderInterval: reminderInterval,
-            reminderIntervalUnit: reminderIntervalUnit,
-          ),
-      onEventCategorySaved: widget.onEventCategorySaved,
-      onEventCategoryDeleted: widget.onEventCategoryDeleted,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -3852,29 +3843,14 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Stack(
-          children: [
-            _WeekDateHeader(
-              today: today,
-              weekStartDay: weekStartDay,
-              selectedDay: selectedDay,
-              onDateSelected: widget.onDayChanged,
-              onHorizontalDayScrollStart: _handleHeaderWeekDragStart,
-              onHorizontalDayScrollUpdate: _handleHeaderWeekDragUpdate,
-              onHorizontalDayScrollEnd: _handleHeaderWeekScroll,
-            ),
-            Positioned(
-              top: 0,
-              right: 0,
-              child: IconButton.filledTonal(
-                key: const Key('calendar-add-event-action'),
-                onPressed: _showCreateEvent,
-                icon: const Icon(Icons.add_rounded),
-                tooltip: 'Create event',
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-          ],
+        _WeekDateHeader(
+          today: today,
+          weekStartDay: weekStartDay,
+          selectedDay: selectedDay,
+          onDateSelected: widget.onDayChanged,
+          onHorizontalDayScrollStart: _handleHeaderWeekDragStart,
+          onHorizontalDayScrollUpdate: _handleHeaderWeekDragUpdate,
+          onHorizontalDayScrollEnd: _handleHeaderWeekScroll,
         ),
         const SizedBox(height: 10),
         Container(

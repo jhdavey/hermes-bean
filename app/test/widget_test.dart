@@ -1684,6 +1684,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('calendar-add-event-action')), findsOneWidget);
+    final addButton = tester.getRect(
+      find.byKey(const Key('calendar-add-event-action')),
+    );
+    final criticalCount = tester.getRect(
+      find.byKey(const Key('critical-task-count')),
+    );
+    final weekHeader = tester.getRect(
+      find.byKey(const Key('apple-style-week-date-header')),
+    );
+    expect(addButton.left, greaterThan(criticalCount.right));
+    expect(addButton.center.dy, closeTo(criticalCount.center.dy, 2));
+    expect(addButton.bottom, lessThan(weekHeader.top));
     await tester.tap(find.byKey(const Key('calendar-add-event-action')));
     await tester.pumpAndSettle();
 
