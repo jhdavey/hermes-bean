@@ -1064,6 +1064,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       allowEmptyTime: true,
       categories: _eventCategories,
       initialCritical: false,
+      onEventCategorySaved: _saveEventCategory,
     );
     if (result == null) return;
     final title = (result['title'] as String).trim();
@@ -1089,6 +1090,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       allowEmptyTime: false,
       categories: _eventCategories,
       showCritical: false,
+      showTimeTextField: false,
+      onEventCategorySaved: _saveEventCategory,
     );
     if (result == null) return;
     final title = (result['title'] as String).trim();
@@ -2481,6 +2484,7 @@ class _CommandCenterContent extends StatelessWidget {
             onTaskCompleted: onTaskCompleted,
             onTaskSaved: onTaskSaved,
             onTaskDeleted: onTaskDeleted,
+            onEventCategorySaved: onEventCategorySaved,
           ),
           _HomeDestination.bean => beanPanel,
           _HomeDestination.reminders => _ReminderListCard(
@@ -2489,6 +2493,7 @@ class _CommandCenterContent extends StatelessWidget {
             onReminderSaved: onReminderSaved,
             onReminderCompleted: onReminderCompleted,
             onReminderDeleted: onReminderDeleted,
+            onEventCategorySaved: onEventCategorySaved,
           ),
           _HomeDestination.settings => _SettingsView(
             apiClient: apiClient,
@@ -3537,6 +3542,7 @@ class _TodayHomeView extends StatelessWidget {
       initialColor: task?.color,
       initialCritical: task?.isCritical ?? false,
       deleteLabel: task == null ? null : 'Delete task',
+      onEventCategorySaved: onEventCategorySaved,
     );
     if (result == null) return;
     if (result['delete'] == true && task != null) {
@@ -6697,11 +6703,20 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   String? completeLabel,
   bool initialCritical = false,
   bool showCritical = true,
+  bool showTimeTextField = true,
+  Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })?
+  onEventCategorySaved,
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
   var selectedCategory = initialCategory?.trim() ?? '';
   var selectedColor = initialColor?.trim() ?? '';
+  var modalCategories = [...categories];
+  var savingCategory = false;
   var isCritical = initialCritical;
   String? validationError;
 
@@ -6730,8 +6745,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                 _SectionTitle(
                   icon: Icons.edit_note_rounded,
                   title: title,
-                  subtitle:
-                      'These changes sync to Bean and are available to the agent.',
+                  subtitle: '',
                 ),
                 const SizedBox(height: 14),
                 if (showCritical) ...[
@@ -6760,13 +6774,94 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                   decoration: InputDecoration(labelText: titleLabel),
                 ),
                 const SizedBox(height: 12),
-                if (categories.isNotEmpty) ...[
-                  Text(
-                    'Category',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: HeyBeanTheme.text,
-                      fontWeight: FontWeight.w800,
-                    ),
+                if (modalCategories.isNotEmpty ||
+                    onEventCategorySaved != null) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Category',
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(
+                                color: HeyBeanTheme.text,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                      ),
+                      if (onEventCategorySaved != null)
+                        IconButton.filledTonal(
+                          key: const Key(
+                            'title-time-editor-category-add-action',
+                          ),
+                          tooltip: 'Create category',
+                          onPressed: savingCategory
+                              ? null
+                              : () async {
+                                  final categoryValues =
+                                      await showDialog<Map<String, String>>(
+                                        context: context,
+                                        builder: (context) =>
+                                            const _EventCategoryCreateDialog(
+                                              initialColor: '#34C759',
+                                              colors: [
+                                                (
+                                                  value: '#34C759',
+                                                  label: 'Green',
+                                                ),
+                                                (
+                                                  value: '#007AFF',
+                                                  label: 'Blue',
+                                                ),
+                                                (
+                                                  value: '#FF9500',
+                                                  label: 'Orange',
+                                                ),
+                                                (
+                                                  value: '#AF52DE',
+                                                  label: 'Purple',
+                                                ),
+                                                (
+                                                  value: '#FF3B30',
+                                                  label: 'Red',
+                                                ),
+                                              ],
+                                            ),
+                                      );
+                                  if (categoryValues == null) return;
+                                  final name =
+                                      categoryValues['name']?.trim() ?? '';
+                                  final color =
+                                      categoryValues['color']?.trim() ??
+                                      '#34C759';
+                                  if (name.isEmpty) return;
+                                  setModalState(() => savingCategory = true);
+                                  try {
+                                    final saved = await onEventCategorySaved(
+                                      name: name,
+                                      color: color,
+                                    );
+                                    setModalState(() {
+                                      modalCategories = [
+                                        ...modalCategories.where(
+                                          (item) => item.id != saved.id,
+                                        ),
+                                        saved,
+                                      ];
+                                      selectedCategory = saved.name;
+                                      selectedColor = saved.color;
+                                      savingCategory = false;
+                                    });
+                                  } catch (_) {
+                                    setModalState(() {
+                                      savingCategory = false;
+                                      validationError =
+                                          'Could not create category.';
+                                    });
+                                  }
+                                },
+                          icon: const Icon(Icons.add_rounded),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -6782,7 +6877,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                           selectedColor = '';
                         }),
                       ),
-                      for (final category in categories)
+                      for (final category in modalCategories)
                         ChoiceChip(
                           key: Key(
                             'title-time-editor-category-${category.name.toLowerCase().replaceAll(' ', '-')}',
@@ -6802,37 +6897,62 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                   ),
                   const SizedBox(height: 12),
                 ],
-                TextFormField(
-                  key: const Key('title-time-editor-time'),
-                  controller: timeController,
-                  textInputAction: TextInputAction.done,
-                  decoration: InputDecoration(
-                    labelText: timeLabel,
-                    helperText: allowEmptyTime
-                        ? 'Optional · examples: Today 5:00 PM, 5:00 PM, May 18 9 AM'
-                        : 'Required · examples: Today 5:00 PM, May 18 9 AM',
-                    suffixIcon: IconButton(
-                      key: const Key('title-time-editor-open-picker'),
-                      tooltip: 'Choose date and time',
-                      onPressed: () async {
-                        final selected = await _showStandardDateTimeDock(
-                          context,
-                          initialText: timeController.text,
-                          originalValue: initialTime,
-                          keyPrefix: 'title-time',
-                        );
-                        if (selected == null) return;
-                        setModalState(() {
-                          timeController.text = _formatCalendarEventDateTime(
-                            selected.toIso8601String(),
+                if (showTimeTextField)
+                  TextFormField(
+                    key: const Key('title-time-editor-time'),
+                    controller: timeController,
+                    textInputAction: TextInputAction.done,
+                    decoration: InputDecoration(
+                      labelText: timeLabel,
+                      helperText: allowEmptyTime
+                          ? 'Optional · examples: Today 5:00 PM, 5:00 PM, May 18 9 AM'
+                          : 'Required · examples: Today 5:00 PM, May 18 9 AM',
+                      suffixIcon: IconButton(
+                        key: const Key('title-time-editor-open-picker'),
+                        tooltip: 'Choose date and time',
+                        onPressed: () async {
+                          final selected = await _showStandardDateTimeDock(
+                            context,
+                            initialText: timeController.text,
+                            originalValue: initialTime,
+                            keyPrefix: 'title-time',
                           );
-                          validationError = null;
-                        });
-                      },
-                      icon: const Icon(Icons.calendar_month_rounded),
+                          if (selected == null) return;
+                          setModalState(() {
+                            timeController.text = _formatCalendarEventDateTime(
+                              selected.toIso8601String(),
+                            );
+                            validationError = null;
+                          });
+                        },
+                        icon: const Icon(Icons.calendar_month_rounded),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    key: const Key('title-time-editor-selected-time-label'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: HeyBeanTheme.surface2,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: HeyBeanTheme.border),
+                    ),
+                    child: Text(
+                      timeController.text.trim().isEmpty
+                          ? 'No date and time selected'
+                          : timeController.text.trim(),
+                      style: TextStyle(
+                        color: timeController.text.trim().isEmpty
+                            ? HeyBeanTheme.muted
+                            : HeyBeanTheme.text,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -6967,6 +7087,7 @@ class _TaskListCard extends StatefulWidget {
     required this.onTaskCompleted,
     required this.onTaskSaved,
     required this.onTaskDeleted,
+    required this.onEventCategorySaved,
   });
 
   final List<HermesTask> tasks;
@@ -6983,6 +7104,12 @@ class _TaskListCard extends StatefulWidget {
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
 
   @override
   State<_TaskListCard> createState() => _TaskListCardState();
@@ -7050,6 +7177,7 @@ class _TaskListCardState extends State<_TaskListCard> {
       initialColor: task?.color,
       initialCritical: task?.isCritical ?? false,
       deleteLabel: task == null ? null : 'Delete task',
+      onEventCategorySaved: widget.onEventCategorySaved,
     );
     if (result == null) return;
     if (result['delete'] == true && task != null) {
@@ -7076,6 +7204,7 @@ class _ReminderListCard extends StatefulWidget {
     required this.onReminderSaved,
     required this.onReminderCompleted,
     required this.onReminderDeleted,
+    required this.onEventCategorySaved,
   });
 
   final List<HermesReminder> reminders;
@@ -7091,6 +7220,12 @@ class _ReminderListCard extends StatefulWidget {
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
   final Future<void> Function(HermesReminder reminder) onReminderDeleted;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
 
   @override
   State<_ReminderListCard> createState() => _ReminderListCardState();
@@ -7161,6 +7296,8 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       initialCategory: reminder?.category,
       initialColor: reminder?.color,
       showCritical: false,
+      showTimeTextField: false,
+      onEventCategorySaved: widget.onEventCategorySaved,
       deleteLabel: reminder == null ? null : 'Delete reminder',
       completeLabel: reminder == null
           ? null
@@ -8472,12 +8609,13 @@ class _SectionTitle extends StatelessWidget {
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
-            Text(
-              subtitle,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: HeyBeanTheme.muted),
-            ),
+            if (subtitle.isNotEmpty)
+              Text(
+                subtitle,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: HeyBeanTheme.muted),
+              ),
           ],
         ),
       ),

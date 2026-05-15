@@ -566,6 +566,33 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('task-edit-action-501')));
     await tester.pumpAndSettle();
+    expect(
+      find.text('These changes sync to Bean and are available to the agent.'),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('title-time-editor-category-add-action')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(const Key('title-time-editor-category-add-action')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('event-category-create-modal')),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const Key('event-category-modal-name-field')),
+      'Errands',
+    );
+    await tester.tap(find.byKey(const Key('event-category-modal-save-action')));
+    await tester.pumpAndSettle();
+    expect(api.savedCategory?.name, 'Errands');
+    expect(
+      find.byKey(const Key('title-time-editor-category-errands')),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -591,6 +618,20 @@ void main() {
     expect(reminderDecoration.color?.b, 1);
     await tester.tap(find.byKey(const Key('reminder-edit-action-601')));
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('title-time-editor-time')), findsNothing);
+    expect(find.text('Remind me at'), findsNothing);
+    expect(
+      find.byKey(const Key('title-time-editor-selected-time-label')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('title-time-editor-picker-button')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('title-time-editor-category-add-action')),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('title-time-editor-save')));
@@ -3014,11 +3055,22 @@ class _TaskReminderCategoryFakeHermesApiClient
   HermesTask? createdTask;
   HermesReminder? updatedReminder;
   HermesReminder? createdReminder;
+  HermesEventCategory? savedCategory;
 
   @override
-  Future<List<HermesEventCategory>> listEventCategories() async => const [
-    HermesEventCategory(id: 10, name: 'Work', color: '#007AFF'),
+  Future<List<HermesEventCategory>> listEventCategories() async => [
+    const HermesEventCategory(id: 10, name: 'Work', color: '#007AFF'),
+    if (savedCategory != null) savedCategory!,
   ];
+
+  @override
+  Future<HermesEventCategory> createEventCategory({
+    required String name,
+    required String color,
+  }) async {
+    savedCategory = HermesEventCategory(id: 11, name: name, color: color);
+    return savedCategory!;
+  }
 
   @override
   Future<List<HermesTask>> listTasks() async => [
