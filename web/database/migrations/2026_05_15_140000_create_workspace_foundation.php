@@ -9,61 +9,79 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('workspaces', function (Blueprint $table): void {
-            $table->id();
-            $table->string('type')->default('personal')->index();
-            $table->string('name');
-            $table->string('slug')->nullable()->index();
-            $table->foreignId('personal_owner_user_id')->nullable()->unique()->constrained('users')->nullOnDelete();
-            $table->foreignId('created_by_user_id')->nullable()->constrained('users')->nullOnDelete();
-            $table->string('status')->default('active')->index();
-            $table->json('settings')->nullable();
-            $table->json('metadata')->nullable();
-            $table->timestamps();
-        });
+        if (! Schema::hasTable('workspaces')) {
+            Schema::create('workspaces', function (Blueprint $table): void {
+                $table->id();
+                $table->string('type')->default('personal')->index();
+                $table->string('name');
+                $table->string('slug')->nullable()->index();
+                $table->foreignId('personal_owner_user_id')->nullable()->unique()->constrained('users')->nullOnDelete();
+                $table->foreignId('created_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+                $table->string('status')->default('active')->index();
+                $table->json('settings')->nullable();
+                $table->json('metadata')->nullable();
+                $table->timestamps();
+            });
+        }
 
-        Schema::create('workspace_memberships', function (Blueprint $table): void {
-            $table->id();
-            $table->foreignId('workspace_id')->constrained('workspaces')->cascadeOnDelete();
-            $table->foreignId('user_id')->nullable()->constrained('users')->cascadeOnDelete();
-            $table->string('role')->default('member')->index();
-            $table->string('status')->default('active')->index();
-            $table->foreignId('invited_by_user_id')->nullable()->constrained('users')->nullOnDelete();
-            $table->string('invited_email')->nullable()->index();
-            $table->timestamp('accepted_at')->nullable();
-            $table->timestamps();
+        if (! Schema::hasTable('workspace_memberships')) {
+            Schema::create('workspace_memberships', function (Blueprint $table): void {
+                $table->id();
+                $table->foreignId('workspace_id')->constrained('workspaces')->cascadeOnDelete();
+                $table->foreignId('user_id')->nullable()->constrained('users')->cascadeOnDelete();
+                $table->string('role')->default('member')->index();
+                $table->string('status')->default('active')->index();
+                $table->foreignId('invited_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+                $table->string('invited_email')->nullable()->index();
+                $table->timestamp('accepted_at')->nullable();
+                $table->timestamps();
 
-            $table->unique(['workspace_id', 'user_id']);
-            $table->index(['user_id', 'status']);
-            $table->index(['workspace_id', 'status']);
-        });
+                $table->unique(['workspace_id', 'user_id']);
+                $table->index(['user_id', 'status']);
+                $table->index(['workspace_id', 'status']);
+            });
+        }
 
-        Schema::create('workspace_item_links', function (Blueprint $table): void {
-            $table->id();
-            $table->foreignId('source_workspace_id')->constrained('workspaces')->cascadeOnDelete();
-            $table->foreignId('target_workspace_id')->constrained('workspaces')->cascadeOnDelete();
-            $table->string('source_type');
-            $table->unsignedBigInteger('source_id');
-            $table->string('target_type');
-            $table->unsignedBigInteger('target_id');
-            $table->string('link_type');
-            $table->json('metadata')->nullable();
-            $table->timestamps();
+        if (! Schema::hasTable('workspace_item_links')) {
+            Schema::create('workspace_item_links', function (Blueprint $table): void {
+                $table->id();
+                $table->foreignId('source_workspace_id')->constrained('workspaces')->cascadeOnDelete();
+                $table->foreignId('target_workspace_id')->constrained('workspaces')->cascadeOnDelete();
+                $table->string('source_type', 80);
+                $table->unsignedBigInteger('source_id');
+                $table->string('target_type', 80);
+                $table->unsignedBigInteger('target_id');
+                $table->string('link_type', 80);
+                $table->json('metadata')->nullable();
+                $table->timestamps();
 
-            $table->index(['source_workspace_id', 'source_type', 'source_id'], 'wil_source_lookup_idx');
-            $table->index(['target_workspace_id', 'target_type', 'target_id'], 'wil_target_lookup_idx');
-            $table->unique([
-                'source_workspace_id',
-                'target_workspace_id',
-                'source_type',
-                'source_id',
-                'target_type',
-                'target_id',
-                'link_type',
-            ], 'wil_idempotent_unique');
-        });
+                $table->index(['source_workspace_id', 'source_type', 'source_id'], 'wil_source_lookup_idx');
+                $table->index(['target_workspace_id', 'target_type', 'target_id'], 'wil_target_lookup_idx');
+            });
+        }
 
-        Schema::create('workspace_google_calendar_mappings', function (Blueprint $table): void {
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement('ALTER TABLE workspace_item_links MODIFY source_type VARCHAR(80) NOT NULL, MODIFY target_type VARCHAR(80) NOT NULL, MODIFY link_type VARCHAR(80) NOT NULL');
+        }
+
+        try {
+            Schema::table('workspace_item_links', function (Blueprint $table): void {
+                $table->unique([
+                    'source_workspace_id',
+                    'target_workspace_id',
+                    'source_type',
+                    'source_id',
+                    'target_type',
+                    'target_id',
+                    'link_type',
+                ], 'wil_idempotent_unique');
+            });
+        } catch (Throwable) {
+            // The idempotency index already exists from a previous attempt.
+        }
+
+        if (! Schema::hasTable('workspace_google_calendar_mappings')) {
+            Schema::create('workspace_google_calendar_mappings', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('workspace_id')->constrained('workspaces')->cascadeOnDelete();
             $table->unsignedBigInteger('google_calendar_connection_id');
@@ -78,8 +96,9 @@ return new class extends Migration
                 ->on('google_calendar_connections')
                 ->cascadeOnDelete();
             $table->unique(['workspace_id', 'google_calendar_connection_id', 'google_calendar_id'], 'wgcm_workspace_connection_calendar_unique');
-            $table->index(['workspace_id', 'is_default_export'], 'wgcm_default_export_idx');
-        });
+                $table->index(['workspace_id', 'is_default_export'], 'wgcm_default_export_idx');
+            });
+        }
 
         foreach ($this->workspaceScopedTables() as $tableName => $deleteBehavior) {
             if (! Schema::hasTable($tableName) || Schema::hasColumn($tableName, 'workspace_id')) {
