@@ -5629,12 +5629,19 @@ class _EventCategoryCreateDialogState
     extends State<_EventCategoryCreateDialog> {
   late final TextEditingController _nameController;
   late String _selectedColor;
+  late double _hue;
+  late double _saturation;
+  late double _value;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController();
-    _selectedColor = widget.initialColor;
+    _selectedColor = widget.initialColor.toUpperCase();
+    final hsv = HSVColor.fromColor(_colorFromHex(_selectedColor));
+    _hue = hsv.hue;
+    _saturation = hsv.saturation;
+    _value = hsv.value;
   }
 
   @override
@@ -5643,64 +5650,138 @@ class _EventCategoryCreateDialogState
     super.dispose();
   }
 
+  void _selectColor(String color) {
+    final normalized = color.toUpperCase();
+    final hsv = HSVColor.fromColor(_colorFromHex(normalized));
+    setState(() {
+      _selectedColor = normalized;
+      _hue = hsv.hue;
+      _saturation = hsv.saturation;
+      _value = hsv.value;
+    });
+  }
+
+  void _setHsv({double? hue, double? saturation, double? value}) {
+    setState(() {
+      _hue = hue ?? _hue;
+      _saturation = saturation ?? _saturation;
+      _value = value ?? _value;
+      _selectedColor = _hexFromColor(
+        HSVColor.fromAHSV(1, _hue, _saturation, _value).toColor(),
+      );
+    });
+  }
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    key: const Key('event-category-create-modal'),
-    title: const Text('New category'),
-    content: SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            key: const Key('event-category-modal-name-field'),
-            controller: _nameController,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Category name',
-              prefixIcon: Icon(Icons.sell_outlined),
+  Widget build(BuildContext context) {
+    final previewColor = _colorFromHex(_selectedColor);
+    return AlertDialog(
+      key: const Key('event-category-create-modal'),
+      title: const Text('New category'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: const Key('event-category-modal-name-field'),
+              controller: _nameController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Category name',
+                prefixIcon: Icon(Icons.sell_outlined),
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          _EventFieldLabel(icon: Icons.palette_outlined, label: 'Color'),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final color in widget.colors)
-                ChoiceChip(
-                  label: Text(color.label),
-                  selected: _selectedColor == color.value,
-                  avatar: CircleAvatar(
-                    radius: 6,
-                    backgroundColor: Color(
-                      int.parse('FF${color.value.substring(1)}', radix: 16),
+            const SizedBox(height: 14),
+            _EventFieldLabel(icon: Icons.palette_outlined, label: 'Color'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final color in widget.colors)
+                  ChoiceChip(
+                    label: Text(color.label),
+                    selected: _selectedColor == color.value.toUpperCase(),
+                    avatar: CircleAvatar(
+                      radius: 6,
+                      backgroundColor: _colorFromHex(color.value),
+                    ),
+                    onSelected: (_) => _selectColor(color.value),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              key: const Key('event-category-custom-color-preview'),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: previewColor.withValues(alpha: .14),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: previewColor, width: 1.4),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(radius: 14, backgroundColor: previewColor),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _selectedColor,
+                      style: const TextStyle(
+                        color: HeyBeanTheme.text,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                  onSelected: (_) => setState(() {
-                    _selectedColor = color.value;
-                  }),
-                ),
-            ],
-          ),
-        ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text('Hue', style: Theme.of(context).textTheme.labelMedium),
+            Slider(
+              key: const Key('event-category-hue-slider'),
+              min: 0,
+              max: 360,
+              divisions: 360,
+              value: _hue.clamp(0, 360),
+              onChanged: (value) => _setHsv(hue: value),
+            ),
+            Text('Saturation', style: Theme.of(context).textTheme.labelMedium),
+            Slider(
+              key: const Key('event-category-saturation-slider'),
+              min: 0,
+              max: 1,
+              divisions: 100,
+              value: _saturation.clamp(0, 1),
+              onChanged: (value) => _setHsv(saturation: value),
+            ),
+            Text('Brightness', style: Theme.of(context).textTheme.labelMedium),
+            Slider(
+              key: const Key('event-category-value-slider'),
+              min: 0,
+              max: 1,
+              divisions: 100,
+              value: _value.clamp(0, 1),
+              onChanged: (value) => _setHsv(value: value),
+            ),
+          ],
+        ),
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        key: const Key('event-category-modal-save-action'),
-        onPressed: () => Navigator.of(
-          context,
-        ).pop({'name': _nameController.text.trim(), 'color': _selectedColor}),
-        child: const Text('Create'),
-      ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const Key('event-category-modal-save-action'),
+          onPressed: () => Navigator.of(
+            context,
+          ).pop({'name': _nameController.text.trim(), 'color': _selectedColor}),
+          child: const Text('Create'),
+        ),
+      ],
+    );
+  }
 }
 
 class _EventFieldLabel extends StatelessWidget {
@@ -5730,6 +5811,16 @@ Color _colorFromHex(String value) {
     return HeyBeanTheme.accentStrong;
   }
   return Color(int.parse('FF${value.substring(1)}', radix: 16));
+}
+
+String _hexFromColor(Color color) {
+  final red = (color.r * 255).round().clamp(0, 255);
+  final green = (color.g * 255).round().clamp(0, 255);
+  final blue = (color.b * 255).round().clamp(0, 255);
+  return '#${red.toRadixString(16).padLeft(2, '0')}'
+          '${green.toRadixString(16).padLeft(2, '0')}'
+          '${blue.toRadixString(16).padLeft(2, '0')}'
+      .toUpperCase();
 }
 
 Color _calendarEventColor(HermesCalendarEvent event) {
