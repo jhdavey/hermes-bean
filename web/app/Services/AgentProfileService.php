@@ -229,6 +229,8 @@ class AgentProfileService
             rtrim($profile->runtime_home, '/').'/bean-preferences-memory.json',
             json_encode($memory, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES).PHP_EOL
         );
+
+        $this->writeRuntimeMarkdownMemory($profile->refresh(), $memory);
     }
 
     private function recursiveMerge(array $base, array $updates): array
@@ -249,6 +251,126 @@ class AgentProfileService
         return array_keys(self::PERSONALITIES);
     }
 
+    private function writeRuntimeMarkdownMemory(AgentProfile $profile, ?array $memory = null): void
+    {
+        if (! $profile->runtime_home) {
+            return;
+        }
+
+        File::ensureDirectoryExists($profile->runtime_home);
+
+        $workspace = $profile->workspace ?: ($profile->workspace_id ? Workspace::find($profile->workspace_id) : null);
+        $user = $profile->user ?: ($profile->user_id ? User::find($profile->user_id) : null);
+        $settings = $profile->settings ?? [];
+        $memory ??= (array) data_get($settings, 'memory', []);
+        $workspaceName = $workspace?->name ?? $profile->display_name ?? 'Personal';
+        $workspaceType = $workspace?->type ?? 'personal';
+        $workspaceId = $workspace?->id ?? $profile->workspace_id;
+        $priorities = array_values(array_filter((array) data_get($settings, 'onboarding.priorities', [])));
+        $context = data_get($settings, 'onboarding.context');
+        $summary = data_get($memory, 'user_preferences.summary') ?: data_get($settings, 'memory.user_preferences.summary');
+        $personality = (string) data_get($settings, 'personality_type', 'balanced');
+        $updatedAt = now()->toISOString();
+
+        $this->putManagedMarkdown(
+            rtrim($profile->runtime_home, '/').'/USER.md',
+            '# User Memory'.PHP_EOL.PHP_EOL,
+            implode(PHP_EOL, array_filter([
+                '## Managed identity context',
+                '- signed_in_user_id: '.($user?->id ?? 'unknown'),
+                '- signed_in_user_name: '.($user?->name ?: 'unknown'),
+                '- signed_in_user_email: '.($user?->email ?: 'unknown'),
+                '- workspace_id: '.($workspaceId ?? 'unknown'),
+                '- workspace_name: '.$workspaceName,
+                '- workspace_type: '.$workspaceType,
+                '- agent_profile_id: '.$profile->id,
+                '- agent_slug: '.$profile->slug,
+                '- updated_at: '.$updatedAt,
+            ])).PHP_EOL
+        );
+
+        $this->putManagedMarkdown(
+            rtrim($profile->runtime_home, '/').'/MEMORY.md',
+            '# Workspace Memory'.PHP_EOL.PHP_EOL,
+            implode(PHP_EOL, array_filter([
+                '## Managed workspace memory context',
+                '- workspace_id: '.($workspaceId ?? 'unknown'),
+                '- workspace_name: '.$workspaceName,
+                '- workspace_type: '.$workspaceType,
+                '- isolation: This memory belongs only to this '.$workspaceType.' workspace. Do not copy facts into Personal or another household unless a user explicitly asks to sync/share them.',
+                $summary ? '- preference_summary: '.$summary : null,
+                is_string($context) && trim($context) !== '' ? '- context: '.trim($context) : null,
+                '- updated_at: '.$updatedAt,
+            ])).PHP_EOL.PHP_EOL."## Agent-learned durable facts\nAdd concise durable facts for this workspace below this heading. Keep Personal-only facts out of household files and household facts out of Personal files.\n"
+        );
+
+        $householdLines = [
+            '## Managed workspace profile',
+            '- name: '.$workspaceName,
+            '- type: '.$workspaceType,
+            '- workspace_id: '.($workspaceId ?? 'unknown'),
+            '- owner_or_actor_user_id: '.($user?->id ?? 'unknown'),
+            '- owner_or_actor_name: '.($user?->name ?: 'unknown'),
+            '- updated_at: '.$updatedAt,
+        ];
+        if ($workspaceType === 'household') {
+            $householdLines[] = '- guidance: Store shared household routines, member preferences relevant to this household, and family scheduling context here.';
+        } else {
+            $householdLines[] = '- guidance: This is the Personal workspace. Store only the signed-in user\'s personal preferences and routines here.';
+        }
+        $this->putManagedMarkdown(
+            rtrim($profile->runtime_home, '/').'/HOUSEHOLD.md',
+            '# Household / Workspace Context'.PHP_EOL.PHP_EOL,
+            implode(PHP_EOL, $householdLines).PHP_EOL.PHP_EOL."## Agent-learned workspace context\nAdd household/workspace-specific context below this heading.\n"
+        );
+
+        $preferenceLines = [
+            '## Managed preferences',
+            '- personality_type: '.$personality,
+            '- personality_label: '.((string) data_get($settings, 'personality_label', 'Balanced helper')),
+        ];
+        foreach ($priorities as $priority) {
+            $preferenceLines[] = '- priority: '.$priority;
+        }
+        if (is_string($context) && trim($context) !== '') {
+            $preferenceLines[] = '- context: '.trim($context);
+        }
+        if ($summary) {
+            $preferenceLines[] = '- summary: '.$summary;
+        }
+        $preferenceLines[] = '- source: '.((string) data_get($memory, 'user_preferences.source', data_get($settings, 'memory.user_preferences.source', 'settings')));
+        $preferenceLines[] = '- updated_at: '.$updatedAt;
+
+        $this->putManagedMarkdown(
+            rtrim($profile->runtime_home, '/').'/PREFERENCES.md',
+            '# Preferences'.PHP_EOL.PHP_EOL,
+            implode(PHP_EOL, $preferenceLines).PHP_EOL.PHP_EOL."## Agent-learned preference notes\nAdd stable preference notes for this workspace below this heading.\n"
+        );
+    }
+
+    private function putManagedMarkdown(string $path, string $defaultHeader, string $managedContent): void
+    {
+        $begin = '<!-- BEGIN HERMES-BEAN MANAGED -->';
+        $end = '<!-- END HERMES-BEAN MANAGED -->';
+        $section = $begin.PHP_EOL.rtrim($managedContent).PHP_EOL.$end;
+
+        if (! File::exists($path)) {
+            File::put($path, rtrim($defaultHeader).PHP_EOL.PHP_EOL.$section.PHP_EOL);
+
+            return;
+        }
+
+        $existing = File::get($path);
+        $pattern = '/'.preg_quote($begin, '/').'.*?'.preg_quote($end, '/').'/s';
+        if (preg_match($pattern, $existing)) {
+            File::put($path, preg_replace($pattern, $section, $existing));
+
+            return;
+        }
+
+        File::put($path, rtrim($existing).PHP_EOL.PHP_EOL.$section.PHP_EOL);
+    }
+
     private function bootstrapRuntimeHome(AgentProfile $profile): void
     {
         if (! $profile->runtime_home) {
@@ -258,6 +380,7 @@ class AgentProfileService
         File::ensureDirectoryExists($profile->runtime_home);
         File::ensureDirectoryExists($profile->runtime_home.'/sessions');
         File::ensureDirectoryExists($profile->runtime_home.'/logs');
+        $this->writeRuntimeMarkdownMemory($profile->refresh());
 
         $baseHome = (string) config('services.hermes_runtime.base_home', '');
         if ($baseHome === '') {
