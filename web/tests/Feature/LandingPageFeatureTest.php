@@ -24,6 +24,8 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Voice-first requests', false)
             ->assertSee('Google Calendar-ready', false)
             ->assertSee('Approval guardrails', false)
+            ->assertSee('Private + shared dashboard', false)
+            ->assertDontSee('Work + home spaces', false)
             ->assertSee('Built for the real day', false)
             ->assertSee('Bean turns “Hey Bean…” voice requests into a structured day', false)
             ->assertSee('Hey Bean, move my focus block to 3', false)

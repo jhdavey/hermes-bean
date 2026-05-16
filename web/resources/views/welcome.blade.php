@@ -41,7 +41,7 @@
             @endif
             <div class="cta"><a class="button secondary" href="#how">See how Bean works</a></div>
             <p class="micro"><strong>Just say “Hey, Bean…!”</strong></p>
-            <div class="proof"><span>Voice-first requests</span><span>Google Calendar-ready</span><span>Approval guardrails</span><span>Work + home spaces</span><span>Private by design</span></div>
+            <div class="proof"><span>Voice-first requests</span><span>Google Calendar-ready</span><span>Approval guardrails</span><span>Private + shared dashboard</span><span>Private by design</span></div>
         </section>
         <section class="phone-wrap" aria-label="HeyBean iOS Today screenshot">
             <div class="halo"></div>
