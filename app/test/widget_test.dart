@@ -175,7 +175,7 @@ void main() {
   );
 
   testWidgets(
-    'workspace calendar selection shows syncing message while saving',
+    'workspace calendar list shows Google access info without duplicate display list',
     (WidgetTester tester) async {
       final calendarSave = Completer<List<Map<String, Object?>>>();
       final api = _WorkspaceFakeHermesApiClient()
@@ -189,6 +189,9 @@ void main() {
             role: 'owner',
             active: true,
             isDefault: true,
+            googleCalendarMappings: [
+              {'google_calendar_id': 'primary', 'is_default_export': true},
+            ],
           ),
         ];
 
@@ -199,11 +202,41 @@ void main() {
 
       await tester.tap(find.byKey(const Key('nav-settings')));
       await tester.pumpAndSettle();
+
+      expect(find.text('Displayed Google calendars'), findsNothing);
+      expect(
+        find.byKey(const Key('google-calendar-source-primary')),
+        findsNothing,
+      );
+
+      await tester.ensureVisible(
+        find.byKey(const Key('workspace-google-calendar-1-primary')),
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('workspace-google-calendar-1-primary')),
+          matching: find.text(
+            'Can add local events · Default for new local events',
+          ),
+        ),
+        findsOneWidget,
+      );
+
       await tester.ensureVisible(
         find.byKey(
           const Key('workspace-google-calendar-1-holidays@example.com'),
         ),
       );
+      expect(
+        find.descendant(
+          of: find.byKey(
+            const Key('workspace-google-calendar-1-holidays@example.com'),
+          ),
+          matching: find.text('Read only'),
+        ),
+        findsOneWidget,
+      );
+
       await tester.tap(
         find.byKey(
           const Key('workspace-google-calendar-1-holidays@example.com'),
@@ -213,9 +246,9 @@ void main() {
 
       expect(
         find.byKey(const Key('workspace-calendar-sync-progress')),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Syncing your calendars...'), findsOneWidget);
+      expect(find.text('Syncing your calendars...'), findsNothing);
 
       calendarSave.complete(const <Map<String, Object?>>[]);
       await tester.pumpAndSettle();
@@ -223,6 +256,58 @@ void main() {
         find.text('Workspace Google calendar mapping saved.'),
         findsOneWidget,
       );
+    },
+  );
+
+  testWidgets(
+    'workspace switch skips inline progress and shows status under full-screen loader',
+    (WidgetTester tester) async {
+      final reloadUser = Completer<HermesUser>();
+      final api = _WorkspaceFakeHermesApiClient()
+        ..googleCalendarConnected = true
+        ..workspaces = const [
+          HermesWorkspace(
+            id: '1',
+            name: 'Personal',
+            type: 'personal',
+            role: 'owner',
+            active: true,
+            isDefault: true,
+          ),
+          HermesWorkspace(
+            id: '2',
+            name: 'Family',
+            type: 'household',
+            role: 'owner',
+          ),
+        ];
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+      api.nextMeCompleter = reloadUser;
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('workspace-switch-2')));
+      await tester.tap(find.byKey(const Key('workspace-switch-2')));
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('workspace-calendar-sync-progress')),
+        findsNothing,
+      );
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(
+        find.byKey(const Key('full-screen-loading-message')),
+        findsOneWidget,
+      );
+      expect(find.text('Syncing your calendars...'), findsOneWidget);
+
+      reloadUser.complete(await api.currentUser());
+      await tester.pumpAndSettle();
+      expect(api.defaultWorkspaceSetTo, 2);
     },
   );
 
@@ -1437,35 +1522,14 @@ void main() {
     expect(api.googleCalendarSyncCalls, 2);
     expect(find.textContaining('Synced 2 Google events'), findsOneWidget);
 
-    expect(find.text('Displayed Google calendars'), findsOneWidget);
+    expect(find.text('Displayed Google calendars'), findsNothing);
     expect(
-      find.descendant(
-        of: find.byKey(const Key('google-calendar-source-primary')),
-        matching: find.text('Personal'),
-      ),
-      findsOneWidget,
+      find.byKey(const Key('google-calendar-source-primary')),
+      findsNothing,
     );
     expect(
-      find.descendant(
-        of: find.byKey(
-          const Key('google-calendar-source-holidays@example.com'),
-        ),
-        matching: find.text('Holidays'),
-      ),
-      findsOneWidget,
-    );
-    await tester.ensureVisible(
       find.byKey(const Key('google-calendar-source-holidays@example.com')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const Key('google-calendar-source-holidays@example.com')),
-    );
-    await tester.pumpAndSettle();
-    expect(api.selectedGoogleCalendarIds, contains('holidays@example.com'));
-    expect(
-      find.text('Google calendar display preferences saved.'),
-      findsOneWidget,
+      findsNothing,
     );
   });
 
@@ -2903,7 +2967,9 @@ class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {
 class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   final createdWorkspaceNames = <String>[];
   Completer<List<Map<String, Object?>>>? workspaceCalendarSaveCompleter;
+  Completer<HermesUser>? nextMeCompleter;
   var savedWorkspaceCalendarIds = <String>[];
+  int? defaultWorkspaceSetTo;
   var workspaces = <HermesWorkspace>[
     const HermesWorkspace(
       id: '1',
@@ -2915,13 +2981,12 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     ),
   ];
 
-  @override
-  Future<HermesUser> me() async => HermesUser(
+  Future<HermesUser> currentUser() async => HermesUser(
     id: 1,
     name: 'Bean User',
     email: updatedEmail ?? 'bean@example.com',
     onboardComplete: true,
-    defaultWorkspaceId: 1,
+    defaultWorkspaceId: defaultWorkspaceSetTo ?? 1,
     personalWorkspace: workspaces.first,
     activeWorkspace: workspaces.firstWhere(
       (workspace) => workspace.active,
@@ -2937,6 +3002,16 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   );
 
   @override
+  Future<HermesUser> me() {
+    final pending = nextMeCompleter;
+    if (pending != null) {
+      nextMeCompleter = null;
+      return pending.future;
+    }
+    return currentUser();
+  }
+
+  @override
   Future<List<HermesWorkspace>> listWorkspaces() async => workspaces;
 
   @override
@@ -2950,6 +3025,21 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     );
     workspaces = [...workspaces, workspace];
     return workspace;
+  }
+
+  @override
+  Future<HermesWorkspace> setDefaultWorkspace(int workspaceId) async {
+    defaultWorkspaceSetTo = workspaceId;
+    workspaces = [
+      for (final workspace in workspaces)
+        workspace.copyWith(
+          active: workspace.numericId == workspaceId,
+          isDefault: workspace.numericId == workspaceId,
+        ),
+    ];
+    return workspaces.firstWhere(
+      (workspace) => workspace.numericId == workspaceId,
+    );
   }
 
   @override

@@ -273,6 +273,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     ),
   ].toList();
   String? _error;
+  String? _loadingStatusText;
   bool _busy = false;
   String _chatRunState = 'Ready';
   _HomeDestination _selectedDestination = _HomeDestination.today;
@@ -328,9 +329,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   Future<void> _loadSignedIn({
     HermesUser? knownUser,
     bool launchedFromRememberedToken = false,
+    String? loadingStatusText,
   }) async {
     setState(() {
       _phase = _AuthPhase.loading;
+      _loadingStatusText = loadingStatusText;
       _error = null;
     });
     try {
@@ -383,6 +386,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _approvals = summary.approvals;
         _events = results[6] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
+        _loadingStatusText = null;
       });
     } catch (error) {
       if (!mounted) return;
@@ -408,6 +412,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _approvals = const [];
         _events = const [];
         _phase = _AuthPhase.signedOut;
+        _loadingStatusText = null;
       });
     }
   }
@@ -1479,7 +1484,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   }
 
   Future<void> _reloadSignedInViewsFromSettings() async {
-    await _loadSignedIn();
+    await _loadSignedIn(loadingStatusText: 'Syncing your calendars...');
   }
 
   Future<void> _updateAccountEmail(String email) async {
@@ -1580,6 +1585,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         setState(() {
           _busy = false;
           _phase = _AuthPhase.signedOut;
+          _loadingStatusText = null;
           _user = null;
         });
         await widget.tokenStore.clearToken();
@@ -1704,7 +1710,26 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
 
   Widget _body() {
     if (_phase == _AuthPhase.loading) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            if (_loadingStatusText != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _loadingStatusText!,
+                key: const Key('full-screen-loading-message'),
+                style: const TextStyle(
+                  color: HeyBeanTheme.muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
     }
     if (_phase == _AuthPhase.signedOut) {
       return _SignedOutScreen(
@@ -8332,6 +8357,21 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
     );
   }
 
+  String _googleCalendarAccessLabel(
+    GoogleCalendarInfo calendar,
+    HermesWorkspace workspace,
+  ) {
+    final defaultForWorkspace = workspace.googleCalendarMappings.any(
+      (mapping) =>
+          mapping['google_calendar_id']?.toString() == calendar.id &&
+          mapping['is_default_export'] == true,
+    );
+    final access = calendar.canWrite ? 'Can add local events' : 'Read only';
+    return defaultForWorkspace
+        ? '$access · Default for new local events'
+        : access;
+  }
+
   @override
   Widget build(BuildContext context) => FutureBuilder<List<HermesWorkspace>>(
     future: _workspacesFuture,
@@ -8384,23 +8424,6 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
               Text(
                 _message!,
                 style: const TextStyle(color: HeyBeanTheme.muted),
-              ),
-            ],
-            if (_busy) ...[
-              const SizedBox(height: 10),
-              const LinearProgressIndicator(
-                key: Key('workspace-calendar-sync-progress'),
-                minHeight: 3,
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Syncing your calendars...',
-                key: Key('workspace-calendar-sync-message'),
-                style: TextStyle(
-                  color: HeyBeanTheme.muted,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
               ),
             ],
             const SizedBox(height: 12),
@@ -8572,6 +8595,16 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                                   value ?? false,
                                 ),
                           title: Text(calendar.summary),
+                          subtitle: Text(
+                            _googleCalendarAccessLabel(calendar, workspace),
+                            key: Key(
+                              'workspace-google-calendar-access-${workspace.id}-${calendar.id}',
+                            ),
+                            style: const TextStyle(
+                              color: HeyBeanTheme.muted,
+                              fontSize: 12,
+                            ),
+                          ),
                         ),
                     ],
                   ],
@@ -8956,75 +8989,6 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     }
   }
 
-  Future<void> _toggleCalendarSelection(
-    GoogleCalendarSyncStatus status,
-    GoogleCalendarInfo calendar,
-    bool selected,
-  ) async {
-    final nextSelected = status.selectedCalendarIds.toSet();
-    if (selected) {
-      nextSelected.add(calendar.id);
-    } else if (nextSelected.length > 1) {
-      nextSelected.remove(calendar.id);
-    }
-    final defaultCalendarId = nextSelected.contains(status.defaultCalendarId)
-        ? status.defaultCalendarId
-        : nextSelected.first;
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    try {
-      final updatedStatus = await widget.apiClient
-          .updateGoogleCalendarSelection(
-            selectedCalendarIds: nextSelected.toList(),
-            defaultCalendarId: defaultCalendarId,
-          );
-      if (!mounted) return;
-      setState(() {
-        _message = 'Google calendar display preferences saved.';
-        _statusFuture = Future.value(updatedStatus);
-      });
-    } catch (error) {
-      if (mounted) {
-        setState(() => _message = 'Could not save calendar selection: $error');
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _setDefaultCalendar(
-    GoogleCalendarSyncStatus status,
-    String calendarId,
-  ) async {
-    final selected = status.selectedCalendarIds.contains(calendarId)
-        ? status.selectedCalendarIds
-        : <String>[...status.selectedCalendarIds, calendarId];
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    try {
-      final updatedStatus = await widget.apiClient
-          .updateGoogleCalendarSelection(
-            selectedCalendarIds: selected,
-            defaultCalendarId: calendarId,
-          );
-      if (!mounted) return;
-      setState(() {
-        _message = 'Default Google calendar updated.';
-        _statusFuture = Future.value(updatedStatus);
-      });
-    } catch (error) {
-      if (mounted) {
-        setState(() => _message = 'Could not update default calendar: $error');
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) => FutureBuilder<GoogleCalendarSyncStatus>(
     future: _statusFuture,
@@ -9082,50 +9046,6 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                 _message!,
                 style: const TextStyle(color: HeyBeanTheme.muted),
               ),
-            ],
-            if (connected && (status?.calendars.isNotEmpty ?? false)) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'Displayed Google calendars',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 6),
-              for (final calendar in status!.calendars)
-                CheckboxListTile(
-                  key: Key('google-calendar-source-${calendar.id}'),
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  value: status.selectedCalendarIds.contains(calendar.id),
-                  onChanged: _busy
-                      ? null
-                      : (value) => _toggleCalendarSelection(
-                          status,
-                          calendar,
-                          value ?? false,
-                        ),
-                  title: Text(calendar.summary),
-                  subtitle: Text(
-                    calendar.canWrite
-                        ? (calendar.id == status.defaultCalendarId
-                              ? 'Default for new local events'
-                              : 'Can add local events')
-                        : 'Read only',
-                  ),
-                  secondary: calendar.canWrite
-                      ? Radio<String>(
-                          key: Key('google-calendar-default-${calendar.id}'),
-                          value: calendar.id,
-                          groupValue: status.defaultCalendarId,
-                          onChanged: _busy
-                              ? null
-                              : (value) {
-                                  if (value != null) {
-                                    _setDefaultCalendar(status, value);
-                                  }
-                                },
-                        )
-                      : const Icon(Icons.visibility_rounded),
-                ),
             ],
             const SizedBox(height: 12),
             Wrap(
