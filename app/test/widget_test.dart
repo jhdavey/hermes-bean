@@ -590,6 +590,42 @@ void main() {
     );
   });
 
+  testWidgets('standard info icons explain Settings sections', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('settings-info')));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings help'), findsOneWidget);
+    expect(
+      find.text(
+        'Workspaces keep household calendars, tasks, and reminders separated from Personal.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Got it'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('workspaces-info')));
+    await tester.pumpAndSettle();
+    expect(find.text('Workspaces'), findsWidgets);
+    expect(
+      find.text(
+        'Personal is your private space. Household workspaces are shared spaces for family plans.',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets(
     'finish closes onboarding even when save response returns stale profile',
     (WidgetTester tester) async {
@@ -2209,6 +2245,39 @@ void main() {
     ]);
     expect(api.createdEvent?.metadata?['google_calendar_id'], 'primary');
     expect(find.textContaining('Client kickoff'), findsOneWidget);
+  });
+
+  testWidgets('event detail info icons explain scheduling options', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('calendar-add-event-action')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('event-schedule-info')));
+    await tester.pumpAndSettle();
+    expect(find.text('Event schedule'), findsOneWidget);
+    expect(
+      find.text('Tap a time field to use the date and time picker.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Got it'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byKey(const Key('event-recurrence-info')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('event-recurrence-info')));
+    await tester.pumpAndSettle();
+    expect(find.text('Event recurrence'), findsOneWidget);
+    expect(
+      find.text('Specific days repeats on the weekdays you select.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('critical event edits persist and update header critical count', (

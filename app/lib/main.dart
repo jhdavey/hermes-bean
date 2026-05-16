@@ -4113,6 +4113,13 @@ class _TodayHomeView extends StatelessWidget {
               icon: Icons.task_alt_rounded,
               title: 'Tasks for $dayLabel',
               subtitle: '${tasks.length} tasks',
+              infoKey: const Key('today-tasks-info'),
+              infoTitle: 'Tasks for today',
+              infoBullets: const [
+                'Use this list for the tasks Bean thinks belong on your current day.',
+                'Tap the circle to complete or reopen a task. Tap the row to edit details.',
+                'Star important tasks as Critical so they appear in the top count.',
+              ],
             ),
             const SizedBox(height: 12),
             if (tasks.isEmpty)
@@ -5948,6 +5955,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               title: 'Schedule',
                               subtitle:
                                   'Use exact times or natural entries from the agent.',
+                              infoKey: Key('event-schedule-info'),
+                              infoTitle: 'Event schedule',
+                              infoBullets: [
+                                'Tap a time field to use the date and time picker.',
+                                'You can also type natural entries like today at 2pm or May 18 at 9am.',
+                                'End time must be after the start time; leave it blank for a simple reminder-style event.',
+                              ],
                             ),
                             const SizedBox(height: 18),
                             if (_validationError != null) ...[
@@ -5999,6 +6013,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               icon: Icons.repeat_rounded,
                               title: 'Recurrence',
                               subtitle: 'Repeat this event when needed.',
+                              infoKey: Key('event-recurrence-info'),
+                              infoTitle: 'Event recurrence',
+                              infoBullets: [
+                                'Choose None for a one-time event.',
+                                'Specific days repeats on the weekdays you select.',
+                                'Every X lets you build patterns like every 2 weeks or every 3 months.',
+                              ],
                             ),
                             const SizedBox(height: 18),
                             Wrap(
@@ -6092,6 +6113,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 title: 'Google calendars',
                                 subtitle:
                                     'Add or update this event on selected writable Google calendars.',
+                                infoKey: Key('event-google-calendars-info'),
+                                infoTitle: 'Google calendar export',
+                                infoBullets: [
+                                  'Checked calendars receive a copy of this local Bean event.',
+                                  'Only writable Google calendars are shown here.',
+                                  'Changing this list affects this event, not your whole account.',
+                                ],
                               ),
                               const SizedBox(height: 12),
                               for (final calendar
@@ -6145,6 +6173,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 title: 'Workspace sync',
                                 subtitle:
                                     'Copy this event only to selected workspaces.',
+                                infoKey: Key('event-workspace-sync-info'),
+                                infoTitle: 'Workspace sync',
+                                infoBullets: [
+                                  'Use this when a Personal event should also appear in a household workspace.',
+                                  'Sync creates a copy for the selected workspace; future edits remain controlled by Bean.',
+                                  'Leave everything unchecked to keep the event only in the current workspace.',
+                                ],
                               ),
                               const SizedBox(height: 10),
                               Wrap(
@@ -6191,6 +6226,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               title: 'Reminder',
                               subtitle:
                                   'Add a reminder relative to this event.',
+                              infoKey: Key('event-reminder-info'),
+                              infoTitle: 'Event reminders',
+                              infoBullets: [
+                                'Minutes before controls when Bean reminds you before the event starts.',
+                                'Reminder repeats are separate from event recurrence, so reminders can follow their own pattern.',
+                                'Leave minutes blank if you do not need a reminder for this event.',
+                              ],
                             ),
                             const SizedBox(height: 18),
                             TextField(
@@ -8714,6 +8756,13 @@ class _SettingsView extends StatelessWidget {
               icon: Icons.settings_rounded,
               title: 'Settings',
               subtitle: 'Focused Hermes Bean preferences',
+              infoKey: Key('settings-info'),
+              infoTitle: 'Settings help',
+              infoBullets: [
+                'Update Bean preferences when you want the assistant to plan, speak, or prioritize differently.',
+                'Workspaces keep household calendars, tasks, and reminders separated from Personal.',
+                'Account controls, legal links, and sign out live at the bottom of Settings.',
+              ],
             ),
             const SizedBox(height: 12),
             if (error != null) ...[
@@ -9053,6 +9102,16 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                       ),
                     ],
                   ),
+                ),
+                const SizedBox(width: 8),
+                const _InfoIconButton(
+                  key: Key('workspaces-info'),
+                  title: 'Workspaces',
+                  bullets: [
+                    'Personal is your private space. Household workspaces are shared spaces for family plans.',
+                    "Switch workspaces to see that space's Bean, calendar, tasks, reminders, and settings.",
+                    'Workspace Google calendar choices control which connected calendars appear in that workspace.',
+                  ],
                 ),
               ],
             ),
@@ -9398,6 +9457,16 @@ class _CalendarPreferencesCard extends StatelessWidget {
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
+              const _InfoIconButton(
+                key: Key('calendar-preferences-info'),
+                title: 'Calendar preferences',
+                bullets: [
+                  'Start and end hours only change the visible day timeline window.',
+                  'Events outside this range are still saved and can show when you expand the day window.',
+                  'Use this to keep the daily view focused on the hours you actually plan around.',
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -9687,6 +9756,16 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                       ),
                     ],
                   ),
+                ),
+                const SizedBox(width: 8),
+                const _InfoIconButton(
+                  key: Key('google-calendar-sync-info'),
+                  title: 'Google Calendar sync',
+                  bullets: [
+                    'Connecting imports your Google events so Bean can plan around them.',
+                    'Writable calendars can also receive local Bean events when you choose them on an item.',
+                    'Disconnecting stops future sync. It does not delete your Google account or calendar.',
+                  ],
                 ),
               ],
             ),
@@ -10319,6 +10398,13 @@ class _AccountCard extends StatelessWidget {
           icon: Icons.settings_rounded,
           title: 'Profile',
           subtitle: 'Account and app settings',
+          infoKey: Key('profile-info'),
+          infoTitle: 'Profile and account',
+          infoBullets: [
+            'Edit your email here if your sign-in address changes.',
+            'Privacy Policy, Terms of Use, and Support links open the hosted HeyBean pages.',
+            'Delete account permanently removes your HeyBean account and data after confirmation.',
+          ],
         ),
         const SizedBox(height: 10),
         _CompactItemTile(
@@ -10438,11 +10524,17 @@ class _SectionTitle extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.infoKey,
+    this.infoTitle,
+    this.infoBullets = const [],
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final Key? infoKey;
+  final String? infoTitle;
+  final List<String> infoBullets;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -10469,9 +10561,130 @@ class _SectionTitle extends StatelessWidget {
           ],
         ),
       ),
+      if (infoTitle != null && infoBullets.isNotEmpty) ...[
+        const SizedBox(width: 8),
+        _InfoIconButton(key: infoKey, title: infoTitle!, bullets: infoBullets),
+      ],
     ],
   );
 }
+
+class _InfoIconButton extends StatelessWidget {
+  const _InfoIconButton({
+    super.key,
+    required this.title,
+    required this.bullets,
+  });
+
+  final String title;
+  final List<String> bullets;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: 'More info about $title',
+    icon: const Icon(
+      Icons.info_outline_rounded,
+      semanticLabel: 'More info',
+      size: 20,
+      color: HeyBeanTheme.accentStrong,
+    ),
+    onPressed: () => _showInfoSheet(context, title: title, bullets: bullets),
+  );
+}
+
+Future<void> _showInfoSheet(
+  BuildContext context, {
+  required String title,
+  required List<String> bullets,
+}) => showModalBottomSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  backgroundColor: Colors.transparent,
+  builder: (context) => SafeArea(
+    top: false,
+    child: Container(
+      key: Key(
+        'info-sheet-${title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '')}',
+      ),
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: HeyBeanTheme.border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x26000000),
+            blurRadius: 30,
+            offset: Offset(0, 16),
+          ),
+        ],
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: HeyBeanTheme.border,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: HeyBeanTheme.text,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 12),
+            for (final bullet in bullets)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 5),
+                      child: Icon(
+                        Icons.circle,
+                        size: 6,
+                        color: HeyBeanTheme.accentStrong,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        bullet,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: HeyBeanTheme.text,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 4),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Got it'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  ),
+);
 
 class _ShellCard extends StatelessWidget {
   const _ShellCard({required this.child, this.glow = false});
