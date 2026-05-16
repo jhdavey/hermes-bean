@@ -14,24 +14,23 @@ class LandingPageFeatureTest extends TestCase
         $response = $this->get('/');
 
         $response->assertOk()
-            ->assertSee('HeyBean', false)
-            ->assertSee('Meet Bean, the AI executive assistant for real life.', false)
-            ->assertSee('HeyBean helps busy people and households stay organized by turning plain-language requests into calendar planning, task updates, reminders, approvals, and daily follow-through.', false)
+            ->assertSee('Tell Bean what changed. Bean updates your day.', false)
+            ->assertSee('AI executive assistant for busy people and households', false)
             ->assertSee('Join the first 100', false)
-            ->assertSee('Early access is limited to the first 100 people.', false)
-            ->assertSee('Calendar planning', false)
-            ->assertSee('Tasks that stay organized', false)
-            ->assertSee('Reminders with context', false)
-            ->assertSee('Google Calendar sync', false)
+            ->assertSee('Google Calendar-ready', false)
+            ->assertSee('Approval guardrails', false)
+            ->assertSee('Built for the real day', false)
+            ->assertSee('images/heybean-ios-today-calendar.png', false)
+            ->assertSee('/privacy', false)
+            ->assertSee('/terms', false)
+            ->assertSee('/support', false)
+            ->assertSee('/account-deletion', false)
             ->assertSee('type="email"', false)
             ->assertSee('name="email"', false)
             ->assertSee(route('early-access.store'), false)
-            ->assertDontSee('See what Bean can do', false)
             ->assertDontSee('name="name"', false)
             ->assertDontSee('name="use_case"', false)
-            ->assertDontSee('Agent command center', false)
-            ->assertDontSee('Flutter + Laravel', false)
-            ->assertDontSee('Preview the Laravel screen', false);
+            ->assertDontSee('Flutter + Laravel', false);
     }
 
     public function test_visitors_can_request_early_access(): void

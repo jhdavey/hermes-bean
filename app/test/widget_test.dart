@@ -21,7 +21,11 @@ void main() {
       final api = _FakeHermesApiClient(onboardingCompleted: false);
       final tokenStore = _MemoryAuthTokenStore();
       await tester.pumpWidget(
-        HermesBeanApp(apiClient: api, tokenStore: tokenStore),
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: tokenStore,
+          launchExternalUrl: (_) async => false,
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -40,11 +44,8 @@ void main() {
 
       await tester.tap(find.byKey(const Key('forgot-login-action')));
       await tester.pumpAndSettle();
-      expect(find.text('Forgot login?'), findsWidgets);
-      expect(
-        find.textContaining('Password reset is not wired yet'),
-        findsOneWidget,
-      );
+      expect(find.text('Account help'), findsWidgets);
+      expect(find.textContaining('heybean.org/support'), findsOneWidget);
       await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
 
@@ -135,6 +136,16 @@ void main() {
         find.byKey(const Key('delete-account-action')),
       );
       await tester.tap(find.byKey(const Key('delete-account-action')));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete account permanently?'), findsOneWidget);
+      expect(api.deletedAccount, isFalse);
+      await tester.enterText(
+        find.byKey(const Key('delete-account-confirmation-field')),
+        'DELETE',
+      );
+      await tester.tap(
+        find.byKey(const Key('delete-account-confirmation-submit')),
+      );
       await tester.pumpAndSettle();
       expect(api.deletedAccount, isTrue);
       expect(find.text('Sign in to Hermes Bean'), findsOneWidget);

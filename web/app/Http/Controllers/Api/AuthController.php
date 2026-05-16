@@ -9,11 +9,14 @@ use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
+use App\Models\EventCategory;
+use App\Models\GoogleCalendarConnection;
 use App\Models\PersonalAccessToken;
 use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Services\AgentProfileService;
 use App\Services\OnboardingSeedService;
 use App\Services\WorkspaceService;
@@ -28,6 +31,10 @@ class AuthController extends Controller
 {
     public function register(Request $request): JsonResponse
     {
+        $request->merge([
+            'email' => strtolower(trim((string) $request->input('email', ''))),
+        ]);
+
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
@@ -50,6 +57,10 @@ class AuthController extends Controller
 
     public function login(Request $request): JsonResponse
     {
+        $request->merge([
+            'email' => strtolower(trim((string) $request->input('email', ''))),
+        ]);
+
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
@@ -97,6 +108,12 @@ class AuthController extends Controller
     public function update(Request $request): JsonResponse
     {
         $user = $request->user();
+        if ($request->has('email')) {
+            $request->merge([
+                'email' => strtolower(trim((string) $request->input('email', ''))),
+            ]);
+        }
+
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'email' => [
@@ -150,6 +167,20 @@ class AuthController extends Controller
             'tasks' => Task::where('user_id', $user->id)->orderBy('id')->get(),
             'reminders' => Reminder::where('user_id', $user->id)->orderBy('id')->get(),
             'calendar_events' => CalendarEvent::where('user_id', $user->id)->orderBy('id')->get(),
+            'event_categories' => EventCategory::where('user_id', $user->id)->orderBy('id')->get(),
+            'google_calendar' => GoogleCalendarConnection::where('user_id', $user->id)->get([
+                'id',
+                'user_id',
+                'google_account_email',
+                'calendar_id',
+                'status',
+                'sync_token',
+                'last_synced_at',
+                'last_error_at',
+                'metadata',
+                'created_at',
+                'updated_at',
+            ]),
             'approvals' => Approval::where('user_id', $user->id)->orderBy('id')->get(),
             'blockers' => Blocker::where('user_id', $user->id)->orderBy('id')->get(),
             'scheduler_jobs' => SchedulerJobRecord::where('user_id', $user->id)->orderBy('id')->get(),
@@ -162,6 +193,7 @@ class AuthController extends Controller
         $user = $request->user();
 
         DB::transaction(function () use ($user): void {
+            Workspace::where('personal_owner_user_id', $user->id)->delete();
             $user->delete();
         });
 
@@ -176,6 +208,7 @@ class AuthController extends Controller
             'user_id' => $user->id,
             'name' => 'api',
             'token' => hash('sha256', $plainToken),
+            'expires_at' => now()->addDays(config('security.api_token_ttl_days', 90)),
         ]);
 
         return $plainToken;

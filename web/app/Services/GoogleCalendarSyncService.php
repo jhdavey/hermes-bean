@@ -90,7 +90,7 @@ class GoogleCalendarSyncService
         ]);
 
         if (! $response->successful()) {
-            $this->markFailed($connection, 'Google OAuth token exchange failed: '.$response->body());
+            $this->markFailed($connection, 'Google OAuth token exchange failed.');
             throw new RuntimeException('Google OAuth token exchange failed.');
         }
 
@@ -178,7 +178,7 @@ class GoogleCalendarSyncService
                 return $this->sync($user, $workspace);
             }
             if (! $response->successful()) {
-                $this->markFailed($connection, 'Google Calendar sync failed: '.$response->body());
+                $this->markFailed($connection, 'Google Calendar sync failed.');
                 throw new RuntimeException('Google Calendar sync failed.');
             }
 
@@ -313,7 +313,7 @@ class GoogleCalendarSyncService
                 ? Http::withToken($token)->patch($this->calendarEventsUrl($calendarId).'/'.rawurlencode($existingGoogleEventId), $payload)
                 : Http::withToken($token)->post($this->calendarEventsUrl($calendarId), $payload);
             if (! $response->successful()) {
-                $this->markFailed($connection, 'Google Calendar event export failed: '.$response->body());
+                $this->markFailed($connection, 'Google Calendar event export failed.');
                 throw new RuntimeException('Google Calendar event export failed.');
             }
 
@@ -595,7 +595,7 @@ class GoogleCalendarSyncService
             'grant_type' => 'refresh_token',
         ]);
         if (! $response->successful()) {
-            $this->markFailed($connection, 'Google Calendar token refresh failed: '.$response->body());
+            $this->markFailed($connection, 'Google Calendar token refresh failed.');
             throw new RuntimeException('Google Calendar token refresh failed.');
         }
         $this->storeTokenPayload($connection, $response->json());

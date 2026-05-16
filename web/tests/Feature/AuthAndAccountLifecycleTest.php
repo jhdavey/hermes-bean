@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\PersonalAccessToken;
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -24,11 +26,15 @@ class AuthAndAccountLifecycleTest extends TestCase
         $plainToken = $register->json('data.token');
         $this->assertIsString($plainToken);
         $this->assertDatabaseMissing('personal_access_tokens', ['token' => $plainToken]);
+        $userId = User::where('email', 'bean@example.com')->value('id');
+        $hashedRegisterToken = hash('sha256', $plainToken);
         $this->assertDatabaseHas('personal_access_tokens', [
-            'user_id' => User::where('email', 'bean@example.com')->value('id'),
-            'token' => hash('sha256', $plainToken),
-            'expires_at' => null,
+            'user_id' => $userId,
+            'token' => $hashedRegisterToken,
         ]);
+        $registerTokenRow = PersonalAccessToken::where('token', $hashedRegisterToken)->firstOrFail();
+        $this->assertNotNull($registerTokenRow->expires_at);
+        $this->assertTrue($registerTokenRow->expires_at->isFuture());
 
         $this->withToken($plainToken)->getJson('/api/auth/me')
             ->assertOk()
@@ -199,12 +205,15 @@ class AuthAndAccountLifecycleTest extends TestCase
             ->assertJsonMissing(['title' => 'Bob private task']);
 
         $aliceId = User::where('email', 'alice@example.com')->value('id');
+        $alicePersonalWorkspaceId = Workspace::where('personal_owner_user_id', $aliceId)->value('id');
 
         $this->withToken($aliceToken)->deleteJson('/api/account')
             ->assertNoContent();
 
         $this->assertDatabaseMissing('users', ['id' => $aliceId]);
         $this->assertDatabaseMissing('personal_access_tokens', ['user_id' => $aliceId]);
+        $this->assertDatabaseMissing('workspaces', ['id' => $alicePersonalWorkspaceId]);
+        $this->assertDatabaseMissing('workspace_memberships', ['workspace_id' => $alicePersonalWorkspaceId]);
         $this->assertDatabaseMissing('conversation_sessions', ['user_id' => $aliceId]);
         $this->assertDatabaseMissing('tasks', ['user_id' => $aliceId]);
         $this->assertDatabaseHas('users', ['email' => 'bob@example.com']);

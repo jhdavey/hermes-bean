@@ -68,6 +68,19 @@ class ProductionReadinessSecurityTest extends TestCase
             ->assertJsonPath('error.message', 'Too many requests.');
     }
 
+    public function test_web_pages_receive_security_headers(): void
+    {
+        foreach (['/', '/privacy', '/terms'] as $path) {
+            $this->get($path)
+                ->assertOk()
+                ->assertHeader('X-Content-Type-Options', 'nosniff')
+                ->assertHeader('X-Frame-Options', 'DENY')
+                ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+                ->assertHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+                ->assertHeader('Content-Security-Policy');
+        }
+    }
+
     public function test_account_deletion_route_is_available_and_requires_authentication(): void
     {
         $this->deleteJson('/api/account')

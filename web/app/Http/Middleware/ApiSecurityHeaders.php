@@ -12,12 +12,22 @@ class ApiSecurityHeaders
     {
         $response = $next($request);
 
+        $response->headers->set('X-Content-Type-Options', 'nosniff');
+        $response->headers->set('X-Frame-Options', 'DENY');
+        $response->headers->set('Referrer-Policy', $request->is('api/*') ? 'no-referrer' : 'strict-origin-when-cross-origin');
+        $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+        if (app()->environment('production')) {
+            $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+        }
+
         if ($request->is('api/*')) {
-            $response->headers->set('X-Content-Type-Options', 'nosniff');
-            $response->headers->set('X-Frame-Options', 'DENY');
-            $response->headers->set('Referrer-Policy', 'no-referrer');
-            $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
             $response->headers->set('Cache-Control', 'no-store');
+        } elseif (! $response->headers->has('Content-Security-Policy')) {
+            $response->headers->set(
+                'Content-Security-Policy',
+                "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
+            );
         }
 
         return $response;

@@ -37,6 +37,11 @@ import UIKit
         return
       }
 
+      guard self.isAllowedExternalUrl(url) else {
+        result(FlutterError(code: "blocked-url", message: "URL host is not allowed", details: nil))
+        return
+      }
+
       DispatchQueue.main.async {
         UIApplication.shared.open(url, options: [:]) { success in
           result(success)
@@ -44,5 +49,17 @@ import UIKit
       }
     }
     platformChannel = channel
+  }
+
+  private func isAllowedExternalUrl(_ url: URL) -> Bool {
+    guard url.scheme?.lowercased() == "https" else { return false }
+    guard let host = url.host?.lowercased() else { return false }
+    return [
+      "heybean.org",
+      "accounts.google.com",
+      "oauth2.googleapis.com",
+      "calendar.google.com",
+      "www.googleapis.com",
+    ].contains(host)
   }
 }

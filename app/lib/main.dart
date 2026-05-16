@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -12,8 +13,24 @@ import 'hermes_api_client.dart';
 typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
 
 const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
+final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
+final Uri _termsOfServiceUrl = Uri.parse('https://heybean.org/terms');
+final Uri _supportUrl = Uri.parse('https://heybean.org/support');
+final Uri _passwordHelpUrl = Uri.parse('https://heybean.org/support');
+
+bool _isAllowedExternalUrl(Uri url) {
+  if (url.scheme != 'https') return false;
+  final host = url.host.toLowerCase();
+  return host == 'heybean.org' ||
+      host == 'accounts.google.com' ||
+      host == 'oauth2.googleapis.com' ||
+      host == 'calendar.google.com' ||
+      host == 'www.googleapis.com';
+}
 
 Future<bool> _defaultLaunchExternalUrl(Uri url) async {
+  if (!_isAllowedExternalUrl(url)) return false;
+
   for (final mode in [
     LaunchMode.platformDefault,
     LaunchMode.externalApplication,
@@ -38,6 +55,8 @@ Future<bool> _defaultLaunchExternalUrl(Uri url) async {
 }
 
 Future<bool> _launchExternalUrlWithNativeFallback(Uri url) async {
+  if (!_isAllowedExternalUrl(url)) return false;
+
   try {
     return await _heyBeanPlatformChannel.invokeMethod<bool>('openUrl', {
           'url': url.toString(),
@@ -68,13 +87,24 @@ class SharedPreferencesAuthTokenStore implements AuthTokenStore {
   static const String _tokenKey = 'auth_token';
   static const String _rememberMeKey = 'remember_me';
   static const String _tokenSavedAtKey = 'auth_token_saved_at';
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
 
   @override
   Future<String?> loadToken() async {
     final preferences = await SharedPreferences.getInstance();
-    return preferences.getBool(_rememberMeKey) == true
-        ? preferences.getString(_tokenKey)
-        : null;
+    if (preferences.getBool(_rememberMeKey) != true) return null;
+    final secureToken = await _secureStorage.read(key: _tokenKey);
+    if (secureToken != null && secureToken.isNotEmpty) return secureToken;
+    final legacyToken = preferences.getString(_tokenKey);
+    if (legacyToken != null && legacyToken.isNotEmpty) {
+      await _secureStorage.write(key: _tokenKey, value: legacyToken);
+      await preferences.remove(_tokenKey);
+      return legacyToken;
+    }
+    return null;
   }
 
   @override
@@ -86,7 +116,8 @@ class SharedPreferencesAuthTokenStore implements AuthTokenStore {
   @override
   Future<void> saveToken(String token) async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_tokenKey, token);
+    await _secureStorage.write(key: _tokenKey, value: token);
+    await preferences.remove(_tokenKey);
     await preferences.setString(
       _tokenSavedAtKey,
       DateTime.now().toUtc().toIso8601String(),
@@ -102,6 +133,7 @@ class SharedPreferencesAuthTokenStore implements AuthTokenStore {
   @override
   Future<void> clearToken() async {
     final preferences = await SharedPreferences.getInstance();
+    await _secureStorage.delete(key: _tokenKey);
     await preferences.remove(_tokenKey);
     await preferences.remove(_tokenSavedAtKey);
   }
@@ -1674,19 +1706,55 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     );
   }
 
-  Future<void> _deleteAccount() async {
+  Future<void> _logout() async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
-      await widget.apiClient.deleteAccount();
+      await widget.apiClient.logout();
+    } catch (_) {
+      widget.apiClient.bearerToken = null;
     } finally {
+      await widget.tokenStore.clearToken();
       if (mounted) {
         setState(() {
           _busy = false;
           _phase = _AuthPhase.signedOut;
           _loadingStatusText = null;
           _user = null;
+          _session = null;
+          _messages.clear();
+          _events = const [];
+          _error = null;
         });
-        await widget.tokenStore.clearToken();
+      }
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.apiClient.deleteAccount();
+      await widget.tokenStore.clearToken();
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _phase = _AuthPhase.signedOut;
+          _loadingStatusText = null;
+          _user = null;
+          _session = null;
+          _messages.clear();
+          _events = const [];
+          _error = null;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error =
+              'Could not delete your account. Please try again or contact support.';
+        });
       }
     }
   }
@@ -1834,6 +1902,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         onLogin: _login,
         onRegister: _register,
         tokenStore: widget.tokenStore,
+        launchExternalUrl: widget.launchExternalUrl,
         busy: _busy,
         error: _error,
       );
@@ -1938,6 +2007,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     onEventCategorySaved: _saveEventCategory,
     onEventCategoryDeleted: _deleteEventCategory,
     onDeleteAccount: _deleteAccount,
+    onSignOut: _logout,
     onAccountEmailChanged: _updateAccountEmail,
     launchExternalUrl: widget.launchExternalUrl,
     onEditAgentOnboarding: () {
@@ -2272,6 +2342,7 @@ class _SignedOutScreen extends StatefulWidget {
     required this.onLogin,
     required this.onRegister,
     required this.tokenStore,
+    required this.launchExternalUrl,
     required this.busy,
     this.error,
   });
@@ -2284,6 +2355,7 @@ class _SignedOutScreen extends StatefulWidget {
   onLogin;
   final _RegisterHandler onRegister;
   final AuthTokenStore tokenStore;
+  final ExternalUrlLauncher launchExternalUrl;
   final bool busy;
   final String? error;
 
@@ -2315,12 +2387,14 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
   }
 
   Future<void> _showForgotLoginDialog() async {
+    final launched = await widget.launchExternalUrl(_passwordHelpUrl);
+    if (launched || !mounted) return;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Forgot login?'),
+        title: const Text('Account help'),
         content: const Text(
-          'Password reset is not wired yet. For local testing, create a new test account from this screen with any email and a 12+ character password.',
+          'Visit heybean.org/support for password reset help, account access, and launch support.',
         ),
         actions: [
           TextButton(
@@ -2349,7 +2423,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
         ? 'Create your Hermes Bean account'
         : 'Sign in to Hermes Bean';
     final subtitle = _registerMode
-        ? 'Use any test email and a 12+ character password'
+        ? 'Create your account with your email and a secure 12+ character password'
         : 'Live API-backed personal assistant';
 
     return SingleChildScrollView(
@@ -2457,6 +2531,36 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    TextButton(
+                      key: const Key('privacy-policy-link'),
+                      onPressed: widget.busy
+                          ? null
+                          : () => widget.launchExternalUrl(_privacyPolicyUrl),
+                      child: const Text('Privacy'),
+                    ),
+                    TextButton(
+                      key: const Key('terms-of-service-link'),
+                      onPressed: widget.busy
+                          ? null
+                          : () => widget.launchExternalUrl(_termsOfServiceUrl),
+                      child: const Text('Terms'),
+                    ),
+                    TextButton(
+                      key: const Key('support-link'),
+                      onPressed: widget.busy
+                          ? null
+                          : () => widget.launchExternalUrl(_supportUrl),
+                      child: const Text('Support'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -2510,6 +2614,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
     required this.onDeleteAccount,
+    required this.onSignOut,
     required this.onAccountEmailChanged,
     required this.launchExternalUrl,
     required this.onEditAgentOnboarding,
@@ -2618,6 +2723,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted;
   final Future<void> Function() onDeleteAccount;
+  final Future<void> Function() onSignOut;
   final Future<void> Function(String email) onAccountEmailChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final VoidCallback onEditAgentOnboarding;
@@ -2702,6 +2808,7 @@ class _CommandCenterContent extends StatelessWidget {
             onCalendarStartHourChanged: onCalendarStartHourChanged,
             onCalendarEndHourChanged: onCalendarEndHourChanged,
             onDeleteAccount: onDeleteAccount,
+            onSignOut: onSignOut,
             onAccountEmailChanged: onAccountEmailChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onWorkspacesChanged: onWorkspacesChanged,
@@ -2714,6 +2821,8 @@ class _CommandCenterContent extends StatelessWidget {
               user: user,
               onEmailChanged: onAccountEmailChanged,
               onDeleteAccount: onDeleteAccount,
+              onSignOut: onSignOut,
+              launchExternalUrl: launchExternalUrl,
             ),
             const SizedBox(height: 16),
             _ProgressCard(
@@ -8281,6 +8390,7 @@ class _SettingsView extends StatelessWidget {
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
     required this.onDeleteAccount,
+    required this.onSignOut,
     required this.onAccountEmailChanged,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
@@ -8297,6 +8407,7 @@ class _SettingsView extends StatelessWidget {
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
   final Future<void> Function() onDeleteAccount;
+  final Future<void> Function() onSignOut;
   final Future<void> Function(String email) onAccountEmailChanged;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
@@ -8366,6 +8477,8 @@ class _SettingsView extends StatelessWidget {
         user: user,
         onEmailChanged: onAccountEmailChanged,
         onDeleteAccount: onDeleteAccount,
+        onSignOut: onSignOut,
+        launchExternalUrl: launchExternalUrl,
       ),
     ],
   );
@@ -9792,21 +9905,99 @@ DateTime? _parseTaskDueDate(HermesTask task) {
   return DateTime.tryParse(dueAt)?.toLocal();
 }
 
+class _DeleteAccountConfirmationDialog extends StatefulWidget {
+  const _DeleteAccountConfirmationDialog();
+
+  @override
+  State<_DeleteAccountConfirmationDialog> createState() =>
+      _DeleteAccountConfirmationDialogState();
+}
+
+class _DeleteAccountConfirmationDialogState
+    extends State<_DeleteAccountConfirmationDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.of(context).pop(_controller.text.trim() == 'DELETE');
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Delete account permanently?'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'This permanently deletes your HeyBean account, assistant history, tasks, reminders, calendar events, and account data. Export anything you need before continuing.',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('delete-account-confirmation-field'),
+            controller: _controller,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _submit(),
+            decoration: const InputDecoration(
+              labelText: 'Type DELETE to confirm',
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(false),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const Key('delete-account-confirmation-submit'),
+        onPressed: _submit,
+        child: const Text('Delete account'),
+      ),
+    ],
+  );
+}
+
 class _AccountCard extends StatelessWidget {
   const _AccountCard({
     required this.user,
     required this.onEmailChanged,
     required this.onDeleteAccount,
+    required this.onSignOut,
+    required this.launchExternalUrl,
   });
 
   final HermesUser user;
   final Future<void> Function(String email) onEmailChanged;
   final Future<void> Function() onDeleteAccount;
+  final Future<void> Function() onSignOut;
+  final ExternalUrlLauncher launchExternalUrl;
 
   Future<void> _editEmail(BuildContext context) async {
     final nextEmail = await _showEmailEditor(context, initialEmail: user.email);
     if (nextEmail == null || nextEmail.trim() == user.email) return;
     await onEmailChanged(nextEmail);
+  }
+
+  Future<bool> _confirmDeleteAccount(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => const _DeleteAccountConfirmationDialog(),
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _requestDeleteAccount(BuildContext context) async {
+    if (await _confirmDeleteAccount(context)) {
+      await onDeleteAccount();
+    }
   }
 
   @override
@@ -9831,11 +10022,45 @@ class _AccountCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        OutlinedButton.icon(
-          key: const Key('delete-account-action'),
-          onPressed: onDeleteAccount,
-          icon: const Icon(Icons.delete_outline_rounded),
-          label: const Text('Delete account'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              key: const Key('sign-out-action'),
+              onPressed: onSignOut,
+              icon: const Icon(Icons.logout_rounded),
+              label: const Text('Sign out'),
+            ),
+            OutlinedButton.icon(
+              key: const Key('delete-account-action'),
+              onPressed: () => _requestDeleteAccount(context),
+              icon: const Icon(Icons.delete_outline_rounded),
+              label: const Text('Delete account'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            TextButton(
+              key: const Key('settings-privacy-policy-link'),
+              onPressed: () => launchExternalUrl(_privacyPolicyUrl),
+              child: const Text('Privacy Policy'),
+            ),
+            TextButton(
+              key: const Key('settings-terms-of-service-link'),
+              onPressed: () => launchExternalUrl(_termsOfServiceUrl),
+              child: const Text('Terms of Use'),
+            ),
+            TextButton(
+              key: const Key('settings-support-link'),
+              onPressed: () => launchExternalUrl(_supportUrl),
+              child: const Text('Support'),
+            ),
+          ],
         ),
       ],
     ),

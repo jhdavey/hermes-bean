@@ -8,6 +8,11 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::view('/privacy', 'legal.privacy')->name('privacy');
+Route::view('/terms', 'legal.terms')->name('terms');
+Route::view('/support', 'legal.support')->name('support');
+Route::view('/account-deletion', 'legal.account-deletion')->name('account-deletion');
+
 Route::post('/early-access', function (Request $request) {
     $validated = $request->validate([
         'email' => ['required', 'email:rfc', 'max:255'],

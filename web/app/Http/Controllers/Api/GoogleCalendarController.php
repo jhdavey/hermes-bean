@@ -46,7 +46,16 @@ class GoogleCalendarController extends Controller
     {
         $workspace = app(WorkspaceService::class)->resolveWorkspace($request->user(), $request->input('workspace_id'));
 
-        return response()->json(['data' => $this->sync->sync($request->user(), $workspace)]);
+        try {
+            return response()->json(['data' => $this->sync->sync($request->user(), $workspace)]);
+        } catch (Throwable) {
+            return response()->json([
+                'error' => [
+                    'code' => 'google_calendar_sync_failed',
+                    'message' => 'Google Calendar sync failed. Please try again.',
+                ],
+            ], 422);
+        }
     }
 
     public function calendars(Request $request): JsonResponse

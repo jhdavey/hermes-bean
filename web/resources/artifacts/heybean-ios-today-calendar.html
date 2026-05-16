@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=430, initial-scale=1">
+  <style>
+    *{box-sizing:border-box} body{margin:0;background:#f6f2e8;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;color:#102016}.screen{width:430px;height:932px;position:relative;overflow:hidden;background:radial-gradient(circle at 20% -5%,rgba(28,181,87,.18),transparent 38%),linear-gradient(180deg,#fffaf0 0%,#eef8ed 58%,#fff9ed 100%)}.status{height:48px;padding:13px 25px 0;display:flex;align-items:flex-start;justify-content:space-between;font-weight:800;font-size:15px;letter-spacing:-.02em}.icons{display:flex;gap:6px;align-items:center}.signal{display:flex;gap:2px;align-items:flex-end;height:12px}.signal i{display:block;width:3px;border-radius:2px;background:#102016}.signal i:nth-child(1){height:4px}.signal i:nth-child(2){height:6px}.signal i:nth-child(3){height:8px}.signal i:nth-child(4){height:10px}.wifi{width:16px;height:11px;border:2px solid #102016;border-bottom:0;border-radius:14px 14px 0 0;transform:scaleY(.75)}.battery{width:24px;height:12px;border:1.8px solid #102016;border-radius:4px;position:relative}.battery:after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:5px;background:#102016;border-radius:1px}.battery span{display:block;margin:2px;width:17px;height:6px;background:#102016;border-radius:2px}.top{display:flex;align-items:center;gap:12px;padding:5px 22px 10px}.logo{width:40px;height:40px;border-radius:13px;background:linear-gradient(135deg,#22c55e,#0f8f40);color:white;display:grid;place-items:center;font-size:27px;font-weight:900;box-shadow:0 10px 24px rgba(22,163,74,.22)}.title{font-size:32px;font-weight:900;letter-spacing:-.055em}.sub{font-size:13px;color:#667367;font-weight:600;margin-top:1px}.critical{margin-left:auto;background:#eaf8ee;border:1px solid #cbe9d2;border-radius:999px;padding:8px 11px;color:#0b7836;font-size:12px;font-weight:900}.week{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:8px 16px 10px}.day{text-align:center;border-radius:24px;padding:7px 0;color:#57655b;font-size:11px;font-weight:800}.day b{display:block;margin-top:1px;font-size:20px;color:#24342a}.day.sel{background:#16a34a;color:white;box-shadow:0 10px 22px rgba(22,163,74,.22)}.day.sel b{color:white}.calendar{margin:0 13px;background:rgba(255,255,255,.95);border:1px solid #dce9dd;border-radius:27px;box-shadow:0 18px 44px rgba(31,92,48,.13);padding:14px 11px 13px}.heading{display:grid;grid-template-columns:46px 1fr 1fr;gap:7px;align-items:end;margin-bottom:8px}.heading span{font-weight:900;font-size:15px;letter-spacing:-.02em}.heading small{color:#839084;font-weight:800;text-align:right;font-size:11px}.allday{display:grid;grid-template-columns:46px 1fr 1fr;gap:7px;align-items:center;margin-bottom:10px}.allday strong{font-size:10px;color:#7c8a80}.allday .pill{background:#fff1cc;color:#784900;border:1px solid #f5d58c;border-radius:12px;padding:7px 9px;font-size:11px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.timeline{height:478px;display:grid;grid-template-columns:46px 1fr 1fr;gap:7px;position:relative;overflow:hidden}.grid{position:absolute;left:53px;right:0;top:0;bottom:0}.grid .line{position:absolute;left:0;right:0;height:1px;background:#e8efe7}.grid .v{position:absolute;top:0;bottom:0;left:50%;width:1px;background:#e4ece5}.hour{position:absolute;left:0;width:40px;text-align:right;color:#879287;font-size:10px;font-weight:700;transform:translateY(-7px)}.event{position:absolute;border-radius:12px;padding:6px 8px;color:#071109;font-size:10.5px;font-weight:900;line-height:1.12;overflow:hidden;border:1px solid rgba(10,20,14,.06);box-shadow:0 5px 12px rgba(28,55,36,.08)}.event span{display:block;margin-top:2px;font-size:8.5px;font-weight:800;color:rgba(7,17,9,.70)}.today{left:53px;width:166px}.tomorrow{left:226px;width:156px}.c1{background:#ffbe55}.c2{background:#78c7ff}.c3{background:#ffd88f}.c4{background:#d7bbff}.c5{background:#b8efc5}.nav{position:absolute;left:17px;right:17px;bottom:18px;height:74px;border-radius:28px;background:#102016;color:#d8e5da;display:flex;align-items:center;justify-content:space-around;box-shadow:0 22px 46px rgba(12,28,18,.32);font-size:10px;font-weight:800}.nav div{min-width:58px;text-align:center;padding:8px 0;border-radius:22px}.nav b{display:block;font-size:19px;line-height:18px;margin-bottom:4px}.nav .active{background:#18a957;color:white}.home{position:absolute;left:158px;right:158px;bottom:6px;height:4px;border-radius:99px;background:rgba(16,32,22,.28)}
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <div class="status"><span>9:41</span><div class="icons"><div class="signal"><i></i><i></i><i></i><i></i></div><div class="wifi"></div><div class="battery"><span></span></div></div></div>
+    <div class="top"><div class="logo">b</div><div><div class="title">Today</div><div class="sub">HeyBean has your day in order</div></div><div class="critical">3 critical</div></div>
+    <div class="week"><div class="day sel">Sat<b>16</b></div><div class="day">Sun<b>17</b></div><div class="day">Mon<b>18</b></div><div class="day">Tue<b>19</b></div><div class="day">Wed<b>20</b></div><div class="day">Thu<b>21</b></div><div class="day">Fri<b>22</b></div></div>
+    <div class="calendar">
+      <div class="heading"><small></small><span>Today - May 16</span><span>Tomorrow - May 17</span></div>
+      <div class="allday"><strong>All Day</strong><div class="pill">Family launch prep</div><div class="pill">Weekly plan draft</div></div>
+      <div class="timeline">
+        <div class="grid">
+          <div class="v"></div>
+          <div class="line" style="top:0"></div><div class="line" style="top:50px"></div><div class="line" style="top:100px"></div><div class="line" style="top:150px"></div><div class="line" style="top:200px"></div><div class="line" style="top:250px"></div><div class="line" style="top:300px"></div><div class="line" style="top:350px"></div><div class="line" style="top:400px"></div><div class="line" style="top:450px"></div>
+        </div>
+        <div class="hour" style="top:0">8am</div><div class="hour" style="top:50px">9am</div><div class="hour" style="top:100px">10am</div><div class="hour" style="top:150px">11am</div><div class="hour" style="top:200px">12pm</div><div class="hour" style="top:250px">1pm</div><div class="hour" style="top:300px">2pm</div><div class="hour" style="top:350px">3pm</div><div class="hour" style="top:400px">4pm</div><div class="hour" style="top:450px">5pm</div>
+        <div class="event today c1" style="top:24px;height:28px">School drop-off<span>8:30am</span></div>
+        <div class="event today c2" style="top:75px;height:74px">Deep work: launch review<span>9:30am – 11am</span></div>
+        <div class="event today c3" style="top:173px;height:32px">Contractor estimate<span>11:30am</span></div>
+        <div class="event today c5" style="top:284px;height:36px">Product check-in<span>1:45pm</span></div>
+        <div class="event today c4" style="top:361px;height:34px">Prescriptions<span>3:15pm</span></div>
+        <div class="event today c1" style="top:438px;height:32px">Soccer pickup<span>5:10pm</span></div>
+        <div class="event tomorrow c2" style="top:7px;height:34px">Prep weekly plan<span>8:10am</span></div>
+        <div class="event tomorrow c5" style="top:104px;height:58px">Investor follow-up<span>10am – 11am</span></div>
+        <div class="event tomorrow c4" style="top:368px;height:32px">Grocery run<span>3:45pm</span></div>
+      </div>
+    </div>
+    <div class="nav"><div class="active"><b>⌂</b>Today</div><div><b>✓</b>Tasks</div><div><b>●</b>Bean</div><div><b>◷</b>Reminders</div><div><b>⚙</b>Settings</div></div>
+    <div class="home"></div>
+  </div>
+</body>
+</html>

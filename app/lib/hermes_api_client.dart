@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,8 +15,15 @@ class HermesApiClient {
     Uri? baseUrl,
     HermesApiTransport? transport,
     this.bearerToken,
-  }) : baseUrl = baseUrl ?? Uri.parse(hermesApiBaseUrl),
+  }) : baseUrl = _validateBaseUrl(baseUrl ?? Uri.parse(hermesApiBaseUrl)),
        _transport = transport ?? _defaultTransport;
+
+  static Uri _validateBaseUrl(Uri baseUrl) {
+    if (const bool.fromEnvironment('dart.vm.product') && baseUrl.scheme != 'https') {
+      throw StateError('Hermes Bean production builds require an HTTPS API base URL.');
+    }
+    return baseUrl;
+  }
 
   final Uri baseUrl;
   final HermesApiTransport _transport;
@@ -663,15 +671,24 @@ class HermesApiClient {
   static Future<HermesApiResponse> _defaultTransport(
     HermesApiRequest request,
   ) async {
-    final client = HttpClient();
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
     try {
-      final ioRequest = await client.openUrl(request.method, request.uri);
+      final ioRequest = await client
+          .openUrl(request.method, request.uri)
+          .timeout(const Duration(seconds: 15));
       request.headers.forEach(ioRequest.headers.set);
       if (request.body != null) ioRequest.write(jsonEncode(request.body));
 
-      final ioResponse = await ioRequest.close();
-      final responseBody = await utf8.decoder.bind(ioResponse).join();
+      final ioResponse = await ioRequest.close().timeout(
+        const Duration(seconds: 30),
+      );
+      final responseBody = await utf8.decoder
+          .bind(ioResponse)
+          .join()
+          .timeout(const Duration(seconds: 30));
       return HermesApiResponse(ioResponse.statusCode, responseBody);
+    } on TimeoutException catch (error) {
+      throw HermesApiException(408, "Request timed out: ${error.message ?? 'network timeout'}");
     } finally {
       client.close(force: true);
     }

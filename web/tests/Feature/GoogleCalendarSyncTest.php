@@ -684,6 +684,43 @@ class GoogleCalendarSyncTest extends TestCase
             && $request['summary'] === 'Multi calendar meeting');
     }
 
+    public function test_google_api_failure_messages_do_not_persist_sensitive_response_bodies(): void
+    {
+        $token = $this->apiToken('calendar-error-sanitize@example.com');
+        $user = User::where('email', 'calendar-error-sanitize@example.com')->firstOrFail();
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => ['selected_calendar_ids' => ['primary']],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'error' => [
+                    'message' => 'sensitive upstream details access-token user@example.com',
+                ],
+            ], 500),
+            'https://www.googleapis.com/calendar/v3/users/me/calendarList*' => Http::response([
+                'items' => [],
+            ]),
+        ]);
+
+        $this->withToken($token)->postJson('/api/google-calendar/sync')
+            ->assertStatus(422)
+            ->assertJsonMissing(['message' => 'sensitive upstream details access-token user@example.com']);
+
+        $connection = GoogleCalendarConnection::where('user_id', $user->id)->firstOrFail();
+        $this->assertSame('Google Calendar sync failed.', $connection->last_error);
+        $this->withToken($token)->getJson('/api/google-calendar/status')
+            ->assertOk()
+            ->assertJsonPath('data.last_error', 'Google Calendar sync failed.')
+            ->assertJsonMissing(['last_error' => 'sensitive upstream details access-token user@example.com']);
+    }
+
     public function test_manual_sync_upserts_and_deletes_google_calendar_events(): void
     {
         $token = $this->apiToken('calendar-resync@example.com');
