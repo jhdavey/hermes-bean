@@ -58,7 +58,11 @@ class WorkspaceController extends Controller
     public function invite(Request $request, Workspace $workspace): JsonResponse
     {
         $data = $request->validate(['email' => ['required', 'email', 'max:255']]);
-        $membership = $this->workspaces->invite($request->user(), $workspace, $data['email']);
+        try {
+            $membership = $this->workspaces->invite($request->user(), $workspace, $data['email']);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
 
         return response()->json(['data' => $membership], 201);
     }
@@ -136,7 +140,7 @@ class WorkspaceController extends Controller
     {
         $this->workspaces->authorizeMember($request->user(), $workspace);
         $connection = $request->user()->googleCalendarConnection;
-        abort_unless($connection, 422, 'Google Calendar is not connected.');
+        abort_unless($connection, 422, 'Calendar sync is not connected.');
         $data = $request->validate([
             'google_calendar_ids' => ['present', 'array'],
             'google_calendar_ids.*' => ['string'],

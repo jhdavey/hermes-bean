@@ -186,6 +186,42 @@ void main() {
   );
 
   testWidgets(
+    'accepting a workspace invitation from Settings joins and reloads workspaces',
+    (WidgetTester tester) async {
+      final api = _WorkspaceFakeHermesApiClient();
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('workspace-accept-invitation-action')),
+      );
+      await tester.tap(
+        find.byKey(const Key('workspace-accept-invitation-action')),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('workspace-accept-invitation-token')),
+        'https://heybean.org/workspace-invitations/family-token/accept',
+      );
+      await tester.tap(
+        find.byKey(const Key('workspace-accept-invitation-save')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(api.acceptedInvitationToken, 'family-token');
+      expect(find.byKey(const Key('settings-view')), findsOneWidget);
+      expect(find.text('Invitation accepted.'), findsOneWidget);
+      expect(find.text('Joined household'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'workspace calendar list shows Google access info without duplicate display list',
     (WidgetTester tester) async {
       final calendarSave = Completer<List<Map<String, Object?>>>();
@@ -214,7 +250,7 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-settings')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Displayed Google calendars'), findsNothing);
+      expect(find.text('Displayed connected calendars'), findsNothing);
       expect(
         find.byKey(const Key('google-calendar-source-primary')),
         findsNothing,
@@ -263,10 +299,7 @@ void main() {
 
       calendarSave.complete(const <Map<String, Object?>>[]);
       await tester.pumpAndSettle();
-      expect(
-        find.text('Workspace Google calendar mapping saved.'),
-        findsOneWidget,
-      );
+      expect(find.text('Workspace calendar choices saved.'), findsOneWidget);
     },
   );
 
@@ -452,7 +485,7 @@ void main() {
         find.byKey(const Key('workspace-sync-personal-action-2')),
       );
       final googleHeading = tester.getRect(
-        find.text('Google calendars for this workspace').last,
+        find.text('Connected calendars for this workspace').last,
       );
       expect(syncButton.bottom, lessThanOrEqualTo(googleHeading.top));
 
@@ -1665,7 +1698,7 @@ void main() {
     expect(reopenedTask.value, isFalse);
   });
 
-  testWidgets('settings exposes Google Calendar connect and sync controls', (
+  testWidgets('settings exposes calendar connect and sync controls', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -1689,20 +1722,20 @@ void main() {
       find.byKey(const Key('google-calendar-sync-settings')),
       findsOneWidget,
     );
-    expect(find.text('Google Calendar sync'), findsOneWidget);
-    expect(find.text('Connect Google'), findsOneWidget);
+    expect(find.text('Calendar sync'), findsOneWidget);
+    expect(find.text('Connect calendar'), findsOneWidget);
 
     await tester.ensureVisible(
       find.byKey(const Key('google-calendar-connect-action')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Connect Google'));
+    await tester.tap(find.text('Connect calendar'));
     await tester.pumpAndSettle();
     expect(api.googleCalendarConnected, isTrue);
     expect(launchedUrls, hasLength(1));
     expect(launchedUrls.single.host, 'accounts.google.com');
     expect(
-      find.textContaining('Finish approving Google Calendar'),
+      find.textContaining('Finish approving calendar access'),
       findsOneWidget,
     );
 
@@ -1711,7 +1744,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(api.googleCalendarSyncCalls, 1);
     expect(
-      find.textContaining('Google Calendar connected and synced 2 events'),
+      find.textContaining('Calendar sync connected and synced 2 events'),
       findsOneWidget,
     );
 
@@ -1722,9 +1755,9 @@ void main() {
     await tester.tap(find.text('Sync now'));
     await tester.pumpAndSettle();
     expect(api.googleCalendarSyncCalls, 2);
-    expect(find.textContaining('Synced 2 Google events'), findsOneWidget);
+    expect(find.textContaining('Synced 2 connected events'), findsOneWidget);
 
-    expect(find.text('Displayed Google calendars'), findsNothing);
+    expect(find.text('Displayed connected calendars'), findsNothing);
     expect(
       find.byKey(const Key('google-calendar-source-primary')),
       findsNothing,
@@ -1780,7 +1813,7 @@ void main() {
         find.byKey(const Key('google-calendar-connect-action')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Connect Google'));
+      await tester.tap(find.text('Connect calendar'));
       await tester.pumpAndSettle();
 
       expect(
@@ -1835,7 +1868,7 @@ void main() {
       find.byKey(const Key('google-calendar-connect-action')),
     );
     await tester.pump();
-    await tester.tap(find.text('Connect Google'));
+    await tester.tap(find.text('Connect calendar'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
@@ -1856,7 +1889,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(api.googleCalendarSyncCalls, 1);
     expect(
-      find.textContaining('Google Calendar connected and synced 2 events'),
+      find.textContaining('Calendar sync connected and synced 2 events'),
       findsOneWidget,
     );
   });
@@ -3261,6 +3294,7 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   int? defaultWorkspaceSetTo;
   int? syncedAllSourceWorkspaceId;
   int? syncedAllTargetWorkspaceId;
+  String? acceptedInvitationToken;
   var workspaces = <HermesWorkspace>[
     const HermesWorkspace(
       id: '1',
@@ -3316,6 +3350,32 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     );
     workspaces = [...workspaces, workspace];
     return workspace;
+  }
+
+  @override
+  Future<HermesWorkspaceMembership> acceptWorkspaceInvitation(
+    String token,
+  ) async {
+    acceptedInvitationToken = token;
+    const workspace = HermesWorkspace(
+      id: '2',
+      name: 'Joined household',
+      type: 'household',
+      role: 'member',
+      active: true,
+    );
+    workspaces = [
+      for (final workspace in workspaces) workspace.copyWith(active: false),
+      workspace,
+    ];
+    return const HermesWorkspaceMembership(
+      id: 20,
+      workspaceId: 2,
+      userId: 1,
+      role: 'member',
+      status: 'active',
+      workspace: workspace,
+    );
   }
 
   @override

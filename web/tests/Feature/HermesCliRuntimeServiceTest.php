@@ -7,10 +7,10 @@ use App\Models\AgentProfile;
 use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\ConversationMessage;
-use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\AgentProfileService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -134,7 +134,7 @@ PHP);
         ]);
 
         $token = $this->apiToken('household-cli-owner@example.com');
-        $user = \App\Models\User::where('email', 'household-cli-owner@example.com')->firstOrFail();
+        $user = User::where('email', 'household-cli-owner@example.com')->firstOrFail();
         $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $household = app(WorkspaceService::class)->createHousehold($user, 'Family');
         $personalProfile = AgentProfile::where('workspace_id', $personalWorkspaceId)->firstOrFail();
@@ -582,14 +582,14 @@ PHP);
         ]);
 
         $token = $this->apiToken('payload-preferences@example.com');
-        $userId = \App\Models\User::where('email', 'payload-preferences@example.com')->value('id');
+        $userId = User::where('email', 'payload-preferences@example.com')->value('id');
         $profile = AgentProfile::where('user_id', $userId)->firstOrFail();
-        app(\App\Services\AgentProfileService::class)->applyOnboarding($profile, [
+        app(AgentProfileService::class)->applyOnboarding($profile, [
             'agent_personality' => 'organizer',
             'onboarding_priorities' => ['Work', 'Focus'],
             'onboarding_context' => 'Protect deep work.',
         ], 'settings');
-        \App\Models\User::where('id', $userId)->update(['onboard_complete' => true]);
+        User::where('id', $userId)->update(['onboard_complete' => true]);
 
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [

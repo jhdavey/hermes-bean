@@ -18,7 +18,7 @@
     <p>HeyBean uses AI and automation. Outputs may be incomplete, delayed, or incorrect. Do not rely on HeyBean for emergencies, medical advice, legal advice, financial advice, or other high-risk decisions. You should verify important calendar, task, reminder, and communication details.</p>
 
     <h2>Connected services</h2>
-    <p>If you connect Google Calendar or another service, you authorize HeyBean to access and process data from that service as needed to provide requested features. Your use of connected services is also governed by their terms and policies. You can disconnect integrations in the app when available.</p>
+    <p>If you connect a calendar or another third-party service, you authorize HeyBean to access and process data from that service as needed to provide requested features. Your use of connected services is also governed by their terms and policies. You can disconnect integrations in the app when available.</p>
 
     <h2>Your content</h2>
     <p>You retain ownership of your content. You grant HeyBean permission to host, process, transmit, and display your content as necessary to provide and improve the service, maintain security, and comply with law.</p>

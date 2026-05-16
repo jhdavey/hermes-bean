@@ -34,11 +34,11 @@ class GoogleCalendarController extends Controller
         try {
             $this->sync->completeOAuthCallback($request->string('state')->toString(), $request->string('code')->toString());
         } catch (Throwable $error) {
-            return response("Google Calendar connection failed. You can close this tab and try again from HeyBean.\n", 422)
+            return response("Calendar connection failed. You can close this tab and try again from HeyBean.\n", 422)
                 ->header('Content-Type', 'text/plain');
         }
 
-        return response("Google Calendar connected. You can close this tab and return to HeyBean.\n")
+        return response("Calendar connected. You can close this tab and return to HeyBean.\n")
             ->header('Content-Type', 'text/plain');
     }
 
@@ -52,7 +52,7 @@ class GoogleCalendarController extends Controller
             return response()->json([
                 'error' => [
                     'code' => 'google_calendar_sync_failed',
-                    'message' => 'Google Calendar sync failed. Please try again.',
+                    'message' => 'Calendar sync failed. Please try again.',
                 ],
             ], 422);
         }

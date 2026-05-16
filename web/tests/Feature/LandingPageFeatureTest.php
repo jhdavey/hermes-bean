@@ -22,7 +22,8 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('Use your voice:', false)
             ->assertSee('Just say “Hey, Bean…!”', false)
             ->assertSee('Voice-first requests', false)
-            ->assertSee('Google Calendar-ready', false)
+            ->assertSee('Calendar sync-ready', false)
+            ->assertDontSee('Google Calendar-ready', false)
             ->assertSee('Approval guardrails', false)
             ->assertSee('Private + shared dashboard', false)
             ->assertDontSee('Work + home spaces', false)
@@ -38,7 +39,10 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('say “Hey Bean, add…”', false)
             ->assertDontSee('Say: <span style="white-space: nowrap;">“Hey Bean…”</span> then say what you need.', false)
             ->assertDontSee('risky changes', false)
-            ->assertSee('images/heybean-ios-today-calendar.png', false)
+            ->assertSee('images/heybean-mobile-today-calendar.png', false)
+            ->assertDontSee('Apple-style', false)
+            ->assertDontSee('Google Calendar', false)
+            ->assertDontSee('iOS', false)
             ->assertSee('/privacy', false)
             ->assertSee('/terms', false)
             ->assertSee('/support', false)
@@ -58,12 +62,25 @@ class LandingPageFeatureTest extends TestCase
         ]);
 
         $response->assertRedirect('/#early-access');
-        $response->assertSessionHas('early_access_status', 'You are on the HeyBean early access list. We will reach out when your invite is ready.');
+        $response->assertSessionHas('early_access_status', 'Thank you for signing up! We’ll send you an email as soon as we can share the app with you! We look forward to your help with making Bean great!');
 
         $this->assertDatabaseHas('early_access_signups', [
             'email' => 'harley@example.com',
             'name' => null,
             'use_case' => null,
         ]);
+    }
+
+    public function test_early_access_thank_you_modal_renders_after_signup(): void
+    {
+        $this->withSession([
+            'early_access_status' => 'Thank you for signing up! We’ll send you an email as soon as we can share the app with you! We look forward to your help with making Bean great!',
+        ])->get('/')
+            ->assertOk()
+            ->assertSee('role="dialog"', false)
+            ->assertSee('Thank you for signing up!', false)
+            ->assertSee('We’ll send you an email as soon as we can share the app with you!', false)
+            ->assertSee('We look forward to your help with making Bean great!', false)
+            ->assertSee('Sounds good', false);
     }
 }

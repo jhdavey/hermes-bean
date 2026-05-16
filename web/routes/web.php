@@ -29,6 +29,6 @@ Route::post('/early-access', function (Request $request) {
 
     return redirect('/#early-access')->with(
         'early_access_status',
-        'You are on the HeyBean early access list. We will reach out when your invite is ready.',
+        'Thank you for signing up! We’ll send you an email as soon as we can share the app with you! We look forward to your help with making Bean great!',
     );
 })->name('early-access.store');

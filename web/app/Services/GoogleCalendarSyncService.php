@@ -178,8 +178,8 @@ class GoogleCalendarSyncService
                 return $this->sync($user, $workspace);
             }
             if (! $response->successful()) {
-                $this->markFailed($connection, 'Google Calendar sync failed.');
-                throw new RuntimeException('Google Calendar sync failed.');
+                $this->markFailed($connection, 'Calendar sync failed.');
+                throw new RuntimeException('Calendar sync failed.');
             }
 
             $payload = $response->json();
@@ -210,7 +210,7 @@ class GoogleCalendarSyncService
                     'title' => $item['summary'] ?? 'Untitled Google event',
                     'description' => $item['description'] ?? null,
                     'location' => $item['location'] ?? null,
-                    'category' => $this->calendarSummary($connection, $calendarId) ?? 'Google Calendar',
+                    'category' => $this->calendarSummary($connection, $calendarId) ?? 'Connected calendar',
                     'color' => $this->calendarColor($connection, $calendarId) ?? '#4285F4',
                     'starts_at' => $startsAt,
                     'ends_at' => $endsAt,
@@ -313,8 +313,8 @@ class GoogleCalendarSyncService
                 ? Http::withToken($token)->patch($this->calendarEventsUrl($calendarId).'/'.rawurlencode($existingGoogleEventId), $payload)
                 : Http::withToken($token)->post($this->calendarEventsUrl($calendarId), $payload);
             if (! $response->successful()) {
-                $this->markFailed($connection, 'Google Calendar event export failed.');
-                throw new RuntimeException('Google Calendar event export failed.');
+                $this->markFailed($connection, 'Calendar event export failed.');
+                throw new RuntimeException('Calendar event export failed.');
             }
 
             $googleEvent = $response->json();
@@ -347,7 +347,7 @@ class GoogleCalendarSyncService
     {
         $connection = $user->googleCalendarConnection()->first();
         if (! $connection || $connection->status !== 'connected') {
-            throw new RuntimeException('Google Calendar is not connected.');
+            throw new RuntimeException('Calendar sync is not connected.');
         }
 
         return $connection;
@@ -367,7 +367,7 @@ class GoogleCalendarSyncService
             'showHidden' => 'true',
         ]);
         if (! $response->successful()) {
-            throw new RuntimeException('Google Calendar list failed.');
+            throw new RuntimeException('Calendar list failed.');
         }
         $calendars = array_map(fn (array $item): array => [
             'id' => $item['id'],
@@ -585,7 +585,7 @@ class GoogleCalendarSyncService
             return Crypt::decryptString($connection->access_token_encrypted);
         }
         if (! $connection->refresh_token_encrypted) {
-            throw new RuntimeException('Google Calendar refresh token is missing.');
+            throw new RuntimeException('Calendar refresh token is missing.');
         }
 
         $response = Http::asForm()->post(self::TOKEN_URL, [
@@ -595,8 +595,8 @@ class GoogleCalendarSyncService
             'grant_type' => 'refresh_token',
         ]);
         if (! $response->successful()) {
-            $this->markFailed($connection, 'Google Calendar token refresh failed.');
-            throw new RuntimeException('Google Calendar token refresh failed.');
+            $this->markFailed($connection, 'Calendar token refresh failed.');
+            throw new RuntimeException('Calendar token refresh failed.');
         }
         $this->storeTokenPayload($connection, $response->json());
 
@@ -648,7 +648,7 @@ class GoogleCalendarSyncService
     private function assertConfigured(): void
     {
         if ($this->clientId() === '' || $this->clientSecret() === '') {
-            throw new RuntimeException('Google Calendar OAuth is not configured.');
+            throw new RuntimeException('Calendar authorization is not configured.');
         }
     }
 

@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityEvent;
-use App\Models\AgentProfile;
 use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;

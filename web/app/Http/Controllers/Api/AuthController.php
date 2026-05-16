@@ -94,7 +94,7 @@ class AuthController extends Controller
         $workspaceService->ensurePersonalWorkspaceForUser($user);
         $user->unsetRelation('agentProfile');
         $user->load('agentProfile');
-        $personalWorkspace = \App\Models\Workspace::where('personal_owner_user_id', $user->id)->first();
+        $personalWorkspace = Workspace::where('personal_owner_user_id', $user->id)->first();
         $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh());
         $agentProfile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
         $user->setAttribute('personal_workspace', $personalWorkspace);

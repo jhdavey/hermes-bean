@@ -11,7 +11,7 @@
     <ul>
         <li><strong>Account information:</strong> name, email address, password hash, authentication tokens, and account settings.</li>
         <li><strong>Assistant and productivity content:</strong> chat messages, preferences, tasks, reminders, calendar events, approvals, blockers, workspace/household information, and activity logs you create or ask Bean to manage.</li>
-        <li><strong>Connected calendar data:</strong> if you connect Google Calendar, HeyBean may read calendar lists and events you authorize, create or update events you approve, and store non-secret sync metadata. OAuth tokens are stored encrypted and are not sold or used for advertising. HeyBean's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener noreferrer">Google API Services User Data Policy</a>, including the Limited Use requirements.</li>
+        <li><strong>Connected calendar data:</strong> if you connect a third-party calendar, HeyBean may read calendar lists and events you authorize, create or update events you approve, and store non-secret sync metadata. OAuth tokens are stored encrypted and are not sold or used for advertising. HeyBean uses connected-service data only to provide and improve the features you request. HeyBean's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener noreferrer">Google API Services User Data Policy</a>, including the Limited Use requirements.</li>
         <li><strong>Technical data:</strong> device/app diagnostics, IP address, timestamps, API request metadata, and security logs needed to run and protect the service.</li>
         <li><strong>Early-access information:</strong> email addresses submitted on our website so we can send product invitations and launch updates.</li>
     </ul>
@@ -20,7 +20,7 @@
     <ul>
         <li>Provide the HeyBean app, including AI assistance, calendar planning, reminders, tasks, workspace syncing, and approvals.</li>
         <li>Authenticate users, secure accounts, prevent abuse, and troubleshoot reliability issues.</li>
-        <li>Sync with services you connect, such as Google Calendar, based on your permissions and app actions.</li>
+        <li>Sync with services you connect, such as your calendar provider, based on your permissions and app actions.</li>
         <li>Respond to support requests and send essential product/account communications.</li>
         <li>Improve product quality using aggregated or de-identified operational information where possible.</li>
     </ul>
@@ -33,7 +33,7 @@
 
     <h2>Your choices</h2>
     <ul>
-        <li>Use Settings in the app to update your email, disconnect Google Calendar, or delete your account. You can request to export account data by emailing support until the in-app export control is available.</li>
+        <li>Use Settings in the app to update your email, disconnect calendar sync, or delete your account. You can request to export account data by emailing support until the in-app export control is available.</li>
         <li>Visit <a href="/account-deletion">Account deletion</a> for deletion instructions.</li>
         <li>Email <a href="mailto:support@heybean.org">support@heybean.org</a> for privacy or account requests.</li>
     </ul>

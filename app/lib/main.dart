@@ -6110,14 +6110,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             children: [
                               const _SectionTitle(
                                 icon: Icons.calendar_month_rounded,
-                                title: 'Google calendars',
+                                title: 'Connected calendars',
                                 subtitle:
-                                    'Add or update this event on selected writable Google calendars.',
+                                    'Add or update this event on selected writable connected calendars.',
                                 infoKey: Key('event-google-calendars-info'),
-                                infoTitle: 'Google calendar export',
+                                infoTitle: 'Calendar export',
                                 infoBullets: [
                                   'Checked calendars receive a copy of this local Bean event.',
-                                  'Only writable Google calendars are shown here.',
+                                  'Only writable connected calendars are shown here.',
                                   'Changing this list affects this event, not your whole account.',
                                 ],
                               ),
@@ -8224,12 +8224,12 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Add to Google calendars',
+                          'Add to connected calendars',
                           style: TextStyle(fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 4),
                         const Text(
-                          'Create or update this item on selected writable Google calendars.',
+                          'Create or update this item on selected writable connected calendars.',
                           style: TextStyle(color: HeyBeanTheme.muted),
                         ),
                         const SizedBox(height: 8),
@@ -8945,6 +8945,39 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
     );
   }
 
+  Future<void> _acceptInvitation() async {
+    final input = await showDialog<String>(
+      context: context,
+      builder: (context) => const _WorkspaceTextInputDialog(
+        title: 'Accept workspace invitation',
+        labelText: 'Invitation token or link',
+        fieldKey: Key('workspace-accept-invitation-token'),
+        submitKey: Key('workspace-accept-invitation-save'),
+        submitLabel: 'Accept',
+        keyboardType: TextInputType.url,
+      ),
+    );
+    final token = _workspaceInvitationTokenFromInput(input ?? '');
+    if (token == null) return;
+    await _run(
+      () => widget.apiClient.acceptWorkspaceInvitation(token),
+      'Invitation accepted.',
+    );
+  }
+
+  String? _workspaceInvitationTokenFromInput(String input) {
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return null;
+    final uri = Uri.tryParse(trimmed);
+    final segments = uri?.pathSegments ?? const <String>[];
+    final invitationIndex = segments.indexOf('workspace-invitations');
+    if (invitationIndex >= 0 && invitationIndex + 1 < segments.length) {
+      final token = segments[invitationIndex + 1].trim();
+      if (token.isNotEmpty) return token;
+    }
+    return trimmed;
+  }
+
   Future<void> _renameWorkspace(HermesWorkspace workspace) async {
     final workspaceId = workspace.numericId;
     if (workspaceId == null || workspace.isPersonal) return;
@@ -9039,7 +9072,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
         googleCalendarIds: current.toList(),
         defaultExportCalendarId: current.isEmpty ? null : current.first,
       ),
-      'Workspace Google calendar mapping saved.',
+      'Workspace calendar choices saved.',
     );
   }
 
@@ -9110,7 +9143,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                   bullets: [
                     'Personal is your private space. Household workspaces are shared spaces for family plans.',
                     "Switch workspaces to see that space's Bean, calendar, tasks, reminders, and settings.",
-                    'Workspace Google calendar choices control which connected calendars appear in that workspace.',
+                    'Workspace calendar choices control which connected calendars appear in that workspace.',
                   ],
                 ),
               ],
@@ -9282,7 +9315,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                     if (googleCalendars.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       const Text(
-                        'Google calendars for this workspace',
+                        'Connected calendars for this workspace',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                       for (final calendar in googleCalendars)
@@ -9330,6 +9363,12 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                   onPressed: _busy ? null : _createHousehold,
                   icon: const Icon(Icons.add_home_rounded),
                   label: const Text('Add household'),
+                ),
+                OutlinedButton.icon(
+                  key: const Key('workspace-accept-invitation-action'),
+                  onPressed: _busy ? null : _acceptInvitation,
+                  icon: const Icon(Icons.mark_email_read_rounded),
+                  label: const Text('Accept invitation'),
                 ),
               ],
             ),
@@ -9591,8 +9630,8 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       setState(() {
         _waitingForGoogleReturn = launched;
         _message = launched
-            ? 'Finish approving Google Calendar in the browser. If Google shows a QR prompt in the simulator, tap Copy auth link, finish it in your Mac browser, then tap Check connection here.'
-            : 'Could not open Google Calendar automatically. Tap Copy auth link, finish it in any browser, then tap Check connection here.';
+            ? 'Finish approving calendar access in the browser. If a QR prompt appears in the simulator, tap Copy auth link, finish it in your browser, then tap Check connection here.'
+            : 'Could not open calendar authorization automatically. Tap Copy auth link, finish it in any browser, then tap Check connection here.';
       });
       _reload();
     } catch (error) {
@@ -9600,7 +9639,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
         setState(
           () => _message = beanFriendlyErrorMessage(
             error,
-            action: 'start Google Calendar connection',
+            action: 'start calendar connection',
           ),
         );
       }
@@ -9612,7 +9651,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
   Future<void> _syncAfterGoogleReturn() async {
     setState(() {
       _busy = true;
-      _message = 'Checking Google Calendar connection…';
+      _message = 'Checking calendar connection…';
     });
     try {
       final status = await widget.apiClient.googleCalendarStatus();
@@ -9621,7 +9660,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
         setState(() {
           _statusFuture = Future.value(status);
           _message =
-              'Google Calendar is not connected yet. Finish approval in the browser, then return to HeyBean.';
+              'Calendar sync is not connected yet. Finish approval in the browser, then return to HeyBean.';
         });
         return;
       }
@@ -9631,7 +9670,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
         _waitingForGoogleReturn = false;
         _googleAuthUrl = null;
         _message =
-            'Google Calendar connected and synced ${result.imported} event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
+            'Calendar sync connected and synced ${result.imported} event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
         _statusFuture = Future.value(result.status);
       });
     } catch (error) {
@@ -9639,7 +9678,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
         setState(
           () => _message = beanFriendlyErrorMessage(
             error,
-            action: 'sync Google Calendar after connecting',
+            action: 'sync calendar after connecting',
           ),
         );
       }
@@ -9655,7 +9694,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     if (!mounted) return;
     setState(() {
       _message =
-          'Copied Google authorization link. Open it in your Mac browser, approve Calendar access, then tap Check connection here.';
+          'Copied calendar authorization link. Open it in your browser, approve calendar access, then tap Check connection here.';
     });
   }
 
@@ -9671,7 +9710,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       if (!mounted) return;
       setState(() {
         _message =
-            'Synced ${result.imported} Google event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
+            'Synced ${result.imported} connected event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
         _googleAuthUrl = null;
         _statusFuture = Future.value(result.status);
       });
@@ -9680,7 +9719,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
         setState(
           () => _message = beanFriendlyErrorMessage(
             error,
-            action: 'sync Google Calendar',
+            action: 'sync calendar',
           ),
         );
       }
@@ -9698,7 +9737,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       final status = await widget.apiClient.disconnectGoogleCalendar();
       if (!mounted) return;
       setState(() {
-        _message = 'Google Calendar disconnected.';
+        _message = 'Calendar sync disconnected.';
         _statusFuture = Future.value(status);
       });
     } catch (error) {
@@ -9706,7 +9745,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
         setState(
           () => _message = beanFriendlyErrorMessage(
             error,
-            action: 'disconnect Google Calendar',
+            action: 'disconnect calendar sync',
           ),
         );
       }
@@ -9745,13 +9784,13 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Google Calendar sync',
+                        'Calendar sync',
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
                       Text(
                         connected
                             ? 'Connected${status?.lastSyncedAt == null ? '' : ' · last sync ${_formatCalendarEventDateTime(status?.lastSyncedAt)}'}'
-                            : 'Connect Google Calendar to import events into HeyBean.',
+                            : 'Connect your calendar to import events into HeyBean.',
                         style: const TextStyle(color: HeyBeanTheme.muted),
                       ),
                     ],
@@ -9760,11 +9799,11 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                 const SizedBox(width: 8),
                 const _InfoIconButton(
                   key: Key('google-calendar-sync-info'),
-                  title: 'Google Calendar sync',
+                  title: 'Calendar sync',
                   bullets: [
-                    'Connecting imports your Google events so Bean can plan around them.',
+                    'Connecting imports your calendar events so Bean can plan around them.',
                     'Writable calendars can also receive local Bean events when you choose them on an item.',
-                    'Disconnecting stops future sync. It does not delete your Google account or calendar.',
+                    'Disconnecting stops future sync. It does not delete your external account or calendar.',
                   ],
                 ),
               ],
@@ -9792,7 +9831,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                   key: const Key('google-calendar-connect-action'),
                   onPressed: _busy ? null : _connect,
                   icon: const Icon(Icons.login_rounded),
-                  label: Text(connected ? 'Reconnect' : 'Connect Google'),
+                  label: Text(connected ? 'Reconnect' : 'Connect calendar'),
                 ),
                 if (_googleAuthUrl != null) ...[
                   OutlinedButton.icon(

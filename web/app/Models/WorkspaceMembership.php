@@ -9,6 +9,8 @@ class WorkspaceMembership extends Model
 {
     protected $fillable = ['workspace_id', 'user_id', 'role', 'status', 'invited_by_user_id', 'invited_email', 'accepted_at', 'metadata'];
 
+    protected $hidden = ['metadata'];
+
     protected function casts(): array
     {
         return ['accepted_at' => 'datetime', 'metadata' => 'array'];

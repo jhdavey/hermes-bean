@@ -15,6 +15,6 @@
         <li><strong>Account deletion:</strong> use Settings in the app or follow <a href="/account-deletion">account deletion instructions</a>.</li>
         <li><strong>Privacy questions:</strong> review the <a href="/privacy">Privacy Policy</a> or contact support.</li>
         <li><strong>Terms:</strong> review the <a href="/terms">Terms of Use</a>.</li>
-        <li><strong>Google Calendar:</strong> disconnect Google Calendar from the app settings if you no longer want calendar sync.</li>
+        <li><strong>Calendar sync:</strong> disconnect calendar integrations from the app settings if you no longer want calendar sync.</li>
     </ul>
 @endsection

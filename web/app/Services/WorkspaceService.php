@@ -132,26 +132,62 @@ class WorkspaceService
         $this->authorizeOwner($actor, $workspace);
         $email = Str::lower(trim($email));
         $invitee = User::where('email', $email)->first();
-        $token = Str::random(40);
 
-        return WorkspaceMembership::updateOrCreate(
-            ['workspace_id' => $workspace->id, 'invited_email' => $email],
-            [
+        return DB::transaction(function () use ($actor, $workspace, $email, $invitee): WorkspaceMembership {
+            $existingActiveMembership = WorkspaceMembership::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('status', 'active')
+                ->where(function ($query) use ($email, $invitee): void {
+                    $query->where('invited_email', $email);
+                    if ($invitee) {
+                        $query->orWhere('user_id', $invitee->id);
+                    }
+                })
+                ->first();
+
+            if ($existingActiveMembership) {
+                throw new InvalidArgumentException('User is already an active member of this workspace.');
+            }
+
+            $membership = WorkspaceMembership::query()
+                ->where('workspace_id', $workspace->id)
+                ->whereIn('status', ['pending', 'invited'])
+                ->where(function ($query) use ($email, $invitee): void {
+                    $query->where('invited_email', $email);
+                    if ($invitee) {
+                        $query->orWhere('user_id', $invitee->id);
+                    }
+                })
+                ->first() ?? new WorkspaceMembership(['workspace_id' => $workspace->id]);
+
+            $token = Str::random(64);
+            $membership->forceFill([
+                'workspace_id' => $workspace->id,
                 'user_id' => $invitee?->id,
                 'role' => 'member',
-                'status' => $invitee ? 'pending' : 'invited',
+                'status' => 'invited',
                 'invited_by_user_id' => $actor->id,
+                'invited_email' => $email,
                 'accepted_at' => null,
-                'metadata' => ['invitation_token' => $token, 'invited_at' => now()->toISOString()],
-            ]
-        );
+                'metadata' => [
+                    'invitation_token_hash' => hash('sha256', $token),
+                    'invited_at' => now()->toISOString(),
+                ],
+            ])->save();
+
+            return $membership->refresh()->setAttribute('invitation_token', $token);
+        });
     }
 
     public function acceptInvite(User $user, string $token): WorkspaceMembership
     {
+        $tokenHash = hash('sha256', $token);
         $membership = WorkspaceMembership::query()
             ->whereIn('status', ['pending', 'invited'])
-            ->where('metadata->invitation_token', $token)
+            ->where(function ($query) use ($token, $tokenHash): void {
+                $query->where('metadata->invitation_token_hash', $tokenHash)
+                    ->orWhere('metadata->invitation_token', $token);
+            })
             ->firstOrFail();
 
         if ($membership->user_id && (int) $membership->user_id !== (int) $user->id) {
@@ -162,7 +198,16 @@ class WorkspaceService
             throw new AuthorizationException('This invitation belongs to another email address.');
         }
 
-        $membership->forceFill(['user_id' => $user->id, 'status' => 'active', 'accepted_at' => now()])->save();
+        $metadata = $membership->metadata ?? [];
+        unset($metadata['invitation_token_hash'], $metadata['invitation_token']);
+        $metadata['accepted_at'] = now()->toISOString();
+
+        $membership->forceFill([
+            'user_id' => $user->id,
+            'status' => 'active',
+            'accepted_at' => now(),
+            'metadata' => $metadata,
+        ])->save();
 
         return $membership->refresh();
     }

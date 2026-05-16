@@ -82,20 +82,20 @@ return new class extends Migration
 
         if (! Schema::hasTable('workspace_google_calendar_mappings')) {
             Schema::create('workspace_google_calendar_mappings', function (Blueprint $table): void {
-            $table->id();
-            $table->foreignId('workspace_id')->constrained('workspaces')->cascadeOnDelete();
-            $table->unsignedBigInteger('google_calendar_connection_id');
-            $table->string('google_calendar_id');
-            $table->string('sync_direction')->default('both');
-            $table->boolean('is_default_export')->default(false);
-            $table->json('settings')->nullable();
-            $table->timestamps();
+                $table->id();
+                $table->foreignId('workspace_id')->constrained('workspaces')->cascadeOnDelete();
+                $table->unsignedBigInteger('google_calendar_connection_id');
+                $table->string('google_calendar_id');
+                $table->string('sync_direction')->default('both');
+                $table->boolean('is_default_export')->default(false);
+                $table->json('settings')->nullable();
+                $table->timestamps();
 
-            $table->foreign('google_calendar_connection_id', 'wgcm_connection_fk')
-                ->references('id')
-                ->on('google_calendar_connections')
-                ->cascadeOnDelete();
-            $table->unique(['workspace_id', 'google_calendar_connection_id', 'google_calendar_id'], 'wgcm_workspace_connection_calendar_unique');
+                $table->foreign('google_calendar_connection_id', 'wgcm_connection_fk')
+                    ->references('id')
+                    ->on('google_calendar_connections')
+                    ->cascadeOnDelete();
+                $table->unique(['workspace_id', 'google_calendar_connection_id', 'google_calendar_id'], 'wgcm_workspace_connection_calendar_unique');
                 $table->index(['workspace_id', 'is_default_export'], 'wgcm_default_export_idx');
             });
         }

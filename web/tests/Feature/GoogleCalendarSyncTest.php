@@ -714,10 +714,10 @@ class GoogleCalendarSyncTest extends TestCase
             ->assertJsonMissing(['message' => 'sensitive upstream details access-token user@example.com']);
 
         $connection = GoogleCalendarConnection::where('user_id', $user->id)->firstOrFail();
-        $this->assertSame('Google Calendar sync failed.', $connection->last_error);
+        $this->assertSame('Calendar sync failed.', $connection->last_error);
         $this->withToken($token)->getJson('/api/google-calendar/status')
             ->assertOk()
-            ->assertJsonPath('data.last_error', 'Google Calendar sync failed.')
+            ->assertJsonPath('data.last_error', 'Calendar sync failed.')
             ->assertJsonMissing(['last_error' => 'sensitive upstream details access-token user@example.com']);
     }
 
