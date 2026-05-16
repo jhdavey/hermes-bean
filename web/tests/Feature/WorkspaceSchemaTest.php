@@ -99,4 +99,48 @@ class WorkspaceSchemaTest extends TestCase
             'created_by_user_id' => $user->id,
         ]);
     }
+
+    public function test_workspace_list_includes_google_calendar_mappings_after_selection(): void
+    {
+        $token = $this->apiToken('workspace-calendar-map@example.com');
+        $user = User::where('email', 'workspace-calendar-map@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $connectionId = DB::table('google_calendar_connections')->insertGetId([
+            'user_id' => $user->id,
+            'google_account_email' => $user->email,
+            'calendar_id' => 'primary',
+            'status' => 'connected',
+            'access_token_encrypted' => 'fake-access-token',
+            'refresh_token_encrypted' => 'fake-refresh-token',
+            'metadata' => json_encode([
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Primary'],
+                    ['id' => 'family@example.com', 'summary' => 'Family'],
+                ],
+                'selected_calendar_ids' => ['primary'],
+            ]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withToken($token)->patchJson("/api/workspaces/{$workspaceId}/google-calendars", [
+            'google_calendar_ids' => ['primary', 'family@example.com'],
+            'default_export_calendar_id' => 'family@example.com',
+        ])->assertOk();
+
+        $response = $this->withToken($token)->getJson('/api/workspaces')->assertOk();
+        $personalWorkspace = collect($response->json('data'))->firstWhere('id', $workspaceId);
+
+        $this->assertNotNull($personalWorkspace);
+        $this->assertEqualsCanonicalizing(
+            ['primary', 'family@example.com'],
+            collect($personalWorkspace['google_calendar_mappings'] ?? [])->pluck('google_calendar_id')->all(),
+        );
+        $this->assertDatabaseHas('workspace_google_calendar_mappings', [
+            'workspace_id' => $workspaceId,
+            'google_calendar_connection_id' => $connectionId,
+            'google_calendar_id' => 'family@example.com',
+            'is_default_export' => true,
+        ]);
+    }
 }

@@ -72,7 +72,7 @@ class WorkspaceService
 
         return Workspace::query()
             ->whereHas('memberships', fn ($query) => $query->where('user_id', $user->id)->where('status', 'active'))
-            ->with(['memberships.user', 'agentProfile'])
+            ->with(['memberships.user', 'agentProfile', 'googleCalendarMappings'])
             ->orderByRaw("case when type = 'personal' then 0 else 1 end")
             ->orderBy('name')
             ->get();
