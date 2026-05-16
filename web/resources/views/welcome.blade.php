@@ -52,7 +52,7 @@
     </main>
 
     <section class="wrap section" id="how">
-        <h2>Your schedule changes faster than your tools.</h2>
+        <h2>Bean manages the logistics, so you can stay ahead</h2>
         <p class="lead">Bean turns “Hey Bean…” voice requests into a structured day — with the calendar, tasks, reminders, and household context kept together.</p>
         <div class="flow"><div class="step"><span>1</span><b>Ask naturally</b><p>“Hey Bean, move my focus block to 3, remind Sam about cleats, and add groceries to Household.”</p></div><div class="step"><span>2</span><b>Bean organizes</b><p>Calendar events, tasks, reminders, and workspace context update from one conversation.</p></div><div class="step"><span>3</span><b>You stay in control</b><p>Sensitive actions wait for approval so Bean can move fast without surprising you.</p></div></div>
     </section>

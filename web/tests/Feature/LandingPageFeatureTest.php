@@ -26,6 +26,8 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Approval guardrails', false)
             ->assertSee('Private + shared dashboard', false)
             ->assertDontSee('Work + home spaces', false)
+            ->assertSee('Bean manages the logistics, so you can stay ahead', false)
+            ->assertDontSee('Your schedule changes faster than your tools.', false)
             ->assertSee('Built for the real day', false)
             ->assertSee('Bean turns “Hey Bean…” voice requests into a structured day', false)
             ->assertSee('Hey Bean, move my focus block to 3', false)
