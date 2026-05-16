@@ -143,7 +143,7 @@ class GoogleCalendarSyncService
     public function sync(User $user, ?Workspace $workspace = null): array
     {
         $connection = $this->connectedConnection($user);
-        $workspace ??= Workspace::find(app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user));
+        $workspace ??= app(WorkspaceService::class)->resolveWorkspace($user);
         $token = $this->validAccessToken($connection);
         $imported = 0;
         $deleted = 0;
@@ -151,6 +151,7 @@ class GoogleCalendarSyncService
         $syncTokens = is_array($metadata['sync_tokens'] ?? null) ? $metadata['sync_tokens'] : [];
 
         foreach ($this->selectedCalendarIds($connection, $workspace) as $calendarId) {
+            $syncTokenKey = $this->syncTokenKey($workspace, $calendarId);
             $query = [
                 'singleEvents' => 'true',
                 'orderBy' => 'startTime',
@@ -158,17 +159,17 @@ class GoogleCalendarSyncService
                 'timeMin' => now()->subMonths(3)->toRfc3339String(),
                 'timeMax' => now()->addYear()->toRfc3339String(),
             ];
-            if (! empty($syncTokens[$calendarId])) {
-                $query = ['syncToken' => $syncTokens[$calendarId], 'showDeleted' => 'true', 'maxResults' => 250];
+            if (! empty($syncTokens[$syncTokenKey])) {
+                $query = ['syncToken' => $syncTokens[$syncTokenKey], 'showDeleted' => 'true', 'maxResults' => 250];
             }
 
             $response = Http::withToken($token)->get($this->calendarEventsUrl($calendarId), $query);
-            if ($response->status() === 410 && ! empty($syncTokens[$calendarId])) {
-                unset($syncTokens[$calendarId]);
+            if ($response->status() === 410 && ! empty($syncTokens[$syncTokenKey])) {
+                unset($syncTokens[$syncTokenKey]);
                 $metadata['sync_tokens'] = $syncTokens;
                 $connection->forceFill(['metadata' => $metadata])->save();
 
-                return $this->sync($user);
+                return $this->sync($user, $workspace);
             }
             if (! $response->successful()) {
                 $this->markFailed($connection, 'Google Calendar sync failed: '.$response->body());
@@ -221,14 +222,14 @@ class GoogleCalendarSyncService
                 $imported++;
             }
             if (! empty($payload['nextSyncToken'])) {
-                $syncTokens[$calendarId] = $payload['nextSyncToken'];
+                $syncTokens[$syncTokenKey] = $payload['nextSyncToken'];
             }
         }
 
         $metadata['sync_tokens'] = $syncTokens;
         $connection->forceFill([
             'status' => 'connected',
-            'sync_token' => $syncTokens[$connection->calendar_id] ?? $connection->sync_token,
+            'sync_token' => $syncTokens[$this->syncTokenKey($workspace, $connection->calendar_id ?: 'primary')] ?? $connection->sync_token,
             'metadata' => $metadata,
             'last_synced_at' => now(),
             'last_error' => null,
@@ -360,6 +361,11 @@ class GoogleCalendarSyncService
         }
 
         return [$connection->calendar_id ?: 'primary'];
+    }
+
+    private function syncTokenKey(Workspace $workspace, string $calendarId): string
+    {
+        return $workspace->id.':'.$calendarId;
     }
 
     private function dedupePrimaryCalendarAliases(GoogleCalendarConnection $connection, array $calendarIds): array

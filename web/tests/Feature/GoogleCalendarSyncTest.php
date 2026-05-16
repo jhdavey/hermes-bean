@@ -218,6 +218,72 @@ class GoogleCalendarSyncTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/calendars/primary/events'));
     }
 
+    public function test_new_workspace_google_calendar_import_does_not_reuse_personal_sync_token(): void
+    {
+        $token = $this->apiToken('workspace-token-scope@example.com');
+        $user = User::where('email', 'workspace-token-scope@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $household = app(WorkspaceService::class)->createHousehold($user, 'Davey Household');
+        $connection = GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'sync_tokens' => ['primary' => 'personal-token'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Main calendar', 'primary' => true, 'accessRole' => 'owner'],
+                ],
+            ],
+        ]);
+        WorkspaceGoogleCalendarMapping::create([
+            'workspace_id' => $household->id,
+            'google_calendar_connection_id' => $connection->id,
+            'google_calendar_id' => 'primary',
+        ]);
+
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/calendars/primary/events') && str_contains($request->url(), 'syncToken=')) {
+                return Http::response(['items' => [], 'nextSyncToken' => 'household-incremental-token']);
+            }
+
+            if (str_contains($request->url(), '/calendars/primary/events')) {
+                return Http::response([
+                    'items' => [[
+                        'id' => 'household-existing-event-1',
+                        'summary' => 'Household mapped existing event',
+                        'status' => 'confirmed',
+                        'start' => ['dateTime' => '2026-05-20T15:00:00Z'],
+                        'end' => ['dateTime' => '2026-05-20T16:00:00Z'],
+                    ]],
+                    'nextSyncToken' => 'household-full-token',
+                ]);
+            }
+
+            return Http::response(['items' => []]);
+        });
+
+        $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$household->id)
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Household mapped existing event']);
+
+        $this->assertDatabaseHas('calendar_events', [
+            'user_id' => $user->id,
+            'workspace_id' => $household->id,
+            'title' => 'Household mapped existing event',
+            'google_event_id' => 'household-existing-event-1',
+            'google_calendar_id' => 'primary',
+        ]);
+        $this->assertDatabaseMissing('calendar_events', [
+            'workspace_id' => $personalWorkspaceId,
+            'google_event_id' => 'household-existing-event-1',
+        ]);
+        $this->assertSame('personal-token', $connection->refresh()->metadata['sync_tokens']['primary']);
+    }
+
     public function test_selected_primary_alias_calendars_do_not_duplicate_all_day_events(): void
     {
         $token = $this->apiToken('calendar-primary-alias@example.com');

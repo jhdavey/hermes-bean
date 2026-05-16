@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -43,7 +44,9 @@ class GoogleCalendarController extends Controller
 
     public function sync(Request $request): JsonResponse
     {
-        return response()->json(['data' => $this->sync->sync($request->user())]);
+        $workspace = app(WorkspaceService::class)->resolveWorkspace($request->user(), $request->input('workspace_id'));
+
+        return response()->json(['data' => $this->sync->sync($request->user(), $workspace)]);
     }
 
     public function calendars(Request $request): JsonResponse
