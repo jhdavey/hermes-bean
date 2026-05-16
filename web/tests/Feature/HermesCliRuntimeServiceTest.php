@@ -7,8 +7,10 @@ use App\Models\AgentProfile;
 use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\ConversationMessage;
+use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
 use App\Models\Task;
+use App\Models\User;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -166,6 +168,144 @@ PHP);
             'workspace_id' => $household->id,
             'event_type' => 'runtime.hermes_cli_started',
         ]);
+    }
+
+    public function test_personal_agent_can_target_accessible_household_workspace_for_items_and_memory_notes(): void
+    {
+        $script = $this->writeExecutable('cross-workspace-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+$workspaceId = (int) getenv('HERMES_TARGET_WORKSPACE_ID');
+echo json_encode([
+    'message' => 'Added that to Davey House.',
+    'actions' => [
+        [
+            'type' => 'task.create',
+            'risk' => 'low',
+            'parameters' => [
+                'workspace_id' => $workspaceId,
+                'title' => 'Buy soccer snacks',
+                'type' => 'todo',
+                'status' => 'open',
+            ],
+        ],
+        [
+            'type' => 'calendar_event.create',
+            'risk' => 'low',
+            'parameters' => [
+                'workspace_id' => $workspaceId,
+                'title' => 'Family dinner',
+                'starts_at' => '2026-05-17T18:00:00-04:00',
+                'ends_at' => '2026-05-17T19:00:00-04:00',
+            ],
+        ],
+        [
+            'type' => 'workspace_memory.note',
+            'risk' => 'low',
+            'parameters' => [
+                'workspace_id' => $workspaceId,
+                'note' => 'Lauren prefers school reminders the night before.',
+            ],
+        ],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.workdir', $this->tempDir);
+        config()->set('services.hermes_runtime.users_home', $this->tempDir.'/hermes-users');
+
+        $token = $this->apiToken('cross-workspace-owner@example.com');
+        $user = User::where('email', 'cross-workspace-owner@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $household = app(WorkspaceService::class)->createHousehold($user, 'Davey House');
+        config()->set('services.hermes_runtime.environment', [
+            'HERMES_TARGET_WORKSPACE_ID' => (string) $household->id,
+        ]);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Personal chat',
+            'workspace_id' => $personalWorkspaceId,
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Add soccer snacks and dinner to Davey House, and remember Lauren likes school reminders the night before.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.workspace_memory.noted']);
+
+        $this->assertDatabaseHas('tasks', [
+            'user_id' => $user->id,
+            'workspace_id' => $household->id,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Buy soccer snacks',
+        ]);
+        $this->assertDatabaseMissing('tasks', [
+            'user_id' => $user->id,
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'Buy soccer snacks',
+        ]);
+        $this->assertDatabaseHas('calendar_events', [
+            'user_id' => $user->id,
+            'workspace_id' => $household->id,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Family dinner',
+        ]);
+
+        $householdProfile = AgentProfile::where('workspace_id', $household->id)->firstOrFail();
+        $this->assertStringContainsString('Lauren prefers school reminders the night before.', File::get($householdProfile->runtime_home.'/MEMORY.md'));
+        $personalProfile = AgentProfile::where('workspace_id', $personalWorkspaceId)->firstOrFail();
+        $this->assertStringNotContainsString('Lauren prefers school reminders the night before.', File::get($personalProfile->runtime_home.'/MEMORY.md'));
+    }
+
+    public function test_personal_agent_cannot_target_inaccessible_household_workspace(): void
+    {
+        $script = $this->writeExecutable('blocked-cross-workspace-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+$workspaceId = (int) getenv('HERMES_TARGET_WORKSPACE_ID');
+echo json_encode([
+    'message' => 'Trying to add this to another household.',
+    'actions' => [[
+        'type' => 'task.create',
+        'risk' => 'low',
+        'parameters' => [
+            'workspace_id' => $workspaceId,
+            'title' => 'Should not be created',
+        ],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.workdir', $this->tempDir);
+
+        $token = $this->apiToken('cross-workspace-blocked@example.com');
+        $user = User::where('email', 'cross-workspace-blocked@example.com')->firstOrFail();
+        $otherUser = User::factory()->create(['email' => 'other-household-owner@example.com']);
+        $otherHousehold = app(WorkspaceService::class)->createHousehold($otherUser, 'Other House');
+        config()->set('services.hermes_runtime.environment', [
+            'HERMES_TARGET_WORKSPACE_ID' => (string) $otherHousehold->id,
+        ]);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Add this to Other House',
+        ])->assertCreated()
+            ->assertJsonFragment(['event_type' => 'assistant.action.failed']);
+
+        $this->assertDatabaseMissing('tasks', [
+            'workspace_id' => $otherHousehold->id,
+            'title' => 'Should not be created',
+        ]);
+        $failure = ActivityEvent::where('conversation_session_id', $sessionId)
+            ->where('event_type', 'assistant.action.failed')
+            ->firstOrFail();
+        $this->assertStringContainsString('not a member', $failure->payload['reason']);
     }
 
     public function test_missing_cli_path_fails_closed_with_blocker_without_assistant_message(): void

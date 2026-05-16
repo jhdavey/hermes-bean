@@ -243,7 +243,7 @@ Schema:
   "message": "short user-facing summary",
   "actions": [
     {
-      "type": "task.create|task.update|task.delete|reminder.create|reminder.update|reminder.delete|calendar_event.create|calendar_event.update|calendar_event.delete|approval.create|approval.update|approval.approve|approval.deny|approval.delete|blocker.create|blocker.update|blocker.resolve|blocker.delete|scheduler_job.create|scheduler_job.update|scheduler_job.delete|agent_profile.update|conversation_session.update|activity_event.create|email.send|payment.create|deployment.run|account.delete",
+      "type": "task.create|task.update|task.delete|reminder.create|reminder.update|reminder.delete|calendar_event.create|calendar_event.update|calendar_event.delete|approval.create|approval.update|approval.approve|approval.deny|approval.delete|blocker.create|blocker.update|blocker.resolve|blocker.delete|scheduler_job.create|scheduler_job.update|scheduler_job.delete|agent_profile.update|workspace_memory.note|conversation_session.update|activity_event.create|email.send|payment.create|deployment.run|account.delete",
       "risk": "low|medium|high",
       "title": "approval title for risky actions",
       "description": "optional approval description",
@@ -256,6 +256,8 @@ Rules:
 - You are allowed to complete complex multi-step app-control requests by emitting multiple ordered actions in one response.
 - Low-risk internal dashboard CRUD/control actions may be emitted with risk "low": tasks, reminders, calendar events, approvals, blockers, scheduler job records, agent profile settings, conversation session metadata, and activity events.
 - Existing dashboard resources are listed in dashboard_state; use their numeric id when updating, deleting, approving, denying, or resolving them.
+- When the user explicitly asks to create/update/delete an item in another accessible workspace, include `parameters.workspace_id` or `parameters.target_workspace_id` with that workspace id from `accessible_sync_targets`; otherwise actions apply to the current session workspace.
+- Use `workspace_memory.note` only when the user clearly asks you to remember a durable fact for a named accessible workspace. Include `parameters.workspace_id`/`target_workspace_id` and `parameters.note`.
 - Risky external, destructive outside the dashboard, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
 - If no concrete action is needed, return an empty actions array.
 - If `user.onboard_complete` is false or `agent_profile.settings.onboarding.completed` is false, treat the conversation as Bean onboarding: ask the user to introduce themself, then ask follow-up questions to learn preferred Bean style/personality, top priorities, and any useful life/context constraints. When the user provides enough onboarding/preferences, emit a low-risk `agent_profile.update` action with `parameters.settings.personality_type`, `parameters.settings.onboarding.completed: true`, `parameters.settings.onboarding.priorities`, and `parameters.settings.onboarding.context` so the app saves settings and updates Bean memory.
@@ -338,7 +340,7 @@ PROMPT.$this->payloadFor($session, $message);
                     'approval.create', 'approval.update', 'approval.approve', 'approval.deny', 'approval.delete',
                     'blocker.create', 'blocker.update', 'blocker.resolve', 'blocker.delete',
                     'scheduler_job.create', 'scheduler_job.update', 'scheduler_job.delete',
-                    'agent_profile.update', 'conversation_session.update', 'activity_event.create',
+                    'agent_profile.update', 'workspace_memory.note', 'conversation_session.update', 'activity_event.create',
                 ],
                 'approval_required' => ['email.send', 'payment.create', 'deployment.run', 'account.delete', 'destructive_actions_outside_dashboard'],
             ],

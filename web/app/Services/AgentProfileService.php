@@ -205,6 +205,29 @@ class AgentProfileService
         ];
     }
 
+    public function appendWorkspaceMemoryNote(Workspace $workspace, User $actor, string $note): AgentProfile
+    {
+        $note = trim($note);
+        if ($note === '') {
+            throw new \InvalidArgumentException('Workspace memory note cannot be empty.');
+        }
+
+        $profile = $this->ensureForWorkspace($workspace, $actor);
+        $path = rtrim($profile->runtime_home, '/').'/MEMORY.md';
+        File::ensureDirectoryExists($profile->runtime_home);
+        if (! File::exists($path)) {
+            $this->writeRuntimeMarkdownMemory($profile->refresh());
+        }
+
+        $existing = File::exists($path) ? File::get($path) : '';
+        $line = '- '.$note;
+        if (! str_contains($existing, $line)) {
+            File::append($path, PHP_EOL.$line.PHP_EOL);
+        }
+
+        return $profile->refresh();
+    }
+
     private function preferenceSummary(string $personality, array $priorities, ?string $context): string
     {
         $parts = ['User prefers Bean personality: '.$personality.'.'];

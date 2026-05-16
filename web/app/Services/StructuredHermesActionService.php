@@ -39,28 +39,42 @@ class StructuredHermesActionService
                 continue;
             }
 
-            if ($this->requiresApproval($session, $action)) {
+            try {
+                $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+                $actionSession = $this->sessionForAction($session, $parameters);
+            } catch (\Throwable $exception) {
+                $events->push($this->recordEvent($session, 'assistant.action.failed', [
+                    'action_type' => $action['type'] ?? null,
+                    'reason' => $exception->getMessage(),
+                ], 'structured_action', 'failed'));
+
+                continue;
+            }
+
+            if ($this->requiresApproval($actionSession, $action)) {
                 $approval = Approval::create([
-                    'user_id' => $session->user_id,
-                    'workspace_id' => $session->workspace_id,
-                    'conversation_session_id' => $session->id,
+                    'user_id' => $actionSession->user_id,
+                    'workspace_id' => $actionSession->workspace_id,
+                    'conversation_session_id' => $actionSession->id,
                     'title' => $this->approvalTitle($action),
                     'description' => isset($action['description']) && is_string($action['description']) ? $action['description'] : null,
                     'status' => 'pending',
                     'payload' => ['action' => $action],
                 ]);
 
-                $events->push($this->recordEvent($session, 'assistant.approval.created', [
+                $events->push($this->recordEvent($actionSession, 'assistant.approval.created', [
                     'approval_id' => $approval->id,
                     'action_type' => $action['type'] ?? null,
                     'risk' => $action['risk'] ?? null,
+                    'source_workspace_id' => $session->workspace_id,
+                    'target_workspace_id' => $actionSession->workspace_id,
                 ], 'approvals.create', 'succeeded'));
 
                 continue;
             }
 
             try {
-                $events = $events->concat($this->executeAction($session, $action));
+                $events = $events->concat($this->executeAction($actionSession, $action));
             } catch (\Throwable $exception) {
                 $events->push($this->recordEvent($session, 'assistant.action.failed', [
                     'action_type' => $action['type'] ?? null,
@@ -171,6 +185,7 @@ class StructuredHermesActionService
             'blocker.create', 'blocker.update', 'blocker.resolve', 'blocker.delete',
             'scheduler_job.create', 'scheduler_job.update', 'scheduler_job.delete',
             'agent_profile.update',
+            'workspace_memory.note',
             'conversation_session.update',
             'activity_event.create',
         ], true);
@@ -206,6 +221,7 @@ class StructuredHermesActionService
         if (! is_array($parameters)) {
             $parameters = [];
         }
+        $session = $this->sessionForAction($session, $parameters);
 
         return match ($type) {
             'task.create' => collect([$this->createTask($session, $parameters)]),
@@ -233,6 +249,7 @@ class StructuredHermesActionService
             'scheduler_job.update' => collect([$this->updateSchedulerJob($session, $parameters)]),
             'scheduler_job.delete' => collect([$this->deleteOwned(SchedulerJobRecord::class, $session, $parameters, 'assistant.scheduler_job.deleted', 'scheduler_jobs.delete', 'scheduler_job_id')]),
             'agent_profile.update' => collect([$this->updateAgentProfile($session, $parameters)]),
+            'workspace_memory.note' => collect([$this->createWorkspaceMemoryNote($session, $parameters)]),
             'conversation_session.update' => collect([$this->updateConversationSession($session, $parameters)]),
             'activity_event.create' => collect([$this->createActivityEvent($session, $parameters)]),
             default => collect([$this->recordEvent($session, 'assistant.action.skipped', [
@@ -603,6 +620,24 @@ class StructuredHermesActionService
         return $this->recordEvent($session, 'assistant.conversation_session.updated', ['session_id' => $session->id, 'title' => $session->title], 'conversation_sessions.update', 'succeeded');
     }
 
+    private function createWorkspaceMemoryNote(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $workspace = Workspace::findOrFail($session->workspace_id);
+        $actor = User::findOrFail($session->user_id);
+        app(WorkspaceService::class)->authorizeMember($actor, $workspace);
+        $profile = app(AgentProfileService::class)->appendWorkspaceMemoryNote(
+            $workspace,
+            $actor,
+            $this->stringParameter($parameters, 'note', $this->stringParameter($parameters, 'content', ''))
+        );
+
+        return $this->recordEvent($session, 'assistant.workspace_memory.noted', [
+            'workspace_id' => $workspace->id,
+            'agent_profile_id' => $profile->id,
+            'note' => $this->stringParameter($parameters, 'note', $this->stringParameter($parameters, 'content', '')),
+        ], 'workspace_memory.note', 'succeeded');
+    }
+
     private function createActivityEvent(ConversationSession $session, array $parameters): ActivityEvent
     {
         return $this->recordEvent(
@@ -625,6 +660,24 @@ class StructuredHermesActionService
         }
 
         return app(AgentProfileService::class)->ensureForUser(User::findOrFail($session->user_id));
+    }
+
+    private function sessionForAction(ConversationSession $session, array $parameters): ConversationSession
+    {
+        $targetWorkspaceId = $parameters['target_workspace_id'] ?? $parameters['workspace_id'] ?? null;
+        if (! $targetWorkspaceId || (int) $targetWorkspaceId === (int) $session->workspace_id) {
+            return $session;
+        }
+
+        $workspace = Workspace::findOrFail((int) $targetWorkspaceId);
+        $actor = User::findOrFail($session->user_id);
+        app(WorkspaceService::class)->authorizeMember($actor, $workspace);
+
+        $targetSession = clone $session;
+        $targetSession->workspace_id = $workspace->id;
+        $targetSession->setRelation('workspace', $workspace);
+
+        return $targetSession;
     }
 
     private function deleteOwned(string $modelClass, ConversationSession $session, array $parameters, string $eventType, string $toolName, string $payloadKey): ActivityEvent
