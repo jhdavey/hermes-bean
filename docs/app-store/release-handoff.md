@@ -11,7 +11,7 @@ This file records the local release state before App Store Connect setup and fin
 ## iOS Project State
 
 - Display name: `HeyBean`
-- Bundle ID: `com.hermesbean.hermesBeanApp`
+- Bundle ID: `com.heybean.heybeanapp`
 - Version from Flutter: `1.0.0`
 - Build number from Flutter: `1`
 - Minimum iOS deployment target: `13.0`

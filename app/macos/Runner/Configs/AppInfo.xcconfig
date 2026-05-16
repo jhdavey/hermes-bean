@@ -8,7 +8,7 @@
 PRODUCT_NAME = hermes_bean_app
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.hermesbean.hermesBeanApp
+PRODUCT_BUNDLE_IDENTIFIER = com.heybean.heybeanapp
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.hermesbean. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.heybean. All rights reserved.

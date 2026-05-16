@@ -1,4 +1,4 @@
-package com.hermesbean.hermes_bean_app
+package com.heybean.heybeanapp
 
 import io.flutter.embedding.android.FlutterActivity
 

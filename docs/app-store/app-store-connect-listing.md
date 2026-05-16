@@ -6,7 +6,7 @@ Use this as the source-of-truth draft when creating the App Store Connect app re
 
 - App name: HeyBean
 - Subtitle: AI planning for real life
-- Bundle ID currently in iOS project: `com.hermesbean.hermesBeanApp`
+- Bundle ID currently in iOS project: `com.heybean.heybeanapp`
 - SKU suggestion: `heybean-ios-001`
 - Primary language: English (U.S.)
 - Version: `1.0.0`
@@ -140,7 +140,7 @@ Suggested captions:
 
 ## Before Archive/Submit
 
-- Confirm App Store Connect app record uses bundle ID `com.hermesbean.hermesBeanApp`, or update the project before archiving if you choose a different bundle ID.
+- Confirm App Store Connect app record uses bundle ID `com.heybean.heybeanapp`, or update the project before archiving if you choose a different bundle ID.
 - Confirm app display name: HeyBean.
 - Confirm version: 1.0.0, build: 1.
 - Log into Xcode with the Apple Developer account.

@@ -18,7 +18,7 @@ plugins {
 }
 
 android {
-    namespace = "com.hermesbean.hermes_bean_app"
+    namespace = "com.heybean.heybeanapp"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -32,7 +32,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.hermesbean.hermes_bean_app"
+        applicationId = "com.heybean.heybeanapp"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
