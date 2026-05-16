@@ -1225,6 +1225,9 @@ class HermesTask {
   final String? completedAt;
   final Map<String, Object?>? metadata;
 
+  List<String> get googleCalendarIds =>
+      _googleCalendarIdsFromMetadata(metadata);
+
   factory HermesTask.fromJson(Map<String, Object?> json) {
     final metadata = _expectMapOrNull(json['metadata']);
     return HermesTask(
@@ -1296,6 +1299,9 @@ class HermesReminder {
   final String? completedAt;
   final int? calendarEventId;
   final Map<String, Object?>? metadata;
+
+  List<String> get googleCalendarIds =>
+      _googleCalendarIdsFromMetadata(metadata);
 
   factory HermesReminder.fromJson(Map<String, Object?> json) {
     final metadata = _expectMapOrNull(json['metadata']);
@@ -1397,9 +1403,23 @@ class HermesCalendarEvent {
   final String? recurrence;
   final Map<String, Object?>? metadata;
 
-  String? get googleCalendarId =>
-      (metadata?['google_calendar_id'] ?? metadata?['googleCalendarId'])
-          ?.toString();
+  String? get googleCalendarId => googleCalendarIds.firstOrNull;
+
+  List<String> get googleCalendarIds {
+    final raw =
+        metadata?['google_calendar_ids'] ?? metadata?['googleCalendarIds'];
+    if (raw is List) {
+      return raw
+          .map((value) => value.toString())
+          .where((value) => value.isNotEmpty)
+          .toList();
+    }
+    final single =
+        metadata?['google_calendar_id'] ?? metadata?['googleCalendarId'];
+    return single == null || single.toString().isEmpty
+        ? const []
+        : [single.toString()];
+  }
 
   factory HermesCalendarEvent.fromJson(Map<String, Object?> json) {
     final parsedMetadata = _expectMapOrNull(json['metadata']);
@@ -1582,6 +1602,22 @@ Map<String, Object?>? _expectMapOrNull(Object? value) {
 List<Object?> _expectList(Object? value) {
   if (value is List<Object?>) return value;
   throw FormatException('Expected JSON array, got ${value.runtimeType}');
+}
+
+List<String> _googleCalendarIdsFromMetadata(Map<String, Object?>? metadata) {
+  final raw =
+      metadata?['google_calendar_ids'] ?? metadata?['googleCalendarIds'];
+  if (raw is List) {
+    return raw
+        .map((value) => value.toString())
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+  final single =
+      metadata?['google_calendar_id'] ?? metadata?['googleCalendarId'];
+  return single == null || single.toString().isEmpty
+      ? const []
+      : [single.toString()];
 }
 
 int _expectInt(Object? value) {

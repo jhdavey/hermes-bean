@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
 use App\Services\AgentProfileService;
+use App\Services\GoogleCalendarSyncService;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class WorkspaceController extends Controller
     public function __construct(
         private readonly WorkspaceService $workspaces,
         private readonly AgentProfileService $profiles,
+        private readonly GoogleCalendarSyncService $googleCalendar,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -141,6 +143,7 @@ class WorkspaceController extends Controller
             'default_export_calendar_id' => ['nullable', 'string'],
         ]);
         $workspace->googleCalendarMappings()->delete();
+        $this->googleCalendar->clearWorkspaceSyncTokens($connection, $workspace);
         $settings = $workspace->settings ?? [];
         $settings['google_calendar_mappings_configured'] = true;
         $workspace->forceFill(['settings' => $settings])->save();

@@ -380,9 +380,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _reminders = listedReminders.isEmpty
             ? summary.reminders
             : listedReminders;
-        _calendar = listedCalendarEvents.isEmpty
-            ? summary.calendarEvents
-            : listedCalendarEvents;
+        _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
         _events = results[6] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
@@ -689,6 +687,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final refreshedUser = await widget.apiClient.me().catchError(
         (_) => _user!,
       );
+      final refreshedCalendar = await widget.apiClient
+          .listCalendarEvents()
+          .catchError((_) => _calendar);
       if (!mounted) return;
       setState(() {
         _user = refreshedUser;
@@ -719,7 +720,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _chatRunState = result.status == 'blocked' ? 'Blocked' : 'Updated';
         _tasks = refreshedSummary.tasks;
         _reminders = refreshedSummary.reminders;
-        _calendar = refreshedSummary.calendarEvents;
+        _calendar = refreshedCalendar;
         _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
       });
@@ -950,9 +951,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _reminders = listedReminders.isEmpty
             ? summary.reminders
             : listedReminders;
-        _calendar = listedCalendarEvents.isEmpty
-            ? summary.calendarEvents
-            : listedCalendarEvents;
+        _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
         _events = results[6] as List<HermesActivityEvent>;
         _error = null;
@@ -1023,6 +1022,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? color,
     bool? isCritical,
     List<Object> syncToWorkspaceIds = const [],
+    List<String> googleCalendarIds = const [],
   }) async {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
     try {
@@ -1033,6 +1033,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               category: category,
               color: color,
               isCritical: isCritical ?? false,
+              metadata: googleCalendarIds.isEmpty
+                  ? null
+                  : {'google_calendar_ids': googleCalendarIds},
               workspaceId: _user?.activeWorkspace?.numericId,
               syncToWorkspaceIds: syncToWorkspaceIds,
             )
@@ -1044,6 +1047,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               category: category,
               color: color,
               isCritical: isCritical,
+              metadata: {
+                ...?task.metadata,
+                'google_calendar_ids': googleCalendarIds,
+              },
               clearCategory: category == null,
               clearColor: color == null,
               syncToWorkspaceIds: syncToWorkspaceIds,
@@ -1076,6 +1083,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       onEventCategorySaved: _saveEventCategory,
       workspaces: _user?.workspaces ?? const [],
       activeWorkspaceId: _user?.activeWorkspace?.id,
+      googleCalendarStatus: _googleCalendarStatus,
     );
     if (result == null) return;
     final title = (result['title'] as String).trim();
@@ -1090,6 +1098,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
+              .toList() ??
+          const [],
+      googleCalendarIds:
+          (result['googleCalendarIds'] as List?)
+              ?.map((value) => value.toString())
               .toList() ??
           const [],
     );
@@ -1110,6 +1123,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       onEventCategorySaved: _saveEventCategory,
       workspaces: _user?.workspaces ?? const [],
       activeWorkspaceId: _user?.activeWorkspace?.id,
+      googleCalendarStatus: _googleCalendarStatus,
     );
     if (result == null) return;
     final title = (result['title'] as String).trim();
@@ -1125,6 +1139,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
+              .toList() ??
+          const [],
+      googleCalendarIds:
+          (result['googleCalendarIds'] as List?)
+              ?.map((value) => value.toString())
               .toList() ??
           const [],
     );
@@ -1154,6 +1173,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? category,
     String? color,
     List<Object> syncToWorkspaceIds = const [],
+    List<String> googleCalendarIds = const [],
   }) async {
     final normalizedRemindAt = _taskReminderInputToWireValue(remindAt);
     if (normalizedRemindAt == null) {
@@ -1168,6 +1188,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               status: status,
               category: category,
               color: color,
+              metadata: googleCalendarIds.isEmpty
+                  ? null
+                  : {'google_calendar_ids': googleCalendarIds},
               workspaceId: _user?.activeWorkspace?.numericId,
               syncToWorkspaceIds: syncToWorkspaceIds,
             )
@@ -1178,6 +1201,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               status: status,
               category: category,
               color: color,
+              metadata: {
+                ...?reminder.metadata,
+                'google_calendar_ids': googleCalendarIds,
+              },
               clearCategory: category == null,
               clearColor: color == null,
               syncToWorkspaceIds: syncToWorkspaceIds,
@@ -2458,6 +2485,7 @@ class _CommandCenterContent extends StatelessWidget {
     String? color,
     bool? isCritical,
     List<Object> syncToWorkspaceIds,
+    List<String> googleCalendarIds,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -2469,6 +2497,7 @@ class _CommandCenterContent extends StatelessWidget {
     String? category,
     String? color,
     List<Object> syncToWorkspaceIds,
+    List<String> googleCalendarIds,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -3514,6 +3543,7 @@ class _TodayHomeView extends StatelessWidget {
     String? color,
     bool? isCritical,
     List<Object> syncToWorkspaceIds,
+    List<String> googleCalendarIds,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -3649,6 +3679,8 @@ class _TodayHomeView extends StatelessWidget {
       onEventCategorySaved: onEventCategorySaved,
       workspaces: user.workspaces,
       activeWorkspaceId: user.activeWorkspace?.id,
+      googleCalendarStatus: googleCalendarStatus,
+      initialGoogleCalendarIds: task?.googleCalendarIds ?? const [],
     );
     if (result == null) return;
     if (result['delete'] == true && task != null) {
@@ -3667,6 +3699,11 @@ class _TodayHomeView extends StatelessWidget {
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
+              .toList() ??
+          const [],
+      googleCalendarIds:
+          (result['googleCalendarIds'] as List?)
+              ?.map((value) => value.toString())
               .toList() ??
           const [],
     );
@@ -5018,7 +5055,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   String _eventIntervalUnit = 'days';
   String _reminderRecurrence = 'none';
   String _reminderIntervalUnit = 'days';
-  String? _googleCalendarId;
+  final Set<String> _googleCalendarIds = <String>{};
   final Set<Object> _syncWorkspaceIds = <Object>{};
   String? _validationError;
   late bool _isCritical;
@@ -5091,17 +5128,21 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     final writableGoogleCalendars =
         widget.googleCalendarStatus?.writableCalendars ??
         const <GoogleCalendarInfo>[];
-    _googleCalendarId =
-        event.googleCalendarId ??
-        widget.googleCalendarStatus?.defaultCalendarId;
-    if (_googleCalendarId != null &&
-        writableGoogleCalendars.isNotEmpty &&
-        !writableGoogleCalendars.any(
-          (calendar) => calendar.id == _googleCalendarId,
-        )) {
-      _googleCalendarId =
-          widget.googleCalendarStatus?.defaultCalendarId ??
-          writableGoogleCalendars.first.id;
+    _googleCalendarIds.addAll(event.googleCalendarIds);
+    if (_googleCalendarIds.isEmpty &&
+        widget.googleCalendarStatus?.defaultCalendarId != null) {
+      _googleCalendarIds.add(widget.googleCalendarStatus!.defaultCalendarId!);
+    }
+    if (writableGoogleCalendars.isNotEmpty) {
+      _googleCalendarIds.removeWhere(
+        (calendarId) => !writableGoogleCalendars.any(
+          (calendar) => calendar.id == calendarId,
+        ),
+      );
+      if (_googleCalendarIds.isEmpty &&
+          widget.googleCalendarStatus?.defaultCalendarId != null) {
+        _googleCalendarIds.add(widget.googleCalendarStatus!.defaultCalendarId!);
+      }
     }
     _isCritical = event.isCritical;
     final matchingCategoryColor = _categories
@@ -5178,10 +5219,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     }
 
     final eventInterval = int.tryParse(_eventInterval.text.trim()) ?? 1;
+    final sortedGoogleCalendarIds = _googleCalendarIds.toList()..sort();
     final eventMetadata = <String, Object?>{
       ...?widget.event.metadata,
       'recurrence': _recurrence,
-      if (_googleCalendarId != null) 'google_calendar_id': _googleCalendarId,
+      if (sortedGoogleCalendarIds.isNotEmpty)
+        'google_calendar_ids': sortedGoogleCalendarIds,
+      if (sortedGoogleCalendarIds.isNotEmpty)
+        'google_calendar_id': sortedGoogleCalendarIds.first,
       if (_recurrence == 'specific_days')
         'days': _eventSpecificDays.toList()..sort(),
       if (_recurrence == 'specific_days' || _recurrence == 'interval')
@@ -5250,6 +5295,25 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     await _saveCategoryValues(
       name: result['name'] ?? '',
       color: result['color'] ?? _color,
+    );
+  }
+
+  Future<void> _openCategoryEditModal(HermesEventCategory category) async {
+    if (category.id < 0) return;
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) => _EventCategoryCreateDialog(
+        initialColor: category.color,
+        initialName: category.name,
+        editing: true,
+        colors: _colors,
+      ),
+    );
+    if (result == null || !mounted) return;
+    await _saveCategoryValues(
+      category: category,
+      name: result['name'] ?? category.name,
+      color: result['color'] ?? category.color,
     );
   }
 
@@ -5555,24 +5619,29 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             children: [
                               const _SectionTitle(
                                 icon: Icons.calendar_month_rounded,
-                                title: 'Google calendar',
+                                title: 'Google calendars',
                                 subtitle:
-                                    'Choose where Bean updates this event in Google Calendar.',
+                                    'Add or update this event on selected writable Google calendars.',
                               ),
                               const SizedBox(height: 12),
                               for (final calendar
                                   in widget
                                       .googleCalendarStatus!
                                       .writableCalendars)
-                                RadioListTile<String>(
+                                CheckboxListTile(
                                   key: Key(
                                     'event-google-calendar-${calendar.id}',
                                   ),
                                   contentPadding: EdgeInsets.zero,
-                                  value: calendar.id,
-                                  groupValue: _googleCalendarId,
+                                  value: _googleCalendarIds.contains(
+                                    calendar.id,
+                                  ),
                                   onChanged: (value) => setState(() {
-                                    _googleCalendarId = value;
+                                    if (value ?? false) {
+                                      _googleCalendarIds.add(calendar.id);
+                                    } else {
+                                      _googleCalendarIds.remove(calendar.id);
+                                    }
                                   }),
                                   title: Text(calendar.summary),
                                   subtitle:
@@ -5786,12 +5855,17 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                     deleteKey: Key(
                                       'event-category-delete-${_categoryKey(category.name)}',
                                     ),
+                                    editKey: Key(
+                                      'event-category-edit-${_categoryKey(category.name)}',
+                                    ),
                                     category: category,
                                     color: _categoryColor(category.color),
                                     selected:
                                         _category.text.trim() == category.name,
                                     saving: _savingCategory,
                                     onSelected: () => _selectCategory(category),
+                                    onEdited: () =>
+                                        _openCategoryEditModal(category),
                                     onDeleted: () =>
                                         _deleteCategoryValues(category),
                                   ),
@@ -5855,21 +5929,25 @@ class _EventCategoryChip extends StatelessWidget {
   const _EventCategoryChip({
     required this.chipKey,
     required this.deleteKey,
+    required this.editKey,
     required this.category,
     required this.color,
     required this.selected,
     required this.saving,
     required this.onSelected,
+    required this.onEdited,
     required this.onDeleted,
   });
 
   final Key chipKey;
   final Key deleteKey;
+  final Key editKey;
   final HermesEventCategory category;
   final Color color;
   final bool selected;
   final bool saving;
   final VoidCallback onSelected;
+  final VoidCallback onEdited;
   final VoidCallback onDeleted;
 
   @override
@@ -5900,6 +5978,17 @@ class _EventCategoryChip extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
+            if (category.id >= 0)
+              InkResponse(
+                key: editKey,
+                radius: 16,
+                onTap: saving ? null : onEdited,
+                child: Icon(
+                  Icons.edit_rounded,
+                  size: 16,
+                  color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
+                ),
+              ),
             InkResponse(
               key: deleteKey,
               radius: 16,
@@ -5921,9 +6010,13 @@ class _EventCategoryCreateDialog extends StatefulWidget {
   const _EventCategoryCreateDialog({
     required this.initialColor,
     required this.colors,
+    this.initialName,
+    this.editing = false,
   });
 
   final String initialColor;
+  final String? initialName;
+  final bool editing;
   final List<({String value, String label})> colors;
 
   @override
@@ -5940,7 +6033,7 @@ class _EventCategoryCreateDialogState
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController();
+    _nameController = TextEditingController(text: widget.initialName ?? '');
     _selectedColor = widget.initialColor.toUpperCase();
     final hsv = HSVColor.fromColor(_colorFromHex(_selectedColor));
     _hue = hsv.hue;
@@ -5973,7 +6066,7 @@ class _EventCategoryCreateDialogState
     final previewColor = _colorFromHex(_selectedColor);
     return AlertDialog(
       key: const Key('event-category-create-modal'),
-      title: const Text('New category'),
+      title: Text(widget.editing ? 'Edit category' : 'New category'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -6051,7 +6144,7 @@ class _EventCategoryCreateDialogState
           onPressed: () => Navigator.of(
             context,
           ).pop({'name': _nameController.text.trim(), 'color': _selectedColor}),
-          child: const Text('Create'),
+          child: Text(widget.editing ? 'Save' : 'Create'),
         ),
       ],
     );
@@ -6446,9 +6539,12 @@ String? _calendarEventInputToWireValue(
   return parsed?.toIso8601String() ?? trimmed;
 }
 
-DateTime? _parseIsoWallClockDateTime(String value) {
+bool _hasExplicitIsoTimezone(String value) =>
+    RegExp(r'(?:Z|[+-]\d{2}:?\d{2})$', caseSensitive: false).hasMatch(value);
+
+DateTime? _parseIsoDeviceLocalDateTime(String value) {
   final match = RegExp(
-    r'^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2})(?::(\d{2}))?(?::(\d{2})(?:\.(\d{1,6}))?)?)?(?:Z|[+-]\d{2}:?\d{2})?$',
+    r'^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2})(?::(\d{2}))?(?::(\d{2})(?:\.(\d{1,6}))?)?)?$',
   ).firstMatch(value);
   if (match == null) return null;
   final year = int.tryParse(match.group(1)!);
@@ -6475,7 +6571,14 @@ DateTime? _parseIsoWallClockDateTime(String value) {
 DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
   if (value == null || value.trim().isEmpty) return null;
   final trimmed = value.trim();
-  final isoWallClock = _parseIsoWallClockDateTime(trimmed);
+  final isoWallClock = _parseIsoDeviceLocalDateTime(
+    _hasExplicitIsoTimezone(trimmed)
+        ? trimmed.replaceFirst(
+            RegExp(r'(?:Z|[+-]\\d{2}:?\\d{2})$', caseSensitive: false),
+            '',
+          )
+        : trimmed,
+  );
   if (isoWallClock != null) return isoWallClock;
   final parsed = DateTime.tryParse(trimmed);
   if (parsed != null) return parsed;
@@ -7320,6 +7423,8 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   onEventCategorySaved,
   List<HermesWorkspace> workspaces = const [],
   String? activeWorkspaceId,
+  GoogleCalendarSyncStatus? googleCalendarStatus,
+  List<String> initialGoogleCalendarIds = const [],
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
@@ -7329,6 +7434,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   var savingCategory = false;
   var isCritical = initialCritical;
   final syncWorkspaceIds = <Object>{};
+  final googleCalendarIds = <String>{...initialGoogleCalendarIds};
+  final writableGoogleCalendars =
+      googleCalendarStatus?.writableCalendars ?? const <GoogleCalendarInfo>[];
   final syncTargets = workspaces
       .where((workspace) => workspace.id != activeWorkspaceId)
       .toList();
@@ -7590,6 +7698,56 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                     label: const Text('Choose date and time'),
                   ),
                 ),
+                if (writableGoogleCalendars.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    key: const Key('title-time-editor-google-calendar-sync'),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: HeyBeanTheme.surface2,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: HeyBeanTheme.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Add to Google calendars',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Create or update this item on selected writable Google calendars.',
+                          style: TextStyle(color: HeyBeanTheme.muted),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final calendar in writableGoogleCalendars)
+                              FilterChip(
+                                key: Key(
+                                  'title-time-editor-google-calendar-${calendar.id}',
+                                ),
+                                label: Text(calendar.summary),
+                                selected: googleCalendarIds.contains(
+                                  calendar.id,
+                                ),
+                                onSelected: (selected) => setModalState(() {
+                                  if (selected) {
+                                    googleCalendarIds.add(calendar.id);
+                                  } else {
+                                    googleCalendarIds.remove(calendar.id);
+                                  }
+                                }),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (syncTargets.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Container(
@@ -7702,6 +7860,8 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                       : selectedColor),
                             'isCritical': isCritical,
                             'syncToWorkspaceIds': syncWorkspaceIds.toList(),
+                            'googleCalendarIds': googleCalendarIds.toList()
+                              ..sort(),
                           });
                         },
                         icon: const Icon(Icons.check_rounded),
@@ -7732,6 +7892,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                   : selectedColor),
                         'isCritical': isCritical,
                         'syncToWorkspaceIds': syncWorkspaceIds.toList(),
+                        'googleCalendarIds': googleCalendarIds.toList()..sort(),
                       });
                     },
                     icon: const Icon(Icons.done_all_rounded),
@@ -7772,6 +7933,7 @@ class _TaskListCard extends StatefulWidget {
     String? color,
     bool? isCritical,
     List<Object> syncToWorkspaceIds,
+    List<String> googleCalendarIds,
   })
   onTaskSaved;
   final Future<void> Function(HermesTask task) onTaskDeleted;
@@ -7853,6 +8015,7 @@ class _TaskListCardState extends State<_TaskListCard> {
       onEventCategorySaved: widget.onEventCategorySaved,
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
+      initialGoogleCalendarIds: task?.googleCalendarIds ?? const [],
     );
     if (result == null) return;
     if (result['delete'] == true && task != null) {
@@ -7899,6 +8062,7 @@ class _ReminderListCard extends StatefulWidget {
     String? category,
     String? color,
     List<Object> syncToWorkspaceIds,
+    List<String> googleCalendarIds,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -7989,6 +8153,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
           : (_reminderIsCompleted(reminder) ? 'Mark pending' : 'Mark complete'),
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
+      initialGoogleCalendarIds: reminder?.googleCalendarIds ?? const [],
     );
     if (result == null) return;
     if (result['delete'] == true && reminder != null) {
@@ -8265,68 +8430,53 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
     );
   }
 
-  Future<void> _syncAll(List<HermesWorkspace> workspaces) async {
+  Future<void> _syncAllFromPersonal(
+    HermesWorkspace target,
+    List<HermesWorkspace> workspaces,
+  ) async {
     final source =
-        widget.user.activeWorkspace ??
+        widget.user.personalWorkspace ??
         workspaces.firstWhere(
-          (workspace) => workspace.isDefault,
+          (workspace) => workspace.isPersonal,
           orElse: () => workspaces.first,
         );
-    final targets = workspaces
-        .where((workspace) => workspace.id != source.id)
-        .toList();
-    if (source.numericId == null || targets.isEmpty) return;
-    String? targetId = targets.first.id;
-    final selected = await showDialog<String>(
+    if (source.numericId == null || target.numericId == null) return;
+    if (source.id == target.id) return;
+
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sync all items'),
-        content: StatefulBuilder(
-          builder: (context, setDialogState) => DropdownButtonFormField<String>(
-            key: const Key('workspace-sync-all-target'),
-            initialValue: targetId,
-            decoration: const InputDecoration(
-              labelText: 'Copy current workspace to',
-            ),
-            items: [
-              for (final workspace in targets)
-                DropdownMenuItem(
-                  value: workspace.id,
-                  child: Text(workspace.name),
-                ),
-            ],
-            onChanged: (value) => setDialogState(() => targetId = value),
-          ),
+        title: const Text('Sync all from my personal workspace'),
+        content: Text(
+          'Copy all current Personal tasks, reminders, and events to ${target.name}. This is a one-time sync and will not automatically sync future items.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            key: const Key('workspace-sync-all-run'),
-            onPressed: () => Navigator.of(context).pop(targetId),
+            key: Key('workspace-sync-personal-run-${target.id}'),
+            onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Sync'),
           ),
         ],
       ),
     );
-    final target = targets
-        .where((workspace) => workspace.id == selected)
-        .firstOrNull;
-    if (target?.numericId == null) return;
+    if (confirmed != true) return;
+
     final result = await _run(
       () => widget.apiClient.syncWorkspaceAll(
         source.numericId!,
-        targetWorkspaceId: target!.numericId!,
+        targetWorkspaceId: target.numericId!,
         resourceTypes: const ['tasks', 'reminders', 'calendar_events'],
       ),
-      'Workspace sync completed.',
+      'Personal workspace sync completed.',
     );
     if (result != null && mounted) {
       setState(() {
         _message =
-            'Copied ${result.tasks} tasks, ${result.reminders} reminders, and ${result.calendarEvents} events.';
+            'Copied ${result.tasks} tasks, ${result.reminders} reminders, and ${result.calendarEvents} events from Personal to ${target.name}.';
       });
     }
   }
@@ -8569,6 +8719,20 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                               )
                             : null,
                       ),
+                    if (!workspace.isPersonal &&
+                        workspace.numericId != null) ...[
+                      const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        key: Key(
+                          'workspace-sync-personal-action-${workspace.id}',
+                        ),
+                        onPressed: _busy
+                            ? null
+                            : () => _syncAllFromPersonal(workspace, workspaces),
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Sync all from personal'),
+                      ),
+                    ],
                     if (googleCalendars.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       const Text(
@@ -8620,14 +8784,6 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                   onPressed: _busy ? null : _createHousehold,
                   icon: const Icon(Icons.add_home_rounded),
                   label: const Text('Add household'),
-                ),
-                OutlinedButton.icon(
-                  key: const Key('workspace-sync-all-action'),
-                  onPressed: _busy || workspaces.length < 2
-                      ? null
-                      : () => _syncAll(workspaces),
-                  icon: const Icon(Icons.copy_all_rounded),
-                  label: const Text('Sync all to workspace'),
                 ),
               ],
             ),
@@ -9099,67 +9255,6 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
   );
 }
 
-class _PastTasksSettingsCard extends StatelessWidget {
-  const _PastTasksSettingsCard({
-    required this.tasks,
-    required this.onTaskCompleted,
-  });
-
-  final List<HermesTask> tasks;
-  final Future<void> Function(HermesTask task) onTaskCompleted;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    key: const Key('past-tasks-settings'),
-    margin: const EdgeInsets.only(bottom: 10),
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: HeyBeanTheme.surface2,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: HeyBeanTheme.border),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Row(
-          children: [
-            Icon(
-              Icons.history_toggle_off_rounded,
-              color: HeyBeanTheme.accentStrong,
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Past tasks',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  Text(
-                    'Completed tasks that dropped off active lists stay here for 10 days.',
-                    style: TextStyle(color: HeyBeanTheme.muted),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (tasks.isEmpty)
-          const _EmptySurface(label: 'No past completed tasks')
-        else
-          for (final task in tasks)
-            _TaskItemTile(
-              task: task,
-              subtitle: 'Completed · Permanently deletes after 10 days',
-              onCompleted: onTaskCompleted,
-            ),
-      ],
-    ),
-  );
-}
-
 class _TaskItemTile extends StatelessWidget {
   const _TaskItemTile({
     required this.task,
@@ -9509,26 +9604,6 @@ List<HermesCalendarEvent> _criticalEventsForToday(
     return a.id.compareTo(b.id);
   });
   return visible;
-}
-
-int _compareRemindersByDueDate(HermesReminder a, HermesReminder b) {
-  final aDue = _parseReminderDueDate(a);
-  final bDue = _parseReminderDueDate(b);
-  if (aDue != null && bDue != null) {
-    final dueCompare = aDue.compareTo(bDue);
-    if (dueCompare != 0) return dueCompare;
-  } else if (aDue != null) {
-    return -1;
-  } else if (bDue != null) {
-    return 1;
-  }
-  return a.id.compareTo(b.id);
-}
-
-DateTime? _parseReminderDueDate(HermesReminder reminder) {
-  final dueAt = reminder.dueAt;
-  if (dueAt == null || dueAt.isEmpty) return null;
-  return _parseCalendarEventDateTime(dueAt);
 }
 
 bool _taskVisibleOnOrAfter(HermesTask task, DateTime today) {

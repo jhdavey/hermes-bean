@@ -12,6 +12,7 @@ use App\Models\ConversationSession;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Services\AgentProfileService;
+use App\Services\GoogleCalendarSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,7 +32,29 @@ class TodaySummaryController extends Controller
         $tasks = Task::where('workspace_id', $workspace->id)->visibleInActiveViews()->latest('updated_at')->get();
         $agentProfile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
         $reminders = Reminder::where('workspace_id', $workspace->id)->latest('remind_at')->get();
-        $calendarEvents = CalendarEvent::where('workspace_id', $workspace->id)->orderBy('starts_at')->get();
+        $calendarEventsQuery = CalendarEvent::where('workspace_id', $workspace->id);
+        $visibleGoogleCalendarIds = app(GoogleCalendarSyncService::class)->visibleGoogleCalendarIdsForWorkspace($user, $workspace);
+        if ($visibleGoogleCalendarIds !== null) {
+            $calendarEventsQuery->where(function ($query) use ($visibleGoogleCalendarIds): void {
+                $query->where(function ($query): void {
+                    $query->whereNull('metadata->source')
+                        ->orWhere('metadata->source', '!=', 'google_calendar');
+                });
+
+                if ($visibleGoogleCalendarIds !== []) {
+                    $query->orWhere(function ($query) use ($visibleGoogleCalendarIds): void {
+                        $query->where('metadata->source', 'google_calendar')
+                            ->where(function ($query) use ($visibleGoogleCalendarIds): void {
+                                $query->whereIn('google_calendar_id', $visibleGoogleCalendarIds);
+                                foreach ($visibleGoogleCalendarIds as $calendarId) {
+                                    $query->orWhere('metadata->google_calendar_id', $calendarId);
+                                }
+                            });
+                    });
+                }
+            });
+        }
+        $calendarEvents = $calendarEventsQuery->orderBy('starts_at')->get();
         $activityEvents = ActivityEvent::where('user_id', $user->id)->orderBy('id')->get();
         $approvals = Approval::where('user_id', $user->id)->latest('updated_at')->get();
         $blockers = Blocker::where('user_id', $user->id)->latest('updated_at')->get();

@@ -587,6 +587,60 @@ class GoogleCalendarSyncTest extends TestCase
             && $request['summary'] === 'Updated client meeting');
     }
 
+    public function test_local_calendar_create_exports_to_multiple_selected_google_calendars(): void
+    {
+        $token = $this->apiToken('calendar-multi-write@example.com');
+        $user = User::where('email', 'calendar-multi-write@example.com')->firstOrFail();
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary', 'work@example.com'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Main calendar', 'accessRole' => 'owner'],
+                    ['id' => 'work@example.com', 'summary' => 'Work', 'accessRole' => 'writer'],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events' => Http::response([
+                'id' => 'google-primary-1',
+                'updated' => '2026-05-15T12:00:00Z',
+                'htmlLink' => 'https://calendar.google.com/event?eid=primary',
+            ]),
+            'https://www.googleapis.com/calendar/v3/calendars/work%40example.com/events' => Http::response([
+                'id' => 'google-work-1',
+                'updated' => '2026-05-15T12:01:00Z',
+                'htmlLink' => 'https://calendar.google.com/event?eid=work',
+            ]),
+        ]);
+
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Multi calendar meeting',
+            'starts_at' => '2026-05-20T15:00:00Z',
+            'ends_at' => '2026-05-20T16:00:00Z',
+            'metadata' => ['google_calendar_ids' => ['primary', 'work@example.com']],
+        ])->assertCreated()
+            ->assertJsonPath('data.google_calendar_id', 'primary')
+            ->json('data.id');
+
+        $event = CalendarEvent::findOrFail($eventId);
+        $this->assertSame(['primary', 'work@example.com'], $event->metadata['google_calendar_ids']);
+        $this->assertSame('google-primary-1', $event->metadata['google_event_exports']['primary']['event_id']);
+        $this->assertSame('google-work-1', $event->metadata['google_event_exports']['work@example.com']['event_id']);
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && str_contains($request->url(), '/calendars/primary/events')
+            && $request['summary'] === 'Multi calendar meeting');
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && str_contains($request->url(), '/calendars/work%40example.com/events')
+            && $request['summary'] === 'Multi calendar meeting');
+    }
+
     public function test_manual_sync_upserts_and_deletes_google_calendar_events(): void
     {
         $token = $this->apiToken('calendar-resync@example.com');

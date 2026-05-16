@@ -260,37 +260,77 @@ class GoogleCalendarSyncService
         return $this->expandPrimaryCalendarAliases($connection, $this->selectedCalendarIds($connection, $workspace));
     }
 
+    public function clearWorkspaceSyncTokens(GoogleCalendarConnection $connection, Workspace $workspace): void
+    {
+        $metadata = $connection->metadata ?? [];
+        $syncTokens = $metadata['sync_tokens'] ?? [];
+        if (! is_array($syncTokens) || $syncTokens === []) {
+            return;
+        }
+
+        $prefix = $workspace->id.':';
+        foreach (array_keys($syncTokens) as $key) {
+            if (str_starts_with((string) $key, $prefix)) {
+                unset($syncTokens[$key]);
+            }
+        }
+
+        $metadata['sync_tokens'] = $syncTokens;
+        $connection->forceFill(['metadata' => $metadata])->save();
+    }
+
     public function exportEvent(CalendarEvent $event): CalendarEvent
     {
         $connection = $event->user?->googleCalendarConnection()->first();
         if (! $connection || $connection->status !== 'connected') {
             return $event;
         }
-        $calendarId = $this->eventGoogleCalendarId($event, $connection);
-        if (! $this->calendarCanWrite($connection, $calendarId)) {
+        $calendarIds = $this->eventGoogleCalendarIds($event, $connection);
+        $calendarIds = array_values(array_filter(
+            array_unique($calendarIds),
+            fn (string $calendarId): bool => $this->calendarCanWrite($connection, $calendarId)
+        ));
+        if ($calendarIds === []) {
             return $event;
         }
 
         $token = $this->validAccessToken($connection);
         $payload = $this->eventPayload($event);
-        $response = $event->google_event_id
-            ? Http::withToken($token)->patch($this->calendarEventsUrl($calendarId).'/'.rawurlencode($event->google_event_id), $payload)
-            : Http::withToken($token)->post($this->calendarEventsUrl($calendarId), $payload);
-        if (! $response->successful()) {
-            $this->markFailed($connection, 'Google Calendar event export failed: '.$response->body());
-            throw new RuntimeException('Google Calendar event export failed.');
+        $metadata = $event->metadata ?? [];
+        $exports = is_array($metadata['google_event_exports'] ?? null) ? $metadata['google_event_exports'] : [];
+        $primaryGoogleEvent = null;
+        $primaryCalendarId = null;
+
+        foreach ($calendarIds as $calendarId) {
+            $existingGoogleEventId = $exports[$calendarId]['event_id'] ?? ($calendarId === $event->google_calendar_id ? $event->google_event_id : null);
+            $response = $existingGoogleEventId
+                ? Http::withToken($token)->patch($this->calendarEventsUrl($calendarId).'/'.rawurlencode($existingGoogleEventId), $payload)
+                : Http::withToken($token)->post($this->calendarEventsUrl($calendarId), $payload);
+            if (! $response->successful()) {
+                $this->markFailed($connection, 'Google Calendar event export failed: '.$response->body());
+                throw new RuntimeException('Google Calendar event export failed.');
+            }
+
+            $googleEvent = $response->json();
+            $exports[$calendarId] = [
+                'event_id' => $googleEvent['id'] ?? $existingGoogleEventId,
+                'html_link' => $googleEvent['htmlLink'] ?? ($exports[$calendarId]['html_link'] ?? null),
+                'updated_at' => $googleEvent['updated'] ?? now()->toIso8601String(),
+            ];
+            $primaryGoogleEvent ??= $googleEvent;
+            $primaryCalendarId ??= $calendarId;
         }
 
-        $googleEvent = $response->json();
-        $metadata = $event->metadata ?? [];
         $metadata['source'] = $metadata['source'] ?? 'heybean';
-        $metadata['google_html_link'] = $googleEvent['htmlLink'] ?? ($metadata['google_html_link'] ?? null);
-        $metadata['google_calendar_id'] = $calendarId;
-        $metadata['google_calendar_summary'] = $this->calendarSummary($connection, $calendarId);
+        $metadata['google_event_exports'] = $exports;
+        $metadata['google_calendar_ids'] = $calendarIds;
+        $metadata['google_html_link'] = $primaryGoogleEvent['htmlLink'] ?? ($metadata['google_html_link'] ?? null);
+        $metadata['google_calendar_id'] = $primaryCalendarId;
+        $metadata['google_calendar_summary'] = $this->calendarSummary($connection, $primaryCalendarId);
         $event->forceFill([
-            'google_event_id' => $googleEvent['id'] ?? $event->google_event_id,
-            'google_calendar_id' => $calendarId,
-            'google_updated_at' => isset($googleEvent['updated']) ? Carbon::parse($googleEvent['updated']) : now(),
+            'google_event_id' => $primaryGoogleEvent['id'] ?? $event->google_event_id,
+            'google_calendar_id' => $primaryCalendarId,
+            'google_updated_at' => isset($primaryGoogleEvent['updated']) ? Carbon::parse($primaryGoogleEvent['updated']) : now(),
             'metadata' => $metadata,
         ])->save();
 
@@ -505,11 +545,16 @@ class GoogleCalendarSyncService
         return true;
     }
 
-    private function eventGoogleCalendarId(CalendarEvent $event, GoogleCalendarConnection $connection): string
+    private function eventGoogleCalendarIds(CalendarEvent $event, GoogleCalendarConnection $connection): array
     {
+        $metadataCalendarIds = $event->metadata['google_calendar_ids'] ?? null;
+        if (is_array($metadataCalendarIds)) {
+            return array_values(array_filter(array_map('strval', $metadataCalendarIds)));
+        }
+
         $metadataCalendarId = $event->metadata['google_calendar_id'] ?? null;
 
-        return $event->google_calendar_id ?: ($metadataCalendarId ? (string) $metadataCalendarId : ($connection->calendar_id ?: 'primary'));
+        return [$event->google_calendar_id ?: ($metadataCalendarId ? (string) $metadataCalendarId : ($connection->calendar_id ?: 'primary'))];
     }
 
     private function eventPayload(CalendarEvent $event): array

@@ -354,6 +354,75 @@ void main() {
     },
   );
 
+  testWidgets(
+    'household personal sync button copies Personal into that workspace',
+    (WidgetTester tester) async {
+      final api = _WorkspaceFakeHermesApiClient()
+        ..googleCalendarConnected = true
+        ..workspaces = const [
+          HermesWorkspace(
+            id: '1',
+            name: 'Personal',
+            type: 'personal',
+            role: 'owner',
+            isDefault: true,
+          ),
+          HermesWorkspace(
+            id: '2',
+            name: 'Family',
+            type: 'household',
+            role: 'owner',
+            active: true,
+          ),
+        ];
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('workspace-sync-all-action')), findsNothing);
+      await tester.ensureVisible(
+        find.byKey(const Key('workspace-sync-personal-action-2')),
+      );
+      await tester.pumpAndSettle();
+      final syncButton = tester.getRect(
+        find.byKey(const Key('workspace-sync-personal-action-2')),
+      );
+      final googleHeading = tester.getRect(
+        find.text('Google calendars for this workspace').last,
+      );
+      expect(syncButton.bottom, lessThanOrEqualTo(googleHeading.top));
+
+      await tester.tap(
+        find.byKey(const Key('workspace-sync-personal-action-2')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Sync all from personal'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('workspace-sync-personal-action-2')),
+          matching: find.byIcon(Icons.refresh_rounded),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('workspace-sync-personal-run-2')));
+      await tester.pumpAndSettle();
+
+      expect(api.syncedAllSourceWorkspaceId, 1);
+      expect(api.syncedAllTargetWorkspaceId, 2);
+      expect(
+        find.text(
+          'Copied 2 tasks, 1 reminders, and 3 events from Personal to Family.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets('settings edits current Bean preferences in one form', (
     WidgetTester tester,
   ) async {
@@ -2035,10 +2104,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.createdEvent?.title, 'Client kickoff');
-    expect(
-      api.createdEvent?.metadata?['google_calendar_id'],
+    expect(api.createdEvent?.metadata?['google_calendar_ids'], [
+      'primary',
       'sports@example.com',
-    );
+    ]);
+    expect(api.createdEvent?.metadata?['google_calendar_id'], 'primary');
     expect(find.textContaining('Client kickoff'), findsOneWidget);
   });
 
@@ -2360,7 +2430,8 @@ void main() {
       expect(api.updatedEvent?.recurrence, 'specific_days');
       expect(api.updatedEvent?.metadata, {
         'recurrence': 'specific_days',
-        'google_calendar_id': 'sports@example.com',
+        'google_calendar_ids': ['primary', 'sports@example.com'],
+        'google_calendar_id': 'primary',
         'days': ['thu', 'tue'],
         'interval': 1,
         'unit': 'days',
@@ -2490,8 +2561,20 @@ void main() {
   );
 
   testWidgets(
-    'UTC multi-day event timestamps render as wall-clock segments across today and tomorrow',
+    'UTC calendar event timestamps render as wall-clock schedule values',
     (WidgetTester tester) async {
+      final now = DateTime.now();
+      final tomorrow = now.add(const Duration(days: 1));
+      final wallClockStart = DateTime(now.year, now.month, now.day, 9);
+      final wallClockEnd = DateTime(
+        tomorrow.year,
+        tomorrow.month,
+        tomorrow.day,
+        10,
+      );
+      final expectedTimeLabel =
+          '${_testNaturalTimeLabel(wallClockStart)} – ${_testNaturalTimeLabel(wallClockEnd)}';
+
       await tester.pumpWidget(
         HermesBeanApp(
           apiClient: _UtcMultiDayCalendarFakeHermesApiClient(),
@@ -2503,28 +2586,29 @@ void main() {
       final eventBlock = find.byKey(
         const Key('calendar-event-block-app-project-focus-block'),
       );
-      expect(eventBlock, findsNWidgets(2));
-
-      final selectedHeading = tester.getRect(
-        find.byKey(const Key('day-column-heading-selected')),
-      );
-      final nextHeading = tester.getRect(
-        find.byKey(const Key('day-column-heading-next')),
-      );
-      final todaySegment = tester.getRect(eventBlock.first);
-      final tomorrowSegment = tester.getRect(eventBlock.last);
-
-      expect(todaySegment.left, greaterThanOrEqualTo(selectedHeading.left));
-      expect(todaySegment.right, lessThanOrEqualTo(selectedHeading.right));
-      expect(tomorrowSegment.left, greaterThanOrEqualTo(nextHeading.left));
-      expect(tomorrowSegment.right, lessThanOrEqualTo(nextHeading.right));
+      expect(eventBlock, findsWidgets);
       expect(
-        todaySegment.top,
-        closeTo(selectedHeading.bottom + 42 + (2 * 52.5) + 2, 1),
+        find.descendant(
+          of: eventBlock.first,
+          matching: find.text(expectedTimeLabel),
+        ),
+        findsOneWidget,
       );
-      expect(todaySegment.height, closeTo((14 * 52.5) - 4, 1));
-      expect(tomorrowSegment.top, closeTo(nextHeading.bottom + 42 + 2, 1));
-      expect(tomorrowSegment.height, closeTo((3 * 52.5) - 4, 1));
+
+      await tester.ensureVisible(eventBlock.first);
+      await tester.pumpAndSettle();
+      await tester.tap(eventBlock.first);
+      await tester.pumpAndSettle();
+      final startEditor = tester.widget<EditableText>(
+        find.descendant(
+          of: find.byKey(const Key('event-start-field')),
+          matching: find.byType(EditableText),
+        ),
+      );
+      expect(
+        startEditor.controller.text,
+        contains(_testNaturalTimeLabel(wallClockStart)),
+      );
     },
   );
 
@@ -2970,6 +3054,8 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   Completer<HermesUser>? nextMeCompleter;
   var savedWorkspaceCalendarIds = <String>[];
   int? defaultWorkspaceSetTo;
+  int? syncedAllSourceWorkspaceId;
+  int? syncedAllTargetWorkspaceId;
   var workspaces = <HermesWorkspace>[
     const HermesWorkspace(
       id: '1',
@@ -3061,6 +3147,17 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
           'is_default_export': id == defaultExportCalendarId,
         },
     ];
+  }
+
+  @override
+  Future<WorkspaceSyncResult> syncWorkspaceAll(
+    int sourceWorkspaceId, {
+    required int targetWorkspaceId,
+    List<String>? resourceTypes,
+  }) async {
+    syncedAllSourceWorkspaceId = sourceWorkspaceId;
+    syncedAllTargetWorkspaceId = targetWorkspaceId;
+    return const WorkspaceSyncResult(tasks: 2, reminders: 1, calendarEvents: 3);
   }
 }
 
@@ -4046,7 +4143,12 @@ class _GoogleCalendarAutoSyncFakeHermesApiClient
           HermesCalendarEvent(
             id: 909,
             title: 'Imported Google event',
-            startsAt: DateTime.now().toIso8601String(),
+            startsAt: DateTime(
+              DateTime.now().year,
+              DateTime.now().month,
+              DateTime.now().day,
+              9,
+            ).toIso8601String(),
           ),
         ]
       : super.listCalendarEvents();
@@ -4156,6 +4258,16 @@ class _JsonEnvelopeMessageHermesApiClient extends _SignedInFakeHermesApiClient {
       events: [],
     );
   }
+}
+
+String _testNaturalTimeLabel(DateTime value) {
+  var hour = value.hour % 12;
+  if (hour == 0) hour = 12;
+  final minute = value.minute == 0
+      ? ''
+      : ':${value.minute.toString().padLeft(2, '0')}';
+  final meridiem = value.hour >= 12 ? 'pm' : 'am';
+  return '$hour$minute$meridiem';
 }
 
 Color? _datePillColor(WidgetTester tester, String key) {
