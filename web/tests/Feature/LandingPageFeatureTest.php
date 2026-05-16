@@ -19,7 +19,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('It plans your calendar, captures tasks, sets reminders', false)
             ->assertSee('keeps home and work moving from one focused conversation', false)
             ->assertSee('Join the first 100', false)
-            ->assertSee('Use your voice:', false)
+            ->assertDontSee('Use your voice:', false)
             ->assertSee('Just say “Hey, Bean…!”', false)
             ->assertSee('Voice-first requests', false)
             ->assertSee('Google Calendar-ready', false)

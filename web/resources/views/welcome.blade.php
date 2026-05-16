@@ -40,7 +40,7 @@
                 <p class="micro">No spam. Private beta invites only. We’ll only use your email for HeyBean launch updates.</p>
             @endif
             <div class="cta"><a class="button secondary" href="#how">See how Bean works</a></div>
-            <p class="micro"><strong>Use your voice:</strong> Just say “Hey, Bean…!”</p>
+            <p class="micro"><strong>Just say “Hey, Bean…!”</strong></p>
             <div class="proof"><span>Voice-first requests</span><span>Google Calendar-ready</span><span>Approval guardrails</span><span>Work + home spaces</span><span>Private by design</span></div>
         </section>
         <section class="phone-wrap" aria-label="HeyBean iOS Today screenshot">
