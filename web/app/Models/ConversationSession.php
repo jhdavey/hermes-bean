@@ -3,11 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ConversationSession extends Model
 {
-    protected $fillable = ['user_id', 'title', 'status', 'runtime_mode', 'metadata', 'last_activity_at'];
+    protected $fillable = ['user_id', 'workspace_id', 'created_by_user_id', 'title', 'status', 'runtime_mode', 'metadata', 'last_activity_at'];
 
     protected function casts(): array
     {
@@ -20,6 +21,11 @@ class ConversationSession extends Model
     public function messages(): HasMany
     {
         return $this->hasMany(ConversationMessage::class);
+    }
+
+    public function workspace(): BelongsTo
+    {
+        return $this->belongsTo(Workspace::class);
     }
 
     public function activityEvents(): HasMany

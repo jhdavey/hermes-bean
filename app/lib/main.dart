@@ -340,6 +340,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final user = knownUser ?? await widget.apiClient.me();
       final session = await widget.apiClient.startSession(
         title: 'Today',
+        workspaceId: user.activeWorkspace?.numericId,
         metadata: {'source': 'flutter'},
       );
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
@@ -598,6 +599,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     try {
       final session = await widget.apiClient.startSession(
         title: 'New chat',
+        workspaceId: _user?.activeWorkspace?.numericId,
         metadata: {'source': 'flutter'},
       );
       final events = await widget.apiClient
@@ -1527,7 +1529,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               status: 'not_connected',
             ),
       );
-      final session = _session;
+      final session = await widget.apiClient.startSession(
+        title: 'Workspace chat',
+        workspaceId: user.activeWorkspace?.numericId,
+        metadata: {'source': 'flutter', 'reason': 'workspace_refresh'},
+      );
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
         widget.apiClient.listTasks().catchError((_) => const <HermesTask>[]),
@@ -1543,14 +1549,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         widget.apiClient.listEventCategories().catchError(
           (_) => const <HermesEventCategory>[],
         ),
-        if (session != null)
-          widget.apiClient
-              .pollActivityEvents(session.id)
-              .catchError((_) => const <HermesActivityEvent>[])
-        else
-          Future<List<HermesActivityEvent>>.value(
-            const <HermesActivityEvent>[],
-          ),
+        widget.apiClient
+            .pollActivityEvents(session.id)
+            .catchError((_) => const <HermesActivityEvent>[]),
       ]);
       final summary = results[0] as HermesTodaySummary;
       final listedTasks = results[1] as List<HermesTask>;
@@ -1559,6 +1560,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       if (!mounted) return;
       setState(() {
         _user = user;
+        _session = session;
         _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
         _pastTasks = results[4] as List<HermesTask>;
         _eventCategories = results[5] as List<HermesEventCategory>;

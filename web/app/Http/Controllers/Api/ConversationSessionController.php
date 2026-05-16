@@ -17,6 +17,7 @@ class ConversationSessionController extends Controller
         $data = $request->validate([
             'title' => ['nullable', 'string', 'max:255'],
             'runtime_mode' => ['nullable', 'string', 'max:50'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'metadata' => ['nullable', 'array'],
         ]);
 

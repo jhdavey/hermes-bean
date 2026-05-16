@@ -12,6 +12,7 @@ use App\Models\ConversationSession;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
@@ -19,13 +20,23 @@ use Symfony\Component\Process\Process;
 
 class HermesCliRuntimeService implements HermesRuntimeService
 {
-    public function __construct(private readonly StructuredHermesActionService $actionService) {}
+    public function __construct(
+        private readonly StructuredHermesActionService $actionService,
+        private readonly AgentProfileService $agentProfileService,
+        private readonly WorkspaceService $workspaceService,
+    ) {}
 
     public function startSession(array $attributes = []): ConversationSession
     {
         return DB::transaction(function () use ($attributes): ConversationSession {
+            $user = User::findOrFail($attributes['user_id'] ?? auth()->id());
+            $workspace = $this->workspaceService->resolveWorkspace($user, $attributes['workspace_id'] ?? null);
+            $this->agentProfileService->ensureForWorkspace($workspace, $user);
+
             $session = ConversationSession::create([
-                'user_id' => $attributes['user_id'] ?? auth()->id(),
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'created_by_user_id' => $user->id,
                 'title' => $attributes['title'] ?? null,
                 'status' => 'active',
                 'runtime_mode' => $attributes['runtime_mode'] ?? 'cli',
@@ -35,6 +46,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
 
             $this->recordEvent($session, 'runtime.session_started', [
                 'runtime_mode' => $session->runtime_mode,
+                'workspace_id' => $workspace->id,
             ]);
 
             return $session->refresh();
@@ -213,7 +225,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
             }
         }
 
-        $profile = AgentProfile::where('user_id', $session->user_id)->first();
+        $profile = $this->profileForSession($session);
         if ($profile?->runtime_home) {
             $environment['HERMES_HOME'] = (string) $profile->runtime_home;
         }
@@ -264,11 +276,22 @@ PROMPT.$this->payloadFor($session, $message);
     private function payloadFor(ConversationSession $session, ConversationMessage $message): string
     {
         $user = User::find($session->user_id);
-        $profile = AgentProfile::where('user_id', $session->user_id)->first();
+        $workspace = $this->workspaceForSession($session, $user);
+        $profile = $workspace ? $this->agentProfileService->ensureForWorkspace($workspace, $user) : $this->profileForSession($session);
+        $workspaceId = $workspace?->id;
+        $accessibleWorkspaces = $user
+            ? $this->workspaceService->accessibleWorkspaces($user)->map(fn (Workspace $workspace): array => [
+                'id' => $workspace->id,
+                'name' => $workspace->name,
+                'type' => $workspace->type,
+                'role' => $workspace->getAttribute('role'),
+            ])->values()
+            : collect();
 
         return json_encode([
             'session' => [
                 'id' => $session->id,
+                'workspace_id' => $workspaceId,
                 'title' => $session->title,
                 'runtime_mode' => $session->runtime_mode,
                 'metadata' => $session->metadata,
@@ -281,6 +304,7 @@ PROMPT.$this->payloadFor($session, $message);
             ],
             'agent_profile' => $profile ? [
                 'id' => $profile->id,
+                'workspace_id' => $profile->workspace_id,
                 'slug' => $profile->slug,
                 'provider' => $profile->provider,
                 'model' => $profile->model,
@@ -289,12 +313,19 @@ PROMPT.$this->payloadFor($session, $message);
                 'approval_policy' => $profile->approval_policy,
                 'settings' => $profile->settings,
             ] : null,
+            'workspace' => $workspace ? [
+                'id' => $workspace->id,
+                'name' => $workspace->name,
+                'type' => $workspace->type,
+                'settings' => $workspace->settings,
+            ] : null,
+            'accessible_sync_targets' => $accessibleWorkspaces,
             'dashboard_state' => [
-                'tasks' => Task::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'due_at', 'metadata']),
-                'reminders' => Reminder::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'notes', 'status', 'category', 'color', 'is_critical', 'remind_at', 'metadata']),
-                'calendar_events' => CalendarEvent::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'description', 'location', 'category', 'color', 'recurrence', 'status', 'starts_at', 'ends_at', 'metadata']),
-                'approvals' => Approval::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'title', 'status', 'description', 'payload']),
-                'blockers' => Blocker::where('user_id', $session->user_id)->latest('updated_at')->limit(50)->get(['id', 'reason', 'status', 'context']),
+                'tasks' => $this->workspaceScopedQuery(Task::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'due_at', 'metadata']),
+                'reminders' => $this->workspaceScopedQuery(Reminder::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'notes', 'status', 'category', 'color', 'is_critical', 'remind_at', 'metadata']),
+                'calendar_events' => $this->workspaceScopedQuery(CalendarEvent::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'description', 'location', 'category', 'color', 'recurrence', 'status', 'starts_at', 'ends_at', 'metadata']),
+                'approvals' => $this->workspaceScopedQuery(Approval::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'status', 'description', 'payload']),
+                'blockers' => $this->workspaceScopedQuery(Blocker::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'reason', 'status', 'context']),
             ],
             'allowed_action_schema' => [
                 'low_risk' => [
@@ -314,6 +345,33 @@ PROMPT.$this->payloadFor($session, $message);
                 'metadata' => $message->metadata,
             ],
         ], JSON_THROW_ON_ERROR);
+    }
+
+    private function profileForSession(ConversationSession $session): ?AgentProfile
+    {
+        $user = User::find($session->user_id);
+        $workspace = $this->workspaceForSession($session, $user);
+
+        if ($workspace) {
+            return $this->agentProfileService->ensureForWorkspace($workspace, $user);
+        }
+
+        return AgentProfile::where('user_id', $session->user_id)->first();
+    }
+
+    private function workspaceForSession(ConversationSession $session, ?User $user = null): ?Workspace
+    {
+        $user ??= User::find($session->user_id);
+        if (! $user) {
+            return null;
+        }
+
+        return $this->workspaceService->resolveWorkspace($user, $session->workspace_id ?: null);
+    }
+
+    private function workspaceScopedQuery(mixed $query, ?int $workspaceId): mixed
+    {
+        return $workspaceId ? $query->where('workspace_id', $workspaceId) : $query;
     }
 
     private function structuredOutputFrom(string $stdout): ?array
@@ -417,6 +475,7 @@ PROMPT.$this->payloadFor($session, $message);
 
             $blocker = Blocker::create([
                 'user_id' => $session->user_id,
+                'workspace_id' => $session->workspace_id,
                 'conversation_session_id' => $session->id,
                 'reason' => $reason,
                 'status' => 'open',
@@ -448,6 +507,7 @@ PROMPT.$this->payloadFor($session, $message);
     {
         return ActivityEvent::create([
             'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
             'conversation_session_id' => $session->id,
             'event_type' => $type,
             'tool_name' => $toolName,

@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class SchedulerJobRecord extends Model
 {
-    protected $fillable = ['user_id', 'name', 'status', 'scheduled_for', 'started_at', 'finished_at', 'payload', 'last_error'];
+    protected $fillable = ['user_id', 'workspace_id', 'name', 'status', 'scheduled_for', 'started_at', 'finished_at', 'payload', 'last_error'];
 
     protected function casts(): array
     {

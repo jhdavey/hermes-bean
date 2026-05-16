@@ -39,7 +39,7 @@ class ProductionReadinessSecurityTest extends TestCase
         ])->options('/api/auth/login')
             ->assertNoContent()
             ->assertHeader('Access-Control-Allow-Origin', 'https://app.hermesbean.example')
-            ->assertHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+            ->assertHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
             ->assertHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, X-Requested-With');
     }
 

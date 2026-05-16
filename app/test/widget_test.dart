@@ -3369,8 +3369,14 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<HermesSession> startSession({
     String? title,
     String? runtimeMode,
+    int? workspaceId,
     Map<String, Object?>? metadata,
-  }) async => const HermesSession(id: 42, status: 'active', title: 'Today');
+  }) async => HermesSession(
+    id: 42,
+    status: 'active',
+    workspaceId: workspaceId,
+    title: 'Today',
+  );
 
   @override
   Future<List<HermesTask>> listTasks() async => plannedToday

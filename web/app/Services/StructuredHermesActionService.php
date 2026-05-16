@@ -13,6 +13,7 @@ use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +42,7 @@ class StructuredHermesActionService
             if ($this->requiresApproval($session, $action)) {
                 $approval = Approval::create([
                     'user_id' => $session->user_id,
+                    'workspace_id' => $session->workspace_id,
                     'conversation_session_id' => $session->id,
                     'title' => $this->approvalTitle($action),
                     'description' => isset($action['description']) && is_string($action['description']) ? $action['description'] : null,
@@ -151,7 +153,7 @@ class StructuredHermesActionService
             return false;
         }
 
-        $profile = AgentProfile::where('user_id', $session->user_id)->first();
+        $profile = $this->profileForSession($session);
         $required = $profile?->approval_policy['require_approval_for']
             ?? config('services.hermes_runtime.require_approval_for', []);
 
@@ -244,6 +246,8 @@ class StructuredHermesActionService
     {
         $task = Task::create([
             'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
             'conversation_session_id' => $session->id,
             'title' => $this->stringParameter($parameters, 'title', 'Untitled task'),
             'type' => $this->stringParameter($parameters, 'type', 'todo'),
@@ -269,6 +273,8 @@ class StructuredHermesActionService
     {
         $reminder = Reminder::create([
             'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
             'conversation_session_id' => $session->id,
             'calendar_event_id' => $parameters['calendar_event_id'] ?? null,
             'title' => $this->stringParameter($parameters, 'title', 'Untitled reminder'),
@@ -300,6 +306,8 @@ class StructuredHermesActionService
 
         $calendarEvent = CalendarEvent::create([
             'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
             'conversation_session_id' => $session->id,
             'title' => $this->stringParameter($parameters, 'title', 'Untitled event'),
             'description' => $parameters['description'] ?? null,
@@ -369,6 +377,7 @@ class StructuredHermesActionService
         $category = EventCategory::updateOrCreate(
             [
                 'user_id' => $session->user_id,
+                'workspace_id' => $session->workspace_id,
                 'name' => $this->stringParameter($parameters, 'name', 'Personal'),
             ],
             [
@@ -390,6 +399,7 @@ class StructuredHermesActionService
         $category->update($this->onlyPresent($parameters, ['name', 'color', 'metadata']));
         if ($oldName !== $category->name) {
             CalendarEvent::where('user_id', $session->user_id)
+                ->where('workspace_id', $session->workspace_id)
                 ->where('category', $oldName)
                 ->update(['category' => $category->name]);
         }
@@ -401,6 +411,7 @@ class StructuredHermesActionService
     {
         $category = $this->ownedModel(EventCategory::class, $session, $parameters);
         CalendarEvent::where('user_id', $session->user_id)
+            ->where('workspace_id', $session->workspace_id)
             ->where('category', $category->name)
             ->update(['category' => null]);
         $id = $category->id;
@@ -414,6 +425,7 @@ class StructuredHermesActionService
     {
         $approval = Approval::create([
             'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
             'conversation_session_id' => $session->id,
             'title' => $this->stringParameter($parameters, 'title', 'Approval requested'),
             'description' => $parameters['description'] ?? null,
@@ -451,6 +463,7 @@ class StructuredHermesActionService
     {
         $blocker = Blocker::create([
             'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
             'conversation_session_id' => $session->id,
             'reason' => $this->stringParameter($parameters, 'reason', $this->stringParameter($parameters, 'title', 'Needs attention')),
             'status' => $this->stringParameter($parameters, 'status', 'open'),
@@ -489,6 +502,7 @@ class StructuredHermesActionService
         $name = $this->stringParameter($parameters, 'name', $this->stringParameter($parameters, 'title', 'Scheduled job'));
         $job = SchedulerJobRecord::create([
             'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
             'name' => $name,
             'status' => $this->stringParameter($parameters, 'status', 'queued'),
             'scheduled_for' => $scheduledFor,
@@ -505,6 +519,8 @@ class StructuredHermesActionService
         if ($scheduledFor !== null && $this->shouldMirrorSchedulerJobToCalendar($parameters)) {
             $calendarEvent = CalendarEvent::create([
                 'user_id' => $session->user_id,
+                'workspace_id' => $session->workspace_id,
+                'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
                 'conversation_session_id' => $session->id,
                 'title' => $name,
                 'description' => isset($parameters['description']) ? (string) $parameters['description'] : null,
@@ -565,10 +581,7 @@ class StructuredHermesActionService
 
     private function updateAgentProfile(ConversationSession $session, array $parameters): ActivityEvent
     {
-        $profile = AgentProfile::firstOrCreate(
-            ['user_id' => $session->user_id],
-            ['slug' => 'default', 'display_name' => 'Bean', 'status' => 'active']
-        );
+        $profile = $this->profileForSession($session);
         $updates = $this->onlyPresent($parameters, ['slug', 'display_name', 'status', 'provider', 'model', 'router_mode', 'runtime_home', 'tool_policy', 'approval_policy', 'metadata']);
         if (isset($parameters['settings']) && is_array($parameters['settings'])) {
             app(AgentProfileService::class)->mergeSettings($profile, $parameters['settings'], 'agent');
@@ -601,6 +614,19 @@ class StructuredHermesActionService
         );
     }
 
+    private function profileForSession(ConversationSession $session): AgentProfile
+    {
+        if ($session->workspace_id) {
+            $workspace = $session->workspace ?: Workspace::find($session->workspace_id);
+            $user = User::find($session->user_id);
+            if ($workspace && $user) {
+                return app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
+            }
+        }
+
+        return app(AgentProfileService::class)->ensureForUser(User::findOrFail($session->user_id));
+    }
+
     private function deleteOwned(string $modelClass, ConversationSession $session, array $parameters, string $eventType, string $toolName, string $payloadKey): ActivityEvent
     {
         $model = $this->ownedModel($modelClass, $session, $parameters);
@@ -617,7 +643,12 @@ class StructuredHermesActionService
             throw new InvalidArgumentException('Structured action is missing required resource id.');
         }
 
-        return $modelClass::where('user_id', $session->user_id)->findOrFail($id);
+        $query = $modelClass::where('user_id', $session->user_id);
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+
+        return $query->findOrFail($id);
     }
 
     private function onlyPresent(array $parameters, array $keys): array
@@ -643,6 +674,7 @@ class StructuredHermesActionService
     {
         return ActivityEvent::create([
             'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
             'conversation_session_id' => $session->id,
             'event_type' => $type,
             'tool_name' => $toolName,

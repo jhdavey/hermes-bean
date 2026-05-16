@@ -561,11 +561,13 @@ class HermesApiClient {
   Future<HermesSession> startSession({
     String? title,
     String? runtimeMode,
+    int? workspaceId,
     Map<String, Object?>? metadata,
   }) async {
     final body = <String, Object?>{};
     if (title != null) body['title'] = title;
     if (runtimeMode != null) body['runtime_mode'] = runtimeMode;
+    if (workspaceId != null) body['workspace_id'] = workspaceId;
     if (metadata != null) body['metadata'] = metadata;
 
     final data = await _sendJson('POST', '/assistant/sessions', body: body);
@@ -1478,15 +1480,22 @@ class HermesCalendarEvent {
 }
 
 class HermesSession {
-  const HermesSession({required this.id, required this.status, this.title});
+  const HermesSession({
+    required this.id,
+    required this.status,
+    this.workspaceId,
+    this.title,
+  });
 
   final int id;
   final String status;
+  final int? workspaceId;
   final String? title;
 
   factory HermesSession.fromJson(Map<String, Object?> json) => HermesSession(
     id: _expectInt(json['id']),
     status: _expectString(json['status']),
+    workspaceId: _readIntOrNull(json['workspace_id']),
     title: json['title'] as String?,
   );
 }

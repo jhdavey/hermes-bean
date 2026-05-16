@@ -9,6 +9,7 @@ use App\Models\Blocker;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\Task;
+use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -104,6 +105,67 @@ PHP);
         $this->assertSame(realpath($this->tempDir), $invocation['cwd']);
         $this->assertSame('Plan my day', $invocation['payload']['message']['content']);
         $this->assertSame('cli-owner@example.com', $invocation['payload']['user']['email']);
+    }
+
+    public function test_household_session_uses_household_agent_profile_runtime_home_and_workspace_payload(): void
+    {
+        $script = $this->writeExecutable('fake-household-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = $argv[array_search('-q', $argv, true) + 1] ?? '';
+$payloadJson = trim(substr($prompt, strpos($prompt, "Runtime payload:") + strlen("Runtime payload:")));
+$payload = json_decode($payloadJson, true, flags: JSON_THROW_ON_ERROR);
+file_put_contents(getenv('HERMES_FAKE_LOG'), json_encode([
+    'home' => getenv('HERMES_HOME'),
+    'payload' => $payload,
+], JSON_THROW_ON_ERROR));
+echo json_encode(['content' => 'Household Bean answered.'], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.workdir', $this->tempDir);
+        config()->set('services.hermes_runtime.users_home', $this->tempDir.'/hermes-users');
+        config()->set('services.hermes_runtime.environment', [
+            'HERMES_FAKE_LOG' => $this->tempDir.'/household-invocation.json',
+        ]);
+
+        $token = $this->apiToken('household-cli-owner@example.com');
+        $user = \App\Models\User::where('email', 'household-cli-owner@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $household = app(WorkspaceService::class)->createHousehold($user, 'Family');
+        $personalProfile = AgentProfile::where('workspace_id', $personalWorkspaceId)->firstOrFail();
+        $householdProfile = AgentProfile::where('workspace_id', $household->id)->first();
+        $this->assertNull($householdProfile);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Family chat',
+            'workspace_id' => $household->id,
+        ])->assertCreated()
+            ->assertJsonPath('data.workspace_id', $household->id)
+            ->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Plan dinner for the household',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Household Bean answered.');
+
+        $householdProfile = AgentProfile::where('workspace_id', $household->id)->firstOrFail();
+        $this->assertNotSame($personalProfile->id, $householdProfile->id);
+        $this->assertStringContainsString('/workspaces/'.$household->id.'/', $householdProfile->runtime_home);
+
+        $invocation = json_decode(File::get($this->tempDir.'/household-invocation.json'), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame($householdProfile->runtime_home, $invocation['home']);
+        $this->assertSame($household->id, $invocation['payload']['session']['workspace_id']);
+        $this->assertSame($household->id, $invocation['payload']['workspace']['id']);
+        $this->assertSame($householdProfile->id, $invocation['payload']['agent_profile']['id']);
+        $this->assertSame($household->id, $invocation['payload']['agent_profile']['workspace_id']);
+        $this->assertDatabaseHas('activity_events', [
+            'conversation_session_id' => $sessionId,
+            'workspace_id' => $household->id,
+            'event_type' => 'runtime.hermes_cli_started',
+        ]);
     }
 
     public function test_missing_cli_path_fails_closed_with_blocker_without_assistant_message(): void
