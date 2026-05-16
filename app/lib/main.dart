@@ -8386,6 +8386,23 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                 style: const TextStyle(color: HeyBeanTheme.muted),
               ),
             ],
+            if (_busy) ...[
+              const SizedBox(height: 10),
+              const LinearProgressIndicator(
+                key: Key('workspace-calendar-sync-progress'),
+                minHeight: 3,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Syncing your calendars...',
+                key: Key('workspace-calendar-sync-message'),
+                style: TextStyle(
+                  color: HeyBeanTheme.muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,

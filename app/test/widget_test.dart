@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
@@ -170,6 +171,58 @@ void main() {
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
       expect(find.text('Family'), findsWidgets);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'workspace calendar selection shows syncing message while saving',
+    (WidgetTester tester) async {
+      final calendarSave = Completer<List<Map<String, Object?>>>();
+      final api = _WorkspaceFakeHermesApiClient()
+        ..googleCalendarConnected = true
+        ..workspaceCalendarSaveCompleter = calendarSave
+        ..workspaces = const [
+          HermesWorkspace(
+            id: '1',
+            name: 'Personal',
+            type: 'personal',
+            role: 'owner',
+            active: true,
+            isDefault: true,
+          ),
+        ];
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(
+          const Key('workspace-google-calendar-1-holidays@example.com'),
+        ),
+      );
+      await tester.tap(
+        find.byKey(
+          const Key('workspace-google-calendar-1-holidays@example.com'),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('workspace-calendar-sync-progress')),
+        findsOneWidget,
+      );
+      expect(find.text('Syncing your calendars...'), findsOneWidget);
+
+      calendarSave.complete(const <Map<String, Object?>>[]);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Workspace Google calendar mapping saved.'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -2849,6 +2902,8 @@ class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {
 
 class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   final createdWorkspaceNames = <String>[];
+  Completer<List<Map<String, Object?>>>? workspaceCalendarSaveCompleter;
+  var savedWorkspaceCalendarIds = <String>[];
   var workspaces = <HermesWorkspace>[
     const HermesWorkspace(
       id: '1',
@@ -2895,6 +2950,27 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     );
     workspaces = [...workspaces, workspace];
     return workspace;
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> updateWorkspaceGoogleCalendars(
+    int workspaceId, {
+    required List<String> googleCalendarIds,
+    String? defaultExportCalendarId,
+  }) async {
+    savedWorkspaceCalendarIds = googleCalendarIds;
+    final pending = workspaceCalendarSaveCompleter;
+    if (pending != null) {
+      return pending.future;
+    }
+    return [
+      for (final id in googleCalendarIds)
+        <String, Object?>{
+          'workspace_id': workspaceId,
+          'google_calendar_id': id,
+          'is_default_export': id == defaultExportCalendarId,
+        },
+    ];
   }
 }
 

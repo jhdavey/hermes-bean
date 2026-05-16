@@ -218,6 +218,85 @@ class GoogleCalendarSyncTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/calendars/primary/events'));
     }
 
+    public function test_selected_primary_alias_calendars_do_not_duplicate_all_day_events(): void
+    {
+        $token = $this->apiToken('calendar-primary-alias@example.com');
+        $user = User::where('email', 'calendar-primary-alias@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $connection = GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'google_account_email' => 'calendar-primary-alias@example.com',
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary', 'calendar-primary-alias@example.com'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Main calendar', 'primary' => true, 'accessRole' => 'owner'],
+                    ['id' => 'calendar-primary-alias@example.com', 'summary' => 'calendar-primary-alias@example.com', 'accessRole' => 'owner'],
+                ],
+            ],
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'title' => 'Existing alias holiday',
+            'starts_at' => '2026-05-15',
+            'ends_at' => '2026-05-16',
+            'google_event_id' => 'shared-all-day-1',
+            'google_calendar_id' => 'calendar-primary-alias@example.com',
+            'metadata' => ['source' => 'google_calendar', 'google_calendar_id' => 'calendar-primary-alias@example.com', 'all_day' => true],
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'title' => 'Legacy alias holiday',
+            'starts_at' => '2026-05-15',
+            'ends_at' => '2026-05-16',
+            'google_event_id' => 'shared-all-day-1',
+            'metadata' => ['source' => 'google_calendar', 'google_calendar_id' => 'primary'],
+        ]);
+
+        WorkspaceGoogleCalendarMapping::create([
+            'workspace_id' => $workspaceId,
+            'google_calendar_connection_id' => $connection->id,
+            'google_calendar_id' => 'primary',
+        ]);
+        WorkspaceGoogleCalendarMapping::create([
+            'workspace_id' => $workspaceId,
+            'google_calendar_connection_id' => $connection->id,
+            'google_calendar_id' => 'calendar-primary-alias@example.com',
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'items' => [[
+                    'id' => 'shared-all-day-1',
+                    'summary' => 'Shared all-day holiday',
+                    'status' => 'confirmed',
+                    'start' => ['date' => '2026-05-15'],
+                    'end' => ['date' => '2026-05-16'],
+                    'htmlLink' => 'https://calendar.google.com/event?eid=shared',
+                ]],
+                'nextSyncToken' => 'primary-token',
+            ]),
+        ]);
+
+        $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$workspaceId)
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Shared all-day holiday']);
+
+        $events = CalendarEvent::where('workspace_id', $workspaceId)
+            ->where('google_event_id', 'shared-all-day-1')
+            ->get();
+        $this->assertCount(1, $events);
+        $this->assertSame('primary', $events->first()->google_calendar_id);
+        $this->assertTrue($events->first()->metadata['all_day']);
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/calendars/calendar-primary-alias%40example.com/events'));
+    }
+
     public function test_local_calendar_create_and_update_write_to_selected_google_calendar(): void
     {
         $token = $this->apiToken('calendar-write@example.com');

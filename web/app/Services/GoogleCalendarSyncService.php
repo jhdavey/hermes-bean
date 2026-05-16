@@ -193,30 +193,31 @@ class GoogleCalendarSyncService
                 }
                 $isAllDay = isset($item['start']['date']);
                 $endsAt = $this->googleDateTime($item['end'] ?? []) ?? $startsAt;
-                CalendarEvent::updateOrCreate(
-                    ['workspace_id' => $workspace->id, 'google_calendar_id' => $calendarId, 'google_event_id' => $item['id']],
-                    [
-                        'user_id' => $user->id,
-                        'created_by_user_id' => $user->id,
+                $event = $this->existingGoogleEvent($workspace, $connection, $calendarId, (string) $item['id']);
+                $event->forceFill([
+                    'workspace_id' => $workspace->id,
+                    'user_id' => $user->id,
+                    'created_by_user_id' => $event->created_by_user_id ?: $user->id,
+                    'google_calendar_id' => $calendarId,
+                    'google_event_id' => $item['id'],
+                    'title' => $item['summary'] ?? 'Untitled Google event',
+                    'description' => $item['description'] ?? null,
+                    'location' => $item['location'] ?? null,
+                    'category' => $this->calendarSummary($connection, $calendarId) ?? 'Google Calendar',
+                    'color' => $this->calendarColor($connection, $calendarId) ?? '#4285F4',
+                    'starts_at' => $startsAt,
+                    'ends_at' => $endsAt,
+                    'status' => $item['status'] ?? 'confirmed',
+                    'google_updated_at' => isset($item['updated']) ? Carbon::parse($item['updated']) : null,
+                    'metadata' => [
+                        'source' => 'google_calendar',
+                        'google_html_link' => $item['htmlLink'] ?? null,
                         'google_calendar_id' => $calendarId,
-                        'title' => $item['summary'] ?? 'Untitled Google event',
-                        'description' => $item['description'] ?? null,
-                        'location' => $item['location'] ?? null,
-                        'category' => $this->calendarSummary($connection, $calendarId) ?? 'Google Calendar',
-                        'color' => $this->calendarColor($connection, $calendarId) ?? '#4285F4',
-                        'starts_at' => $startsAt,
-                        'ends_at' => $endsAt,
-                        'status' => $item['status'] ?? 'confirmed',
-                        'google_updated_at' => isset($item['updated']) ? Carbon::parse($item['updated']) : null,
-                        'metadata' => [
-                            'source' => 'google_calendar',
-                            'google_html_link' => $item['htmlLink'] ?? null,
-                            'google_calendar_id' => $calendarId,
-                            'google_calendar_summary' => $this->calendarSummary($connection, $calendarId),
-                            'all_day' => $isAllDay,
-                        ],
-                    ]
-                );
+                        'google_calendar_summary' => $this->calendarSummary($connection, $calendarId),
+                        'all_day' => $isAllDay,
+                    ],
+                ])->save();
+                $this->deleteDuplicateGoogleEventAliases($event, $connection, $calendarId);
                 $imported++;
             }
             if (! empty($payload['nextSyncToken'])) {
@@ -349,16 +350,98 @@ class GoogleCalendarSyncService
                 ->map(fn ($id): string => (string) $id)
                 ->all();
             if ($workspaceSelected !== []) {
-                return array_values(array_unique($workspaceSelected));
+                return $this->dedupePrimaryCalendarAliases($connection, $workspaceSelected);
             }
         }
 
         $selected = $connection->metadata['selected_calendar_ids'] ?? null;
         if (is_array($selected) && $selected !== []) {
-            return array_values(array_unique(array_map('strval', $selected)));
+            return $this->dedupePrimaryCalendarAliases($connection, array_map('strval', $selected));
         }
 
         return [$connection->calendar_id ?: 'primary'];
+    }
+
+    private function dedupePrimaryCalendarAliases(GoogleCalendarConnection $connection, array $calendarIds): array
+    {
+        $calendarIds = array_values(array_unique(array_map('strval', $calendarIds)));
+        $primaryAliases = $this->primaryCalendarAliases($connection);
+        if (count(array_intersect($calendarIds, $primaryAliases)) <= 1) {
+            return $calendarIds;
+        }
+
+        $preferred = in_array('primary', $calendarIds, true) ? 'primary' : array_values(array_intersect($calendarIds, $primaryAliases))[0];
+
+        return array_values(array_unique(array_map(
+            fn (string $calendarId): string => in_array($calendarId, $primaryAliases, true) ? $preferred : $calendarId,
+            $calendarIds,
+        )));
+    }
+
+    private function primaryCalendarAliases(GoogleCalendarConnection $connection): array
+    {
+        $aliases = ['primary'];
+        if ($connection->google_account_email) {
+            $aliases[] = (string) $connection->google_account_email;
+        }
+        foreach ($this->storedCalendars($connection) as $calendar) {
+            if ((bool) ($calendar['primary'] ?? false) && ! empty($calendar['id'])) {
+                $aliases[] = (string) $calendar['id'];
+            }
+        }
+
+        return array_values(array_unique($aliases));
+    }
+
+    private function existingGoogleEvent(Workspace $workspace, GoogleCalendarConnection $connection, string $calendarId, string $googleEventId): CalendarEvent
+    {
+        $calendarAliases = in_array($calendarId, $this->primaryCalendarAliases($connection), true)
+            ? $this->primaryCalendarAliases($connection)
+            : [$calendarId];
+
+        $existing = CalendarEvent::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('google_event_id', $googleEventId)
+            ->where(function ($query) use ($calendarAliases): void {
+                $query->whereIn('google_calendar_id', $calendarAliases)
+                    ->orWhereNull('google_calendar_id')
+                    ->orWhere(function ($query) use ($calendarAliases): void {
+                        foreach ($calendarAliases as $alias) {
+                            $query->orWhere('metadata->google_calendar_id', $alias);
+                        }
+                    });
+            })
+            ->orderByRaw('google_calendar_id is null')
+            ->oldest('id')
+            ->first();
+
+        return $existing ?: new CalendarEvent;
+    }
+
+    private function deleteDuplicateGoogleEventAliases(CalendarEvent $event, GoogleCalendarConnection $connection, string $calendarId): void
+    {
+        if (! $event->google_event_id || ! $event->workspace_id) {
+            return;
+        }
+
+        $calendarAliases = in_array($calendarId, $this->primaryCalendarAliases($connection), true)
+            ? $this->primaryCalendarAliases($connection)
+            : [$calendarId];
+
+        CalendarEvent::query()
+            ->where('workspace_id', $event->workspace_id)
+            ->where('google_event_id', $event->google_event_id)
+            ->whereKeyNot($event->id)
+            ->where(function ($query) use ($calendarAliases): void {
+                $query->whereIn('google_calendar_id', $calendarAliases)
+                    ->orWhereNull('google_calendar_id')
+                    ->orWhere(function ($query) use ($calendarAliases): void {
+                        foreach ($calendarAliases as $alias) {
+                            $query->orWhere('metadata->google_calendar_id', $alias);
+                        }
+                    });
+            })
+            ->delete();
     }
 
     private function calendarSummary(GoogleCalendarConnection $connection, string $calendarId): ?string
