@@ -2153,12 +2153,16 @@ class _AgentPersonalityOption {
     required this.key,
     required this.label,
     required this.description,
+    required this.infoTitle,
+    required this.infoDetails,
     required this.icon,
   });
 
   final String key;
   final String label;
   final String description;
+  final String infoTitle;
+  final List<String> infoDetails;
   final IconData icon;
 }
 
@@ -2167,24 +2171,48 @@ const List<_AgentPersonalityOption> _agentPersonalityOptions = [
     key: 'balanced',
     label: 'Balanced',
     description: 'Calm, practical, and concise.',
+    infoTitle: 'A steady everyday helper',
+    infoDetails: [
+      'Keeps answers simple and low-drama.',
+      'Gives clear confirmations and one helpful suggestion when it makes sense.',
+      'Best when you want Bean to be useful without feeling too chatty.',
+    ],
     icon: Icons.tune_rounded,
   ),
   _AgentPersonalityOption(
     key: 'coach',
     label: 'Coach',
     description: 'Encouraging with gentle accountability.',
+    infoTitle: 'A motivating helper for momentum',
+    infoDetails: [
+      'Celebrates small wins and helps you move forward.',
+      'Suggests the next small step when things feel overloaded.',
+      'Best when you want gentle nudges without guilt or pressure.',
+    ],
     icon: Icons.emoji_events_rounded,
   ),
   _AgentPersonalityOption(
     key: 'organizer',
     label: 'Organizer',
     description: 'Structured, precise, schedule-first.',
+    infoTitle: 'A detail-focused planner',
+    infoDetails: [
+      'Keeps summaries tidy and schedule-aware.',
+      'Asks for missing dates, times, categories, calendars, or reminders.',
+      'Best when you want Bean to help keep the day clean and organized.',
+    ],
     icon: Icons.view_agenda_rounded,
   ),
   _AgentPersonalityOption(
     key: 'creative',
     label: 'Creative',
     description: 'Idea-forward while staying useful.',
+    infoTitle: 'A warm brainstorming partner',
+    infoDetails: [
+      'Helps with ideas, names, themes, checklists, and plans.',
+      'Turns brainstorms into real tasks, reminders, and calendar events.',
+      'Best when you want planning to feel a little more fun and imaginative.',
+    ],
     icon: Icons.auto_awesome_rounded,
   ),
 ];
@@ -2386,12 +2414,90 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
     );
   }
 
+  void _showPersonalityInfo() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * .86,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: HeyBeanTheme.accent.withValues(alpha: .12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.info_outline_rounded,
+                        size: 18,
+                        color: HeyBeanTheme.accent,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Bean personality options',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Choose the style that best matches how you want Bean to help. You can change this any time in Settings.',
+                  style: TextStyle(color: HeyBeanTheme.muted),
+                ),
+                const SizedBox(height: 18),
+                for (final option in _agentPersonalityOptions) ...[
+                  _PersonalityInfoRow(option: option),
+                  if (option != _agentPersonalityOptions.last)
+                    const SizedBox(height: 14),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _personalityStep() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Text(
-        'Choose Bean’s personality',
-        style: TextStyle(fontWeight: FontWeight.w800),
+      Row(
+        children: [
+          const Expanded(
+            child: Text(
+              'Choose Bean’s personality',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+          IconButton(
+            key: const Key('agent-personality-info'),
+            tooltip: 'More info about Bean personalities',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+            icon: const Icon(Icons.info_outline_rounded, size: 20),
+            color: HeyBeanTheme.accent,
+            onPressed: _showPersonalityInfo,
+          ),
+        ],
       ),
       const SizedBox(height: 10),
       Wrap(
@@ -2458,6 +2564,64 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
       labelText: 'Anything Bean should know?',
       hintText:
           'Example: I work nights, protect family time, and need gentle nudges.',
+    ),
+  );
+}
+
+class _PersonalityInfoRow extends StatelessWidget {
+  const _PersonalityInfoRow({required this.option});
+
+  final _AgentPersonalityOption option;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(option.icon, size: 18, color: HeyBeanTheme.accent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                option.label,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          option.infoTitle,
+          style: const TextStyle(
+            color: HeyBeanTheme.muted,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final detail in option.infoDetails)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 5),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('• ', style: TextStyle(color: HeyBeanTheme.muted)),
+                Expanded(
+                  child: Text(
+                    detail,
+                    style: const TextStyle(color: HeyBeanTheme.muted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     ),
   );
 }

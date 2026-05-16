@@ -552,6 +552,44 @@ void main() {
     expect(find.textContaining('Focus, Work'), findsOneWidget);
   });
 
+  testWidgets('Bean personality info explains customer-facing options', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open-bean-preferences')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('agent-personality-info')), findsOneWidget);
+    expect(find.text('Bean personality options'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('agent-personality-info')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Bean personality options'), findsOneWidget);
+    expect(find.text('A steady everyday helper'), findsOneWidget);
+    expect(find.text('A motivating helper for momentum'), findsOneWidget);
+    expect(find.text('A detail-focused planner'), findsOneWidget);
+    expect(find.text('A warm brainstorming partner'), findsOneWidget);
+    expect(
+      find.text('Best when you want gentle nudges without guilt or pressure.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'Turns brainstorms into real tasks, reminders, and calendar events.',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets(
     'finish closes onboarding even when save response returns stale profile',
     (WidgetTester tester) async {

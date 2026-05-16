@@ -37,6 +37,8 @@ class AgentProfileTest extends TestCase
         $this->assertSame('app_home_top_banner', $profile->approval_policy['approval_surface']);
         $this->assertSame('balanced', $profile->settings['personality_type']);
         $this->assertSame('Balanced helper', $profile->settings['personality_label']);
+        $this->assertStringContainsString('calm, practical, concise co-pilot', $profile->settings['personality_prompt']);
+        $this->assertStringContainsString('one useful next suggestion', $profile->settings['personality_prompt']);
         $this->assertNotNull($response->json('data.user.agent_profile.id'));
     }
 
@@ -80,9 +82,12 @@ class AgentProfileTest extends TestCase
             ->assertJsonPath('data.onboard_complete', true)
             ->assertJsonPath('data.agent_profile.settings.personality_type', 'organizer')
             ->assertJsonPath('data.agent_profile.settings.onboarding.completed', true)
-            ->assertJsonPath('data.agent_profile.settings.onboarding.priorities.0', 'Work');
+            ->assertJsonPath('data.agent_profile.settings.onboarding.priorities.0', 'Work')
+            ->assertJsonPath('data.agent_profile.settings.personality_label', 'Detail organizer');
 
         $profile->refresh();
+        $this->assertStringContainsString('structured, precise, schedule-aware', $profile->settings['personality_prompt']);
+        $this->assertStringContainsString('missing dates, times, recurrence', $profile->settings['personality_prompt']);
         $this->assertSame('organizer', $profile->settings['personality_type']);
         $this->assertTrue($profile->settings['onboarding']['completed']);
         $this->assertTrue($user->refresh()->onboard_complete);
