@@ -244,6 +244,17 @@ class GoogleCalendarSyncTest extends TestCase
             'google_calendar_connection_id' => $connection->id,
             'google_calendar_id' => 'primary',
         ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $personalWorkspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Personal copy of shared Google event',
+            'starts_at' => '2026-05-20T15:00:00Z',
+            'ends_at' => '2026-05-20T16:00:00Z',
+            'google_calendar_id' => 'primary',
+            'google_event_id' => 'household-existing-event-1',
+            'metadata' => ['source' => 'google_calendar', 'google_calendar_id' => 'primary'],
+        ]);
 
         Http::fake(function ($request) {
             if (str_contains($request->url(), '/calendars/primary/events') && str_contains($request->url(), 'syncToken=')) {
@@ -277,11 +288,13 @@ class GoogleCalendarSyncTest extends TestCase
             'google_event_id' => 'household-existing-event-1',
             'google_calendar_id' => 'primary',
         ]);
-        $this->assertDatabaseMissing('calendar_events', [
+        $this->assertDatabaseHas('calendar_events', [
             'workspace_id' => $personalWorkspaceId,
             'google_event_id' => 'household-existing-event-1',
+            'title' => 'Personal copy of shared Google event',
         ]);
         $this->assertSame('personal-token', $connection->refresh()->metadata['sync_tokens']['primary']);
+        $this->assertSame(2, CalendarEvent::where('google_event_id', 'household-existing-event-1')->count());
     }
 
     public function test_selected_primary_alias_calendars_do_not_duplicate_all_day_events(): void
