@@ -100,6 +100,26 @@ class WorkspaceSchemaTest extends TestCase
         ]);
     }
 
+    public function test_workspace_list_includes_current_users_workspace_role(): void
+    {
+        $token = $this->apiToken('workspace-role-owner@example.com');
+        $user = User::where('email', 'workspace-role-owner@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+
+        $householdResponse = $this->withToken($token)->postJson('/api/workspaces', [
+            'name' => 'Owner Household',
+        ])->assertCreated();
+        $householdWorkspaceId = $householdResponse->json('data.id');
+
+        $response = $this->withToken($token)->getJson('/api/workspaces')->assertOk();
+        $workspaces = collect($response->json('data'));
+
+        $this->assertSame('owner', $workspaces->firstWhere('id', $personalWorkspaceId)['role'] ?? null);
+        $this->assertSame('owner', $workspaces->firstWhere('id', $householdWorkspaceId)['role'] ?? null);
+        $this->assertSame('owner', $workspaces->firstWhere('id', $personalWorkspaceId)['membership_role'] ?? null);
+        $this->assertSame('owner', $workspaces->firstWhere('id', $householdWorkspaceId)['membership_role'] ?? null);
+    }
+
     public function test_workspace_list_includes_google_calendar_mappings_after_selection(): void
     {
         $token = $this->apiToken('workspace-calendar-map@example.com');

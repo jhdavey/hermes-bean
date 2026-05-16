@@ -70,12 +70,22 @@ class WorkspaceService
     {
         $this->ensurePersonalWorkspaceForUser($user);
 
+        $defaultWorkspaceId = (int) $user->fresh()->default_workspace_id;
+
         return Workspace::query()
             ->whereHas('memberships', fn ($query) => $query->where('user_id', $user->id)->where('status', 'active'))
             ->with(['memberships.user', 'agentProfile', 'googleCalendarMappings'])
             ->orderByRaw("case when type = 'personal' then 0 else 1 end")
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->each(function (Workspace $workspace) use ($user, $defaultWorkspaceId): void {
+                $membership = $workspace->memberships->firstWhere('user_id', $user->id);
+                $role = $membership?->role ?? 'member';
+                $workspace->setAttribute('role', $role);
+                $workspace->setAttribute('membership_role', $role);
+                $workspace->setAttribute('active', (int) $workspace->id === $defaultWorkspaceId);
+                $workspace->setAttribute('is_default', (int) $workspace->id === $defaultWorkspaceId);
+            });
     }
 
     public function resolveWorkspace(User $user, mixed $workspaceId = null): Workspace
