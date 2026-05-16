@@ -250,6 +250,16 @@ class GoogleCalendarSyncService
         }
     }
 
+    public function visibleGoogleCalendarIdsForWorkspace(User $user, Workspace $workspace): ?array
+    {
+        $connection = $user->googleCalendarConnection()->where('status', 'connected')->first();
+        if (! $connection) {
+            return null;
+        }
+
+        return $this->expandPrimaryCalendarAliases($connection, $this->selectedCalendarIds($connection, $workspace));
+    }
+
     public function exportEvent(CalendarEvent $event): CalendarEvent
     {
         $connection = $event->user?->googleCalendarConnection()->first();
@@ -350,7 +360,7 @@ class GoogleCalendarSyncService
                 ->pluck('google_calendar_id')
                 ->map(fn ($id): string => (string) $id)
                 ->all();
-            if ($workspaceSelected !== []) {
+            if ($workspaceSelected !== [] || (bool) (($workspace->settings ?? [])['google_calendar_mappings_configured'] ?? false)) {
                 return $this->dedupePrimaryCalendarAliases($connection, $workspaceSelected);
             }
         }
@@ -366,6 +376,16 @@ class GoogleCalendarSyncService
     private function syncTokenKey(Workspace $workspace, string $calendarId): string
     {
         return $workspace->id.':'.$calendarId;
+    }
+
+    private function expandPrimaryCalendarAliases(GoogleCalendarConnection $connection, array $calendarIds): array
+    {
+        $calendarIds = array_values(array_unique(array_map('strval', $calendarIds)));
+        if (array_intersect($calendarIds, $this->primaryCalendarAliases($connection)) !== []) {
+            return array_values(array_unique(array_merge($calendarIds, $this->primaryCalendarAliases($connection))));
+        }
+
+        return $calendarIds;
     }
 
     private function dedupePrimaryCalendarAliases(GoogleCalendarConnection $connection, array $calendarIds): array

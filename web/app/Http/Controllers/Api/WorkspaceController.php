@@ -8,7 +8,6 @@ use App\Models\WorkspaceMembership;
 use App\Services\AgentProfileService;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
@@ -137,11 +136,14 @@ class WorkspaceController extends Controller
         $connection = $request->user()->googleCalendarConnection;
         abort_unless($connection, 422, 'Google Calendar is not connected.');
         $data = $request->validate([
-            'google_calendar_ids' => ['required', 'array'],
+            'google_calendar_ids' => ['present', 'array'],
             'google_calendar_ids.*' => ['string'],
             'default_export_calendar_id' => ['nullable', 'string'],
         ]);
         $workspace->googleCalendarMappings()->delete();
+        $settings = $workspace->settings ?? [];
+        $settings['google_calendar_mappings_configured'] = true;
+        $workspace->forceFill(['settings' => $settings])->save();
         foreach ($data['google_calendar_ids'] as $calendarId) {
             $workspace->googleCalendarMappings()->create([
                 'google_calendar_connection_id' => $connection->id,

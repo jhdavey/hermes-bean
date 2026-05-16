@@ -10,6 +10,7 @@ use App\Models\EventCategory;
 use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
+use App\Models\Workspace;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\StructuredHermesActionService;
 use App\Services\WorkspaceItemSyncService;
@@ -59,9 +60,13 @@ class DomainResourceController extends Controller
 
     public function listCalendarEvents(Request $request): JsonResponse
     {
-        $this->googleCalendar->syncIfConnected($request->user(), $this->workspace($request));
+        $workspace = $this->workspace($request);
+        $this->googleCalendar->syncIfConnected($request->user(), $workspace);
 
-        return $this->listed($this->scoped(CalendarEvent::query(), $request)->orderBy('starts_at')->orderBy('id')->get());
+        $query = $this->scoped(CalendarEvent::query(), $request);
+        $this->scopeVisibleGoogleCalendars($query, $request, $workspace);
+
+        return $this->listed($query->orderBy('starts_at')->orderBy('id')->get());
     }
 
     public function listEventCategories(Request $request): JsonResponse
@@ -476,6 +481,33 @@ class DomainResourceController extends Controller
         return app(WorkspaceService::class)->resolveWorkspace($request->user(), $request->input('workspace_id'));
     }
 
+    private function scopeVisibleGoogleCalendars($query, Request $request, $workspace): void
+    {
+        $calendarIds = $this->googleCalendar->visibleGoogleCalendarIdsForWorkspace($request->user(), $workspace);
+        if ($calendarIds === null) {
+            return;
+        }
+
+        $query->where(function ($query) use ($calendarIds): void {
+            $query->where(function ($query): void {
+                $query->whereNull('metadata->source')
+                    ->orWhere('metadata->source', '!=', 'google_calendar');
+            });
+
+            if ($calendarIds !== []) {
+                $query->orWhere(function ($query) use ($calendarIds): void {
+                    $query->where('metadata->source', 'google_calendar')
+                        ->where(function ($query) use ($calendarIds): void {
+                            $query->whereIn('google_calendar_id', $calendarIds);
+                            foreach ($calendarIds as $calendarId) {
+                                $query->orWhere('metadata->google_calendar_id', $calendarId);
+                            }
+                        });
+                });
+            }
+        });
+    }
+
     private function tableForStoreCaller(string $caller): string
     {
         return match ($caller) {
@@ -494,10 +526,12 @@ class DomainResourceController extends Controller
     {
         if ($useRequestWorkspace || $request->filled('workspace_id')) {
             $workspace = $this->workspace($request);
+
             return $query->where('workspace_id', $workspace->id);
         }
 
         $workspaceIds = app(WorkspaceService::class)->accessibleWorkspaces($request->user())->pluck('id')->all();
+
         return $query->whereIn('workspace_id', $workspaceIds);
     }
 
@@ -508,7 +542,7 @@ class DomainResourceController extends Controller
         }
         $workspaceService = app(WorkspaceService::class);
         foreach ($workspaceIds as $workspaceId) {
-            $workspaceService->authorizeMember($request->user(), \App\Models\Workspace::findOrFail($workspaceId));
+            $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
         }
         app(WorkspaceItemSyncService::class)->syncToWorkspaceIds($model, $workspaceIds, $request->user());
     }

@@ -218,6 +218,159 @@ class GoogleCalendarSyncTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/calendars/primary/events'));
     }
 
+    public function test_unchecking_workspace_google_calendar_hides_existing_imported_events_and_stops_syncing_it(): void
+    {
+        $token = $this->apiToken('workspace-calendar-hidden@example.com');
+        $user = User::where('email', 'workspace-calendar-hidden@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $connection = GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary', 'family@example.com'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Main calendar', 'accessRole' => 'owner'],
+                    ['id' => 'family@example.com', 'summary' => 'Family', 'accessRole' => 'reader'],
+                ],
+            ],
+        ]);
+        WorkspaceGoogleCalendarMapping::create([
+            'workspace_id' => $workspaceId,
+            'google_calendar_connection_id' => $connection->id,
+            'google_calendar_id' => 'primary',
+        ]);
+        WorkspaceGoogleCalendarMapping::create([
+            'workspace_id' => $workspaceId,
+            'google_calendar_connection_id' => $connection->id,
+            'google_calendar_id' => 'family@example.com',
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Visible main event',
+            'starts_at' => '2026-05-20T15:00:00Z',
+            'ends_at' => '2026-05-20T16:00:00Z',
+            'google_event_id' => 'main-event-1',
+            'google_calendar_id' => 'primary',
+            'metadata' => ['source' => 'google_calendar', 'google_calendar_id' => 'primary'],
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Hidden family event',
+            'starts_at' => '2026-05-20T17:00:00Z',
+            'ends_at' => '2026-05-20T18:00:00Z',
+            'google_event_id' => 'family-event-1',
+            'google_calendar_id' => 'family@example.com',
+            'metadata' => ['source' => 'google_calendar', 'google_calendar_id' => 'family@example.com'],
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Local workspace event',
+            'starts_at' => '2026-05-20T19:00:00Z',
+            'ends_at' => '2026-05-20T20:00:00Z',
+        ]);
+
+        $this->withToken($token)->patchJson('/api/workspaces/'.$workspaceId.'/google-calendars', [
+            'google_calendar_ids' => ['primary'],
+        ])->assertOk();
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'items' => [],
+                'nextSyncToken' => 'primary-token',
+            ]),
+            'https://www.googleapis.com/calendar/v3/calendars/family%40example.com/events*' => Http::response([
+                'items' => [[
+                    'id' => 'family-event-2',
+                    'summary' => 'Should not sync',
+                    'status' => 'confirmed',
+                    'start' => ['dateTime' => '2026-05-21T15:00:00Z'],
+                    'end' => ['dateTime' => '2026-05-21T16:00:00Z'],
+                ]],
+            ]),
+        ]);
+
+        $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$workspaceId)
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Visible main event'])
+            ->assertJsonFragment(['title' => 'Local workspace event'])
+            ->assertJsonMissing(['title' => 'Hidden family event'])
+            ->assertJsonMissing(['title' => 'Should not sync']);
+
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/calendars/family%40example.com/events'));
+    }
+
+    public function test_workspace_with_explicitly_empty_google_calendar_selection_hides_google_events_without_falling_back_to_personal_selection(): void
+    {
+        $token = $this->apiToken('workspace-calendar-empty@example.com');
+        $user = User::where('email', 'workspace-calendar-empty@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'calendars' => [['id' => 'primary', 'summary' => 'Main calendar', 'accessRole' => 'owner']],
+            ],
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Hidden main event',
+            'starts_at' => '2026-05-20T15:00:00Z',
+            'ends_at' => '2026-05-20T16:00:00Z',
+            'google_event_id' => 'main-hidden-1',
+            'google_calendar_id' => 'primary',
+            'metadata' => ['source' => 'google_calendar', 'google_calendar_id' => 'primary'],
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Still visible local event',
+            'starts_at' => '2026-05-20T19:00:00Z',
+            'ends_at' => '2026-05-20T20:00:00Z',
+        ]);
+
+        $this->withToken($token)->patchJson('/api/workspaces/'.$workspaceId.'/google-calendars', [
+            'google_calendar_ids' => [],
+        ])->assertOk();
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'items' => [[
+                    'id' => 'main-hidden-2',
+                    'summary' => 'Should not fall back sync',
+                    'status' => 'confirmed',
+                    'start' => ['dateTime' => '2026-05-21T15:00:00Z'],
+                    'end' => ['dateTime' => '2026-05-21T16:00:00Z'],
+                ]],
+            ]),
+        ]);
+
+        $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$workspaceId)
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Still visible local event'])
+            ->assertJsonMissing(['title' => 'Hidden main event'])
+            ->assertJsonMissing(['title' => 'Should not fall back sync']);
+
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/calendars/primary/events'));
+    }
+
     public function test_new_workspace_google_calendar_import_does_not_reuse_personal_sync_token(): void
     {
         $token = $this->apiToken('workspace-token-scope@example.com');
