@@ -311,6 +311,51 @@ void main() {
     },
   );
 
+  testWidgets('workspace switch refresh failure does not sign the user out', (
+    WidgetTester tester,
+  ) async {
+    final reloadUser = Completer<HermesUser>();
+    final tokenStore = _MemoryAuthTokenStore();
+    final api = _WorkspaceFakeHermesApiClient()
+      ..googleCalendarConnected = true
+      ..workspaces = const [
+        HermesWorkspace(
+          id: '1',
+          name: 'Personal',
+          type: 'personal',
+          role: 'owner',
+          active: true,
+          isDefault: true,
+        ),
+        HermesWorkspace(
+          id: '2',
+          name: 'Family',
+          type: 'household',
+          role: 'owner',
+        ),
+      ];
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: tokenStore),
+    );
+    await tester.pumpAndSettle();
+    api.nextMeCompleter = reloadUser;
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('workspace-switch-2')));
+    await tester.tap(find.byKey(const Key('workspace-switch-2')));
+    await tester.pump();
+
+    reloadUser.completeError(const HermesApiException(500, 'sync failed'));
+    await tester.pumpAndSettle();
+
+    expect(api.defaultWorkspaceSetTo, 2);
+    expect(find.text('Sign in to Hermes Bean'), findsNothing);
+    expect(find.byKey(const Key('settings-view')), findsOneWidget);
+    expect(find.textContaining('Workspace refresh failed'), findsOneWidget);
+  });
+
   testWidgets(
     'household Leave action sits in the workspace card header next to role',
     (WidgetTester tester) async {
@@ -2613,6 +2658,43 @@ void main() {
   );
 
   testWidgets(
+    'offset calendar event timestamps render as wall-clock schedule values',
+    (WidgetTester tester) async {
+      final now = DateTime.now();
+      final tomorrow = now.add(const Duration(days: 1));
+      final wallClockStart = DateTime(now.year, now.month, now.day, 13);
+      final wallClockEnd = DateTime(
+        tomorrow.year,
+        tomorrow.month,
+        tomorrow.day,
+        17,
+      );
+      final expectedTimeLabel =
+          '${_testNaturalTimeLabel(wallClockStart)} – ${_testNaturalTimeLabel(wallClockEnd)}';
+
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _OffsetCalendarFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final eventBlock = find.byKey(
+        const Key('calendar-event-block-google-afternoon-block'),
+      );
+      expect(eventBlock, findsWidgets);
+      expect(
+        find.descendant(
+          of: eventBlock.first,
+          matching: find.text(expectedTimeLabel),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
     'calendar event editor creates categories from plus modal and uses bottom dock time dials with five minute increments',
     (WidgetTester tester) async {
       final api = _EditableCalendarFakeHermesApiClient();
@@ -4232,6 +4314,29 @@ class _UtcMultiDayCalendarFakeHermesApiClient
         ).toIso8601String(),
         category: 'Work',
         color: '#007AFF',
+        recurrence: 'none',
+      ),
+    ];
+  }
+}
+
+class _OffsetCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final today = DateTime.now();
+    final tomorrow = today.add(const Duration(days: 1));
+    final startDay =
+        '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final endDay =
+        '${tomorrow.year.toString().padLeft(4, '0')}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}';
+    return [
+      HermesCalendarEvent(
+        id: 32,
+        title: 'Google afternoon block',
+        startsAt: '${startDay}T13:00:00-04:00',
+        endsAt: '${endDay}T17:00:00-04:00',
+        category: 'Google Calendar',
+        color: '#4285F4',
         recurrence: 'none',
       ),
     ];

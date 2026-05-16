@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\CalendarEvent;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -161,6 +163,52 @@ class WorkspaceSchemaTest extends TestCase
             'google_calendar_connection_id' => $connectionId,
             'google_calendar_id' => 'family@example.com',
             'is_default_export' => true,
+        ]);
+    }
+
+    public function test_sync_all_reuses_existing_copied_google_calendar_event(): void
+    {
+        $user = User::factory()->create(['email' => 'owner@example.com']);
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $household = app(WorkspaceService::class)->createHousehold($user, 'Family');
+        $source = CalendarEvent::create([
+            'workspace_id' => $personalWorkspaceId,
+            'user_id' => $user->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Flight to LGA',
+            'starts_at' => '2026-02-25 07:00:00',
+            'ends_at' => '2026-02-25 09:39:00',
+            'status' => 'confirmed',
+            'google_calendar_id' => $user->email,
+            'google_event_id' => 'google-flight-1',
+            'metadata' => ['source' => 'google_calendar'],
+        ]);
+        $existing = CalendarEvent::create([
+            'workspace_id' => $household->id,
+            'user_id' => $user->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Older copied title',
+            'starts_at' => '2026-02-25 07:00:00',
+            'ends_at' => '2026-02-25 09:39:00',
+            'status' => 'confirmed',
+            'google_calendar_id' => $user->email,
+            'google_event_id' => 'google-flight-1',
+            'metadata' => ['source' => 'google_calendar'],
+        ]);
+
+        $copied = app(WorkspaceItemSyncService::class)->sync($source, $household, $user);
+
+        $this->assertSame($existing->id, $copied->id);
+        $this->assertSame('Flight to LGA', $copied->title);
+        $this->assertSame(1, CalendarEvent::where('workspace_id', $household->id)->where('google_event_id', 'google-flight-1')->count());
+        $this->assertDatabaseHas('workspace_item_links', [
+            'source_workspace_id' => $personalWorkspaceId,
+            'target_workspace_id' => $household->id,
+            'source_type' => 'calendar_events',
+            'source_id' => $source->id,
+            'target_type' => 'calendar_events',
+            'target_id' => $existing->id,
+            'link_type' => 'copy',
         ]);
     }
 }

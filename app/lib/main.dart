@@ -1511,7 +1511,76 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   }
 
   Future<void> _reloadSignedInViewsFromSettings() async {
-    await _loadSignedIn(loadingStatusText: 'Syncing your calendars...');
+    if (_phase != _AuthPhase.signedIn) return;
+    setState(() {
+      _phase = _AuthPhase.loading;
+      _loadingStatusText = 'Syncing your calendars...';
+      _error = null;
+    });
+    try {
+      final user = await widget.apiClient.me();
+      final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
+        fallback:
+            _googleCalendarStatus ??
+            const GoogleCalendarSyncStatus(
+              connected: false,
+              status: 'not_connected',
+            ),
+      );
+      final session = _session;
+      final results = await Future.wait<Object>([
+        widget.apiClient.todaySummary(),
+        widget.apiClient.listTasks().catchError((_) => const <HermesTask>[]),
+        widget.apiClient.listReminders().catchError(
+          (_) => const <HermesReminder>[],
+        ),
+        widget.apiClient.listCalendarEvents().catchError(
+          (_) => const <HermesCalendarEvent>[],
+        ),
+        widget.apiClient.listPastTasks().catchError(
+          (_) => const <HermesTask>[],
+        ),
+        widget.apiClient.listEventCategories().catchError(
+          (_) => const <HermesEventCategory>[],
+        ),
+        if (session != null)
+          widget.apiClient
+              .pollActivityEvents(session.id)
+              .catchError((_) => const <HermesActivityEvent>[])
+        else
+          Future<List<HermesActivityEvent>>.value(
+            const <HermesActivityEvent>[],
+          ),
+      ]);
+      final summary = results[0] as HermesTodaySummary;
+      final listedTasks = results[1] as List<HermesTask>;
+      final listedReminders = results[2] as List<HermesReminder>;
+      final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
+      if (!mounted) return;
+      setState(() {
+        _user = user;
+        _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
+        _pastTasks = results[4] as List<HermesTask>;
+        _eventCategories = results[5] as List<HermesEventCategory>;
+        _googleCalendarStatus = googleCalendarStatus;
+        _reminders = listedReminders.isEmpty
+            ? summary.reminders
+            : listedReminders;
+        _calendar = listedCalendarEvents;
+        _approvals = summary.approvals;
+        _events = results[6] as List<HermesActivityEvent>;
+        _phase = _AuthPhase.signedIn;
+        _loadingStatusText = null;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _AuthPhase.signedIn;
+        _loadingStatusText = null;
+        _error = 'Workspace refresh failed: $error';
+      });
+    }
   }
 
   Future<void> _updateAccountEmail(String email) async {
@@ -2634,6 +2703,7 @@ class _CommandCenterContent extends StatelessWidget {
             onAccountEmailChanged: onAccountEmailChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onWorkspacesChanged: onWorkspacesChanged,
+            error: error,
           ),
         };
         final right = Column(
@@ -8212,6 +8282,7 @@ class _SettingsView extends StatelessWidget {
     required this.onAccountEmailChanged,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
+    this.error,
   });
 
   final HermesApiClient apiClient;
@@ -8227,6 +8298,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(String email) onAccountEmailChanged;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
+  final String? error;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -8242,6 +8314,10 @@ class _SettingsView extends StatelessWidget {
               subtitle: 'Focused Hermes Bean preferences',
             ),
             const SizedBox(height: 12),
+            if (error != null) ...[
+              Text(error!, style: const TextStyle(color: HeyBeanTheme.warning)),
+              const SizedBox(height: 12),
+            ],
             _CompactItemTile(
               icon: Icons.person_outline_rounded,
               title: user.name,

@@ -26,7 +26,8 @@ class WorkspaceItemSyncService
             'link_type' => 'copy',
         ])->first();
 
-        $target = $link ? $targetClass::find($link->target_id) : new $targetClass;
+        $target = $link ? $targetClass::find($link->target_id) : $this->existingTargetForCopy($source, $targetWorkspace, $actor);
+        $target ??= new $targetClass;
         $target->fill($this->attributesForCopy($source));
         $target->forceFill([
             'workspace_id' => $targetWorkspace->id,
@@ -93,6 +94,28 @@ class WorkspaceItemSyncService
         }
 
         return $attributes;
+    }
+
+    private function existingTargetForCopy(Model $source, Workspace $targetWorkspace, User $actor): ?Model
+    {
+        if (! $source instanceof CalendarEvent || ! $source->google_event_id) {
+            return null;
+        }
+
+        return CalendarEvent::query()
+            ->where('workspace_id', $targetWorkspace->id)
+            ->where('user_id', $actor->id)
+            ->where('google_event_id', $source->google_event_id)
+            ->where(function ($query) use ($source): void {
+                $query->where('google_calendar_id', $source->google_calendar_id);
+
+                if ($source->google_calendar_id === 'primary') {
+                    $query->orWhere('google_calendar_id', $source->user?->email);
+                } elseif ($source->user?->email && $source->google_calendar_id === $source->user->email) {
+                    $query->orWhere('google_calendar_id', 'primary');
+                }
+            })
+            ->first();
     }
 
     private function typeFor(Model $model): string

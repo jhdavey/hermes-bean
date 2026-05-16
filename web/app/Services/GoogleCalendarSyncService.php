@@ -149,6 +149,12 @@ class GoogleCalendarSyncService
         $deleted = 0;
         $metadata = $connection->metadata ?? [];
         $syncTokens = is_array($metadata['sync_tokens'] ?? null) ? $metadata['sync_tokens'] : [];
+        if (($metadata['google_datetime_import_mode'] ?? null) !== 'wall_clock_v1') {
+            $syncTokens = [];
+            $metadata['sync_tokens'] = [];
+            $metadata['google_datetime_import_mode'] = 'wall_clock_v1';
+            $connection->forceFill(['sync_token' => null, 'metadata' => $metadata])->save();
+        }
 
         foreach ($this->selectedCalendarIds($connection, $workspace) as $calendarId) {
             $syncTokenKey = $this->syncTokenKey($workspace, $calendarId);

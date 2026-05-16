@@ -96,7 +96,10 @@ class GoogleCalendarSyncTest extends TestCase
             'access_token_encrypted' => Crypt::encryptString('access-token'),
             'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
             'token_expires_at' => now()->addHour(),
-            'metadata' => ['selected_calendar_ids' => ['primary']],
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'sync_tokens' => ['primary' => 'stale-instant-token'],
+            ],
         ]);
 
         Http::fake([
@@ -119,6 +122,9 @@ class GoogleCalendarSyncTest extends TestCase
         $this->assertSame('2026-05-20 17:00:00', $event->getRawOriginal('ends_at'));
         $this->assertSame('2026-05-20T13:00:00+00:00', $event->starts_at->toIso8601String());
         $this->assertSame('2026-05-20T17:00:00+00:00', $event->ends_at->toIso8601String());
+        $connection = GoogleCalendarConnection::where('user_id', $user->id)->firstOrFail();
+        $this->assertSame('wall_clock_v1', $connection->metadata['google_datetime_import_mode']);
+        $this->assertContains('wall-clock-token', $connection->metadata['sync_tokens']);
     }
 
     public function test_user_can_select_google_calendars_and_sync_imports_only_selected_calendars(): void
@@ -423,6 +429,7 @@ class GoogleCalendarSyncTest extends TestCase
             'metadata' => [
                 'selected_calendar_ids' => ['primary'],
                 'sync_tokens' => ['primary' => 'personal-token'],
+                'google_datetime_import_mode' => 'wall_clock_v1',
                 'calendars' => [
                     ['id' => 'primary', 'summary' => 'Main calendar', 'primary' => true, 'accessRole' => 'owner'],
                 ],
