@@ -7,7 +7,7 @@ APP_ROOT="$SITE_ROOT/web"
 cd "$SITE_ROOT"
 
 git fetch origin main
-git reset --hard origin/main
+git checkout -f -B main origin/main
 
 cd "$APP_ROOT"
 
@@ -16,7 +16,7 @@ cd "$APP_ROOT"
 rm -f bootstrap/cache/*.php
 
 composer install --no-dev --optimize-autoloader --no-interaction
-npm install --ignore-scripts
+npm ci --ignore-scripts
 npm run build
 
 php artisan migrate --force
