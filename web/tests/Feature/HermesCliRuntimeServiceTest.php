@@ -417,7 +417,8 @@ PHP);
         $this->assertTrue($profile->settings['onboarding']['completed']);
         $this->assertSame(['Family', 'Planning'], $profile->settings['onboarding']['priorities']);
         $this->assertSame('Protect family dinner.', $profile->settings['memory']['user_preferences']['context']);
-        $this->assertFileExists($profile->runtime_home.'/bean-preferences-memory.json');
+        $this->assertFileExists($profile->runtime_home.'/PREFERENCES.md');
+        $this->assertFileDoesNotExist($profile->runtime_home.'/bean-preferences-memory.json');
     }
 
     public function test_runtime_payload_includes_onboarding_status_and_preference_memory(): void

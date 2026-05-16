@@ -225,10 +225,10 @@ class AgentProfileService
         }
 
         File::ensureDirectoryExists($profile->runtime_home);
-        File::put(
-            rtrim($profile->runtime_home, '/').'/bean-preferences-memory.json',
-            json_encode($memory, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES).PHP_EOL
-        );
+        $jsonPath = rtrim($profile->runtime_home, '/').'/bean-preferences-memory.json';
+        if (File::exists($jsonPath)) {
+            File::delete($jsonPath);
+        }
 
         $this->writeRuntimeMarkdownMemory($profile->refresh(), $memory);
     }

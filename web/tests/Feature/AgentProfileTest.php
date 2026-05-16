@@ -142,7 +142,7 @@ class AgentProfileTest extends TestCase
         $this->assertStringContainsString('Harley Davey', File::get($profile->runtime_home.'/USER.md'));
     }
 
-    public function test_workspace_preference_updates_refresh_json_and_markdown_memory_without_cross_workspace_leakage(): void
+    public function test_workspace_preference_updates_refresh_database_and_markdown_memory_without_json_sidecar_or_cross_workspace_leakage(): void
     {
         $runtimeRoot = sys_get_temp_dir().'/hermes-bean-agent-memory-'.bin2hex(random_bytes(6));
         config()->set('services.hermes_runtime.users_home', $runtimeRoot);
@@ -166,12 +166,11 @@ class AgentProfileTest extends TestCase
 
         $preferences = File::get($householdProfile->runtime_home.'/PREFERENCES.md');
         $memory = File::get($householdProfile->runtime_home.'/MEMORY.md');
-        $json = json_decode(File::get($householdProfile->runtime_home.'/bean-preferences-memory.json'), true, flags: JSON_THROW_ON_ERROR);
-
         $this->assertStringContainsString('organizer', $preferences);
         $this->assertStringContainsString('School pickups', $preferences);
         $this->assertStringContainsString('Lauren prefers reminders the night before.', $memory);
-        $this->assertSame('Lauren prefers reminders the night before.', $json['user_preferences']['context']);
+        $this->assertSame('Lauren prefers reminders the night before.', $householdProfile->refresh()->settings['memory']['user_preferences']['context']);
+        $this->assertFileDoesNotExist($householdProfile->runtime_home.'/bean-preferences-memory.json');
 
         File::append($householdProfile->runtime_home.'/MEMORY.md', PHP_EOL.'- Lauren likes dinner reminders before 5pm.'.PHP_EOL);
         $service->mergeSettings($householdProfile->refresh(), [
