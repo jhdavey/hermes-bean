@@ -502,6 +502,10 @@ class HermesApiClient {
     await _sendJson('DELETE', '/event-categories/$categoryId');
   }
 
+  Future<void> deleteCalendarEvent(int eventId) async {
+    await _sendJson('DELETE', '/calendar-events/$eventId');
+  }
+
   Future<HermesCalendarEvent> updateCalendarEvent(
     int eventId, {
     required String title,

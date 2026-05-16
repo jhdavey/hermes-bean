@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\CalendarEvent;
 use App\Models\GoogleCalendarConnection;
 use App\Models\User;
+use App\Models\WorkspaceGoogleCalendarMapping;
+use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
@@ -158,6 +160,62 @@ class GoogleCalendarSyncTest extends TestCase
         ]);
         $holiday = CalendarEvent::where('google_event_id', 'holiday-event-1')->firstOrFail();
         $this->assertTrue($holiday->metadata['all_day']);
+    }
+
+    public function test_workspace_calendar_event_listing_syncs_workspace_selected_google_calendars(): void
+    {
+        $token = $this->apiToken('workspace-calendar-sync@example.com');
+        $user = User::where('email', 'workspace-calendar-sync@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $connection = GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Main calendar', 'accessRole' => 'owner', 'backgroundColor' => '#4285F4'],
+                    ['id' => 'wife@example.com', 'summary' => 'Lauren', 'accessRole' => 'reader', 'backgroundColor' => '#D50000'],
+                ],
+            ],
+        ]);
+        WorkspaceGoogleCalendarMapping::create([
+            'workspace_id' => $workspaceId,
+            'google_calendar_connection_id' => $connection->id,
+            'google_calendar_id' => 'wife@example.com',
+            'google_calendar_summary' => 'Lauren',
+            'color' => '#D50000',
+            'is_default_export' => false,
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/wife%40example.com/events*' => Http::response([
+                'items' => [[
+                    'id' => 'wife-event-1',
+                    'summary' => 'Lauren dentist',
+                    'status' => 'confirmed',
+                    'start' => ['dateTime' => '2026-05-20T15:00:00Z'],
+                    'end' => ['dateTime' => '2026-05-20T16:00:00Z'],
+                ]],
+                'nextSyncToken' => 'wife-token',
+            ]),
+        ]);
+
+        $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$workspaceId)
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Lauren dentist']);
+
+        $this->assertDatabaseHas('calendar_events', [
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'title' => 'Lauren dentist',
+            'google_event_id' => 'wife-event-1',
+            'google_calendar_id' => 'wife@example.com',
+        ]);
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/calendars/primary/events'));
     }
 
     public function test_local_calendar_create_and_update_write_to_selected_google_calendar(): void

@@ -237,11 +237,11 @@ class GoogleCalendarSyncService
         return ['imported' => $imported, 'deleted' => $deleted, 'status' => $this->status($user)];
     }
 
-    public function syncIfConnected(User $user): void
+    public function syncIfConnected(User $user, ?Workspace $workspace = null): void
     {
         try {
             if ($user->googleCalendarConnection()->where('status', 'connected')->exists()) {
-                $this->sync($user);
+                $this->sync($user, $workspace);
             }
         } catch (RuntimeException) {
             // Keep local calendar usable if Google has a temporary auth/network problem.
@@ -340,8 +340,19 @@ class GoogleCalendarSyncService
         return [['id' => $connection->calendar_id ?: 'primary', 'summary' => 'Primary', 'primary' => true, 'access_role' => 'owner', 'color' => '#4285F4']];
     }
 
-    private function selectedCalendarIds(GoogleCalendarConnection $connection): array
+    private function selectedCalendarIds(GoogleCalendarConnection $connection, ?Workspace $workspace = null): array
     {
+        if ($workspace !== null) {
+            $workspaceSelected = WorkspaceGoogleCalendarMapping::query()
+                ->where('workspace_id', $workspace->id)
+                ->pluck('google_calendar_id')
+                ->map(fn ($id): string => (string) $id)
+                ->all();
+            if ($workspaceSelected !== []) {
+                return array_values(array_unique($workspaceSelected));
+            }
+        }
+
         $selected = $connection->metadata['selected_calendar_ids'] ?? null;
         if (is_array($selected) && $selected !== []) {
             return array_values(array_unique(array_map('strval', $selected)));

@@ -173,6 +173,49 @@ void main() {
     },
   );
 
+  testWidgets(
+    'household Leave action sits in the workspace card header next to role',
+    (WidgetTester tester) async {
+      final api = _WorkspaceFakeHermesApiClient()
+        ..workspaces = const [
+          HermesWorkspace(
+            id: '1',
+            name: 'Personal',
+            type: 'personal',
+            role: 'owner',
+            active: true,
+            isDefault: true,
+          ),
+          HermesWorkspace(
+            id: '2',
+            name: 'Family',
+            type: 'household',
+            role: 'owner',
+          ),
+        ];
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('workspace-leave-2')));
+      await tester.pumpAndSettle();
+
+      final role = tester.getRect(find.byKey(const Key('workspace-role-2')));
+      final leave = tester.getRect(find.byKey(const Key('workspace-leave-2')));
+      final invite = tester.getRect(
+        find.byKey(const Key('workspace-invite-2')),
+      );
+
+      expect((leave.center.dy - role.center.dy).abs(), lessThan(8));
+      expect(leave.left, greaterThan(role.right));
+      expect(invite.top, greaterThan(leave.bottom));
+    },
+  );
+
   testWidgets('settings edits current Bean preferences in one form', (
     WidgetTester tester,
   ) async {
@@ -1017,6 +1060,37 @@ void main() {
     final headingAfterSwipe = _activeSelectedDayHeading(tester);
 
     expect(headingAfterSwipe, _headingDaysAfter(headingBeforeSwipe, 2));
+  });
+
+  testWidgets('recurring calendar events render on their occurrence days', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _TwoDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final today = DateTime.now();
+    final tomorrow = today.add(const Duration(days: 1));
+    expect(
+      find.byKey(
+        Key(
+          'calendar-event-block-daily-standup-${today.year}-${today.month}-${today.day}',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        Key(
+          'calendar-event-block-daily-standup-${tomorrow.year}-${tomorrow.month}-${tomorrow.day}',
+        ),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('calendar event blocks place time span under the title', (
@@ -1880,6 +1954,36 @@ void main() {
     expect(find.textContaining('Design review'), findsWidgets);
   });
 
+  testWidgets('calendar event detail page can delete an event', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(
+      find.byKey(const Key('calendar-event-block-design-review')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('calendar-event-block-design-review')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('event-delete-action')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('event-delete-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.deletedEventId, 3);
+    expect(find.byKey(const Key('calendar-event-detail-page')), findsNothing);
+    expect(
+      find.byKey(const Key('calendar-event-block-design-review')),
+      findsNothing,
+    );
+  });
+
   testWidgets('event editor preserves custom category colors when resaving', (
     WidgetTester tester,
   ) async {
@@ -2144,14 +2248,13 @@ void main() {
         'interval': 1,
         'unit': 'days',
       });
-      await tester.ensureVisible(
-        find.byKey(const Key('calendar-event-block-design-sync')),
+      final updatedEventKey = Key(
+        'calendar-event-block-design-sync-${eventDate.year}-${eventDate.month}-${eventDate.day}',
       );
+      await tester.ensureVisible(find.byKey(updatedEventKey));
       await tester.pumpAndSettle();
       expect(
-        tester
-            .getRect(find.byKey(const Key('calendar-event-block-design-sync')))
-            .height,
+        tester.getRect(find.byKey(updatedEventKey)).height,
         greaterThan(initialEventHeight),
       );
       expect(api.createdReminder?['calendar_event_id'], 3);
@@ -3426,6 +3529,17 @@ class _TwoDayCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
           10,
         ).toIso8601String(),
       ),
+      HermesCalendarEvent(
+        id: 103,
+        title: 'Daily standup',
+        startsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day - 1,
+          11,
+        ).toIso8601String(),
+        recurrence: 'daily',
+      ),
     ];
   }
 }
@@ -3566,6 +3680,7 @@ class _EditableCalendarFakeHermesApiClient
   Map<String, Object?>? createdReminder;
   HermesEventCategory? savedCategory;
   int? deletedCategoryId;
+  int? deletedEventId;
 
   @override
   Future<HermesCalendarEvent> updateCalendarEvent(
@@ -3673,30 +3788,36 @@ class _EditableCalendarFakeHermesApiClient
   }
 
   @override
+  Future<void> deleteCalendarEvent(int eventId) async {
+    deletedEventId = eventId;
+  }
+
+  @override
   Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
     if (createdEvent != null) createdEvent!,
-    updatedEvent ??
-        HermesCalendarEvent(
-          id: 3,
-          title: 'Design review',
-          startsAt: DateTime.utc(
-            DateTime.now().year,
-            DateTime.now().month,
-            DateTime.now().day,
-            14,
-            30,
-          ).toIso8601String(),
-          endsAt: DateTime.utc(
-            DateTime.now().year,
-            DateTime.now().month,
-            DateTime.now().day,
-            15,
-            00,
-          ).toIso8601String(),
-          category: 'Personal',
-          color: '#34C759',
-          recurrence: 'none',
-        ),
+    if (deletedEventId != 3)
+      updatedEvent ??
+          HermesCalendarEvent(
+            id: 3,
+            title: 'Design review',
+            startsAt: DateTime.utc(
+              DateTime.now().year,
+              DateTime.now().month,
+              DateTime.now().day,
+              14,
+              30,
+            ).toIso8601String(),
+            endsAt: DateTime.utc(
+              DateTime.now().year,
+              DateTime.now().month,
+              DateTime.now().day,
+              15,
+              00,
+            ).toIso8601String(),
+            category: 'Personal',
+            color: '#34C759',
+            recurrence: 'none',
+          ),
   ];
 }
 

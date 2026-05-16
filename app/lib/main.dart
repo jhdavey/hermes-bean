@@ -1458,6 +1458,26 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     }
   }
 
+  Future<void> _deleteCalendarEvent(HermesCalendarEvent event) async {
+    final previousCalendar = _calendar;
+    setState(() {
+      _calendar = _calendar
+          .where((candidate) => candidate.id != event.id)
+          .toList();
+      _error = null;
+    });
+    try {
+      await widget.apiClient.deleteCalendarEvent(event.id);
+      await _refreshSignedInViews();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _calendar = previousCalendar;
+        _error = 'Could not delete event: $error';
+      });
+    }
+  }
+
   Future<void> _reloadSignedInViewsFromSettings() async {
     await _loadSignedIn();
   }
@@ -1547,6 +1567,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           ),
       onEventCategorySaved: _saveEventCategory,
       onEventCategoryDeleted: _deleteEventCategory,
+      onDelete: _deleteCalendarEvent,
     );
   }
 
@@ -1790,6 +1811,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     onReminderDeleted: _deleteReminder,
     onCalendarEventCreated: _createCalendarEvent,
     onCalendarEventEdited: _editCalendarEvent,
+    onCalendarEventDeleted: _deleteCalendarEvent,
     onEventCategorySaved: _saveEventCategory,
     onEventCategoryDeleted: _deleteEventCategory,
     onDeleteAccount: _deleteAccount,
@@ -2361,6 +2383,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onReminderDeleted,
     required this.onCalendarEventCreated,
     required this.onCalendarEventEdited,
+    required this.onCalendarEventDeleted,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
     required this.onDeleteAccount,
@@ -2460,6 +2483,7 @@ class _CommandCenterContent extends StatelessWidget {
     List<Object> syncToWorkspaceIds,
   })
   onCalendarEventEdited;
+  final Future<void> Function(HermesCalendarEvent event) onCalendarEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -2516,6 +2540,7 @@ class _CommandCenterContent extends StatelessWidget {
             onTaskDeleted: onTaskDeleted,
             onCalendarEventCreated: onCalendarEventCreated,
             onCalendarEventEdited: onCalendarEventEdited,
+            onCalendarEventDeleted: onCalendarEventDeleted,
             onEventCategorySaved: onEventCategorySaved,
             onEventCategoryDeleted: onEventCategoryDeleted,
           ),
@@ -3437,6 +3462,7 @@ class _TodayHomeView extends StatelessWidget {
     required this.onTaskDeleted,
     required this.onCalendarEventCreated,
     required this.onCalendarEventEdited,
+    required this.onCalendarEventDeleted,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
   });
@@ -3501,6 +3527,7 @@ class _TodayHomeView extends StatelessWidget {
     List<Object> syncToWorkspaceIds,
   })
   onCalendarEventEdited;
+  final Future<void> Function(HermesCalendarEvent event) onCalendarEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -3545,6 +3572,7 @@ class _TodayHomeView extends StatelessWidget {
                 endHour: endHour,
                 onDayChanged: onDateSelected,
                 onEventTap: onCalendarEventEdited,
+                onEventDeleted: onCalendarEventDeleted,
                 onEventCategorySaved: onEventCategorySaved,
                 onEventCategoryDeleted: onEventCategoryDeleted,
               ),
@@ -3761,6 +3789,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     required this.endHour,
     required this.onDayChanged,
     required this.onEventTap,
+    required this.onEventDeleted,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
   });
@@ -3789,6 +3818,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     String? reminderIntervalUnit,
   })
   onEventTap;
+  final Future<void> Function(HermesCalendarEvent event) onEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -3952,6 +3982,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                         visibleHours: visibleHours,
                         isActivePage: page == _visibleDayPage,
                         onEventTap: widget.onEventTap,
+                        onEventDeleted: widget.onEventDeleted,
                         onEventCategorySaved: widget.onEventCategorySaved,
                         onEventCategoryDeleted: widget.onEventCategoryDeleted,
                       ),
@@ -4024,6 +4055,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     required this.visibleHours,
     required this.isActivePage,
     required this.onEventTap,
+    required this.onEventDeleted,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
   });
@@ -4054,6 +4086,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     String? reminderIntervalUnit,
   })
   onEventTap;
+  final Future<void> Function(HermesCalendarEvent event) onEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -4120,6 +4153,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                   eventCategories: eventCategories,
                   googleCalendarStatus: googleCalendarStatus,
                   onEventTap: onEventTap,
+                  onEventDeleted: onEventDeleted,
                   onEventCategorySaved: onEventCategorySaved,
                   onEventCategoryDeleted: onEventCategoryDeleted,
                 ),
@@ -4133,6 +4167,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                   eventCategories: eventCategories,
                   googleCalendarStatus: googleCalendarStatus,
                   onEventTap: onEventTap,
+                  onEventDeleted: onEventDeleted,
                   onEventCategorySaved: onEventCategorySaved,
                   onEventCategoryDeleted: onEventCategoryDeleted,
                 ),
@@ -4170,6 +4205,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       eventCategories: eventCategories,
                       googleCalendarStatus: googleCalendarStatus,
                       onTap: onEventTap,
+                      onDelete: onEventDeleted,
                       onEventCategorySaved: onEventCategorySaved,
                       onEventCategoryDeleted: onEventCategoryDeleted,
                     ),
@@ -4191,6 +4227,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       eventCategories: eventCategories,
                       googleCalendarStatus: googleCalendarStatus,
                       onTap: onEventTap,
+                      onDelete: onEventDeleted,
                       onEventCategorySaved: onEventCategorySaved,
                       onEventCategoryDeleted: onEventCategoryDeleted,
                     ),
@@ -4518,6 +4555,7 @@ class _AllDayEventRow extends StatelessWidget {
     required this.eventCategories,
     required this.googleCalendarStatus,
     required this.onEventTap,
+    required this.onEventDeleted,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
   });
@@ -4542,6 +4580,7 @@ class _AllDayEventRow extends StatelessWidget {
     String? reminderIntervalUnit,
   })
   onEventTap;
+  final Future<void> Function(HermesCalendarEvent event) onEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -4662,6 +4701,7 @@ class _TimelineEventBlock extends StatelessWidget {
     required this.eventCategories,
     required this.googleCalendarStatus,
     required this.onTap,
+    required this.onDelete,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
   });
@@ -4691,6 +4731,7 @@ class _TimelineEventBlock extends StatelessWidget {
     String? reminderIntervalUnit,
   })
   onTap;
+  final Future<void> Function(HermesCalendarEvent event) onDelete;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -4719,7 +4760,7 @@ class _TimelineEventBlock extends StatelessWidget {
       left: left,
       width: width,
       child: InkWell(
-        key: Key(_calendarEventBlockKey(event)),
+        key: Key(_calendarEventBlockKeyForDay(event, day)),
         borderRadius: BorderRadius.circular(10),
         onTap: () => _showCalendarEventDetails(
           context,
@@ -4761,6 +4802,7 @@ class _TimelineEventBlock extends StatelessWidget {
               ),
           onEventCategorySaved: onEventCategorySaved,
           onEventCategoryDeleted: onEventCategoryDeleted,
+          onDelete: onDelete,
         ),
         child: Container(
           height: eventHeight,
@@ -4854,6 +4896,7 @@ Future<void> _showCalendarEventDetails(
   onEventCategorySaved,
   required Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted,
+  Future<void> Function(HermesCalendarEvent event)? onDelete,
   List<HermesWorkspace> workspaces = const [],
   String? activeWorkspaceId,
 }) async {
@@ -4867,9 +4910,15 @@ Future<void> _showCalendarEventDetails(
         activeWorkspaceId: activeWorkspaceId,
         onEventCategorySaved: onEventCategorySaved,
         onEventCategoryDeleted: onEventCategoryDeleted,
+        onDelete: onDelete,
       ),
     ),
   );
+
+  if (result != null && result['action'] == 'delete') {
+    await onDelete?.call(event);
+    return;
+  }
 
   if (result != null) {
     await onSave(
@@ -4907,6 +4956,7 @@ class _CalendarEventDetailPage extends StatefulWidget {
     this.activeWorkspaceId,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
+    this.onDelete,
   });
 
   final HermesCalendarEvent event;
@@ -4922,6 +4972,7 @@ class _CalendarEventDetailPage extends StatefulWidget {
   onEventCategorySaved;
   final Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted;
+  final Future<void> Function(HermesCalendarEvent event)? onDelete;
 
   @override
   State<_CalendarEventDetailPage> createState() =>
@@ -5748,6 +5799,16 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                   child: const Text('Cancel'),
                 ),
               ),
+              if (widget.onDelete != null) ...[
+                const SizedBox(width: 12),
+                IconButton.filledTonal(
+                  key: const Key('event-delete-action'),
+                  tooltip: 'Delete event',
+                  onPressed: () =>
+                      Navigator.of(context).pop({'action': 'delete'}),
+                  icon: const Icon(Icons.delete_outline_rounded),
+                ),
+              ],
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton.icon(
@@ -6147,6 +6208,13 @@ String _calendarEventBlockKey(HermesCalendarEvent event) {
   return 'calendar-event-block-${slug.isEmpty ? event.id : slug}';
 }
 
+String _calendarEventBlockKeyForDay(HermesCalendarEvent event, DateTime day) {
+  final base = _calendarEventBlockKey(event);
+  final recurrence = (event.recurrence ?? 'none').toLowerCase();
+  if (recurrence == 'none' || recurrence.isEmpty) return base;
+  return '$base-${day.year}-${day.month}-${day.day}';
+}
+
 List<int> _calendarVisibleHours(int startHour, int endHour) {
   final start = startHour.clamp(0, 22);
   final end = endHour.clamp(start + 1, 23);
@@ -6166,13 +6234,32 @@ bool _eventFallsWithinHours(
   int startHour,
   int endHour,
 ) {
-  final start = _parseCalendarEventDateTime(event.startsAt);
+  var start = _parseCalendarEventDateTime(event.startsAt);
   if (start == null) return null;
   var end =
       _parseCalendarEventDateTime(event.endsAt, event.startsAt) ??
       start.add(const Duration(minutes: 30));
   if (!end.isAfter(start)) {
     end = start.add(const Duration(minutes: 30));
+  }
+
+  final dayStart = DateTime(day.year, day.month, day.day);
+  final recurrence = (event.recurrence ?? 'none').toLowerCase();
+  if (recurrence != 'none' && recurrence.isNotEmpty) {
+    if (!_eventFallsOnDay(event, dayStart)) return null;
+    final duration = end.difference(start);
+    final occurrenceStart = DateTime(
+      dayStart.year,
+      dayStart.month,
+      dayStart.day,
+      start.hour,
+      start.minute,
+      start.second,
+      start.millisecond,
+      start.microsecond,
+    );
+    start = occurrenceStart;
+    end = occurrenceStart.add(duration);
   }
 
   final visibleStart = DateTime(day.year, day.month, day.day, startHour);
@@ -6459,7 +6546,81 @@ bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
   }
   final dayStart = DateTime(day.year, day.month, day.day);
   final dayEnd = dayStart.add(const Duration(days: 1));
+  final recurrence = (event.recurrence ?? 'none').toLowerCase();
+  if (recurrence != 'none' && recurrence.isNotEmpty) {
+    return _recurringEventFallsOnDay(event, start, end, dayStart, dayEnd);
+  }
   return end.isAfter(dayStart) && start.isBefore(dayEnd);
+}
+
+bool _recurringEventFallsOnDay(
+  HermesCalendarEvent event,
+  DateTime start,
+  DateTime end,
+  DateTime dayStart,
+  DateTime dayEnd,
+) {
+  final originalStartDay = DateTime(start.year, start.month, start.day);
+  if (dayEnd.isBefore(originalStartDay) ||
+      dayStart.isBefore(originalStartDay)) {
+    return false;
+  }
+  if (_sameCalendarDay(dayStart, originalStartDay)) {
+    return true;
+  }
+
+  final recurrence = (event.recurrence ?? 'none').toLowerCase();
+  final interval = (event.metadata?['interval'] is num)
+      ? ((event.metadata!['interval'] as num).toInt()).clamp(1, 365)
+      : int.tryParse(event.metadata?['interval']?.toString() ?? '') ?? 1;
+  final daysSinceStart = dayStart.difference(_dateOnly(start)).inDays;
+
+  switch (recurrence) {
+    case 'daily':
+      return daysSinceStart % interval == 0;
+    case 'weekly':
+      return daysSinceStart >= 0 && daysSinceStart % (7 * interval) == 0;
+    case 'monthly':
+      final months =
+          (dayStart.year - start.year) * 12 + (dayStart.month - start.month);
+      return months >= 0 && months % interval == 0 && dayStart.day == start.day;
+    case 'yearly':
+      final years = dayStart.year - start.year;
+      return years >= 0 &&
+          years % interval == 0 &&
+          dayStart.month == start.month &&
+          dayStart.day == start.day;
+    case 'specific_days':
+      final days = event.metadata?['days'];
+      final selectedDays = days is List
+          ? days.map((day) => day.toString()).toSet()
+          : <String>{};
+      const weekdayKeys = {
+        DateTime.monday: 'mon',
+        DateTime.tuesday: 'tue',
+        DateTime.wednesday: 'wed',
+        DateTime.thursday: 'thu',
+        DateTime.friday: 'fri',
+        DateTime.saturday: 'sat',
+        DateTime.sunday: 'sun',
+      };
+      return selectedDays.contains(weekdayKeys[dayStart.weekday]);
+    case 'interval':
+      final unit = (event.metadata?['unit'] ?? 'days').toString();
+      if (unit == 'weeks') {
+        return daysSinceStart >= 0 && daysSinceStart % (7 * interval) == 0;
+      }
+      if (unit == 'months') {
+        final months =
+            (dayStart.year - start.year) * 12 + (dayStart.month - start.month);
+        return months >= 0 &&
+            months % interval == 0 &&
+            dayStart.day == start.day;
+      }
+      return daysSinceStart >= 0 && daysSinceStart % interval == 0;
+    default:
+      return end.isAfter(dayStart) && start.isBefore(dayEnd);
+  }
 }
 
 class _MonthScroller extends StatefulWidget {
@@ -8272,8 +8433,25 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                         ),
                         Text(
                           workspace.role,
+                          key: Key('workspace-role-${workspace.id}'),
                           style: const TextStyle(color: HeyBeanTheme.muted),
                         ),
+                        if (!workspace.isPersonal &&
+                            workspace.numericId != null) ...[
+                          const SizedBox(width: 8),
+                          TextButton(
+                            key: Key('workspace-leave-${workspace.id}'),
+                            onPressed: _busy
+                                ? null
+                                : () => _run(
+                                    () => widget.apiClient.leaveWorkspace(
+                                      workspace.numericId!,
+                                    ),
+                                    'Left ${workspace.name}.',
+                                  ),
+                            child: const Text('Leave'),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -8296,20 +8474,6 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                                 ? null
                                 : () => _inviteMember(workspace),
                             child: const Text('Invite'),
-                          ),
-                        if (!workspace.isPersonal &&
-                            workspace.numericId != null)
-                          TextButton(
-                            key: Key('workspace-leave-${workspace.id}'),
-                            onPressed: _busy
-                                ? null
-                                : () => _run(
-                                    () => widget.apiClient.leaveWorkspace(
-                                      workspace.numericId!,
-                                    ),
-                                    'Left ${workspace.name}.',
-                                  ),
-                            child: const Text('Leave'),
                           ),
                       ],
                     ),
