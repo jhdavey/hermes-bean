@@ -27,8 +27,8 @@
     <main class="wrap hero">
         <section>
             <span class="pill">● First 100 early-access invites now opening</span>
-            <h1>Tell Bean what changed. Bean updates your day.</h1>
-            <p>HeyBean is an AI executive assistant for busy people and households. It plans your calendar, captures tasks, sets reminders, and keeps home and work moving from one focused conversation.</p>
+            <h1>Say: <span style="white-space: nowrap;">“Hey Bean…”</span> then say what you need.</h1>
+            <p>HeyBean is an AI executive assistant for busy people and households. Start requests with “Hey Bean…” to plan your calendar, capture tasks, set reminders, and keep home and work moving from one focused conversation.</p>
             <form class="form" id="early-access" method="POST" action="{{ route('early-access.store') }}">
                 @csrf
                 <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address">
@@ -40,7 +40,7 @@
                 <p class="micro">No spam. Private beta invites only. We’ll only use your email for HeyBean launch updates.</p>
             @endif
             <div class="cta"><a class="button secondary" href="#how">See how Bean works</a></div>
-            <div class="proof"><span>Google Calendar-ready</span><span>Approval guardrails</span><span>Work + home spaces</span><span>Private by design</span></div>
+            <div class="proof"><span>Voice-first requests</span><span>Google Calendar-ready</span><span>Approval guardrails</span><span>Work + home spaces</span><span>Private by design</span></div>
         </section>
         <section class="phone-wrap" aria-label="HeyBean iOS Today screenshot">
             <div class="halo"></div>
@@ -52,13 +52,13 @@
 
     <section class="wrap section" id="how">
         <h2>Your schedule changes faster than your tools.</h2>
-        <p class="lead">Bean turns plain-English requests into a structured day — with the calendar, tasks, reminders, and household context kept together.</p>
-        <div class="flow"><div class="step"><span>1</span><b>Ask naturally</b><p>“Move my focus block to 3, remind Sam about cleats, and add groceries to Household.”</p></div><div class="step"><span>2</span><b>Bean organizes</b><p>Calendar events, tasks, reminders, and workspace context update from one conversation.</p></div><div class="step"><span>3</span><b>You stay in control</b><p>Sensitive actions wait for approval so Bean can move fast without surprising you.</p></div></div>
+        <p class="lead">Bean turns “Hey Bean…” voice requests into a structured day — with the calendar, tasks, reminders, and household context kept together.</p>
+        <div class="flow"><div class="step"><span>1</span><b>Ask naturally</b><p>“Hey Bean, move my focus block to 3, remind Sam about cleats, and add groceries to Household.”</p></div><div class="step"><span>2</span><b>Bean organizes</b><p>Calendar events, tasks, reminders, and workspace context update from one conversation.</p></div><div class="step"><span>3</span><b>You stay in control</b><p>Sensitive actions wait for approval so Bean can move fast without surprising you.</p></div></div>
     </section>
 
     <section class="wrap section" id="features">
         <h2>Built for the real day, not a perfect day.</h2>
-        <div class="grid"><div class="card"><b>Calendar command center</b><p>Apple-style daily timeline, critical count, all-day events, Google Calendar sync, and quick event editing.</p></div><div class="card"><b>Tasks + reminders</b><p>Capture the things that fall between apps, color-code them by category, and keep today’s priorities visible.</p></div><div class="card"><b>Household workspaces</b><p>Separate personal and shared contexts, invite members, and sync the right items to the right space.</p></div><div class="card"><b>Bean chat</b><p>Ask for changes in plain English and watch progress inline without losing the focused mobile layout.</p></div><div class="card"><b>Approval guardrails</b><p>Bean can draft and stage actions while letting you approve sensitive changes before they happen.</p></div><div class="card"><b>Privacy controls</b><p>Export your data, delete your account, disconnect Google Calendar, and access policy links from the app.</p></div></div>
+        <div class="grid"><div class="card"><b>Calendar command center</b><p>Apple-style daily timeline, critical count, all-day events, Google Calendar sync, and quick event editing.</p></div><div class="card"><b>Tasks + reminders</b><p>Capture the things that fall between apps, color-code them by category, and keep today’s priorities visible.</p></div><div class="card"><b>Household workspaces</b><p>Separate personal and shared contexts, invite members, and sync the right items to the right space.</p></div><div class="card"><b>Bean chat</b><p>Type or speak “Hey Bean…” and watch progress inline without losing the focused mobile layout.</p></div><div class="card"><b>Approval guardrails</b><p>Bean can draft and stage actions while letting you approve sensitive changes before they happen.</p></div><div class="card"><b>Privacy controls</b><p>Export your data, delete your account, disconnect Google Calendar, and access policy links from the app.</p></div></div>
         <div class="quote"><p>“Done — calendar updated, reminder created, household task synced.”</p><a class="button" href="#early-access">Get early access</a></div>
     </section>
 
