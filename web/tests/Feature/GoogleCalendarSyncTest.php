@@ -85,6 +85,42 @@ class GoogleCalendarSyncTest extends TestCase
         $this->assertSame('sync-token-1', $connection->sync_token);
     }
 
+    public function test_google_timed_events_import_using_calendar_wall_clock_time(): void
+    {
+        $token = $this->apiToken('calendar-wall-clock@example.com');
+        $user = User::where('email', 'calendar-wall-clock@example.com')->firstOrFail();
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => ['selected_calendar_ids' => ['primary']],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'items' => [[
+                    'id' => 'offset-event-1',
+                    'summary' => 'Afternoon Google block',
+                    'status' => 'confirmed',
+                    'start' => ['dateTime' => '2026-05-20T13:00:00-04:00', 'timeZone' => 'America/New_York'],
+                    'end' => ['dateTime' => '2026-05-20T17:00:00-04:00', 'timeZone' => 'America/New_York'],
+                ]],
+                'nextSyncToken' => 'wall-clock-token',
+            ]),
+        ]);
+
+        $this->withToken($token)->getJson('/api/calendar-events')->assertOk();
+
+        $event = CalendarEvent::where('google_event_id', 'offset-event-1')->firstOrFail();
+        $this->assertSame('2026-05-20 13:00:00', $event->getRawOriginal('starts_at'));
+        $this->assertSame('2026-05-20 17:00:00', $event->getRawOriginal('ends_at'));
+        $this->assertSame('2026-05-20T13:00:00+00:00', $event->starts_at->toIso8601String());
+        $this->assertSame('2026-05-20T17:00:00+00:00', $event->ends_at->toIso8601String());
+    }
+
     public function test_user_can_select_google_calendars_and_sync_imports_only_selected_calendars(): void
     {
         $token = $this->apiToken('calendar-select@example.com');
