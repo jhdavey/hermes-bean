@@ -8,7 +8,7 @@
     <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
     <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
-    <link rel="manifest" href="{{ asset('site.webmanifest') }}">
+    <link rel="manifest" href="{{ asset('site-manifest.json') }}">
     <meta name="theme-color" content="#16a34a">
     <style>
         :root { color-scheme: light; --ink:#102016; --muted:#58645c; --green:#16a34a; --cream:#fbf7ed; --line:#dce8dd; }
