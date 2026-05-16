@@ -27,8 +27,8 @@
     <main class="wrap hero">
         <section>
             <span class="pill">● First 100 early-access invites now opening</span>
-            <h1>Say: <span style="white-space: nowrap;">“Hey Bean…”</span> then say what you need.</h1>
-            <p>HeyBean is an AI executive assistant for busy people and households. Start requests with “Hey Bean…” to plan your calendar, capture tasks, set reminders, and keep home and work moving from one focused conversation.</p>
+            <h1>Tell <span style="margin-left: .06em;">Bean</span> what changed. <span style="margin-left: .08em;">Bean</span> updates your day.</h1>
+            <p>HeyBean is an AI executive assistant for busy people and households. It plans your calendar, captures tasks, sets reminders, and keeps home and work moving from one focused conversation.</p>
             <form class="form" id="early-access" method="POST" action="{{ route('early-access.store') }}">
                 @csrf
                 <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address">
@@ -40,6 +40,7 @@
                 <p class="micro">No spam. Private beta invites only. We’ll only use your email for HeyBean launch updates.</p>
             @endif
             <div class="cta"><a class="button secondary" href="#how">See how Bean works</a></div>
+            <p class="micro"><strong>Voice shortcut:</strong> say “Hey Bean…” before any request to talk through changes hands-free.</p>
             <div class="proof"><span>Voice-first requests</span><span>Google Calendar-ready</span><span>Approval guardrails</span><span>Work + home spaces</span><span>Private by design</span></div>
         </section>
         <section class="phone-wrap" aria-label="HeyBean iOS Today screenshot">
