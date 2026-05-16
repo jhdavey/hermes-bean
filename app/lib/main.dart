@@ -6574,7 +6574,7 @@ DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
   final isoWallClock = _parseIsoDeviceLocalDateTime(
     _hasExplicitIsoTimezone(trimmed)
         ? trimmed.replaceFirst(
-            RegExp(r'(?:Z|[+-]\\d{2}:?\\d{2})$', caseSensitive: false),
+            RegExp(r'(?:Z|[+-]\d{2}:?\d{2})$', caseSensitive: false),
             '',
           )
         : trimmed,

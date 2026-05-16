@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>HeyBean - AI executive assistant for real life</title>
-    <meta name="description" content="HeyBean gives busy people an AI assistant named Bean for calendars, tasks, reminders, approvals, and household coordination. First 100 early-access spots now open.">
+    <meta name="description" content="HeyBean gives busy people an AI executive assistant named Bean for calendars, planning, tasks, reminders, approvals, and household coordination. First 100 early-access spots now open.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
@@ -521,6 +521,8 @@
         .feature:nth-child(2):before { background: var(--gold); }
         .feature:nth-child(3):before { background: var(--coral); }
         .feature:nth-child(4):before { background: #4f8fdb; }
+        .feature:nth-child(5):before { background: #7c6fcb; }
+        .feature:nth-child(6):before { background: var(--green-dark); }
         .feature h3 {
             font-family: Sora, sans-serif;
             letter-spacing: -.035em;
@@ -613,7 +615,7 @@
     <header class="shell nav">
         <a class="brand" href="/" aria-label="HeyBean home">
             <img src="{{ asset('images/bean-logo-color.png') }}" alt="HeyBean logo">
-            <span><strong>HeyBean</strong><span>AI assistant for real life</span></span>
+            <span><strong>HeyBean</strong><span>AI executive assistant</span></span>
         </a>
         <nav class="nav-links" aria-label="Primary navigation">
             <a href="#how-it-works">How it works</a>
@@ -627,7 +629,7 @@
             <div>
                 <div class="eyebrow">First 100 early-access spots</div>
                 <h1 aria-label="Meet Bean, the AI executive assistant for real life.">Meet Bean, the AI executive assistant for <span class="highlight">real life</span>.</h1>
-                <p class="lead">HeyBean helps busy people and households stay organized by turning plain-language requests into calendar updates, tasks, reminders, approvals, and daily follow-through.</p>
+                <p class="lead">HeyBean helps busy people and households stay organized by turning plain-language requests into calendar planning, task updates, reminders, approvals, and daily follow-through.</p>
                 <form class="hero-signup" id="early-access" action="{{ route('early-access.store') }}" method="post">
                     @csrf
                     <label class="sr-only" for="email">Email address</label>
@@ -642,8 +644,8 @@
                     <div class="errors hero-status" role="alert">Please check your email address and try again.</div>
                 @endif
                 <div class="proof" aria-label="HeyBean trust markers">
-                    <span>Calendar, tasks, and reminders</span>
-                    <span>Personal and household workspaces</span>
+                    <span>Calendar and planning</span>
+                    <span>Tasks and reminders</span>
                     <span>Google Calendar sync</span>
                 </div>
             </div>
@@ -727,20 +729,32 @@
 
         <section class="section" id="features">
             <div class="section-head">
-                <h2 class="section-title">Practical AI, not a blank chat box.</h2>
-                <p class="section-copy">Early access focuses on the capabilities that make Bean useful day to day. The goal is simple: less admin, fewer dropped balls, and a household that can stay in sync.</p>
+                <h2 class="section-title">Executive assistance, not a blank chat box.</h2>
+                <p class="section-copy">Early access focuses on the capabilities that make Bean useful day to day: calendar planning first, then the tasks and reminders that keep work and home moving.</p>
             </div>
             <div class="feature-grid">
                 <article class="feature">
                     <div>
-                        <h3>Today command center</h3>
-                        <p>See your current tasks, reminders, calendar events, activity, approvals, blockers, and counts in one daily surface.</p>
+                        <h3>Calendar planning</h3>
+                        <p>Plan the day, create events, move blocks around, and tune the calendar hours that matter to your actual routine.</p>
                     </div>
                 </article>
                 <article class="feature">
                     <div>
-                        <h3>Calendar and reminder logic</h3>
-                        <p>Create events, add reminders before events, track recurrence details, and tune the calendar hours that matter to your day.</p>
+                        <h3>Tasks that stay organized</h3>
+                        <p>Capture personal, work, household, chore, and maintenance tasks with categories, due dates, completion states, and shared workspace context.</p>
+                    </div>
+                </article>
+                <article class="feature">
+                    <div>
+                        <h3>Reminders with context</h3>
+                        <p>Add standalone reminders or reminders tied to events, including timing, recurrence details, and follow-up notes Bean can understand later.</p>
+                    </div>
+                </article>
+                <article class="feature">
+                    <div>
+                        <h3>Today command center</h3>
+                        <p>See your current events, tasks, reminders, activity, approvals, blockers, and counts in one daily surface.</p>
                     </div>
                 </article>
                 <article class="feature">

@@ -614,9 +614,24 @@ class GoogleCalendarSyncService
 
     private function googleDateTime(array $value): ?Carbon
     {
-        $date = $value['dateTime'] ?? $value['date'] ?? null;
+        if (! empty($value['date'])) {
+            return Carbon::parse((string) $value['date'])->startOfDay();
+        }
 
-        return $date ? Carbon::parse($date) : null;
+        $dateTime = $value['dateTime'] ?? null;
+        if (! is_string($dateTime) || trim($dateTime) === '') {
+            return null;
+        }
+
+        // Google timed events are already expressed in the calendar's wall-clock
+        // schedule time (for example 1:00 PM America/New_York as
+        // 2026-05-20T13:00:00-04:00). Hermes Bean's calendar UI intentionally
+        // treats API timestamps as wall-clock schedule values, so preserve those
+        // literal date/time components instead of converting the instant to UTC
+        // and shifting the visible block by the timezone offset.
+        $wallClock = preg_replace('/(?:Z|[+-]\d{2}:?\d{2})$/i', '', trim($dateTime));
+
+        return Carbon::parse($wallClock ?: $dateTime);
     }
 
     private function markFailed(GoogleCalendarConnection $connection, string $message): void
