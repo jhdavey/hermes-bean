@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ $title ?? 'HeyBean' }}</title>
     <meta name="description" content="{{ $description ?? 'HeyBean legal and support information.' }}">
+    <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
+    <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}">
+    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
+    <link rel="manifest" href="{{ asset('site.webmanifest') }}">
+    <meta name="theme-color" content="#16a34a">
     <style>
         :root { color-scheme: light; --ink:#102016; --muted:#58645c; --green:#16a34a; --cream:#fbf7ed; --line:#dce8dd; }
         * { box-sizing: border-box; }
