@@ -364,7 +364,10 @@ void main() {
     expect(api.defaultWorkspaceSetTo, 2);
     expect(find.text('Sign in to Hermes Bean'), findsNothing);
     expect(find.byKey(const Key('settings-view')), findsOneWidget);
-    expect(find.textContaining('Workspace refresh failed'), findsOneWidget);
+    expect(
+      find.textContaining('Bean could not refresh your workspace'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -2029,7 +2032,9 @@ void main() {
       expect(api.sentMessages, ['Send the contract to Lauren']);
       expect(find.text('Blocked'), findsOneWidget);
       expect(
-        find.text('Hermes is blocked: Gmail OAuth is not connected.'),
+        find.text(
+          'Bean is paused because Gmail OAuth is not connected. Please check Settings or approvals, then try again.',
+        ),
         findsOneWidget,
       );
     },
@@ -2059,7 +2064,7 @@ void main() {
       expect(find.text('Failed'), findsOneWidget);
       expect(
         find.text(
-          'I could not complete that request because Hermes timed out. Please try again, or clarify any missing details so I can continue.',
+          'Bean could not finish that request. Bean’s service is having a moment on our side. Please try again in a bit. Please try again, or tell Bean any missing details and I’ll pick it back up. Don’t worry — if this keeps happening we’ll fix it as soon as possible.',
         ),
         findsOneWidget,
       );

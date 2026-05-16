@@ -19,8 +19,11 @@ class HermesApiClient {
        _transport = transport ?? _defaultTransport;
 
   static Uri _validateBaseUrl(Uri baseUrl) {
-    if (const bool.fromEnvironment('dart.vm.product') && baseUrl.scheme != 'https') {
-      throw StateError('Hermes Bean production builds require an HTTPS API base URL.');
+    if (const bool.fromEnvironment('dart.vm.product') &&
+        baseUrl.scheme != 'https') {
+      throw StateError(
+        'Hermes Bean production builds require an HTTPS API base URL.',
+      );
     }
     return baseUrl;
   }
@@ -671,7 +674,8 @@ class HermesApiClient {
   static Future<HermesApiResponse> _defaultTransport(
     HermesApiRequest request,
   ) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
     try {
       final ioRequest = await client
           .openUrl(request.method, request.uri)
@@ -688,7 +692,10 @@ class HermesApiClient {
           .timeout(const Duration(seconds: 30));
       return HermesApiResponse(ioResponse.statusCode, responseBody);
     } on TimeoutException catch (error) {
-      throw HermesApiException(408, "Request timed out: ${error.message ?? 'network timeout'}");
+      throw HermesApiException(
+        408,
+        "Request timed out: ${error.message ?? 'network timeout'}",
+      );
     } finally {
       client.close(force: true);
     }
@@ -725,7 +732,7 @@ class HermesApiException implements Exception {
   final String body;
 
   @override
-  String toString() => 'HermesApiException($statusCode): $body';
+  String toString() => 'HermesApiException(statusCode: $statusCode)';
 }
 
 class HermesAuthResult {

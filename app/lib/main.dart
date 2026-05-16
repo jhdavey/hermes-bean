@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -67,6 +68,110 @@ Future<bool> _launchExternalUrlWithNativeFallback(Uri url) async {
   } on MissingPluginException {
     return false;
   }
+}
+
+String beanFriendlyErrorMessage(Object error, {String? action}) {
+  final prefix = action == null || action.trim().isEmpty
+      ? 'Bean hit a little snag.'
+      : 'Bean could not ${action.trim()}.';
+  final guidance = _beanErrorGuidance(error);
+  return '$prefix $guidance Don’t worry — your data is safe, and if this keeps happening we’ll fix it as soon as possible.';
+}
+
+String beanFriendlyChatFailureMessage(Object error) {
+  final guidance = _beanErrorGuidance(error);
+  return 'Bean could not finish that request. $guidance Please try again, or tell Bean any missing details and I’ll pick it back up. Don’t worry — if this keeps happening we’ll fix it as soon as possible.';
+}
+
+String _beanErrorGuidance(Object error) {
+  if (error is HermesApiException) {
+    final validationMessage = error.statusCode == 400 || error.statusCode == 422
+        ? _validationHintFromApiBody(error.body)
+        : null;
+    if (validationMessage != null) return validationMessage;
+    return switch (error.statusCode) {
+      400 =>
+        'Something in the request did not look quite right. Please review what you entered and try again.',
+      401 =>
+        'Your session looks like it expired. Please sign in again and Bean will get right back to work.',
+      403 =>
+        'Bean does not have permission to do that yet. Please check the account or workspace access and try again.',
+      404 =>
+        'Bean could not find that item anymore. It may have been moved or deleted, so try refreshing the app.',
+      408 =>
+        'The connection took too long. Please check your internet connection and try again.',
+      409 =>
+        'That change bumped into something that was already updated. Please refresh and try once more.',
+      422 =>
+        'One of the details needs a quick fix. Please check the highlighted fields and try again.',
+      423 =>
+        'That action is temporarily blocked while Bean waits on a required connection or approval. Please check Settings and try again.',
+      429 =>
+        'Bean is getting too many requests at once. Please give it a moment and try again.',
+      >= 500 && < 600 =>
+        'Bean’s service is having a moment on our side. Please try again in a bit.',
+      _ => 'Something unexpected happened. Please try again in a moment.',
+    };
+  }
+  if (error is SocketException) {
+    return 'Bean cannot reach the internet right now. Please check your connection and try again.';
+  }
+  if (error is TimeoutException) {
+    return 'The connection took too long. Please check your internet connection and try again.';
+  }
+  if (error is FormatException || error is TypeError) {
+    return 'Bean received something it could not read correctly. Please refresh and try again.';
+  }
+  if (error is PlatformException || error is MissingPluginException) {
+    return 'Bean could not open that on this device. Please update the app or try again.';
+  }
+  return 'Something unexpected happened. Please try again in a moment.';
+}
+
+String? _validationHintFromApiBody(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, Object?>) {
+      final errors = decoded['errors'];
+      if (errors is Map && errors.isNotEmpty) {
+        final first = errors.values.first;
+        if (first is List && first.isNotEmpty && first.first is String) {
+          final clean = _safeValidationSentence(first.first as String);
+          if (clean != null) return '$clean Please adjust it and try again.';
+        }
+      }
+      final message = decoded['message'];
+      if (message is String) {
+        final clean = _safeValidationSentence(message);
+        if (clean != null) return '$clean Please adjust it and try again.';
+      }
+    }
+  } catch (_) {
+    // Raw error bodies are intentionally never shown to users.
+  }
+  return null;
+}
+
+String? _safeValidationSentence(String message) {
+  final trimmed = message.trim();
+  if (trimmed.isEmpty) return null;
+  final lower = trimmed.toLowerCase();
+  if (lower.contains('exception') ||
+      lower.contains('sql') ||
+      lower.contains('stack') ||
+      lower.contains('trace') ||
+      lower.contains('token') ||
+      lower.contains('bearer') ||
+      lower.contains('html') ||
+      lower.contains('{') ||
+      lower.contains('}')) {
+    return null;
+  }
+  final sentence =
+      trimmed.endsWith('.') || trimmed.endsWith('!') || trimmed.endsWith('?')
+      ? trimmed
+      : '$trimmed.';
+  return sentence;
 }
 
 void main() {
@@ -430,8 +535,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _error = invalidToken
             ? 'Session expired or the saved sign-in is no longer valid. Please sign in again.'
             : launchedFromRememberedToken
-            ? 'Could not refresh your saved sign-in. Your Remember me token is still saved, so try again when the connection is back.'
-            : 'Session expired or the API could not be reached. Please sign in again.';
+            ? 'Bean could not refresh your saved sign-in. Your Remember me token is still saved, so please try again when the connection is back.'
+            : 'Bean could not reach your account. Please sign in again and Bean will get right back to work.';
         _user = null;
         _session = null;
         _tasks = const [];
@@ -471,7 +576,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       }
       await _loadSignedIn(knownUser: auth.user);
     } catch (error) {
-      setState(() => _error = 'Sign in failed: $error');
+      setState(
+        () => _error = beanFriendlyErrorMessage(error, action: 'sign you in'),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -492,7 +599,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       await widget.tokenStore.saveToken(auth.token);
       await _loadSignedIn(knownUser: auth.user);
     } catch (error) {
-      setState(() => _error = 'Registration failed: $error');
+      setState(
+        () => _error = beanFriendlyErrorMessage(
+          error,
+          action: 'create your account',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -561,7 +673,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       }
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = 'Could not save Bean preferences: $error');
+      setState(
+        () => _error = beanFriendlyErrorMessage(
+          error,
+          action: 'save your Bean preferences',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -656,7 +773,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       if (!mounted) return;
       setState(() {
         _chatRunState = 'Failed';
-        _error = 'Could not start a new Bean session: $error';
+        _error = beanFriendlyErrorMessage(error, action: 'start a new chat');
       });
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -737,8 +854,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               id: _messages.length + 1,
               role: 'assistant',
               content: reason == null || reason.isEmpty
-                  ? 'Hermes is blocked and needs attention before it can continue.'
-                  : 'Hermes is blocked: $reason',
+                  ? 'Bean is paused because something needs attention before it can continue. Please check Settings or approvals, then try again.'
+                  : 'Bean is paused because $reason Please check Settings or approvals, then try again.',
             ),
           );
         } else if (result.assistantMessage == null) {
@@ -747,7 +864,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
               id: _messages.length + 1,
               role: 'assistant',
               content:
-                  'Hermes finished, but did not return a response. Please clarify what you want me to do next and I will continue.',
+                  'Bean finished the work, but the response did not come through cleanly. Please tell Bean what you want next and I’ll continue from here.',
             ),
           );
         }
@@ -765,10 +882,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           HermesMessage(
             id: _messages.length + 1,
             role: 'assistant',
-            content: _chatFailureMessage(error),
+            content: beanFriendlyChatFailureMessage(error),
           ),
         );
-        _error = 'Send failed: $error';
+        _error = beanFriendlyErrorMessage(error, action: 'send that message');
       });
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -811,51 +928,21 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     if (blocker == null) return null;
     for (final key in ['reason', 'message', 'title', 'description']) {
       final value = blocker[key];
-      if (value is String && value.trim().isNotEmpty) return value.trim();
+      if (value is String) {
+        final cleaned = _safeValidationSentence(value);
+        if (cleaned != null) return cleaned;
+      }
     }
     final context = blocker['context'];
     if (context is Map<String, Object?>) {
       final detail =
           context['message'] ?? context['error'] ?? context['failure_type'];
-      if (detail is String && detail.trim().isNotEmpty) return detail.trim();
-    }
-    return null;
-  }
-
-  String _chatFailureMessage(Object error) {
-    final reason = _extractFailureReason(error);
-    return reason == null || reason.isEmpty
-        ? 'I could not complete that request because the Hermes API could not be reached. Please try again, or clarify any missing details so I can continue.'
-        : 'I could not complete that request because $reason Please try again, or clarify any missing details so I can continue.';
-  }
-
-  String? _extractFailureReason(Object error) {
-    if (error is HermesApiException) {
-      try {
-        final decoded = jsonDecode(error.body);
-        if (decoded is Map<String, Object?>) {
-          final message =
-              decoded['message'] ?? decoded['error'] ?? decoded['reason'];
-          if (message is String && message.trim().isNotEmpty) {
-            return _sentenceFragment(message);
-          }
-        }
-      } catch (_) {
-        // Fall through to the exception status below.
+      if (detail is String) {
+        final cleaned = _safeValidationSentence(detail);
+        if (cleaned != null) return cleaned;
       }
-      return 'the API returned HTTP ${error.statusCode}.';
     }
     return null;
-  }
-
-  String _sentenceFragment(String message) {
-    final trimmed = message.trim();
-    if (trimmed.isEmpty) return trimmed;
-    return trimmed.endsWith('.') ||
-            trimmed.endsWith('!') ||
-            trimmed.endsWith('?')
-        ? trimmed
-        : '$trimmed.';
   }
 
   List<HermesActivityEvent> _mergeEvents(
@@ -992,7 +1079,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = 'Refresh failed: $error');
+      setState(
+        () => _error = beanFriendlyErrorMessage(
+          error,
+          action: 'refresh your latest data',
+        ),
+      );
     }
   }
 
@@ -1040,8 +1132,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _tasks = previousTasks;
         _pastTasks = previousPastTasks;
         _error = wasCompleted
-            ? 'Could not reopen task: $error'
-            : 'Could not complete task: $error';
+            ? beanFriendlyErrorMessage(error, action: 'reopen that task')
+            : beanFriendlyErrorMessage(error, action: 'complete that task');
       });
     } finally {
       _pendingTaskIds.remove(task.id);
@@ -1099,7 +1191,14 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       });
       await _refreshSignedInViews();
     } catch (error) {
-      if (mounted) setState(() => _error = 'Could not save task: $error');
+      if (mounted) {
+        setState(
+          () => _error = beanFriendlyErrorMessage(
+            error,
+            action: 'save that task',
+          ),
+        );
+      }
     }
   }
 
@@ -1193,7 +1292,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       if (mounted) {
         setState(() {
           _tasks = previousTasks;
-          _error = 'Could not delete task: $error';
+          _error = beanFriendlyErrorMessage(error, action: 'delete that task');
         });
       }
     }
@@ -1255,7 +1354,14 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       });
       await _refreshSignedInViews();
     } catch (error) {
-      if (mounted) setState(() => _error = 'Could not save reminder: $error');
+      if (mounted) {
+        setState(
+          () => _error = beanFriendlyErrorMessage(
+            error,
+            action: 'save that reminder',
+          ),
+        );
+      }
     }
   }
 
@@ -1287,8 +1393,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       setState(() {
         _reminders = previousReminders;
         _error = completed
-            ? 'Could not reopen reminder: $error'
-            : 'Could not complete reminder: $error';
+            ? beanFriendlyErrorMessage(error, action: 'reopen that reminder')
+            : beanFriendlyErrorMessage(error, action: 'complete that reminder');
       });
     }
   }
@@ -1307,7 +1413,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       if (mounted) {
         setState(() {
           _reminders = previousReminders;
-          _error = 'Could not delete reminder: $error';
+          _error = beanFriendlyErrorMessage(
+            error,
+            action: 'delete that reminder',
+          );
         });
       }
     }
@@ -1425,7 +1534,14 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       });
       await _refreshSignedInViews();
     } catch (error) {
-      if (mounted) setState(() => _error = 'Could not create event: $error');
+      if (mounted) {
+        setState(
+          () => _error = beanFriendlyErrorMessage(
+            error,
+            action: 'create that calendar event',
+          ),
+        );
+      }
     }
   }
 
@@ -1519,7 +1635,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       if (!mounted) return;
       setState(() {
         _calendar = previousCalendar;
-        _error = 'Could not update event: $error';
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'update that calendar event',
+        );
       });
     }
   }
@@ -1539,7 +1658,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       if (!mounted) return;
       setState(() {
         _calendar = previousCalendar;
-        _error = 'Could not delete event: $error';
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'delete that calendar event',
+        );
       });
     }
   }
@@ -1612,7 +1734,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       setState(() {
         _phase = _AuthPhase.signedIn;
         _loadingStatusText = null;
-        _error = 'Workspace refresh failed: $error';
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'refresh your workspace',
+        );
       });
     }
   }
@@ -1636,7 +1761,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Could not update email: $error';
+        _error = beanFriendlyErrorMessage(error, action: 'update your email');
       });
     }
   }
@@ -8551,7 +8676,14 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
       await widget.onChanged();
       return result;
     } catch (error) {
-      if (mounted) setState(() => _message = 'Workspace action failed: $error');
+      if (mounted) {
+        setState(
+          () => _message = beanFriendlyErrorMessage(
+            error,
+            action: 'finish that workspace action',
+          ),
+        );
+      }
       return null;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -9233,7 +9365,10 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     } catch (error) {
       if (mounted) {
         setState(
-          () => _message = 'Could not start Google Calendar connection: $error',
+          () => _message = beanFriendlyErrorMessage(
+            error,
+            action: 'start Google Calendar connection',
+          ),
         );
       }
     } finally {
@@ -9269,7 +9404,10 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     } catch (error) {
       if (mounted) {
         setState(
-          () => _message = 'Google Calendar sync failed after return: $error',
+          () => _message = beanFriendlyErrorMessage(
+            error,
+            action: 'sync Google Calendar after connecting',
+          ),
         );
       }
     } finally {
@@ -9306,7 +9444,12 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       });
     } catch (error) {
       if (mounted) {
-        setState(() => _message = 'Google Calendar sync failed: $error');
+        setState(
+          () => _message = beanFriendlyErrorMessage(
+            error,
+            action: 'sync Google Calendar',
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -9328,7 +9471,10 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     } catch (error) {
       if (mounted) {
         setState(
-          () => _message = 'Could not disconnect Google Calendar: $error',
+          () => _message = beanFriendlyErrorMessage(
+            error,
+            action: 'disconnect Google Calendar',
+          ),
         );
       }
     } finally {
