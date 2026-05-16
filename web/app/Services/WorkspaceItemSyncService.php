@@ -26,7 +26,8 @@ class WorkspaceItemSyncService
             'link_type' => 'copy',
         ])->first();
 
-        $target = $link ? $targetClass::find($link->target_id) : $this->existingTargetForCopy($source, $targetWorkspace, $actor);
+        $target = $link ? $targetClass::find($link->target_id) : null;
+        $target ??= $this->existingTargetForCopy($source, $targetWorkspace, $actor);
         $target ??= new $targetClass;
         $target->fill($this->attributesForCopy($source));
         $target->forceFill([
@@ -42,10 +43,12 @@ class WorkspaceItemSyncService
                 'source_type' => $type,
                 'source_id' => $source->id,
                 'target_type' => $type,
-                'target_id' => $target->id,
                 'link_type' => 'copy',
             ],
-            ['metadata' => ['synced_at' => now()->toISOString()]]
+            [
+                'target_id' => $target->id,
+                'metadata' => ['synced_at' => now()->toISOString()],
+            ]
         );
 
         return $target->refresh();

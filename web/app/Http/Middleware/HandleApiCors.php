@@ -33,7 +33,7 @@ class HandleApiCors
             $response->headers->set('Vary', trim($response->headers->get('Vary').' Origin'));
         }
 
-        $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+        $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         $response->headers->set('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, X-Requested-With');
         $response->headers->set('Access-Control-Max-Age', '600');
 
