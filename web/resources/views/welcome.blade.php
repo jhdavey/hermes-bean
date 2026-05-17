@@ -51,7 +51,7 @@
             <div class="halo"></div>
             <div class="phone"><img src="{{ asset('images/heybean-mobile-today-calendar.png') }}" alt="HeyBean mobile app screenshot showing seeded events on the Today daily calendar"></div>
             <div class="callout c1">3 events planned<small>calendar updated</small></div>
-            <div class="callout c2">1 approval waiting<small>Bean asks first</small></div>
+            <div class="callout c2">Voice-first control<small>Hold the button and say “Hey, Bean…!”</small></div>
         </section>
     </main>
 
