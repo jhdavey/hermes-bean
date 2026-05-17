@@ -33,6 +33,13 @@ void main() {
       expect(find.text('Sign in to Hermes Bean'), findsNothing);
       expect(find.text('Live API-backed personal assistant'), findsNothing);
       expect(find.byKey(const Key('login-header-logo')), findsOneWidget);
+      final loginLogo = tester.widget<Image>(
+        find.byKey(const Key('login-header-logo')),
+      );
+      expect(
+        (loginLogo.image as AssetImage).assetName,
+        'assets/images/bean/bean-logo.png',
+      );
       expect(find.byIcon(Icons.lock_rounded), findsNothing);
       expect(find.byKey(const Key('show-register-mode')), findsOneWidget);
       expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
@@ -2114,6 +2121,23 @@ void main() {
     expect(find.byKey(const Key('green-glow-left')), findsOneWidget);
     expect(find.byKey(const Key('heybean-bottom-menu')), findsOneWidget);
     expect(find.byKey(const Key('heybean-center-bean-button')), findsOneWidget);
+    final beanLogo = tester.widget<Image>(
+      find.byKey(const Key('heybean-center-bean-logo')),
+    );
+    expect(beanLogo.image, isA<AssetImage>());
+    expect(
+      (beanLogo.image as AssetImage).assetName,
+      'assets/images/bean/bean-logo.png',
+    );
+    expect(beanLogo.color, Colors.white);
+    expect(beanLogo.colorBlendMode, BlendMode.srcIn);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('heybean-center-bean-button')),
+        matching: find.byIcon(Icons.eco_rounded),
+      ),
+      findsNothing,
+    );
 
     await tester.tap(find.byKey(const Key('nav-bean')));
     await tester.pumpAndSettle();

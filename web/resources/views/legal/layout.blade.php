@@ -35,7 +35,7 @@
     <header class="wrap">
         <nav>
             <a class="brand" href="/">
-                <img src="{{ asset('images/bean-logo-color.png') }}" alt="HeyBean logo">
+                <img src="{{ asset('images/bean-logo.png') }}" alt="HeyBean logo">
                 <strong>HeyBean</strong>
             </a>
             <div class="links">

@@ -2730,7 +2730,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                       : ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.asset(
-                            'assets/images/bean/bean-logo-color.png',
+                            'assets/images/bean/bean-logo.png',
                             key: const Key('login-header-logo'),
                             width: 28,
                             height: 28,
@@ -11076,7 +11076,17 @@ class _BeanFab extends StatelessWidget {
               ),
             ],
           ),
-          child: const Icon(Icons.eco_rounded, color: Colors.white, size: 30),
+          child: Padding(
+            padding: const EdgeInsets.all(13),
+            child: Image.asset(
+              'assets/images/bean/bean-logo.png',
+              key: const Key('heybean-center-bean-logo'),
+              color: Colors.white,
+              colorBlendMode: BlendMode.srcIn,
+              fit: BoxFit.contain,
+              semanticLabel: 'Bean chat',
+            ),
+          ),
         ),
       ),
     ),

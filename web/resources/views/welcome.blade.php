@@ -17,7 +17,7 @@
 </head>
 <body>
     <header class="wrap nav">
-        <a class="brand" href="/"><img src="{{ asset('images/bean-logo-color.png') }}" alt="HeyBean logo">HeyBean</a>
+        <a class="brand" href="/"><img src="{{ asset('images/bean-logo.png') }}" alt="HeyBean logo">HeyBean</a>
         <nav class="navlinks" aria-label="Primary navigation"><a href="#how">How it works</a><a href="#features">Features</a></nav>
         <details class="mobile-menu">
             <summary aria-label="Open menu">Menu</summary>

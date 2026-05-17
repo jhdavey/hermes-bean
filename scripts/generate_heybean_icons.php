@@ -1,7 +1,7 @@
 <?php
 
 $root = dirname(__DIR__);
-$sourcePath = $root.'/app/assets/images/bean/bean-logo-color.png';
+$sourcePath = $root.'/web/public/images/bean-logo.png';
 
 if (! extension_loaded('gd')) {
     fwrite(STDERR, "PHP GD extension is required.\n");

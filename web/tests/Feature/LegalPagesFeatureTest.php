@@ -12,6 +12,8 @@ class LegalPagesFeatureTest extends TestCase
             $this->get($path)
                 ->assertOk()
                 ->assertSee('HeyBean', false)
+                ->assertSee('images/bean-logo.png', false)
+                ->assertDontSee('images/bean-logo-color.png', false)
                 ->assertSee('support@heybean.org', false)
                 ->assertHeader('X-Content-Type-Options', 'nosniff')
                 ->assertHeader('X-Frame-Options', 'DENY')

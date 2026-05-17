@@ -34,6 +34,8 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Hey Bean, move my focus block to 3', false)
             ->assertSee('Type or speak “Hey Bean…”', false)
             ->assertSee('class="mobile-menu"', false)
+            ->assertSee('images/bean-logo.png', false)
+            ->assertDontSee('images/bean-logo-color.png', false)
             ->assertDontSee('Voice shortcut:', false)
             ->assertDontSee('talk through changes hands-free', false)
             ->assertDontSee('say “Hey Bean, add…”', false)
