@@ -1624,11 +1624,22 @@ String _readTitle(Map<String, Object?> json) =>
 
 Map<String, Object?> _expectMap(Object? value) {
   if (value is Map<String, Object?>) return value;
+  if (value is Map) {
+    return value.map<String, Object?>(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+  }
   throw FormatException('Expected JSON object, got ${value.runtimeType}');
 }
 
 Map<String, Object?>? _expectMapOrNull(Object? value) {
   if (value == null) return null;
+  if (value is String) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || trimmed == 'null') return null;
+    final decoded = jsonDecode(trimmed);
+    return _expectMap(decoded);
+  }
   return _expectMap(value);
 }
 

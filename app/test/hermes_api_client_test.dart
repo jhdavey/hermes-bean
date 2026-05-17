@@ -294,6 +294,35 @@ void main() {
     expect((await client.listCalendarEvents()).single.title, 'Design review');
   });
 
+  test(
+    'parses legacy string-encoded metadata from production records',
+    () async {
+      final task = HermesTask.fromJson({
+        'id': 1,
+        'title': 'Cut grass',
+        'status': 'open',
+        'metadata': '{"google_calendar_ids":["family@example.com"]}',
+      });
+      final reminder = HermesReminder.fromJson({
+        'id': 2,
+        'title': 'Stand up',
+        'remind_at': '2026-05-10T09:00:00Z',
+        'metadata': '{"color":"#34C759","is_critical":true}',
+      });
+      final event = HermesCalendarEvent.fromJson({
+        'id': 3,
+        'title': 'Design review',
+        'starts_at': '2026-05-10T14:30:00Z',
+        'metadata': '{"google_calendar_id":"work@example.com"}',
+      });
+
+      expect(task.googleCalendarIds, ['family@example.com']);
+      expect(reminder.color, '#34C759');
+      expect(reminder.isCritical, isTrue);
+      expect(event.googleCalendarId, 'work@example.com');
+    },
+  );
+
   test('parses and saves Google Calendar selection metadata', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
