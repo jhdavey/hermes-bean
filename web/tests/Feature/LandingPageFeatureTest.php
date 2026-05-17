@@ -14,7 +14,8 @@ class LandingPageFeatureTest extends TestCase
         $response = $this->get('/');
 
         $response->assertOk()
-            ->assertSee('Live your best life, let Bean handle the rest', false)
+            ->assertSee('Your AI operating system for the real-world', false)
+            ->assertDontSee('Live your best life, let Bean handle the rest', false)
             ->assertSee('your new AI executive assistant', false)
             ->assertSee('manages your calendar, keeps track of tasks, sets reminders', false)
             ->assertSee('keeps you moving instead of getting stuck in the weeds', false)
