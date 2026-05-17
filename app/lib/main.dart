@@ -1514,6 +1514,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
             title: 'Reminder: $title',
             remindAt: start
                 .subtract(Duration(minutes: reminderMinutesBefore))
+                .toUtc()
                 .toIso8601String(),
             metadata: {
               'minutes_before': reminderMinutesBefore,
@@ -1782,8 +1783,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     final draft = HermesCalendarEvent(
       id: 0,
       title: '',
-      startsAt: start.toIso8601String(),
-      endsAt: end.toIso8601String(),
+      startsAt: start.toUtc().toIso8601String(),
+      endsAt: end.toUtc().toIso8601String(),
     );
     await _showCalendarEventDetails(
       context,
@@ -1918,10 +1919,11 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                 title: _phase == _AuthPhase.signedIn
                     ? _CalendarHeaderButton(
                         key: const Key('calendar-month-chevron'),
-                        label:
-                            '${_monthName(DateTime.now().month)} ${DateTime.now().year}',
+                        label: _calendarHeaderMonthLabel(_selectedCalendarDay),
                         icon: Icons.chevron_left_rounded,
+                        secondaryIcon: Icons.calendar_month_rounded,
                         iconSize: 16,
+                        secondaryIconSize: 15,
                         horizontalPadding: 10,
                         verticalPadding: 7,
                         labelStyle: const TextStyle(
@@ -1935,9 +1937,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                   if (_phase == _AuthPhase.signedIn) ...[
                     _CalendarHeaderButton(
                       key: const Key('calendar-today-button'),
-                      label: 'Today',
-                      icon: Icons.today_rounded,
-                      iconSize: 16,
+                      label: _calendarHeaderDayLabel(_selectedCalendarDay),
+                      icon: null,
                       horizontalPadding: 10,
                       verticalPadding: 7,
                       labelStyle: const TextStyle(
@@ -4793,16 +4794,20 @@ class _CalendarHeaderButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onTap,
+    this.secondaryIcon,
     this.iconSize = 20,
+    this.secondaryIconSize = 20,
     this.horizontalPadding = 12,
     this.verticalPadding = 8,
     this.labelStyle = const TextStyle(fontWeight: FontWeight.w800),
   });
 
   final String label;
-  final IconData icon;
+  final IconData? icon;
+  final IconData? secondaryIcon;
   final VoidCallback onTap;
   final double iconSize;
+  final double secondaryIconSize;
   final double horizontalPadding;
   final double verticalPadding;
   final TextStyle labelStyle;
@@ -4831,8 +4836,14 @@ class _CalendarHeaderButton extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: iconSize),
-          const SizedBox(width: 4),
+          if (icon != null) ...[
+            Icon(icon, size: iconSize),
+            SizedBox(width: secondaryIcon == null ? 4 : 2),
+          ],
+          if (secondaryIcon != null) ...[
+            Icon(secondaryIcon, size: secondaryIconSize),
+            const SizedBox(width: 4),
+          ],
           Text(label, style: labelStyle),
         ],
       ),
@@ -5298,8 +5309,8 @@ class _TimelineEventBlock extends StatelessWidget {
     final eventHeight = ((endDecimal - startDecimal) * _calendarHourHeight - 4)
         .clamp(34.0, (endHour + 1 - startHour) * _calendarHourHeight);
     final dayColumnWidth = timelineWidth / 2;
-    final left = (dayColumnWidth * columnIndex) + 8;
-    final width = (dayColumnWidth - 16).clamp(0.0, double.infinity);
+    final left = (dayColumnWidth * columnIndex) + 2;
+    final width = (dayColumnWidth - 4).clamp(0.0, double.infinity);
     final timeLabel = _eventTimeRangeShort(event);
     return Positioned(
       top: hourPosition + 2,
@@ -5307,7 +5318,7 @@ class _TimelineEventBlock extends StatelessWidget {
       width: width,
       child: InkWell(
         key: Key(_calendarEventBlockKeyForDay(event, day)),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(6),
         onTap: () => _showCalendarEventDetails(
           context,
           event,
@@ -5355,7 +5366,7 @@ class _TimelineEventBlock extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
             color: _calendarEventColor(event).withValues(alpha: .14),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
               color: _calendarEventColor(event).withValues(alpha: .35),
             ),
@@ -6941,6 +6952,15 @@ String _weekdayLetter(int weekday) =>
 String _shortWeekdayName(int weekday) =>
     const ['Mon', 'Tues', 'Wed', 'Thurs', 'Fri', 'Sat', 'Sun'][weekday - 1];
 
+String _compactWeekdayName(int weekday) =>
+    const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
+
+String _calendarHeaderDayLabel(DateTime date) =>
+    '${_compactWeekdayName(date.weekday)} ${_shortMonthName(date.month)} ${date.day}';
+
+String _calendarHeaderMonthLabel(DateTime date) =>
+    "${_shortMonthName(date.month)} '${(date.year % 100).toString().padLeft(2, '0')}";
+
 int? _weekdayNumber(String name) {
   final normalized = name.toLowerCase().replaceAll('.', '');
   const aliases = <String, int>{
@@ -7048,18 +7068,21 @@ String? _calendarEventInputToWireValue(
 
   final originalDisplay = _formatCalendarEventDateTime(originalValue);
   if (originalValue != null && trimmed == originalDisplay) {
-    return originalValue;
+    return _calendarEventOriginalToWireValue(originalValue);
   }
 
   final parsed = _parseCalendarEventDateTime(
     trimmed,
     referenceValue ?? originalValue,
   );
-  return parsed?.toIso8601String() ?? trimmed;
+  return parsed?.toUtc().toIso8601String() ?? trimmed;
 }
 
-bool _hasExplicitIsoTimezone(String value) =>
-    RegExp(r'(?:Z|[+-]\d{2}:?\d{2})$', caseSensitive: false).hasMatch(value);
+String _calendarEventOriginalToWireValue(String originalValue) {
+  final parsed = DateTime.tryParse(originalValue.trim());
+  if (parsed == null) return originalValue;
+  return parsed.isUtc ? originalValue : parsed.toUtc().toIso8601String();
+}
 
 DateTime? _parseIsoDeviceLocalDateTime(String value) {
   final match = RegExp(
@@ -7090,17 +7113,10 @@ DateTime? _parseIsoDeviceLocalDateTime(String value) {
 DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
   if (value == null || value.trim().isEmpty) return null;
   final trimmed = value.trim();
-  final isoWallClock = _parseIsoDeviceLocalDateTime(
-    _hasExplicitIsoTimezone(trimmed)
-        ? trimmed.replaceFirst(
-            RegExp(r'(?:Z|[+-]\d{2}:?\d{2})$', caseSensitive: false),
-            '',
-          )
-        : trimmed,
-  );
-  if (isoWallClock != null) return isoWallClock;
   final parsed = DateTime.tryParse(trimmed);
-  if (parsed != null) return parsed;
+  if (parsed != null) return parsed.isUtc ? parsed.toLocal() : parsed;
+  final isoWallClock = _parseIsoDeviceLocalDateTime(trimmed);
+  if (isoWallClock != null) return isoWallClock;
 
   final relativeMatch = RegExp(
     r'^(today|tomorrow)\s*(?:@|·|at)?\s*(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
@@ -10931,7 +10947,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                         onPressed: () => onSelected(_HomeDestination.tasks),
                       ),
                     ),
-                    const SizedBox(width: 84),
+                    const SizedBox(width: 96),
                     Expanded(
                       child: _MenuIconButton(
                         key: const Key('nav-reminders'),
@@ -10956,7 +10972,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             ),
           ),
           Positioned(
-            top: 15,
+            top: 7,
             child: _BeanFab(
               selected: selected == _HomeDestination.bean,
               listening: beanListening,
@@ -11050,8 +11066,8 @@ class _BeanFab extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           key: const Key('heybean-center-bean-button'),
-          width: 64,
-          height: 64,
+          width: 72,
+          height: 72,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: const LinearGradient(
@@ -11077,7 +11093,7 @@ class _BeanFab extends StatelessWidget {
             ],
           ),
           child: Padding(
-            padding: const EdgeInsets.all(13),
+            padding: const EdgeInsets.all(14),
             child: Image.asset(
               'assets/images/bean/bean-logo.png',
               key: const Key('heybean-center-bean-logo'),

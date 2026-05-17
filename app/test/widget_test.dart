@@ -830,6 +830,8 @@ void main() {
       expect(find.text('Bean assistant'), findsNothing);
       expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
       expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
+      expect(_topHeaderDayLabelFinder(), findsOneWidget);
+      expect(_topHeaderMonthLabelFinder(), findsOneWidget);
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('nav-bean')));
@@ -1147,8 +1149,23 @@ void main() {
       expect(find.byKey(const Key('calendar-view')), findsOneWidget);
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
       expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
-      expect(find.text('Today'), findsOneWidget);
+      expect(_topHeaderDayLabelFinder(), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-today-button')),
+          matching: find.byIcon(Icons.today_rounded),
+        ),
+        findsNothing,
+      );
       expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
+      expect(_topHeaderMonthLabelFinder(), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('calendar-month-chevron')),
+          matching: find.byIcon(Icons.calendar_month_rounded),
+        ),
+        findsOneWidget,
+      );
       expect(
         tester.getTopLeft(find.byKey(const Key('calendar-month-chevron'))).dx,
         lessThan(
@@ -1257,12 +1274,11 @@ void main() {
         find.byKey(const Key('calendar-month-pill-selected')),
         findsOneWidget,
       );
-      final currentFullMonthYearLabel =
-          '${const ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][DateTime.now().month - 1]} ${DateTime.now().year}';
+      expect(_topHeaderMonthLabelFinder(), findsOneWidget);
       expect(
         find.descendant(
           of: find.byKey(const Key('calendar-month-chevron')),
-          matching: find.text(currentFullMonthYearLabel),
+          matching: find.byIcon(Icons.calendar_month_rounded),
         ),
         findsOneWidget,
       );
@@ -1407,10 +1423,21 @@ void main() {
       find.byKey(const Key('calendar-event-block-tomorrow-workout')),
     );
 
-    expect(todayEvent.left, greaterThanOrEqualTo(selectedHeading.left));
-    expect(todayEvent.right, lessThanOrEqualTo(selectedHeading.right));
-    expect(tomorrowEvent.left, greaterThanOrEqualTo(nextHeading.left));
-    expect(tomorrowEvent.right, lessThanOrEqualTo(nextHeading.right));
+    expect(todayEvent.left, closeTo(selectedHeading.left + 2, 1));
+    expect(todayEvent.right, closeTo(selectedHeading.right - 2, 1));
+    expect(tomorrowEvent.left, closeTo(nextHeading.left + 2, 1));
+    expect(tomorrowEvent.right, closeTo(nextHeading.right - 2, 1));
+    final eventBlockContainer = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('calendar-event-block-today-workout')),
+            matching: find.byType(Container),
+          )
+          .last,
+    );
+    final eventBlockDecoration =
+        eventBlockContainer.decoration! as BoxDecoration;
+    expect(eventBlockDecoration.borderRadius, BorderRadius.circular(6));
     expect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
       findsOneWidget,
@@ -2121,6 +2148,10 @@ void main() {
     expect(find.byKey(const Key('green-glow-left')), findsOneWidget);
     expect(find.byKey(const Key('heybean-bottom-menu')), findsOneWidget);
     expect(find.byKey(const Key('heybean-center-bean-button')), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('heybean-center-bean-button'))),
+      const Size(72, 72),
+    );
     final beanLogo = tester.widget<Image>(
       find.byKey(const Key('heybean-center-bean-logo')),
     );
@@ -2300,6 +2331,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.createdEvent?.title, 'Client kickoff');
+    final typedStart = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+      16,
+    ).toUtc().toIso8601String();
+    final typedEnd = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+      17,
+    ).toUtc().toIso8601String();
+    expect(api.createdEvent?.startsAt, typedStart);
+    expect(api.createdEvent?.endsAt, typedEnd);
     expect(api.createdEvent?.metadata?['google_calendar_ids'], [
       'primary',
       'sports@example.com',
@@ -2307,6 +2352,43 @@ void main() {
     expect(api.createdEvent?.metadata?['google_calendar_id'], 'primary');
     expect(find.textContaining('Client kickoff'), findsOneWidget);
   });
+
+  testWidgets(
+    'calendar plus action preserves unchanged default local time after reload',
+    (WidgetTester tester) async {
+      final api = _EditableCalendarFakeHermesApiClient();
+      final now = DateTime.now();
+      final defaultStartHour = (now.hour + 1).clamp(7, 22);
+      final defaultStart = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        defaultStartHour,
+      );
+      final defaultEnd = defaultStart.add(const Duration(hours: 1));
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('calendar-add-event-action')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('event-title-field')),
+        'Default-time hold',
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      expect(
+        api.createdEvent?.startsAt,
+        defaultStart.toUtc().toIso8601String(),
+      );
+      expect(api.createdEvent?.endsAt, defaultEnd.toUtc().toIso8601String());
+      expect(find.textContaining('Default-time hold'), findsOneWidget);
+    },
+  );
 
   testWidgets('event detail info icons explain scheduling options', (
     WidgetTester tester,
@@ -2516,7 +2598,16 @@ void main() {
           matching: find.byType(EditableText),
         ),
       );
-      expect(startEditor.controller.text, 'today at 2:30pm');
+      final initialStartTime = _testNaturalTimeLabel(
+        DateTime.utc(
+          DateTime.now().year,
+          DateTime.now().month,
+          DateTime.now().day,
+          14,
+          30,
+        ).toLocal(),
+      );
+      expect(startEditor.controller.text, 'today at $initialStartTime');
       expect(startEditor.controller.text, isNot(contains('T14:30')));
 
       await tester.enterText(
@@ -2643,7 +2734,7 @@ void main() {
           eventDate.month,
           eventDate.day,
           16,
-        ).toIso8601String(),
+        ).toUtc().toIso8601String(),
       );
       expect(
         api.updatedEvent?.endsAt,
@@ -2652,7 +2743,7 @@ void main() {
           eventDate.month,
           eventDate.day,
           17,
-        ).toIso8601String(),
+        ).toUtc().toIso8601String(),
       );
       expect(api.updatedEvent?.category, 'Work');
       expect(api.updatedEvent?.color, '#007AFF');
@@ -2777,7 +2868,7 @@ void main() {
 
       expect(
         api.updatedEvent?.endsAt,
-        DateTime(end.year, end.month, end.day, 13).toIso8601String(),
+        DateTime(end.year, end.month, end.day, 13).toUtc().toIso8601String(),
       );
       expect(eventBlock, findsNWidgets(2));
       final startDayHeight = tester.getRect(eventBlock.first).height;
@@ -2789,92 +2880,135 @@ void main() {
     },
   );
 
+  testWidgets('UTC calendar event timestamps render in the device timezone', (
+    WidgetTester tester,
+  ) async {
+    final now = DateTime.now();
+    final tomorrow = now.add(const Duration(days: 1));
+    final wallClockStart = DateTime.utc(
+      now.year,
+      now.month,
+      now.day,
+      14,
+    ).toLocal();
+    final wallClockEnd = DateTime.utc(
+      tomorrow.year,
+      tomorrow.month,
+      tomorrow.day,
+      15,
+    ).toLocal();
+    final expectedTimeLabel =
+        '${_testNaturalTimeLabel(wallClockStart)} – ${_testNaturalTimeLabel(wallClockEnd)}';
+
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _UtcMultiDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final eventBlock = find.byKey(
+      const Key('calendar-event-block-app-project-focus-block'),
+    );
+    expect(eventBlock, findsWidgets);
+    expect(
+      find.descendant(
+        of: eventBlock.first,
+        matching: find.text(expectedTimeLabel),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(eventBlock.first);
+    await tester.pumpAndSettle();
+    await tester.tap(eventBlock.first);
+    await tester.pumpAndSettle();
+    final startEditor = tester.widget<EditableText>(
+      find.descendant(
+        of: find.byKey(const Key('event-start-field')),
+        matching: find.byType(EditableText),
+      ),
+    );
+    expect(
+      startEditor.controller.text,
+      contains(_testNaturalTimeLabel(wallClockStart)),
+    );
+  });
+
+  testWidgets('offset calendar event timestamps render in the device timezone', (
+    WidgetTester tester,
+  ) async {
+    final now = DateTime.now();
+    final tomorrow = now.add(const Duration(days: 1));
+    final wallClockStart = DateTime.parse(
+      _testIsoWithOffset(now, hour: 13, offset: '-04:00'),
+    ).toLocal();
+    final wallClockEnd = DateTime.parse(
+      _testIsoWithOffset(tomorrow, hour: 17, offset: '-04:00'),
+    ).toLocal();
+    final expectedTimeLabel =
+        '${_testNaturalTimeLabel(wallClockStart)} – ${_testNaturalTimeLabel(wallClockEnd)}';
+
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _OffsetCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final eventBlock = find.byKey(
+      const Key('calendar-event-block-google-afternoon-block'),
+    );
+    expect(eventBlock, findsWidgets);
+    expect(
+      find.descendant(
+        of: eventBlock.first,
+        matching: find.text(expectedTimeLabel),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets(
-    'UTC calendar event timestamps render as wall-clock schedule values',
+    'saving an edited event preserves local times as UTC wire values',
     (WidgetTester tester) async {
-      final now = DateTime.now();
-      final tomorrow = now.add(const Duration(days: 1));
-      final wallClockStart = DateTime(now.year, now.month, now.day, 9);
-      final wallClockEnd = DateTime(
-        tomorrow.year,
-        tomorrow.month,
-        tomorrow.day,
+      final api = _EditableCalendarFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-event-block-design-review')),
+      );
+      await tester.tap(
+        find.byKey(const Key('calendar-event-block-design-review')),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('event-title-field')),
+        'Design review updated',
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      final expectedStart = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
         10,
-      );
-      final expectedTimeLabel =
-          '${_testNaturalTimeLabel(wallClockStart)} – ${_testNaturalTimeLabel(wallClockEnd)}';
-
-      await tester.pumpWidget(
-        HermesBeanApp(
-          apiClient: _UtcMultiDayCalendarFakeHermesApiClient(),
-          tokenStore: _MemoryAuthTokenStore(),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final eventBlock = find.byKey(
-        const Key('calendar-event-block-app-project-focus-block'),
-      );
-      expect(eventBlock, findsWidgets);
-      expect(
-        find.descendant(
-          of: eventBlock.first,
-          matching: find.text(expectedTimeLabel),
-        ),
-        findsOneWidget,
-      );
-
-      await tester.ensureVisible(eventBlock.first);
-      await tester.pumpAndSettle();
-      await tester.tap(eventBlock.first);
-      await tester.pumpAndSettle();
-      final startEditor = tester.widget<EditableText>(
-        find.descendant(
-          of: find.byKey(const Key('event-start-field')),
-          matching: find.byType(EditableText),
-        ),
-      );
-      expect(
-        startEditor.controller.text,
-        contains(_testNaturalTimeLabel(wallClockStart)),
-      );
-    },
-  );
-
-  testWidgets(
-    'offset calendar event timestamps render as wall-clock schedule values',
-    (WidgetTester tester) async {
-      final now = DateTime.now();
-      final tomorrow = now.add(const Duration(days: 1));
-      final wallClockStart = DateTime(now.year, now.month, now.day, 13);
-      final wallClockEnd = DateTime(
-        tomorrow.year,
-        tomorrow.month,
-        tomorrow.day,
-        17,
-      );
-      final expectedTimeLabel =
-          '${_testNaturalTimeLabel(wallClockStart)} – ${_testNaturalTimeLabel(wallClockEnd)}';
-
-      await tester.pumpWidget(
-        HermesBeanApp(
-          apiClient: _OffsetCalendarFakeHermesApiClient(),
-          tokenStore: _MemoryAuthTokenStore(),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final eventBlock = find.byKey(
-        const Key('calendar-event-block-google-afternoon-block'),
-      );
-      expect(eventBlock, findsWidgets);
-      expect(
-        find.descendant(
-          of: eventBlock.first,
-          matching: find.text(expectedTimeLabel),
-        ),
-        findsOneWidget,
-      );
+        30,
+      ).toUtc().toIso8601String();
+      final expectedEnd = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+        11,
+      ).toUtc().toIso8601String();
+      expect(api.updatedEvent?.startsAt, expectedStart);
+      expect(api.updatedEvent?.endsAt, expectedEnd);
     },
   );
 
@@ -3000,6 +3134,12 @@ void main() {
           ?.call(2);
       hourPicker.onSelectedItemChanged?.call(12);
       minutePicker.onSelectedItemChanged?.call(13);
+      tester
+          .widget<CupertinoPicker>(
+            find.byKey(const Key('event-time-meridiem-dial')),
+          )
+          .onSelectedItemChanged
+          ?.call(1);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('event-time-dock-done')));
       await tester.pumpAndSettle();
@@ -4521,13 +4661,13 @@ class _UtcMultiDayCalendarFakeHermesApiClient
           today.year,
           today.month,
           today.day,
-          9,
+          14,
         ).toIso8601String(),
         endsAt: DateTime.utc(
           tomorrow.year,
           tomorrow.month,
           tomorrow.day,
-          10,
+          15,
         ).toIso8601String(),
         category: 'Work',
         color: '#007AFF',
@@ -4592,6 +4732,18 @@ String _testNaturalTimeLabel(DateTime value) {
   return '$hour$minute$meridiem';
 }
 
+String _testIsoWithOffset(
+  DateTime value, {
+  required int hour,
+  required String offset,
+}) {
+  final year = value.year.toString().padLeft(4, '0');
+  final month = value.month.toString().padLeft(2, '0');
+  final day = value.day.toString().padLeft(2, '0');
+  final hourText = hour.toString().padLeft(2, '0');
+  return '$year-$month-${day}T$hourText:00:00$offset';
+}
+
 Color? _datePillColor(WidgetTester tester, String key) {
   final container = tester.widget<Container>(find.byKey(Key(key)));
   final decoration = container.decoration as BoxDecoration?;
@@ -4617,6 +4769,26 @@ String? _headingDaysAfter(String? heading, int days) {
   if (month <= 0 || day == null) return null;
   final date = DateTime(2026, month, day).add(Duration(days: days));
   return '${_testShortWeekdayNames[date.weekday - 1]} — ${_testMonthNames[date.month - 1]} ${date.day}';
+}
+
+Finder _topHeaderDayLabelFinder() {
+  final now = DateTime.now();
+  final label =
+      '${_testCompactWeekdayNames[now.weekday - 1]} ${_testShortMonthNames[now.month - 1]} ${now.day}';
+  return find.descendant(
+    of: find.byKey(const Key('calendar-today-button')),
+    matching: find.text(label),
+  );
+}
+
+Finder _topHeaderMonthLabelFinder() {
+  final now = DateTime.now();
+  final label =
+      "${_testShortMonthNames[now.month - 1]} '${(now.year % 100).toString().padLeft(2, '0')}";
+  return find.descendant(
+    of: find.byKey(const Key('calendar-month-chevron')),
+    matching: find.text(label),
+  );
 }
 
 const _testShortMonthNames = [
@@ -4654,6 +4826,16 @@ const _testShortWeekdayNames = [
   'Tues',
   'Wed',
   'Thurs',
+  'Fri',
+  'Sat',
+  'Sun',
+];
+
+const _testCompactWeekdayNames = [
+  'Mon',
+  'Tue',
+  'Wed',
+  'Thu',
   'Fri',
   'Sat',
   'Sun',
