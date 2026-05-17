@@ -29,7 +29,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
+      expect(find.text('Login'), findsOneWidget);
+      expect(find.text('Sign in to Hermes Bean'), findsNothing);
+      expect(find.text('Live API-backed personal assistant'), findsNothing);
+      expect(find.byKey(const Key('login-header-logo')), findsOneWidget);
+      expect(find.byIcon(Icons.lock_rounded), findsNothing);
       expect(find.byKey(const Key('show-register-mode')), findsOneWidget);
       expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
       expect(find.byKey(const Key('remember-me-checkbox')), findsOneWidget);
@@ -148,7 +152,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(api.deletedAccount, isTrue);
-      expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
+      expect(find.text('Login'), findsOneWidget);
     },
   );
 
@@ -2019,7 +2023,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tokenStore.token, isNull);
-      expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
+      expect(find.text('Login'), findsOneWidget);
       expect(find.textContaining('Session expired'), findsOneWidget);
       expect(
         find.text('I could not reach the API. Try again soon.'),
@@ -2071,7 +2075,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tokenStore.token, 'saved-token');
-      expect(find.text('Sign in to Hermes Bean'), findsOneWidget);
+      expect(find.text('Login'), findsOneWidget);
       expect(
         find.textContaining('Remember me token is still saved'),
         findsOneWidget,

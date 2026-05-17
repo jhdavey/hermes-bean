@@ -41,6 +41,11 @@ class LegalPagesFeatureTest extends TestCase
             ->assertSee('AI assistant limitations', false)
             ->assertSee('Account deletion', false);
 
+        $this->get('/support')
+            ->assertOk()
+            ->assertSee('/account-deletion', false)
+            ->assertSee('account deletion instructions', false);
+
         $this->get('/account-deletion')
             ->assertOk()
             ->assertSee('Type DELETE', false)

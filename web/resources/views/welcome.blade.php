@@ -18,14 +18,12 @@
 <body>
     <header class="wrap nav">
         <a class="brand" href="/"><img src="{{ asset('images/bean-logo-color.png') }}" alt="HeyBean logo">HeyBean</a>
-        <nav class="navlinks" aria-label="Primary navigation"><a href="#how">How it works</a><a href="#features">Features</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav>
+        <nav class="navlinks" aria-label="Primary navigation"><a href="#how">How it works</a><a href="#features">Features</a></nav>
         <details class="mobile-menu">
             <summary aria-label="Open menu">Menu</summary>
             <div class="mobile-menu-panel">
                 <a href="#how">How it works</a>
                 <a href="#features">Features</a>
-                <a href="/privacy">Privacy</a>
-                <a href="/terms">Terms</a>
             </div>
         </details>
     </header>
@@ -34,7 +32,7 @@
         <section>
             <span class="pill">● First 100 early-access invites now opening</span>
             <h1>Tell <span style="margin-left: .06em;">Bean</span> what changed. <span style="margin-left: .08em;">Bean</span> updates your day.</h1>
-            <p>HeyBean is an AI executive assistant for busy people and households. It plans your calendar, captures tasks, sets reminders, and keeps home and work moving from one focused conversation.</p>
+            <p>Bean is an AI executive assistant for busy people and households. It plans your calendar, captures tasks, sets reminders, and keeps home and work moving from one focused conversation.</p>
             <form class="form" id="early-access" method="POST" action="{{ route('early-access.store') }}">
                 @csrf
                 <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address">
@@ -80,6 +78,6 @@
         </div>
     @endif
 
-    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a> · <a href="/account-deletion">Account deletion</a></span></footer>
+    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a></span></footer>
 </body>
 </html>

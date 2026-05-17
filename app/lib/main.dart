@@ -2708,12 +2708,10 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = _registerMode
-        ? 'Create your Hermes Bean account'
-        : 'Sign in to Hermes Bean';
+    final title = _registerMode ? 'Create your Hermes Bean account' : 'Login';
     final subtitle = _registerMode
         ? 'Create your account with your email and a secure 12+ character password'
-        : 'Live API-backed personal assistant';
+        : '';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -2726,9 +2724,18 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _SectionTitle(
-                  icon: _registerMode
-                      ? Icons.person_add_alt_1_rounded
-                      : Icons.lock_rounded,
+                  icon: Icons.person_add_alt_1_rounded,
+                  leading: _registerMode
+                      ? null
+                      : ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.asset(
+                            'assets/images/bean/bean-logo-color.png',
+                            key: const Key('login-header-logo'),
+                            width: 28,
+                            height: 28,
+                          ),
+                        ),
                   title: title,
                   subtitle: subtitle,
                 ),
@@ -10563,6 +10570,7 @@ class _SectionTitle extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.leading,
     this.infoKey,
     this.infoTitle,
     this.infoBullets = const [],
@@ -10571,6 +10579,7 @@ class _SectionTitle extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
+  final Widget? leading;
   final Key? infoKey;
   final String? infoTitle;
   final List<String> infoBullets;
@@ -10578,7 +10587,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      Icon(icon, color: HeyBeanTheme.accentStrong),
+      leading ?? Icon(icon, color: HeyBeanTheme.accentStrong),
       const SizedBox(width: 10),
       Expanded(
         child: Column(
