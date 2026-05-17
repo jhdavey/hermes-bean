@@ -14,10 +14,10 @@ class LandingPageFeatureTest extends TestCase
         $response = $this->get('/');
 
         $response->assertOk()
-            ->assertSee('Tell <span style="margin-left: .06em;">Bean</span> what changed. <span style="margin-left: .08em;">Bean</span> updates your day.', false)
-            ->assertSee('AI executive assistant for busy people and households', false)
-            ->assertSee('It plans your calendar, captures tasks, sets reminders', false)
-            ->assertSee('keeps home and work moving from one focused conversation', false)
+            ->assertSee('Live your best life, let Bean handle the rest', false)
+            ->assertSee('your new AI executive assistant', false)
+            ->assertSee('manages your calendar, keeps track of tasks, sets reminders', false)
+            ->assertSee('keeps you moving instead of getting stuck in the weeds', false)
             ->assertSee('Join the first 100', false)
             ->assertDontSee('Use your voice:', false)
             ->assertSee('Just say “Hey, Bean…!”', false)

@@ -31,8 +31,8 @@
     <main class="wrap hero">
         <section>
             <span class="pill">● First 100 early-access invites now opening</span>
-            <h1>Tell <span style="margin-left: .06em;">Bean</span> what changed. <span style="margin-left: .08em;">Bean</span> updates your day.</h1>
-            <p>Bean is an AI executive assistant for busy people and households. It plans your calendar, captures tasks, sets reminders, and keeps home and work moving from one focused conversation.</p>
+            <h1>Live your best life, let Bean handle the rest</h1>
+            <p>Bean is your new AI executive assistant. Bean manages your calendar, keeps track of tasks, sets reminders, and keeps you moving instead of getting stuck in the weeds.</p>
             <form class="form" id="early-access" method="POST" action="{{ route('early-access.store') }}">
                 @csrf
                 <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address">
