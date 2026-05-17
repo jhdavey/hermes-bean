@@ -11092,15 +11092,29 @@ class _BeanFab extends StatelessWidget {
               ),
             ],
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Image.asset(
-              'assets/images/bean/bean-logo.png',
-              key: const Key('heybean-center-bean-logo'),
-              color: Colors.white,
-              colorBlendMode: BlendMode.srcIn,
-              fit: BoxFit.contain,
-              semanticLabel: 'Bean chat',
+          child: Center(
+            child: Container(
+              key: const Key('heybean-center-bean-logo-badge'),
+              width: 42,
+              height: 42,
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: .10),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Image.asset(
+                'assets/images/bean/bean-logo.png',
+                key: const Key('heybean-center-bean-logo'),
+                fit: BoxFit.contain,
+                semanticLabel: 'Bean chat',
+              ),
             ),
           ),
         ),

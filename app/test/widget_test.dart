@@ -2160,8 +2160,16 @@ void main() {
       (beanLogo.image as AssetImage).assetName,
       'assets/images/bean/bean-logo.png',
     );
-    expect(beanLogo.color, Colors.white);
-    expect(beanLogo.colorBlendMode, BlendMode.srcIn);
+    expect(
+      find.byKey(const Key('heybean-center-bean-logo-badge')),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('heybean-center-bean-logo-badge'))),
+      const Size(42, 42),
+    );
+    expect(beanLogo.color, isNull);
+    expect(beanLogo.colorBlendMode, isNull);
     expect(
       find.descendant(
         of: find.byKey(const Key('heybean-center-bean-button')),
