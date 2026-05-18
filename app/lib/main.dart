@@ -9432,6 +9432,7 @@ class _SettingsView extends StatelessWidget {
               preferences: user.notificationPreferences,
               onChanged: onNotificationPreferencesChanged,
             ),
+            const SizedBox(height: 8),
             _WorkspacesSettingsCard(
               apiClient: apiClient,
               user: user,
@@ -9525,11 +9526,29 @@ class _NotificationPreferencesCardState
     ),
     child: Column(
       children: [
-        const _CompactItemTile(
-          icon: Icons.notifications_active_outlined,
-          title: 'Notification preferences',
-          subtitle:
-              'Reminders are sent using these preferences. Turn on push notifications in iOS so Bean can alert you when reminders are due.',
+        Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: HeyBeanTheme.surface2,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: HeyBeanTheme.border),
+          ),
+          child: const Row(
+            children: [
+              Icon(
+                Icons.notifications_active_outlined,
+                color: HeyBeanTheme.accentStrong,
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Notification preferences',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
         ),
         SwitchListTile.adaptive(
           key: const Key('reminder-push-preference'),
@@ -9538,9 +9557,6 @@ class _NotificationPreferencesCardState
               ? null
               : (value) => _save(_preferences.copyWith(reminderPush: value)),
           title: const Text('Reminder push notifications'),
-          subtitle: const Text(
-            'Shows an iOS push notification and in-app banner when a reminder is due.',
-          ),
           secondary: const Icon(Icons.phone_iphone_rounded),
         ),
         SwitchListTile.adaptive(
@@ -9550,9 +9566,6 @@ class _NotificationPreferencesCardState
               ? null
               : (value) => _save(_preferences.copyWith(reminderEmail: value)),
           title: const Text('Reminder emails'),
-          subtitle: const Text(
-            'Sends an email reminder at the scheduled reminder time.',
-          ),
           secondary: const Icon(Icons.email_outlined),
         ),
       ],

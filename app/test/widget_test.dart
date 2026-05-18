@@ -673,10 +673,20 @@ void main() {
       find.byKey(const Key('notification-preferences-card')),
       findsOneWidget,
     );
+    expect(find.text('Notification preferences'), findsOneWidget);
     expect(
       find.textContaining('Reminders are sent using these preferences'),
-      findsOneWidget,
+      findsNothing,
     );
+    expect(find.textContaining('Shows an iOS push notification'), findsNothing);
+    expect(find.textContaining('Sends an email reminder'), findsNothing);
+    final notificationBottom = tester
+        .getBottomLeft(find.byKey(const Key('notification-preferences-card')))
+        .dy;
+    final workspaceTop = tester
+        .getTopLeft(find.byKey(const Key('workspaces-settings')))
+        .dy;
+    expect(workspaceTop - notificationBottom, greaterThanOrEqualTo(8));
 
     await tester.ensureVisible(
       find.byKey(const Key('reminder-push-preference')),
