@@ -18,6 +18,7 @@ use App\Services\WorkspaceService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
@@ -31,7 +32,16 @@ class DomainResourceController extends Controller
 
     public function listTasks(Request $request): JsonResponse
     {
-        return $this->listed($this->scoped(Task::query(), $request)->visibleInActiveViews()->orderBy('id')->get());
+        return $this->listed(
+            $this->scoped(Task::query(), $request)
+                ->where(function ($query): void {
+                    $query->whereNull('status')
+                        ->orWhereNotIn('status', ['completed', 'complete', 'done', 'COMPLETED', 'Complete', 'Done']);
+                })
+                ->orderBy('due_at')
+                ->orderBy('id')
+                ->get()
+        );
     }
 
     public function listPastTasks(Request $request): JsonResponse
@@ -103,6 +113,8 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
 
+        $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
+
         if ($this->taskStatusIsCompleted($validated['status'] ?? null) && empty($validated['completed_at'])) {
             $validated['completed_at'] = now();
         }
@@ -132,6 +144,8 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+
+        $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
 
         if (array_key_exists('status', $validated)) {
             $willBeCompleted = $this->taskStatusIsCompleted($validated['status']);
@@ -176,6 +190,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        $this->normalizeDateFields($validated, ['remind_at']);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $reminder = Reminder::create($this->owned($request, $validated));
@@ -200,6 +215,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        $this->normalizeDateFields($validated, ['remind_at']);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
@@ -232,6 +248,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $event = CalendarEvent::create($this->owned($request, $validated));
@@ -258,6 +275,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
@@ -393,7 +411,7 @@ class DomainResourceController extends Controller
 
     public function storeSchedulerJob(Request $request): JsonResponse
     {
-        return $this->created(SchedulerJobRecord::create($this->owned($request, $request->validate([
+        $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'status' => ['nullable', 'string', 'max:50'],
             'scheduled_for' => ['nullable', 'date'],
@@ -401,13 +419,16 @@ class DomainResourceController extends Controller
             'finished_at' => ['nullable', 'date'],
             'payload' => ['nullable', 'array'],
             'last_error' => ['nullable', 'string'],
-        ]))));
+        ]);
+        $this->normalizeDateFields($validated, ['scheduled_for', 'started_at', 'finished_at']);
+
+        return $this->created(SchedulerJobRecord::create($this->owned($request, $validated)));
     }
 
     public function updateSchedulerJob(Request $request, string $schedulerJob): JsonResponse
     {
         $model = SchedulerJobRecord::where('user_id', $request->user()->id)->findOrFail($schedulerJob);
-        $model->update($request->validate([
+        $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'scheduled_for' => ['sometimes', 'nullable', 'date'],
@@ -415,7 +436,9 @@ class DomainResourceController extends Controller
             'finished_at' => ['sometimes', 'nullable', 'date'],
             'payload' => ['sometimes', 'nullable', 'array'],
             'last_error' => ['sometimes', 'nullable', 'string'],
-        ]));
+        ]);
+        $this->normalizeDateFields($validated, ['scheduled_for', 'started_at', 'finished_at']);
+        $model->update($validated);
 
         return response()->json(['data' => $model->refresh()]);
     }
@@ -550,5 +573,20 @@ class DomainResourceController extends Controller
     private function taskStatusIsCompleted(?string $status): bool
     {
         return in_array(strtolower(str_replace('_', '-', (string) $status)), ['completed', 'complete', 'done'], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @param  array<int, string>  $fields
+     */
+    private function normalizeDateFields(array &$attributes, array $fields): void
+    {
+        foreach ($fields as $field) {
+            if (! array_key_exists($field, $attributes) || $attributes[$field] === null || $attributes[$field] === '') {
+                continue;
+            }
+
+            $attributes[$field] = Carbon::parse((string) $attributes[$field])->utc();
+        }
     }
 }

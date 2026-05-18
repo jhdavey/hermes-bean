@@ -265,6 +265,117 @@ PHP);
             ->assertJsonPath('data.assistant_message.content', 'Schema includes universal dashboard controls.');
     }
 
+    public function test_runtime_exposes_client_temporal_context_for_local_calendar_times(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = implode(' ', $argv);
+$required = [
+    'temporal_context',
+    'client_context',
+    '2026-05-18T13:14:00.000',
+    'timezone_offset',
+    '-04:00',
+    'emit ISO-8601 timestamps with that local UTC offset',
+    'not a bare `Z` UTC timestamp',
+];
+$missing = array_values(array_filter($required, fn ($needle) => ! str_contains($prompt, $needle)));
+echo json_encode([
+    'message' => empty($missing) ? 'Temporal context is available.' : 'Missing temporal context: '.implode(', ', $missing),
+    'actions' => [],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Temporal contract',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Fit a 15min yoga session somewhere for today please',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Temporal context is available.');
+    }
+
+    public function test_runtime_normalizes_unzoned_agent_times_with_client_timezone_for_all_dashboard_dates(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Saved local dashboard items.',
+    'actions' => [
+        ['type' => 'task.create', 'risk' => 'low', 'parameters' => ['title' => 'Local task', 'due_at' => '2026-05-18T14:15:00']],
+        ['type' => 'reminder.create', 'risk' => 'low', 'parameters' => ['title' => 'Local reminder', 'remind_at' => '2026-05-18T14:30:00']],
+        ['type' => 'calendar_event.create', 'risk' => 'low', 'parameters' => ['title' => 'Local yoga', 'starts_at' => '2026-05-18T13:45:00', 'ends_at' => '2026-05-18T14:00:00']],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Local date normalization',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Save local task, reminder, and yoga session.',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Saved local dashboard items.');
+
+        $this->assertSame(
+            '2026-05-18T18:15:00+00:00',
+            Task::where('title', 'Local task')->firstOrFail()->due_at->utc()->toIso8601String()
+        );
+        $this->assertSame(
+            '2026-05-18T18:30:00+00:00',
+            Reminder::where('title', 'Local reminder')->firstOrFail()->remind_at->utc()->toIso8601String()
+        );
+        $event = CalendarEvent::where('title', 'Local yoga')->firstOrFail();
+        $this->assertSame('2026-05-18T17:45:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-18T18:00:00+00:00', $event->ends_at->utc()->toIso8601String());
+    }
+
+    public function test_runtime_preserves_explicit_utc_and_offset_agent_times(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Saved explicit dashboard items.',
+    'actions' => [
+        ['type' => 'task.create', 'risk' => 'low', 'parameters' => ['title' => 'Explicit task', 'due_at' => '2026-05-18T14:15:00Z']],
+        ['type' => 'reminder.create', 'risk' => 'low', 'parameters' => ['title' => 'Explicit reminder', 'remind_at' => '2026-05-18T14:30:00+01:00']],
+        ['type' => 'calendar_event.create', 'risk' => 'low', 'parameters' => ['title' => 'Explicit event', 'starts_at' => '2026-05-18T13:45:00-07:00', 'ends_at' => '2026-05-18T14:00:00-07:00']],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Explicit date preservation',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Save explicit timezone items.',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated();
+
+        $this->assertSame(
+            '2026-05-18T14:15:00+00:00',
+            Task::where('title', 'Explicit task')->firstOrFail()->due_at->utc()->toIso8601String()
+        );
+        $this->assertSame(
+            '2026-05-18T13:30:00+00:00',
+            Reminder::where('title', 'Explicit reminder')->firstOrFail()->remind_at->utc()->toIso8601String()
+        );
+        $event = CalendarEvent::where('title', 'Explicit event')->firstOrFail();
+        $this->assertSame('2026-05-18T20:45:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-18T21:00:00+00:00', $event->ends_at->utc()->toIso8601String());
+    }
+
     public function test_runtime_normalizes_nested_json_assistant_message_and_applies_nested_actions(): void
     {
         $this->configureFakeHermes(<<<'PHP'
@@ -483,5 +594,22 @@ PHP);
         config()->set('services.hermes_runtime.cli_path', $path);
         config()->set('services.hermes_runtime.timeout', 5);
         config()->set('services.hermes_runtime.workdir', $this->tempDir);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function clientTemporalMetadata(): array
+    {
+        return [
+            'source' => 'flutter',
+            'client_context' => [
+                'current_local_time' => '2026-05-18T13:14:00.000',
+                'current_utc_time' => '2026-05-18T17:14:00.000Z',
+                'timezone_name' => 'EDT',
+                'timezone_offset' => '-04:00',
+                'timezone_offset_minutes' => -240,
+            ],
+        ];
     }
 }

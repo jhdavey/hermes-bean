@@ -133,6 +133,19 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.sentMessages, contains('Schedule dentist tomorrow at 3pm'));
+      final scheduleMetadata = api.sentMessageMetadata.last;
+      expect(scheduleMetadata?['source'], 'flutter');
+      final clientContext = scheduleMetadata?['client_context'];
+      expect(clientContext, isA<Map<String, Object?>>());
+      final typedClientContext = clientContext! as Map<String, Object?>;
+      expect(typedClientContext['current_local_time'], isA<String>());
+      expect(typedClientContext['current_utc_time'], isA<String>());
+      expect(typedClientContext['timezone_name'], isA<String>());
+      expect(
+        typedClientContext['timezone_offset'],
+        matches(RegExp(r'^[+-]\d{2}:\d{2}$')),
+      );
+      expect(typedClientContext['timezone_offset_minutes'], isA<int>());
       expect(find.text('Done — I updated your day.'), findsOneWidget);
       tester.testTextInput.hide();
       await tester.pumpAndSettle();
@@ -1475,6 +1488,25 @@ void main() {
     expect(_topHeaderDayLabelFinder(), findsOneWidget);
   });
 
+  testWidgets(
+    'early calendar events extend visible hours instead of disappearing',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _EarlyCalendarFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('6 AM'), findsOneWidget);
+      expect(
+        find.byKey(const Key('calendar-event-block-early-flight')),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets('recurring calendar events render on their occurrence days', (
     WidgetTester tester,
   ) async {
@@ -1697,6 +1729,32 @@ void main() {
 
     expect(api.completedTaskIds, [101]);
     expect(find.text('Edit task'), findsNothing);
+  });
+
+  testWidgets('tasks page keeps overdue open tasks after a chat refresh', (
+    WidgetTester tester,
+  ) async {
+    final api = _ChatRefreshOverdueTaskFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'How does my day look?',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('tasks-view')), findsOneWidget);
+    expect(find.text('Cut grass'), findsOneWidget);
+    expect(find.textContaining('Due '), findsOneWidget);
   });
 
   testWidgets('tasks can be checked from the tasks page', (
@@ -3630,6 +3688,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   final bool staleOnboardingAfterUpdate;
   final bool staleSettingsAfterUpdate;
   final sentMessages = <String>[];
+  final sentMessageMetadata = <Map<String, Object?>?>[];
   String? updatedEmail;
   bool deletedAccount = false;
   bool plannedToday = false;
@@ -3902,6 +3961,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     Map<String, Object?>? metadata,
   }) async {
     sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
     var isPreferenceOnlyMessage = false;
     if (metadata?['settings_update'] == true) {
       isPreferenceOnlyMessage = true;
@@ -4254,6 +4314,32 @@ class _TwoDayCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   }
 }
 
+class _EarlyCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final selectedDay = DateTime.now();
+    return [
+      HermesCalendarEvent(
+        id: 106,
+        title: 'Early flight',
+        startsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          6,
+        ).toIso8601String(),
+        endsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          6,
+          45,
+        ).toIso8601String(),
+      ),
+    ];
+  }
+}
+
 class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   final completedTaskIds = <int>[];
   final reopenedTaskIds = <int>[];
@@ -4355,6 +4441,57 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
         )
         .toList();
     return _activeTasks.singleWhere((task) => task.id == taskId);
+  }
+}
+
+class _ChatRefreshOverdueTaskFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  bool _askedAboutDay = false;
+
+  @override
+  Future<List<HermesTask>> listTasks() async {
+    if (!_askedAboutDay) return const [];
+    return [
+      HermesTask(
+        id: 301,
+        title: 'Cut grass',
+        status: 'open',
+        dueAt: DateTime.now()
+            .subtract(const Duration(days: 1))
+            .toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async =>
+      HermesTodaySummary(
+        tasks: const [],
+        reminders: const [],
+        calendarEvents: await listCalendarEvents(),
+        activityEvents: await pollActivityEvents(42),
+        approvals: const [],
+        blockers: const [],
+      );
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sentMessages.add(content);
+    _askedAboutDay = true;
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      assistantMessage: HermesMessage(
+        id: 8,
+        role: 'assistant',
+        content: 'You have an overdue task: Cut grass.',
+      ),
+      events: [],
+    );
   }
 }
 

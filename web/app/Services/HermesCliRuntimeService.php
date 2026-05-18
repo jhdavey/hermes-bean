@@ -266,7 +266,7 @@ Rules:
 - Workspace memory files live under `agent_profile.runtime_home` and are isolated per workspace. Use USER.md, MEMORY.md, HOUSEHOLD.md, and PREFERENCES.md for durable markdown notes when file tools are available; keep notes concise and declarative.
 - In Personal workspaces, save only the signed-in user's personal preferences/routines. In household workspaces, save shared household routines and household-relevant member preferences. Never copy memory between Personal and households or between households unless the user explicitly asks.
 - App-managed sections in those markdown files are wrapped in `HERMES-BEAN MANAGED` comments; preserve those sections and add agent-learned facts under the non-managed headings.
-- Use ISO-8601 timestamps for dates when you create or update reminders, calendar events, and scheduler jobs.
+- Use ISO-8601 timestamps for dates when you create or update reminders, calendar events, and scheduler jobs. For relative dates/times such as "today", "tomorrow", "later", or "1:45 PM", use `temporal_context.client_context` when present: interpret times in the user's device-local time and emit ISO-8601 timestamps with that local UTC offset (for example `2026-05-18T13:45:00-04:00`), not a bare `Z` UTC timestamp unless the user explicitly asks for UTC. Your visible message must describe the same local time that the created/updated dashboard resource will show.
 - For user-facing requests to schedule, plan, book, block time, add an appointment, create a reminder, or create a task: emit visible dashboard resources (`calendar_event.*`, `reminder.*`, and/or `task.*`) so the item appears in `/api/today`. Do not use `scheduler_job.*` for ordinary user calendar/reminder/task planning.
 - Only use `scheduler_job.*` for internal/background agent automation. If you do emit `scheduler_job.create` with `scheduled_for` for a user-visible scheduled plan, the app will mirror it to a calendar event unless `parameters.kind` or `parameters.payload.kind` is `internal_automation`, `background_job`, or `system_job`.
 - Task parameters support `title`, `type`, `status`, `notes`, `category`, `color`, `is_critical`, `due_at`, and `metadata`. Reminder parameters support `title`, `notes`, `category`, `color`, `is_critical`, `remind_at`, `status`, `calendar_event_id`, and `metadata`. Calendar event parameters support `title`, `description`, `location`, `category`, `color`, `is_critical`, `recurrence`, `starts_at`, `ends_at`, `status`, and `metadata`.
@@ -325,6 +325,14 @@ PROMPT.$this->payloadFor($session, $message);
                 'settings' => $workspace->settings,
             ] : null,
             'accessible_sync_targets' => $accessibleWorkspaces,
+            'temporal_context' => [
+                'server_now_utc' => now()->utc()->toIso8601String(),
+                'server_today' => now()->toDateString(),
+                'profile_timezone' => data_get($profile?->settings ?? [], 'timezone'),
+                'client_context' => is_array(data_get($message->metadata ?? [], 'client_context'))
+                    ? data_get($message->metadata ?? [], 'client_context')
+                    : null,
+            ],
             'dashboard_state' => [
                 'tasks' => $this->workspaceScopedQuery(Task::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'due_at', 'metadata']),
                 'reminders' => $this->workspaceScopedQuery(Reminder::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'notes', 'status', 'category', 'color', 'is_critical', 'remind_at', 'metadata']),

@@ -2,6 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\CalendarEvent;
+use App\Models\Reminder;
+use App\Models\SchedulerJobRecord;
+use App\Models\Task;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -99,6 +103,40 @@ class AssistantDomainApiTest extends TestCase
         $this->assertDatabaseHas('approvals', ['title' => 'Confirm booking']);
         $this->assertDatabaseHas('blockers', ['reason' => 'Needs user credentials']);
         $this->assertDatabaseHas('scheduler_job_records', ['name' => 'daily-review']);
+    }
+
+    public function test_direct_domain_api_normalizes_explicit_timezone_offsets_to_utc(): void
+    {
+        $token = $this->apiToken();
+
+        $taskId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Offset task',
+            'type' => 'todo',
+            'due_at' => '2026-05-18T14:15:00-04:00',
+        ])->assertCreated()->json('data.id');
+
+        $reminderId = $this->withToken($token)->postJson('/api/reminders', [
+            'title' => 'Offset reminder',
+            'remind_at' => '2026-05-18T14:30:00+01:00',
+        ])->assertCreated()->json('data.id');
+
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Offset event',
+            'starts_at' => '2026-05-18T13:45:00-07:00',
+            'ends_at' => '2026-05-18T14:00:00-07:00',
+        ])->assertCreated()->json('data.id');
+
+        $jobId = $this->withToken($token)->postJson('/api/scheduler-jobs', [
+            'name' => 'offset-job',
+            'scheduled_for' => '2026-05-18T07:00:00-04:00',
+        ])->assertCreated()->json('data.id');
+
+        $this->assertSame('2026-05-18T18:15:00+00:00', Task::findOrFail($taskId)->due_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-18T13:30:00+00:00', Reminder::findOrFail($reminderId)->remind_at->utc()->toIso8601String());
+        $event = CalendarEvent::findOrFail($eventId);
+        $this->assertSame('2026-05-18T20:45:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-18T21:00:00+00:00', $event->ends_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-18T11:00:00+00:00', SchedulerJobRecord::findOrFail($jobId)->scheduled_for->utc()->toIso8601String());
     }
 
     public function test_created_tasks_are_immediately_visible_from_database_task_list(): void
@@ -287,7 +325,7 @@ PHP);
         ]);
     }
 
-    public function test_task_lists_hide_expired_one_off_tasks_but_keep_recurring_tasks(): void
+    public function test_task_list_shows_overdue_open_tasks_while_today_stays_date_scoped(): void
     {
         $token = $this->apiToken();
 
@@ -315,7 +353,7 @@ PHP);
 
         $this->withToken($token)->getJson('/api/tasks')
             ->assertOk()
-            ->assertJsonMissing(['title' => 'Yesterday one-off'])
+            ->assertJsonFragment(['title' => 'Yesterday one-off'])
             ->assertJsonFragment(['title' => 'Recurring vitamins'])
             ->assertJsonFragment(['title' => 'Today task']);
 

@@ -273,7 +273,7 @@ class StructuredHermesActionService
             'category' => $parameters['category'] ?? null,
             'color' => $parameters['color'] ?? null,
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
-            'due_at' => isset($parameters['due_at']) ? Carbon::parse((string) $parameters['due_at']) : null,
+            'due_at' => isset($parameters['due_at']) ? $this->parseDashboardDateTime($session, $parameters['due_at']) : null,
             'metadata' => array_merge(
                 ['created_by' => 'structured_hermes_action'],
                 is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []
@@ -299,7 +299,7 @@ class StructuredHermesActionService
             'category' => $parameters['category'] ?? null,
             'color' => $parameters['color'] ?? null,
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
-            'remind_at' => Carbon::parse((string) ($parameters['remind_at'] ?? now()->addDay()->toIso8601String())),
+            'remind_at' => $this->parseDashboardDateTime($session, $parameters['remind_at'] ?? now()->addDay()->toIso8601String()),
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
             'metadata' => array_merge(
                 ['created_by' => 'structured_hermes_action'],
@@ -318,8 +318,8 @@ class StructuredHermesActionService
     {
         $startsAtValue = $parameters['starts_at'] ?? $parameters['start_at'] ?? now()->toIso8601String();
         $endsAtValue = $parameters['ends_at'] ?? $parameters['end_at'] ?? null;
-        $startsAt = Carbon::parse((string) $startsAtValue);
-        $endsAt = $endsAtValue !== null ? Carbon::parse((string) $endsAtValue) : null;
+        $startsAt = $this->parseDashboardDateTime($session, $startsAtValue);
+        $endsAt = $endsAtValue !== null ? $this->parseDashboardDateTime($session, $endsAtValue) : null;
 
         $calendarEvent = CalendarEvent::create([
             'user_id' => $session->user_id,
@@ -355,7 +355,7 @@ class StructuredHermesActionService
         $task = $this->ownedModel(Task::class, $session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'metadata']);
         if (array_key_exists('due_at', $parameters)) {
-            $updates['due_at'] = $parameters['due_at'] ? Carbon::parse((string) $parameters['due_at']) : null;
+            $updates['due_at'] = $parameters['due_at'] ? $this->parseDashboardDateTime($session, $parameters['due_at']) : null;
         }
         $task->update($updates);
 
@@ -367,7 +367,7 @@ class StructuredHermesActionService
         $reminder = $this->ownedModel(Reminder::class, $session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'notes', 'status', 'category', 'color', 'is_critical', 'metadata']);
         if (array_key_exists('remind_at', $parameters)) {
-            $updates['remind_at'] = Carbon::parse((string) $parameters['remind_at']);
+            $updates['remind_at'] = $this->parseDashboardDateTime($session, $parameters['remind_at']);
         }
         $reminder->update($updates);
 
@@ -379,10 +379,10 @@ class StructuredHermesActionService
         $calendarEvent = $this->ownedModel(CalendarEvent::class, $session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'status', 'metadata']);
         if (array_key_exists('starts_at', $parameters)) {
-            $updates['starts_at'] = Carbon::parse((string) $parameters['starts_at']);
+            $updates['starts_at'] = $this->parseDashboardDateTime($session, $parameters['starts_at']);
         }
         if (array_key_exists('ends_at', $parameters)) {
-            $updates['ends_at'] = $parameters['ends_at'] ? Carbon::parse((string) $parameters['ends_at']) : null;
+            $updates['ends_at'] = $parameters['ends_at'] ? $this->parseDashboardDateTime($session, $parameters['ends_at']) : null;
         }
         $calendarEvent->update($updates);
 
@@ -515,7 +515,7 @@ class StructuredHermesActionService
      */
     private function createSchedulerJob(ConversationSession $session, array $parameters): Collection
     {
-        $scheduledFor = isset($parameters['scheduled_for']) ? Carbon::parse((string) $parameters['scheduled_for']) : null;
+        $scheduledFor = isset($parameters['scheduled_for']) ? $this->parseDashboardDateTime($session, $parameters['scheduled_for']) : null;
         $name = $this->stringParameter($parameters, 'name', $this->stringParameter($parameters, 'title', 'Scheduled job'));
         $job = SchedulerJobRecord::create([
             'user_id' => $session->user_id,
@@ -523,8 +523,8 @@ class StructuredHermesActionService
             'name' => $name,
             'status' => $this->stringParameter($parameters, 'status', 'queued'),
             'scheduled_for' => $scheduledFor,
-            'started_at' => isset($parameters['started_at']) ? Carbon::parse((string) $parameters['started_at']) : null,
-            'finished_at' => isset($parameters['finished_at']) ? Carbon::parse((string) $parameters['finished_at']) : null,
+            'started_at' => isset($parameters['started_at']) ? $this->parseDashboardDateTime($session, $parameters['started_at']) : null,
+            'finished_at' => isset($parameters['finished_at']) ? $this->parseDashboardDateTime($session, $parameters['finished_at']) : null,
             'payload' => $parameters['payload'] ?? null,
             'last_error' => $parameters['last_error'] ?? null,
         ]);
@@ -547,7 +547,7 @@ class StructuredHermesActionService
                 'recurrence' => $parameters['recurrence'] ?? null,
                 'starts_at' => $scheduledFor,
                 'ends_at' => isset($parameters['ends_at'])
-                    ? Carbon::parse((string) $parameters['ends_at'])
+                    ? $this->parseDashboardDateTime($session, $parameters['ends_at'])
                     : $scheduledFor->copy()->addMinutes((int) ($parameters['duration_minutes'] ?? 30)),
                 'status' => 'scheduled',
                 'metadata' => array_filter([
@@ -588,7 +588,7 @@ class StructuredHermesActionService
         $updates = $this->onlyPresent($parameters, ['name', 'status', 'payload', 'last_error']);
         foreach (['scheduled_for', 'started_at', 'finished_at'] as $dateKey) {
             if (array_key_exists($dateKey, $parameters)) {
-                $updates[$dateKey] = $parameters[$dateKey] ? Carbon::parse((string) $parameters[$dateKey]) : null;
+                $updates[$dateKey] = $parameters[$dateKey] ? $this->parseDashboardDateTime($session, $parameters[$dateKey]) : null;
             }
         }
         $job->update($updates);
@@ -721,6 +721,71 @@ class StructuredHermesActionService
         return isset($parameters[$key]) && is_scalar($parameters[$key]) && (string) $parameters[$key] !== ''
             ? (string) $parameters[$key]
             : $default;
+    }
+
+    private function parseDashboardDateTime(ConversationSession $session, mixed $value): Carbon
+    {
+        $dateTime = trim((string) $value);
+        if ($dateTime === '') {
+            return now();
+        }
+
+        if ($this->hasExplicitTimezone($dateTime)) {
+            return Carbon::parse($dateTime)->utc();
+        }
+
+        $offset = $this->clientTimezoneOffset($session);
+        if ($offset !== null && $this->looksLikeLocalDateTime($dateTime)) {
+            return Carbon::parse($this->appendTimezoneOffset($dateTime, $offset))->utc();
+        }
+
+        return Carbon::parse($dateTime)->utc();
+    }
+
+    private function hasExplicitTimezone(string $value): bool
+    {
+        return (bool) preg_match('/(?:Z|[+-]\d{2}:?\d{2})$/i', trim($value));
+    }
+
+    private function looksLikeLocalDateTime(string $value): bool
+    {
+        return (bool) preg_match('/^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?)?$/', trim($value));
+    }
+
+    private function appendTimezoneOffset(string $value, string $offset): string
+    {
+        return str_replace(' ', 'T', trim($value)).$offset;
+    }
+
+    private function clientTimezoneOffset(ConversationSession $session): ?string
+    {
+        $message = $session->messages()
+            ->where('role', 'user')
+            ->latest('id')
+            ->first();
+        $metadata = is_array($message?->metadata) ? $message->metadata : [];
+        $context = data_get($metadata, 'client_context');
+        if (! is_array($context)) {
+            return null;
+        }
+
+        $offset = data_get($context, 'timezone_offset');
+        if (is_string($offset) && preg_match('/^[+-]\d{2}:?\d{2}$/', $offset)) {
+            return strlen($offset) === 5
+                ? substr($offset, 0, 3).':'.substr($offset, 3, 2)
+                : $offset;
+        }
+
+        $minutes = data_get($context, 'timezone_offset_minutes');
+        if (is_numeric($minutes)) {
+            $totalMinutes = (int) $minutes;
+            $sign = $totalMinutes < 0 ? '-' : '+';
+            $absolute = abs($totalMinutes);
+
+            return sprintf('%s%02d:%02d', $sign, intdiv($absolute, 60), $absolute % 60);
+        }
+
+        return null;
     }
 
     private function recordEvent(ConversationSession $session, string $type, array $payload = [], ?string $toolName = null, string $status = 'recorded'): ActivityEvent

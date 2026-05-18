@@ -70,6 +70,31 @@ Future<bool> _launchExternalUrlWithNativeFallback(Uri url) async {
   }
 }
 
+Map<String, Object?> _clientTemporalContext() {
+  final now = DateTime.now();
+  final offset = now.timeZoneOffset;
+  final offsetMinutes = offset.inMinutes;
+  final sign = offsetMinutes < 0 ? '-' : '+';
+  final absoluteMinutes = offsetMinutes.abs();
+  final offsetLabel =
+      '$sign${(absoluteMinutes ~/ 60).toString().padLeft(2, '0')}:${(absoluteMinutes % 60).toString().padLeft(2, '0')}';
+  return {
+    'current_local_time': now.toIso8601String(),
+    'current_utc_time': now.toUtc().toIso8601String(),
+    'timezone_name': now.timeZoneName,
+    'timezone_offset': offsetLabel,
+    'timezone_offset_minutes': offsetMinutes,
+  };
+}
+
+Map<String, Object?> _flutterChatMetadata({
+  Map<String, Object?> additional = const {},
+}) => {
+  'source': 'flutter',
+  'client_context': _clientTemporalContext(),
+  ...additional,
+};
+
 String beanFriendlyErrorMessage(Object error, {String? action}) {
   final prefix = action == null || action.trim().isEmpty
       ? 'Bean hit a little snag.'
@@ -478,7 +503,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final session = await widget.apiClient.startSession(
         title: 'Today',
         workspaceId: user.activeWorkspace?.numericId,
-        metadata: {'source': 'flutter'},
+        metadata: _flutterChatMetadata(),
       );
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
         fallback: const GoogleCalendarSyncStatus(
@@ -729,13 +754,15 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       sessionId: session.id,
       content:
           'Bean preferences were updated in Settings. Save these as your current memory: personality=$agentPersonality; priorities=${onboardingPriorities.join(', ')}; context=${onboardingContext ?? ''}',
-      metadata: {
-        'source': 'settings',
-        'settings_update': true,
-        'agent_personality': agentPersonality,
-        'onboarding_priorities': onboardingPriorities,
-        'onboarding_context': onboardingContext,
-      },
+      metadata: _flutterChatMetadata(
+        additional: {
+          'source': 'settings',
+          'settings_update': true,
+          'agent_personality': agentPersonality,
+          'onboarding_priorities': onboardingPriorities,
+          'onboarding_context': onboardingContext,
+        },
+      ),
     );
   }
 
@@ -749,7 +776,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final session = await widget.apiClient.startSession(
         title: 'New chat',
         workspaceId: _user?.activeWorkspace?.numericId,
-        metadata: {'source': 'flutter'},
+        metadata: _flutterChatMetadata(),
       );
       final events = await widget.apiClient
           .pollActivityEvents(session.id)
@@ -820,7 +847,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final result = await widget.apiClient.sendMessage(
         sessionId: session.id,
         content: trimmed,
-        metadata: {'source': 'flutter'},
+        metadata: _flutterChatMetadata(),
       );
       final refreshedEvents = await widget.apiClient
           .pollActivityEvents(session.id)
@@ -841,6 +868,9 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final refreshedCalendar = await widget.apiClient
           .listCalendarEvents()
           .catchError((_) => _calendar);
+      final refreshedTasks = await widget.apiClient.listTasks().catchError(
+        (_) => refreshedSummary.tasks,
+      );
       if (!mounted) return;
       setState(() {
         _user = refreshedUser;
@@ -869,7 +899,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
           );
         }
         _chatRunState = result.status == 'blocked' ? 'Blocked' : 'Updated';
-        _tasks = refreshedSummary.tasks;
+        _tasks = refreshedTasks;
         _reminders = refreshedSummary.reminders;
         _calendar = refreshedCalendar;
         _approvals = refreshedSummary.approvals;
@@ -4460,7 +4490,9 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     final weekStartDay = selectedDay.subtract(
       Duration(days: selectedDay.weekday - DateTime.monday),
     );
-    final visibleHours = _calendarVisibleHours(
+    final visibleHours = _calendarVisibleHoursForEvents(
+      widget.calendar,
+      selectedDay,
       widget.startHour,
       widget.endHour,
     );
@@ -4524,8 +4556,8 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                         googleCalendarStatus: widget.googleCalendarStatus,
                         selectedDay: _dateForPage(page),
                         today: today,
-                        startHour: widget.startHour,
-                        endHour: widget.endHour,
+                        startHour: visibleHours.first,
+                        endHour: visibleHours.last,
                         visibleHours: visibleHours,
                         isActivePage: page == _visibleDayPage,
                         onEventTap: widget.onEventTap,
@@ -6971,6 +7003,37 @@ List<int> _calendarVisibleHours(int startHour, int endHour) {
   return [for (var hour = start; hour <= end; hour++) hour];
 }
 
+List<int> _calendarVisibleHoursForEvents(
+  List<HermesCalendarEvent> events,
+  DateTime selectedDay,
+  int startHour,
+  int endHour,
+) {
+  var start = startHour.clamp(0, 22);
+  var end = endHour.clamp(start + 1, 23);
+  final days = [
+    _dateOnly(selectedDay),
+    _dateOnly(selectedDay.add(const Duration(days: 1))),
+  ];
+
+  for (final event in events) {
+    if (_eventIsAllDay(event)) continue;
+    for (final day in days) {
+      final segment = _eventVisibleSegment(event, day, 0, 23);
+      if (segment == null) continue;
+      final startDecimal = _decimalHoursFromDayStart(segment.start, day);
+      final endDecimal = _decimalHoursFromDayStart(segment.end, day);
+      final segmentStartHour = startDecimal.floor().clamp(0, 22);
+      if (segmentStartHour < start) start = segmentStartHour;
+      final segmentEndHour = endDecimal.ceil().clamp(start + 1, 24) - 1;
+      final boundedEndHour = segmentEndHour.clamp(start + 1, 23);
+      if (boundedEndHour > end) end = boundedEndHour;
+    }
+  }
+
+  return _calendarVisibleHours(start, end);
+}
+
 bool _eventFallsWithinHours(
   HermesCalendarEvent event,
   DateTime day,
@@ -7184,6 +7247,17 @@ String _calendarEventOriginalToWireValue(String originalValue) {
   final parsed = DateTime.tryParse(originalValue.trim());
   if (parsed == null) return originalValue;
   return parsed.isUtc ? originalValue : parsed.toUtc().toIso8601String();
+}
+
+String _dateTimeToWireIsoString(DateTime value) {
+  if (value.isUtc) return value.toIso8601String();
+  final offset = value.timeZoneOffset;
+  final totalMinutes = offset.inMinutes;
+  final sign = totalMinutes < 0 ? '-' : '+';
+  final absoluteMinutes = totalMinutes.abs();
+  final offsetLabel =
+      '$sign${(absoluteMinutes ~/ 60).toString().padLeft(2, '0')}:${(absoluteMinutes % 60).toString().padLeft(2, '0')}';
+  return '${value.toIso8601String()}$offsetLabel';
 }
 
 DateTime? _parseIsoDeviceLocalDateTime(String value) {
@@ -10439,7 +10513,7 @@ String? _taskReminderInputToWireValue(String? value) {
   final trimmed = value?.trim() ?? '';
   if (trimmed.isEmpty) return null;
   final parsed = _parseCalendarEventDateTime(trimmed);
-  return parsed?.toIso8601String();
+  return parsed == null ? trimmed : _dateTimeToWireIsoString(parsed);
 }
 
 bool _taskIsRecurring(HermesTask task) {
