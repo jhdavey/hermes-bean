@@ -64,6 +64,8 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('Say: <span style="white-space: nowrap;">“Hey Bean…”</span> then say what you need.', false)
             ->assertDontSee('risky changes', false)
             ->assertSee('images/heybean-mobile-today-calendar.png', false)
+            ->assertSee('.phone img{display:block;width:min(390px,70vw);height:auto;aspect-ratio:1320/2868;object-fit:contain', false)
+            ->assertDontSee('.phone img{display:block;width:min(430px,76vw);height:auto;border-radius:42px}', false)
             ->assertDontSee('Apple-style', false)
             ->assertDontSee('Google Calendar', false)
             ->assertDontSee('iOS', false)
