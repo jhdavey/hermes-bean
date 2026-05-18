@@ -16,6 +16,49 @@ void main() {
   });
 
   testWidgets(
+    'forgot password asks for account email and sends a reset link request',
+    (WidgetTester tester) async {
+      final api = _FakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: _MemoryAuthTokenStore(),
+          launchExternalUrl: (_) async => false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('auth-email')),
+        'bean@example.com',
+      );
+      await tester.tap(find.byKey(const Key('forgot-login-action')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reset password'), findsOneWidget);
+      expect(find.byKey(const Key('forgot-password-email')), findsOneWidget);
+      expect(
+        find.textContaining('email used for your account'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('send-password-reset-link')));
+      await tester.pumpAndSettle();
+
+      expect(api.passwordResetRequests, ['bean@example.com']);
+      expect(find.text('Check your email'), findsOneWidget);
+      expect(find.textContaining('password reset link'), findsOneWidget);
+
+      await tester.tap(find.text('Back to login'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Login'), findsOneWidget);
+      expect(find.byKey(const Key('auth-password')), findsOneWidget);
+      expect(find.text('Reset password'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'starts signed out, logs in, loads live data, sends chat, and exposes delete account',
     (WidgetTester tester) async {
       final api = _FakeHermesApiClient(onboardingCompleted: false);
@@ -40,6 +83,15 @@ void main() {
         (loginLogo.image as AssetImage).assetName,
         'assets/images/bean/bean-logo.png',
       );
+      final screenSize =
+          tester.view.physicalSize / tester.view.devicePixelRatio;
+      final bodyRect = tester.getRect(find.byType(SafeArea).first);
+      final loginHeaderRect = tester.getRect(
+        find.byKey(const Key('login-header')),
+      );
+      final loginCardRect = tester.getRect(find.byKey(const Key('login-card')));
+      expect(loginHeaderRect.center.dx, closeTo(screenSize.width / 2, 1));
+      expect(loginCardRect.center.dy, closeTo(bodyRect.center.dy, 1));
       expect(find.byIcon(Icons.lock_rounded), findsNothing);
       expect(find.byKey(const Key('show-register-mode')), findsOneWidget);
       expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
@@ -53,12 +105,7 @@ void main() {
       await tester.tap(find.byKey(const Key('remember-me-checkbox')));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('forgot-login-action')));
-      await tester.pumpAndSettle();
-      expect(find.text('Account help'), findsWidgets);
-      expect(find.textContaining('heybean.org/support'), findsOneWidget);
-      await tester.tap(find.text('OK'));
-      await tester.pumpAndSettle();
+      expect(find.text('Forgot password?'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('show-register-mode')));
       await tester.pumpAndSettle();
@@ -2537,7 +2584,22 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('event-delete-action')), findsOneWidget);
+    final deleteButton = tester.widget<IconButton>(
+      find.byKey(const Key('event-delete-action')),
+    );
+    expect(
+      deleteButton.style?.backgroundColor?.resolve(<WidgetState>{}),
+      HeyBeanTheme.destructive,
+    );
+
     await tester.tap(find.byKey(const Key('event-delete-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete event?'), findsOneWidget);
+    expect(api.deletedEventId, isNull);
+    expect(find.byKey(const Key('calendar-event-detail-page')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('destructive-confirm-action')));
     await tester.pumpAndSettle();
 
     expect(api.deletedEventId, 3);
@@ -2620,7 +2682,10 @@ void main() {
       expect(find.byKey(const Key('event-start-field')), findsOneWidget);
       expect(find.byKey(const Key('event-end-field')), findsOneWidget);
       expect(find.byKey(const Key('event-category-dropdown')), findsNothing);
+      expect(find.text('Categories'), findsNothing);
+      expect(find.text('Category'), findsOneWidget);
       expect(find.byKey(const Key('event-category-chip-list')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-none')), findsOneWidget);
       expect(find.byKey(const Key('event-category-chip-Work')), findsOneWidget);
       expect(
         find.byKey(const Key('event-category-chip-Personal')),
@@ -3100,7 +3165,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('event-category-dropdown')), findsNothing);
+      expect(find.text('Categories'), findsNothing);
+      expect(find.text('Category'), findsOneWidget);
       expect(find.byKey(const Key('event-category-chip-list')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-none')), findsOneWidget);
       expect(find.byKey(const Key('event-category-chip-Work')), findsOneWidget);
       expect(
         find.byKey(const Key('event-category-delete-Work')),
@@ -3114,7 +3182,34 @@ void main() {
       expect(find.byKey(const Key('event-category-manager')), findsNothing);
       expect(find.byKey(const Key('event-category-save-action')), findsNothing);
 
+      final categoryDeleteButton = tester.widget<IconButton>(
+        find.byKey(const Key('event-category-delete-Work')),
+      );
+      expect(
+        categoryDeleteButton.style?.backgroundColor?.resolve(<WidgetState>{}),
+        isNot(HeyBeanTheme.destructive),
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('event-category-delete-Work')),
+          matching: find.byIcon(Icons.close_rounded),
+        ),
+        findsOneWidget,
+      );
+      final categoryDeleteIcon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(const Key('event-category-delete-Work')),
+          matching: find.byIcon(Icons.close_rounded),
+        ),
+      );
+      expect(categoryDeleteIcon.color, HeyBeanTheme.destructive);
+
       await tester.tap(find.byKey(const Key('event-category-delete-Work')));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete category?'), findsOneWidget);
+      expect(api.deletedCategoryId, isNull);
+
+      await tester.tap(find.byKey(const Key('destructive-confirm-action')));
       await tester.pumpAndSettle();
       expect(api.deletedCategoryId, 10);
       expect(find.byKey(const Key('event-category-chip-Work')), findsNothing);
@@ -3703,6 +3798,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   String? updatedAgentPersonality;
   List<String>? updatedPriorities;
   String? updatedContext;
+  final passwordResetRequests = <String>[];
 
   HermesUser _user({required String name, required String email}) {
     final persistedPersonality = staleSettingsAfterUpdate
@@ -3759,6 +3855,11 @@ class _FakeHermesApiClient extends HermesApiClient {
       token: 'fake-token',
       user: _user(name: name, email: email),
     );
+  }
+
+  @override
+  Future<void> requestPasswordReset({required String email}) async {
+    passwordResetRequests.add(email.trim().toLowerCase());
   }
 
   @override

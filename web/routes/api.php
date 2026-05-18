@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('api.rate_limit')->group(function (): void {
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
     Route::get('/google-calendar/callback', [GoogleCalendarController::class, 'callback']);
 
     Route::middleware('auth.bearer')->group(function (): void {

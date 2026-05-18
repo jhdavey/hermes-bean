@@ -17,6 +17,7 @@ use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Notifications\ResetPasswordLink;
 use App\Services\AgentProfileService;
 use App\Services\OnboardingSeedService;
 use App\Services\WorkspaceService;
@@ -24,6 +25,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 
@@ -84,6 +86,26 @@ class AuthController extends Controller
             'user' => $user,
             'token' => $this->issueToken($user),
         ]]);
+    }
+
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $request->merge([
+            'email' => strtolower(trim((string) $request->input('email', ''))),
+        ]);
+
+        $data = $request->validate([
+            'email' => ['required', 'email', 'max:255'],
+        ]);
+
+        $user = User::where('email', $data['email'])->first();
+        if ($user) {
+            $user->notify(new ResetPasswordLink(PasswordBroker::broker()->createToken($user)));
+        }
+
+        return response()->json([
+            'message' => 'If an account exists for that email, we sent a password reset link.',
+        ]);
     }
 
     public function me(Request $request): JsonResponse

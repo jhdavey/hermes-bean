@@ -1,8 +1,13 @@
 <?php
 
 use App\Models\EarlyAccessSignup;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password;
 
 Route::get('/', function () {
     return view('welcome');
@@ -12,6 +17,41 @@ Route::view('/privacy', 'legal.privacy')->name('privacy');
 Route::view('/terms', 'legal.terms')->name('terms');
 Route::view('/support', 'legal.support')->name('support');
 Route::view('/account-deletion', 'legal.account-deletion')->name('account-deletion');
+
+Route::get('/reset-password/{token}', function (Request $request, string $token) {
+    return view('auth.reset-password', [
+        'token' => $token,
+        'email' => (string) $request->query('email', ''),
+    ]);
+})->name('password.reset');
+
+Route::post('/reset-password', function (Request $request) {
+    $request->merge([
+        'email' => strtolower(trim((string) $request->input('email', ''))),
+    ]);
+
+    $credentials = $request->validate([
+        'token' => ['required', 'string'],
+        'email' => ['required', 'email', 'max:255'],
+        'password' => ['required', 'confirmed', Password::min(12)],
+    ]);
+
+    $status = PasswordBroker::broker()->reset(
+        $credentials,
+        function (User $user, string $password): void {
+            $user->forceFill([
+                'password' => Hash::make($password),
+                'remember_token' => Str::random(60),
+            ])->save();
+        },
+    );
+
+    if ($status !== PasswordBroker::PASSWORD_RESET) {
+        return back()->withErrors(['email' => __($status)])->withInput($request->only('email'));
+    }
+
+    return response()->view('auth.reset-complete');
+})->name('password.update');
 
 Route::post('/early-access', function (Request $request) {
     $validated = $request->validate([

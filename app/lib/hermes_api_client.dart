@@ -65,6 +65,15 @@ class HermesApiClient {
     return _rememberAuth(HermesAuthResult.fromJson(_expectMap(data['data'])));
   }
 
+  Future<void> requestPasswordReset({required String email}) async {
+    await _sendJson(
+      'POST',
+      '/auth/forgot-password',
+      body: {'email': email},
+      authenticated: false,
+    );
+  }
+
   Future<void> logout() async {
     await _sendJson('POST', '/auth/logout');
     bearerToken = null;

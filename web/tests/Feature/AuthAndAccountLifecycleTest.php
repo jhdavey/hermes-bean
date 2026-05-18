@@ -5,8 +5,11 @@ namespace Tests\Feature;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Notifications\ResetPasswordLink;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password as PasswordBroker;
 use Tests\TestCase;
 
 class AuthAndAccountLifecycleTest extends TestCase
@@ -68,6 +71,50 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->withToken($token)->patchJson('/api/auth/me', [
             'email' => 'not-an-email',
         ])->assertUnprocessable();
+    }
+
+    public function test_forgot_password_sends_reset_link_without_revealing_accounts(): void
+    {
+        Notification::fake();
+        $user = User::factory()->create(['email' => 'bean@example.com']);
+
+        $this->postJson('/api/auth/forgot-password', [
+            'email' => 'BEAN@example.com ',
+        ])->assertOk()
+            ->assertJsonPath('message', 'If an account exists for that email, we sent a password reset link.');
+
+        Notification::assertSentTo($user, ResetPasswordLink::class, function (ResetPasswordLink $notification) use ($user): bool {
+            return str_contains($notification->resetUrl($user), '/reset-password')
+                && str_contains($notification->resetUrl($user), 'email=bean%40example.com');
+        });
+
+        $this->postJson('/api/auth/forgot-password', [
+            'email' => 'missing@example.com',
+        ])->assertOk()
+            ->assertJsonPath('message', 'If an account exists for that email, we sent a password reset link.');
+    }
+
+    public function test_web_password_reset_changes_password_and_returns_to_app_login(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'bean@example.com',
+            'password' => Hash::make('old-password-12345'),
+        ]);
+        $token = PasswordBroker::broker()->createToken($user);
+
+        $this->post('/reset-password', [
+            'token' => $token,
+            'email' => 'bean@example.com',
+            'password' => 'new-password-12345',
+            'password_confirmation' => 'new-password-12345',
+        ])->assertOk()
+            ->assertSee('Your password has been reset')
+            ->assertSee('Back to app login');
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'bean@example.com',
+            'password' => 'new-password-12345',
+        ])->assertOk();
     }
 
     public function test_registration_can_seed_visible_calendar_events_for_new_users(): void

@@ -4,9 +4,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_bean_app/hermes_api_client.dart';
 
 void main() {
-  test('defaults to the production HeyBean API', () {
+  test('uses production API base by default', () {
     expect(hermesApiBaseUrl, 'https://heybean.org/api');
     expect(HermesApiClient().baseUrl, Uri.parse('https://heybean.org/api'));
+  });
+
+  test('requests a password reset link without authenticating', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'old-token',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'POST');
+        expect(request.path, '/auth/forgot-password');
+        expect(request.headers.containsKey('Authorization'), isFalse);
+        expect(request.body, {'email': 'bean@example.com'});
+        return HermesApiResponse(
+          200,
+          jsonEncode({'message': 'Password reset link sent.'}),
+        );
+      },
+    );
+
+    await client.requestPasswordReset(email: 'bean@example.com');
+
+    expect(client.bearerToken, 'old-token');
+    expect(requests, hasLength(1));
   });
 
   test(

@@ -17,7 +17,6 @@ const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
 final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
 final Uri _termsOfServiceUrl = Uri.parse('https://heybean.org/terms');
 final Uri _supportUrl = Uri.parse('https://heybean.org/support');
-final Uri _passwordHelpUrl = Uri.parse('https://heybean.org/support');
 
 bool _isAllowedExternalUrl(Uri url) {
   if (url.scheme != 'https') return false;
@@ -314,6 +313,7 @@ class HeyBeanTheme {
   static const Color accentStrong = Color(0xFF15803D);
   static const Color success = Color(0xFF22C55E);
   static const Color warning = Color(0xFFF59E0B);
+  static const Color destructive = Color(0xFFDC2626);
 
   static const SystemUiOverlayStyle lightSystemOverlayStyle =
       SystemUiOverlayStyle(
@@ -393,6 +393,55 @@ class HeyBeanTheme {
       ),
     );
   }
+}
+
+ButtonStyle _destructiveFilledButtonStyle({double radius = 14}) =>
+    FilledButton.styleFrom(
+      backgroundColor: HeyBeanTheme.destructive,
+      foregroundColor: Colors.white,
+      disabledBackgroundColor: HeyBeanTheme.destructive.withValues(alpha: .36),
+      disabledForegroundColor: Colors.white70,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius),
+      ),
+    );
+
+ButtonStyle _destructiveIconButtonStyle() => IconButton.styleFrom(
+  backgroundColor: HeyBeanTheme.destructive,
+  foregroundColor: Colors.white,
+  disabledBackgroundColor: HeyBeanTheme.destructive.withValues(alpha: .28),
+  disabledForegroundColor: Colors.white70,
+);
+
+Future<bool> _confirmDestructiveAction(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String confirmLabel,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(
+          key: const Key('destructive-cancel-action'),
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          key: const Key('destructive-confirm-action'),
+          style: _destructiveFilledButtonStyle(),
+          onPressed: () => Navigator.of(context).pop(true),
+          icon: const Icon(Icons.delete_outline_rounded),
+          label: Text(confirmLabel),
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
 }
 
 enum _AuthPhase { loading, signedOut, signedIn }
@@ -633,6 +682,10 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _requestPasswordReset(String email) async {
+    await widget.apiClient.requestPasswordReset(email: email);
   }
 
   Future<void> _completeAgentOnboarding({
@@ -2057,6 +2110,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       return _SignedOutScreen(
         onLogin: _login,
         onRegister: _register,
+        onForgotPassword: _requestPasswordReset,
         tokenStore: widget.tokenStore,
         launchExternalUrl: widget.launchExternalUrl,
         busy: _busy,
@@ -2178,6 +2232,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
 
 typedef _RegisterHandler =
     Future<void> Function(String name, String email, String password);
+typedef _ForgotPasswordHandler = Future<void> Function(String email);
 
 class _AgentPersonalityOption {
   const _AgentPersonalityOption({
@@ -2661,6 +2716,7 @@ class _SignedOutScreen extends StatefulWidget {
   const _SignedOutScreen({
     required this.onLogin,
     required this.onRegister,
+    required this.onForgotPassword,
     required this.tokenStore,
     required this.launchExternalUrl,
     required this.busy,
@@ -2674,6 +2730,7 @@ class _SignedOutScreen extends StatefulWidget {
   })
   onLogin;
   final _RegisterHandler onRegister;
+  final _ForgotPasswordHandler onForgotPassword;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final bool busy;
@@ -2706,22 +2763,12 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
     super.dispose();
   }
 
-  Future<void> _showForgotLoginDialog() async {
-    final launched = await widget.launchExternalUrl(_passwordHelpUrl);
-    if (launched || !mounted) return;
+  Future<void> _showForgotPasswordDialog() async {
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Account help'),
-        content: const Text(
-          'Visit heybean.org/support for password reset help, account access, and launch support.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
+      builder: (context) => _ForgotPasswordDialog(
+        initialEmail: _email.text,
+        onSubmit: widget.onForgotPassword,
       ),
     );
   }
@@ -2744,155 +2791,318 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
         ? 'Create your account with your email and a secure 12+ character password'
         : '';
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
-          child: _ShellCard(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _SectionTitle(
-                  icon: Icons.person_add_alt_1_rounded,
-                  leading: _registerMode
-                      ? null
-                      : ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.asset(
-                            'assets/images/bean/bean-logo.png',
-                            key: const Key('login-header-logo'),
-                            width: 28,
-                            height: 28,
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight - 32,
+              maxWidth: 440,
+            ),
+            child: Center(
+              child: KeyedSubtree(
+                key: const Key('login-card'),
+                child: _ShellCard(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Column(
+                        key: const Key('login-header'),
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.max,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (_registerMode)
+                                const Icon(
+                                  Icons.person_add_alt_1_rounded,
+                                  color: HeyBeanTheme.accentStrong,
+                                )
+                              else
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.asset(
+                                    'assets/images/bean/bean-logo.png',
+                                    key: const Key('login-header-logo'),
+                                    width: 28,
+                                    height: 28,
+                                  ),
+                                ),
+                              const SizedBox(width: 10),
+                              Flexible(
+                                child: Text(
+                                  title,
+                                  textAlign: TextAlign.center,
+                                  softWrap: true,
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                              ),
+                            ],
                           ),
+                          if (subtitle.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              subtitle,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: HeyBeanTheme.muted),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      if (_registerMode) ...[
+                        TextField(
+                          key: const Key('auth-name'),
+                          controller: _name,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(labelText: 'Name'),
                         ),
-                  title: title,
-                  subtitle: subtitle,
-                ),
-                const SizedBox(height: 16),
-                if (_registerMode) ...[
-                  TextField(
-                    key: const Key('auth-name'),
-                    controller: _name,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(labelText: 'Name'),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                TextField(
-                  key: const Key('auth-email'),
-                  controller: _email,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(labelText: 'Email'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('auth-password'),
-                  controller: _password,
-                  obscureText: true,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => widget.busy ? null : _submit(),
-                  decoration: InputDecoration(
-                    labelText: 'Password',
-                    helperText: _registerMode ? 'Minimum 12 characters' : null,
-                  ),
-                ),
-                if (!_registerMode) ...[
-                  const SizedBox(height: 8),
-                  CheckboxListTile(
-                    key: const Key('remember-me-checkbox'),
-                    value: _rememberMe,
-                    onChanged: widget.busy
-                        ? null
-                        : (value) =>
-                              setState(() => _rememberMe = value ?? false),
-                    title: const Text('Remember me'),
-                    contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    dense: true,
-                  ),
-                ],
-                if (widget.error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    widget.error!,
-                    style: const TextStyle(color: Colors.redAccent),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                FilledButton(
-                  key: const Key('auth-submit'),
-                  onPressed: widget.busy ? null : _submit,
-                  child: Text(
-                    widget.busy
-                        ? (_registerMode ? 'Creating account…' : 'Signing in…')
-                        : (_registerMode ? 'Create account' : 'Sign in'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
-                    TextButton(
-                      key: Key(
-                        _registerMode
-                            ? 'show-login-mode'
-                            : 'show-register-mode',
+                        const SizedBox(height: 12),
+                      ],
+                      TextField(
+                        key: const Key('auth-email'),
+                        controller: _email,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(labelText: 'Email'),
                       ),
-                      onPressed: widget.busy ? null : _toggleMode,
-                      child: Text(
-                        _registerMode
-                            ? 'Already have an account? Sign in'
-                            : 'Create an account',
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('auth-password'),
+                        controller: _password,
+                        obscureText: true,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => widget.busy ? null : _submit(),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          helperText: _registerMode
+                              ? 'Minimum 12 characters'
+                              : null,
+                        ),
                       ),
-                    ),
-                    TextButton(
-                      key: const Key('forgot-login-action'),
-                      onPressed: widget.busy ? null : _showForgotLoginDialog,
-                      child: const Text('Forgot login?'),
-                    ),
-                  ],
+                      if (!_registerMode) ...[
+                        const SizedBox(height: 8),
+                        CheckboxListTile(
+                          key: const Key('remember-me-checkbox'),
+                          value: _rememberMe,
+                          onChanged: widget.busy
+                              ? null
+                              : (value) => setState(
+                                  () => _rememberMe = value ?? false,
+                                ),
+                          title: const Text('Remember me'),
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          dense: true,
+                        ),
+                      ],
+                      if (widget.error != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          widget.error!,
+                          style: const TextStyle(color: Colors.redAccent),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      FilledButton(
+                        key: const Key('auth-submit'),
+                        onPressed: widget.busy ? null : _submit,
+                        child: Text(
+                          widget.busy
+                              ? (_registerMode
+                                    ? 'Creating account…'
+                                    : 'Signing in…')
+                              : (_registerMode ? 'Create account' : 'Sign in'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          TextButton(
+                            key: Key(
+                              _registerMode
+                                  ? 'show-login-mode'
+                                  : 'show-register-mode',
+                            ),
+                            onPressed: widget.busy ? null : _toggleMode,
+                            child: Text(
+                              _registerMode
+                                  ? 'Already have an account? Sign in'
+                                  : 'Create an account',
+                            ),
+                          ),
+                          TextButton(
+                            key: const Key('forgot-login-action'),
+                            onPressed: widget.busy
+                                ? null
+                                : _showForgotPasswordDialog,
+                            child: const Text('Forgot password?'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          TextButton(
+                            key: const Key('privacy-policy-link'),
+                            onPressed: widget.busy
+                                ? null
+                                : () => widget.launchExternalUrl(
+                                    _privacyPolicyUrl,
+                                  ),
+                            child: const Text('Privacy'),
+                          ),
+                          TextButton(
+                            key: const Key('terms-of-service-link'),
+                            onPressed: widget.busy
+                                ? null
+                                : () => widget.launchExternalUrl(
+                                    _termsOfServiceUrl,
+                                  ),
+                            child: const Text('Terms'),
+                          ),
+                          TextButton(
+                            key: const Key('support-link'),
+                            onPressed: widget.busy
+                                ? null
+                                : () => widget.launchExternalUrl(_supportUrl),
+                            child: const Text('Support'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
-                    TextButton(
-                      key: const Key('privacy-policy-link'),
-                      onPressed: widget.busy
-                          ? null
-                          : () => widget.launchExternalUrl(_privacyPolicyUrl),
-                      child: const Text('Privacy'),
-                    ),
-                    TextButton(
-                      key: const Key('terms-of-service-link'),
-                      onPressed: widget.busy
-                          ? null
-                          : () => widget.launchExternalUrl(_termsOfServiceUrl),
-                      child: const Text('Terms'),
-                    ),
-                    TextButton(
-                      key: const Key('support-link'),
-                      onPressed: widget.busy
-                          ? null
-                          : () => widget.launchExternalUrl(_supportUrl),
-                      child: const Text('Support'),
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ForgotPasswordDialog extends StatefulWidget {
+  const _ForgotPasswordDialog({
+    required this.initialEmail,
+    required this.onSubmit,
+  });
+
+  final String initialEmail;
+  final _ForgotPasswordHandler onSubmit;
+
+  @override
+  State<_ForgotPasswordDialog> createState() => _ForgotPasswordDialogState();
+}
+
+class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
+  late final TextEditingController _email;
+  bool _sending = false;
+  bool _sent = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _email = TextEditingController(text: widget.initialEmail.trim());
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+    try {
+      await widget.onSubmit(_email.text.trim());
+      if (!mounted) return;
+      setState(() => _sent = true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _error = beanFriendlyErrorMessage(
+          error,
+          action: 'send a password reset link',
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_sent) {
+      return AlertDialog(
+        title: const Text('Check your email'),
+        content: const Text(
+          'If that email matches a HeyBean account, we sent a password reset link. After you reset it, come back here and sign in with your new password.',
+        ),
+        actions: [
+          FilledButton(
+            key: const Key('back-to-login-after-reset'),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Back to login'),
+          ),
+        ],
+      );
+    }
+
+    return AlertDialog(
+      title: const Text('Reset password'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Enter the email used for your account and we’ll send a password reset link.',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            key: const Key('forgot-password-email'),
+            controller: _email,
+            enabled: !_sending,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _sending ? null : _submit(),
+            decoration: const InputDecoration(labelText: 'Account email'),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _sending ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const Key('send-password-reset-link'),
+          onPressed: _sending ? null : _submit,
+          child: Text(_sending ? 'Sending…' : 'Send reset link'),
+        ),
+      ],
     );
   }
 }
@@ -5890,6 +6100,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       });
       return;
     }
+    final confirmed = await _confirmDestructiveAction(
+      context,
+      title: 'Delete category?',
+      message:
+          'This removes "${category.name}" and clears it from matching events, tasks, and reminders.',
+      confirmLabel: 'Delete category',
+    );
+    if (!confirmed || !mounted) return;
     setState(() => _savingCategory = true);
     try {
       await widget.onEventCategoryDeleted(category);
@@ -6389,60 +6607,73 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         ),
                       ),
                       const SizedBox(height: 14),
-                      _ShellCard(
-                        child: Column(
-                          key: const Key('event-category-chip-list'),
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Expanded(
-                                  child: _EventFieldLabel(
-                                    icon: Icons.sell_outlined,
-                                    label: 'Categories',
-                                  ),
+                      Column(
+                        key: const Key('event-category-chip-list'),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Category',
+                                  style: Theme.of(context).textTheme.labelLarge
+                                      ?.copyWith(
+                                        color: HeyBeanTheme.text,
+                                        fontWeight: FontWeight.w800,
+                                      ),
                                 ),
-                                IconButton.filledTonal(
-                                  key: const Key('event-category-add-action'),
-                                  onPressed: _savingCategory
-                                      ? null
-                                      : _openCategoryCreationModal,
-                                  tooltip: 'Create category',
-                                  icon: const Icon(Icons.add_rounded),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final category in _categoryChipValues)
-                                  _EventCategoryChip(
-                                    chipKey: Key(
-                                      'event-category-chip-${_categoryKey(category.name)}',
-                                    ),
-                                    deleteKey: Key(
-                                      'event-category-delete-${_categoryKey(category.name)}',
-                                    ),
-                                    editKey: Key(
-                                      'event-category-edit-${_categoryKey(category.name)}',
-                                    ),
-                                    category: category,
-                                    color: _categoryColor(category.color),
-                                    selected:
-                                        _category.text.trim() == category.name,
-                                    saving: _savingCategory,
-                                    onSelected: () => _selectCategory(category),
-                                    onEdited: () =>
-                                        _openCategoryEditModal(category),
-                                    onDeleted: () =>
-                                        _deleteCategoryValues(category),
+                              ),
+                              IconButton.filledTonal(
+                                key: const Key('event-category-add-action'),
+                                onPressed: _savingCategory
+                                    ? null
+                                    : _openCategoryCreationModal,
+                                tooltip: 'Create category',
+                                icon: const Icon(Icons.add_rounded),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _CategoryOptionPill(
+                                key: const Key('event-category-none'),
+                                label: 'No category',
+                                selected: _category.text.trim().isEmpty,
+                                onTap: () {
+                                  setState(() {
+                                    _category.text = '';
+                                    _color = '#34C759';
+                                  });
+                                },
+                              ),
+                              for (final category in _categoryChipValues)
+                                _EventCategoryChip(
+                                  chipKey: Key(
+                                    'event-category-chip-${_categoryKey(category.name)}',
                                   ),
-                              ],
-                            ),
-                          ],
-                        ),
+                                  deleteKey: Key(
+                                    'event-category-delete-${_categoryKey(category.name)}',
+                                  ),
+                                  editKey: Key(
+                                    'event-category-edit-${_categoryKey(category.name)}',
+                                  ),
+                                  category: category,
+                                  color: _categoryColor(category.color),
+                                  selected:
+                                      _category.text.trim() == category.name,
+                                  saving: _savingCategory,
+                                  onSelected: () => _selectCategory(category),
+                                  onEdited: () =>
+                                      _openCategoryEditModal(category),
+                                  onDeleted: () =>
+                                      _deleteCategoryValues(category),
+                                ),
+                            ],
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -6470,11 +6701,21 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
               ),
               if (widget.onDelete != null) ...[
                 const SizedBox(width: 12),
-                IconButton.filledTonal(
+                IconButton.filled(
                   key: const Key('event-delete-action'),
                   tooltip: 'Delete event',
-                  onPressed: () =>
-                      Navigator.of(context).pop({'action': 'delete'}),
+                  style: _destructiveIconButtonStyle(),
+                  onPressed: () async {
+                    final confirmed = await _confirmDestructiveAction(
+                      context,
+                      title: 'Delete event?',
+                      message:
+                          'This removes "${widget.event.title}" from your calendar.',
+                      confirmLabel: 'Delete event',
+                    );
+                    if (!context.mounted || !confirmed) return;
+                    Navigator.of(context).pop({'action': 'delete'});
+                  },
                   icon: const Icon(Icons.delete_outline_rounded),
                 ),
               ],
@@ -6588,7 +6829,7 @@ class _EventCategoryChip extends StatelessWidget {
             icon: Icon(
               Icons.close_rounded,
               size: 18,
-              color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
+              color: saving ? HeyBeanTheme.muted : HeyBeanTheme.destructive,
             ),
           ),
         ],
@@ -8523,10 +8764,20 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                   children: [
                     if (deleteLabel != null)
                       Expanded(
-                        child: OutlinedButton.icon(
+                        child: FilledButton.icon(
                           key: const Key('title-time-editor-delete'),
-                          onPressed: () =>
-                              Navigator.of(context).pop({'delete': true}),
+                          style: _destructiveFilledButtonStyle(),
+                          onPressed: () async {
+                            final confirmed = await _confirmDestructiveAction(
+                              context,
+                              title: '$deleteLabel?',
+                              message:
+                                  'This action cannot be undone. Are you sure you want to ${deleteLabel.toLowerCase()}?',
+                              confirmLabel: deleteLabel,
+                            );
+                            if (!context.mounted || !confirmed) return;
+                            Navigator.of(context).pop({'delete': true});
+                          },
                           icon: const Icon(Icons.delete_outline_rounded),
                           label: Text(deleteLabel),
                         ),
@@ -10585,6 +10836,7 @@ class _DeleteAccountConfirmationDialogState
       ),
       FilledButton(
         key: const Key('delete-account-confirmation-submit'),
+        style: _destructiveFilledButtonStyle(),
         onPressed: _submit,
         child: const Text('Delete account'),
       ),
@@ -10666,8 +10918,9 @@ class _AccountCard extends StatelessWidget {
               icon: const Icon(Icons.logout_rounded),
               label: const Text('Sign out'),
             ),
-            OutlinedButton.icon(
+            FilledButton.icon(
               key: const Key('delete-account-action'),
+              style: _destructiveFilledButtonStyle(),
               onPressed: () => _requestDeleteAccount(context),
               icon: const Icon(Icons.delete_outline_rounded),
               label: const Text('Delete account'),
@@ -10762,7 +11015,6 @@ class _SectionTitle extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
-    this.leading,
     this.infoKey,
     this.infoTitle,
     this.infoBullets = const [],
@@ -10771,7 +11023,6 @@ class _SectionTitle extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  final Widget? leading;
   final Key? infoKey;
   final String? infoTitle;
   final List<String> infoBullets;
@@ -10779,7 +11030,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      leading ?? Icon(icon, color: HeyBeanTheme.accentStrong),
+      Icon(icon, color: HeyBeanTheme.accentStrong),
       const SizedBox(width: 10),
       Expanded(
         child: Column(
