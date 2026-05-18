@@ -21,8 +21,11 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Bean helps you manage your calendar, keeps track of tasks, set reminders', false)
             ->assertSee('keeps you moving instead of getting stuck in the weeds', false)
             ->assertSee('Get Early Access', false)
+            ->assertDontSee('See how Bean works', false)
             ->assertDontSee('Use your voice:', false)
+            ->assertSee('class="hero-voice"', false)
             ->assertSee('Just say “Hey, Bean…!”', false)
+            ->assertSee('.hero-voice{font-size:clamp(30px,4.8vw,54px)!important', false)
             ->assertSee('Voice-first control', false)
             ->assertSee('Hold the button and say “Hey, Bean…!” 👇', false)
             ->assertDontSee('↘️ Hold the button and say “Hey, Bean…!”', false)
@@ -93,6 +96,10 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('name="name"', false)
             ->assertDontSee('name="use_case"', false)
             ->assertDontSee('Flutter + Laravel', false);
+
+        $html = $response->getContent();
+        $this->assertLessThan(strpos($html, 'Voice-first requests'), strpos($html, 'No spam. Private beta invites only.'));
+        $this->assertLessThan(strpos($html, 'Just say “Hey, Bean…!”'), strpos($html, 'Private by design'));
     }
 
     public function test_visitors_can_request_early_access(): void
