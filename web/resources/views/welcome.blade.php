@@ -31,12 +31,12 @@
     <main class="wrap hero">
         <section>
             <span class="pill">● First 100 early-access invites now opening</span>
-            <h1>Meet Bean, your new executive assistant</h1>
-            <p>Bean manages your calendar, keeps track of tasks, sets reminders, and keeps you moving instead of getting stuck in the weeds.</p>
+            <h1>Meet Bean, your new assistant for real-life</h1>
+            <p>Bean helps you manage your calendar, keeps track of tasks, set reminders, and keeps you moving instead of getting stuck in the weeds.</p>
             <form class="form" id="early-access" method="POST" action="{{ route('early-access.store') }}">
                 @csrf
                 <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address">
-                <button type="submit">Join the first 100</button>
+                <button type="submit">Get Early Access</button>
             </form>
             @if (session('early_access_status'))
                 <p class="micro"><strong>You’re on the list — thank you.</strong></p>
@@ -56,7 +56,7 @@
     </main>
 
     <section class="wrap section" id="how">
-        <h2>Bean manages the logistics, so you can stay ahead</h2>
+        <h2>Bean manages the logistics, so you stay ahead</h2>
         <p class="lead">Bean turns “Hey Bean…” voice requests into a structured day — with the calendar, tasks, reminders, and household context kept together.</p>
         <div class="logistics-layout">
             <div class="chat-mockup" aria-label="Bean planning chat mockup">
