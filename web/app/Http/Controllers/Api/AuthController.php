@@ -150,12 +150,25 @@ class AuthController extends Controller
             'onboarding_priorities' => ['sometimes', 'array', 'max:5'],
             'onboarding_priorities.*' => ['string', 'max:80'],
             'onboarding_context' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'notification_preferences' => ['sometimes', 'array'],
+            'notification_preferences.reminder_push' => ['sometimes', 'boolean'],
+            'notification_preferences.reminder_email' => ['sometimes', 'boolean'],
         ]);
 
-        $user->fill(collect($data)->only(['name', 'email'])->all());
+        $profileKeys = ['agent_personality', 'onboarding_priorities', 'onboarding_context'];
+        $profileData = collect($data)->only($profileKeys)->all();
+        $userData = collect($data)->only(['name', 'email'])->all();
+        if (array_key_exists('notification_preferences', $data)) {
+            $userData['notification_preferences'] = array_merge(
+                User::defaultNotificationPreferences(),
+                $user->notification_preferences ?? [],
+                $data['notification_preferences']
+            );
+        }
+        $user->fill($userData);
         $user->save();
 
-        if (array_key_exists('agent_personality', $data) || array_key_exists('onboarding_priorities', $data) || array_key_exists('onboarding_context', $data)) {
+        if ($profileData !== []) {
             $profile = app(AgentProfileService::class)->ensureForUser($user);
             app(AgentProfileService::class)->applyOnboarding($profile, $data, 'settings');
             $user->forceFill(['onboard_complete' => true])->save();

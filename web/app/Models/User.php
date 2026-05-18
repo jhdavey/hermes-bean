@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'onboard_complete', 'default_workspace_id'])]
+#[Fillable(['name', 'email', 'password', 'onboard_complete', 'default_workspace_id', 'notification_preferences'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -25,12 +25,37 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'onboard_complete' => 'boolean',
+            'notification_preferences' => 'array',
         ];
     }
 
     public function tokens(): HasMany
     {
         return $this->hasMany(PersonalAccessToken::class);
+    }
+
+    public function getNotificationPreferencesAttribute($value): array
+    {
+        $decoded = is_string($value) ? json_decode($value, true) : $value;
+        return array_merge(self::defaultNotificationPreferences(), is_array($decoded) ? $decoded : []);
+    }
+
+    public static function defaultNotificationPreferences(): array
+    {
+        return [
+            'reminder_push' => true,
+            'reminder_email' => true,
+        ];
+    }
+
+    public function wantsReminderEmailNotifications(): bool
+    {
+        return (bool) ($this->notification_preferences['reminder_email'] ?? true);
+    }
+
+    public function wantsReminderPushNotifications(): bool
+    {
+        return (bool) ($this->notification_preferences['reminder_push'] ?? true);
     }
 
     public function conversationSessions(): HasMany

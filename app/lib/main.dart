@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -17,6 +18,72 @@ const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
 final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
 final Uri _termsOfServiceUrl = Uri.parse('https://heybean.org/terms');
 final Uri _supportUrl = Uri.parse('https://heybean.org/support');
+
+class _ReminderNotificationService {
+  final FlutterLocalNotificationsPlugin _plugin =
+      FlutterLocalNotificationsPlugin();
+  bool _initialized = false;
+
+  Future<void> initialize() async {
+    if (_initialized) return;
+    const initializationSettings = InitializationSettings(
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      ),
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    );
+    try {
+      await _plugin.initialize(initializationSettings);
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
+      _initialized = true;
+    } on MissingPluginException {
+      _initialized = false;
+    } on PlatformException {
+      _initialized = false;
+    } catch (_) {
+      _initialized = false;
+    }
+  }
+
+  Future<void> showReminder(HermesReminder reminder) async {
+    await initialize();
+    if (!_initialized) return;
+    try {
+      await _plugin.show(
+        reminder.id,
+        'Reminder: ${reminder.title}',
+        'Open HeyBean to dismiss or mark it complete.',
+        const NotificationDetails(
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+          android: AndroidNotificationDetails(
+            'heybean_reminders',
+            'Reminders',
+            channelDescription: 'HeyBean reminder alerts',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
+        payload: 'reminder:${reminder.id}',
+      );
+    } on MissingPluginException {
+      // Widget tests and stale native shells can run without plugin registration.
+    } on PlatformException {
+      // Notification permissions may be denied; the in-app banner still appears.
+    } catch (_) {
+      // If the notification platform is not available, keep the app usable.
+    }
+  }
+}
 
 bool _isAllowedExternalUrl(Uri url) {
   if (url.scheme != 'https') return false;
@@ -497,11 +564,82 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   bool _editingAgentPreferences = false;
   bool _beanVoiceListening = false;
   String? _beanVoiceDraft;
+  final Set<int> _dismissedReminderBannerIds = <int>{};
+  final Set<int> _notifiedReminderIds = <int>{};
+  final _ReminderNotificationService _reminderNotifications =
+      _ReminderNotificationService();
+  Timer? _reminderDueTimer;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_reminderNotifications.initialize());
+    _reminderDueTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _checkReminderDueState(),
+    );
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _reminderDueTimer?.cancel();
+    super.dispose();
+  }
+
+  void _checkReminderDueState() {
+    if (!mounted || _phase != _AuthPhase.signedIn) return;
+    _syncReminderNotifications();
+    if (_dueReminderBanner() != null) {
+      setState(() {});
+    }
+  }
+
+  void _syncReminderNotifications() {
+    final user = _user;
+    if (user == null || !user.notificationPreferences.reminderPush) return;
+    for (final reminder in _reminders) {
+      if (_isReminderCompleted(reminder) ||
+          _notifiedReminderIds.contains(reminder.id)) {
+        continue;
+      }
+      final dueAt = _parseReminderDueAt(reminder);
+      if (dueAt != null &&
+          !dueAt.isAfter(DateTime.now()) &&
+          !dueAt.isBefore(DateTime.now().subtract(const Duration(hours: 2)))) {
+        _notifiedReminderIds.add(reminder.id);
+        unawaited(_reminderNotifications.showReminder(reminder));
+      }
+    }
+  }
+
+  HermesReminder? _dueReminderBanner() {
+    final now = DateTime.now();
+    for (final reminder in _reminders) {
+      if (_dismissedReminderBannerIds.contains(reminder.id) ||
+          _isReminderCompleted(reminder) ||
+          !reminder.isCritical) {
+        continue;
+      }
+      final dueAt = _parseReminderDueAt(reminder);
+      if (dueAt != null &&
+          !dueAt.isAfter(now) &&
+          !dueAt.isBefore(now.subtract(const Duration(hours: 2)))) {
+        return reminder;
+      }
+    }
+    return null;
+  }
+
+  DateTime? _parseReminderDueAt(HermesReminder reminder) {
+    final value = reminder.dueAt;
+    if (value == null || value.trim().isEmpty) return null;
+    return DateTime.tryParse(value)?.toLocal();
+  }
+
+  bool _isReminderCompleted(HermesReminder reminder) {
+    final status = reminder.status?.toLowerCase();
+    return status == 'completed' || status == 'complete' || status == 'done';
   }
 
   Future<void> _bootstrap() async {
@@ -598,6 +736,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _phase = _AuthPhase.signedIn;
         _loadingStatusText = null;
       });
+      _syncReminderNotifications();
     } catch (error) {
       if (!mounted) return;
       final invalidToken = _isInvalidTokenError(error);
@@ -1160,6 +1299,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         _events = results[6] as List<HermesActivityEvent>;
         _error = null;
       });
+      _syncReminderNotifications();
     } catch (error) {
       if (!mounted) return;
       setState(
@@ -1915,6 +2055,34 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     );
   }
 
+  Future<void> _updateNotificationPreferences(
+    HermesNotificationPreferences preferences,
+  ) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final updatedUser = await widget.apiClient.updateMe(
+        notificationPreferences: preferences,
+      );
+      if (!mounted) return;
+      setState(() {
+        _user = updatedUser;
+        _busy = false;
+        _error = null;
+      });
+      _syncReminderNotifications();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'update notification preferences',
+        );
+      });
+    }
+  }
+
   Future<void> _logout() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -2126,6 +2294,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         !_editingAgentPreferences &&
         !_forceAgentOnboarding;
     final editingAgentPreferences = _editingAgentPreferences;
+    final dueReminder = _dueReminderBanner();
     final signedInContent = _signedInContent(user);
     final signedInSurface = _selectedDestination == _HomeDestination.bean
         ? Padding(
@@ -2145,6 +2314,23 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     return Stack(
       children: [
         signedInSurface,
+        if (dueReminder != null)
+          Positioned(
+            key: const Key('due-reminder-banner'),
+            left: 20,
+            right: 20,
+            top: 8,
+            child: _DueReminderBanner(
+              reminder: dueReminder,
+              onDismiss: () => setState(
+                () => _dismissedReminderBannerIds.add(dueReminder.id),
+              ),
+              onComplete: () async {
+                _dismissedReminderBannerIds.add(dueReminder.id);
+                await _toggleReminderCompletion(dueReminder);
+              },
+            ),
+          ),
         if (showBeanIntroBubble)
           Positioned(
             left: 24,
@@ -2219,6 +2405,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     onDeleteAccount: _deleteAccount,
     onSignOut: _logout,
     onAccountEmailChanged: _updateAccountEmail,
+    onNotificationPreferencesChanged: _updateNotificationPreferences,
     launchExternalUrl: widget.launchExternalUrl,
     onEditAgentOnboarding: () {
       setState(() {
@@ -3153,6 +3340,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onDeleteAccount,
     required this.onSignOut,
     required this.onAccountEmailChanged,
+    required this.onNotificationPreferencesChanged,
     required this.launchExternalUrl,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
@@ -3262,6 +3450,8 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
   final Future<void> Function(String email) onAccountEmailChanged;
+  final Future<void> Function(HermesNotificationPreferences preferences)
+  onNotificationPreferencesChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
@@ -3347,6 +3537,7 @@ class _CommandCenterContent extends StatelessWidget {
             onDeleteAccount: onDeleteAccount,
             onSignOut: onSignOut,
             onAccountEmailChanged: onAccountEmailChanged,
+            onNotificationPreferencesChanged: onNotificationPreferencesChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onWorkspacesChanged: onWorkspacesChanged,
             error: error,
@@ -9173,6 +9364,7 @@ class _SettingsView extends StatelessWidget {
     required this.onDeleteAccount,
     required this.onSignOut,
     required this.onAccountEmailChanged,
+    required this.onNotificationPreferencesChanged,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
     this.error,
@@ -9190,6 +9382,8 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
   final Future<void> Function(String email) onAccountEmailChanged;
+  final Future<void> Function(HermesNotificationPreferences preferences)
+  onNotificationPreferencesChanged;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
@@ -9234,6 +9428,10 @@ class _SettingsView extends StatelessWidget {
                 child: const Text('Update'),
               ),
             ),
+            _NotificationPreferencesCard(
+              preferences: user.notificationPreferences,
+              onChanged: onNotificationPreferencesChanged,
+            ),
             _WorkspacesSettingsCard(
               apiClient: apiClient,
               user: user,
@@ -9269,6 +9467,96 @@ class _SettingsView extends StatelessWidget {
         launchExternalUrl: launchExternalUrl,
       ),
     ],
+  );
+}
+
+class _NotificationPreferencesCard extends StatefulWidget {
+  const _NotificationPreferencesCard({
+    required this.preferences,
+    required this.onChanged,
+  });
+
+  final HermesNotificationPreferences preferences;
+  final Future<void> Function(HermesNotificationPreferences preferences)
+  onChanged;
+
+  @override
+  State<_NotificationPreferencesCard> createState() =>
+      _NotificationPreferencesCardState();
+}
+
+class _NotificationPreferencesCardState
+    extends State<_NotificationPreferencesCard> {
+  late HermesNotificationPreferences _preferences;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _preferences = widget.preferences;
+  }
+
+  @override
+  void didUpdateWidget(covariant _NotificationPreferencesCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_saving) _preferences = widget.preferences;
+  }
+
+  Future<void> _save(HermesNotificationPreferences preferences) async {
+    setState(() {
+      _preferences = preferences;
+      _saving = true;
+    });
+    try {
+      await widget.onChanged(preferences);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('notification-preferences-card'),
+    margin: const EdgeInsets.only(top: 10),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.accent.withValues(alpha: .06),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .15)),
+    ),
+    child: Column(
+      children: [
+        const _CompactItemTile(
+          icon: Icons.notifications_active_outlined,
+          title: 'Notification preferences',
+          subtitle:
+              'Reminders are sent using these preferences. Turn on push notifications in iOS so Bean can alert you when reminders are due.',
+        ),
+        SwitchListTile.adaptive(
+          key: const Key('reminder-push-preference'),
+          value: _preferences.reminderPush,
+          onChanged: _saving
+              ? null
+              : (value) => _save(_preferences.copyWith(reminderPush: value)),
+          title: const Text('Reminder push notifications'),
+          subtitle: const Text(
+            'Shows an iOS push notification and in-app banner when a reminder is due.',
+          ),
+          secondary: const Icon(Icons.phone_iphone_rounded),
+        ),
+        SwitchListTile.adaptive(
+          key: const Key('reminder-email-preference'),
+          value: _preferences.reminderEmail,
+          onChanged: _saving
+              ? null
+              : (value) => _save(_preferences.copyWith(reminderEmail: value)),
+          title: const Text('Reminder emails'),
+          subtitle: const Text(
+            'Sends an email reminder at the scheduled reminder time.',
+          ),
+          secondary: const Icon(Icons.email_outlined),
+        ),
+      ],
+    ),
   );
 }
 
@@ -11237,6 +11525,105 @@ class _MiniSurface extends StatelessWidget {
           style: const TextStyle(color: HeyBeanTheme.muted),
         ),
       ],
+    ),
+  );
+}
+
+class _DueReminderBanner extends StatelessWidget {
+  const _DueReminderBanner({
+    required this.reminder,
+    required this.onDismiss,
+    required this.onComplete,
+  });
+
+  final HermesReminder reminder;
+  final VoidCallback onDismiss;
+  final Future<void> Function() onComplete;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: Container(
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.accent.withValues(alpha: .95),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: HeyBeanTheme.accent.withValues(alpha: .22),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.notifications_active_rounded,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Reminder due now',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                    Text(
+                      reminder.title,
+                      key: const Key('due-reminder-banner-title'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                key: const Key('due-reminder-dismiss-icon'),
+                onPressed: onDismiss,
+                icon: const Icon(Icons.close_rounded, color: Colors.white),
+                tooltip: 'Dismiss reminder banner',
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              TextButton(
+                key: const Key('due-reminder-dismiss'),
+                onPressed: onDismiss,
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+                child: const Text('Dismiss'),
+              ),
+              const Spacer(),
+              FilledButton.icon(
+                key: const Key('due-reminder-complete'),
+                onPressed: onComplete,
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: HeyBeanTheme.accent,
+                ),
+                icon: const Icon(Icons.check_rounded),
+                label: const Text('Mark complete'),
+              ),
+            ],
+          ),
+        ],
+      ),
     ),
   );
 }

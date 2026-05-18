@@ -90,6 +90,7 @@ class HermesApiClient {
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
+    HermesNotificationPreferences? notificationPreferences,
   }) async {
     final data = await _sendJson(
       'PATCH',
@@ -101,6 +102,8 @@ class HermesApiClient {
         if (onboardingPriorities != null)
           'onboarding_priorities': onboardingPriorities,
         if (onboardingContext != null) 'onboarding_context': onboardingContext,
+        if (notificationPreferences != null)
+          'notification_preferences': notificationPreferences.toJson(),
       },
     );
     return HermesUser.fromJson(_expectMap(data['data']));
@@ -757,6 +760,39 @@ class HermesAuthResult {
       );
 }
 
+class HermesNotificationPreferences {
+  const HermesNotificationPreferences({
+    this.reminderPush = true,
+    this.reminderEmail = true,
+  });
+
+  final bool reminderPush;
+  final bool reminderEmail;
+
+  Map<String, Object?> toJson() => {
+    'reminder_push': reminderPush,
+    'reminder_email': reminderEmail,
+  };
+
+  factory HermesNotificationPreferences.fromJson(Map<String, Object?>? json) =>
+      HermesNotificationPreferences(
+        reminderPush: _readBool(
+          json?['reminder_push'] ?? json?['reminderPush'] ?? true,
+        ),
+        reminderEmail: _readBool(
+          json?['reminder_email'] ?? json?['reminderEmail'] ?? true,
+        ),
+      );
+
+  HermesNotificationPreferences copyWith({
+    bool? reminderPush,
+    bool? reminderEmail,
+  }) => HermesNotificationPreferences(
+    reminderPush: reminderPush ?? this.reminderPush,
+    reminderEmail: reminderEmail ?? this.reminderEmail,
+  );
+}
+
 class HermesUser {
   const HermesUser({
     required this.id,
@@ -769,6 +805,7 @@ class HermesUser {
     this.activeWorkspace,
     this.workspaces = const [],
     this.activeWorkspaceAgentProfile,
+    this.notificationPreferences = const HermesNotificationPreferences(),
   });
 
   final int id;
@@ -781,6 +818,7 @@ class HermesUser {
   final HermesWorkspace? activeWorkspace;
   final List<HermesWorkspace> workspaces;
   final HermesAgentProfile? activeWorkspaceAgentProfile;
+  final HermesNotificationPreferences notificationPreferences;
 
   HermesUser copyWith({
     String? name,
@@ -792,6 +830,7 @@ class HermesUser {
     HermesWorkspace? activeWorkspace,
     List<HermesWorkspace>? workspaces,
     HermesAgentProfile? activeWorkspaceAgentProfile,
+    HermesNotificationPreferences? notificationPreferences,
   }) => HermesUser(
     id: id,
     name: name ?? this.name,
@@ -804,6 +843,8 @@ class HermesUser {
     workspaces: workspaces ?? this.workspaces,
     activeWorkspaceAgentProfile:
         activeWorkspaceAgentProfile ?? this.activeWorkspaceAgentProfile,
+    notificationPreferences:
+        notificationPreferences ?? this.notificationPreferences,
   );
 
   factory HermesUser.fromJson(Map<String, Object?> json) => HermesUser(
@@ -830,6 +871,9 @@ class HermesUser {
             _expectMap(json['active_workspace_agent_profile']),
           )
         : null,
+    notificationPreferences: HermesNotificationPreferences.fromJson(
+      _expectMapOrNull(json['notification_preferences']),
+    ),
   );
 }
 

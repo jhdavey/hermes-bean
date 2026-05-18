@@ -656,6 +656,86 @@ void main() {
     expect(find.textContaining('Focus, Work'), findsOneWidget);
   });
 
+  testWidgets('settings edits reminder notification preferences', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient()..plannedToday = true;
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('notification-preferences-card')),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Reminders are sent using these preferences'),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(
+      find.byKey(const Key('reminder-push-preference')),
+    );
+    await tester.tap(find.byKey(const Key('reminder-push-preference')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotificationPreferences.reminderPush, isFalse);
+    expect(api.updatedNotificationPreferences.reminderEmail, isTrue);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('reminder-email-preference')),
+    );
+    await tester.tap(find.byKey(const Key('reminder-email-preference')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotificationPreferences.reminderPush, isFalse);
+    expect(api.updatedNotificationPreferences.reminderEmail, isFalse);
+  });
+
+  testWidgets('due reminder banner can dismiss or complete reminders', (
+    WidgetTester tester,
+  ) async {
+    final dismissApi = _SignedInFakeHermesApiClient()
+      ..showDueReminderBanner = true;
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: dismissApi, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('due-reminder-banner')), findsOneWidget);
+    expect(find.text('Stand up'), findsWidgets);
+    await tester.tap(find.byKey(const Key('due-reminder-dismiss')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('due-reminder-banner')), findsNothing);
+    expect(dismissApi.bannerUpdatedReminder, isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+
+    final completeApi = _SignedInFakeHermesApiClient()
+      ..showDueReminderBanner = true;
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: completeApi,
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('due-reminder-banner')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('due-reminder-complete')));
+    await tester.pumpAndSettle();
+
+    expect(completeApi.bannerUpdatedReminder?.status, 'completed');
+    expect(find.byKey(const Key('due-reminder-banner')), findsNothing);
+  });
+
   testWidgets('Bean personality info explains customer-facing options', (
     WidgetTester tester,
   ) async {
@@ -719,6 +799,8 @@ void main() {
     await tester.tap(find.text('Got it'));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.byKey(const Key('workspaces-info')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('workspaces-info')));
     await tester.pumpAndSettle();
     expect(find.text('Workspaces'), findsWidgets);
@@ -3789,6 +3871,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   bool plannedToday = false;
   int todaySummaryCalls = 0;
   bool googleCalendarConnected = false;
+  bool showDueReminderBanner = false;
   int googleCalendarSyncCalls = 0;
   List<String> selectedGoogleCalendarIds = <String>['primary'];
   String defaultGoogleCalendarId = 'primary';
@@ -3798,7 +3881,10 @@ class _FakeHermesApiClient extends HermesApiClient {
   String? updatedAgentPersonality;
   List<String>? updatedPriorities;
   String? updatedContext;
+  HermesNotificationPreferences updatedNotificationPreferences =
+      const HermesNotificationPreferences();
   final passwordResetRequests = <String>[];
+  HermesReminder? bannerUpdatedReminder;
 
   HermesUser _user({required String name, required String email}) {
     final persistedPersonality = staleSettingsAfterUpdate
@@ -3828,6 +3914,7 @@ class _FakeHermesApiClient extends HermesApiClient {
           },
         },
       ),
+      notificationPreferences: updatedNotificationPreferences,
     );
   }
 
@@ -3873,11 +3960,14 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
+    HermesNotificationPreferences? notificationPreferences,
   }) async {
     updatedEmail = email ?? updatedEmail;
     updatedAgentPersonality = agentPersonality ?? updatedAgentPersonality;
     updatedPriorities = onboardingPriorities ?? updatedPriorities;
     updatedContext = onboardingContext ?? updatedContext;
+    updatedNotificationPreferences =
+        notificationPreferences ?? updatedNotificationPreferences;
     return _user(
       name: name ?? 'Bean User',
       email: updatedEmail ?? 'bean@example.com',
@@ -3933,11 +4023,50 @@ class _FakeHermesApiClient extends HermesApiClient {
         title: 'Stand up',
         isCritical: true,
         dueAt: DateTime.now()
-            .subtract(const Duration(days: 1))
-            .copyWith(hour: 9, minute: 0, second: 0, millisecond: 0)
+            .subtract(
+              showDueReminderBanner
+                  ? const Duration(hours: 1)
+                  : const Duration(days: 1),
+            )
+            .copyWith(
+              hour: showDueReminderBanner ? DateTime.now().hour : 9,
+              minute: 0,
+              second: 0,
+              millisecond: 0,
+            )
             .toIso8601String(),
+        status: bannerUpdatedReminder?.status ?? 'pending',
       ),
     ];
+  }
+
+  @override
+  Future<HermesReminder> updateReminder(
+    int reminderId, {
+    String? title,
+    String? remindAt,
+    String? status,
+    int? calendarEventId,
+    String? category,
+    String? color,
+    bool? isCritical,
+    Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
+    bool clearCategory = false,
+    bool clearColor = false,
+  }) async {
+    bannerUpdatedReminder = HermesReminder(
+      id: reminderId,
+      title: title ?? 'Stand up',
+      status: status ?? 'pending',
+      dueAt: remindAt ?? DateTime.now().toIso8601String(),
+      isCritical: isCritical ?? true,
+      category: clearCategory ? null : category,
+      color: clearColor ? null : color,
+      calendarEventId: calendarEventId,
+      metadata: metadata,
+    );
+    return bannerUpdatedReminder!;
   }
 
   @override

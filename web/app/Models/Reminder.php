@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Reminder extends Model
 {
@@ -11,5 +12,10 @@ class Reminder extends Model
     protected function casts(): array
     {
         return ['remind_at' => 'datetime', 'is_critical' => 'boolean', 'metadata' => 'array'];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 }

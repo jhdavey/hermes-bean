@@ -178,6 +178,54 @@ void main() {
     },
   );
 
+  test(
+    'updates reminder notification preferences through auth profile update',
+    () async {
+      final requests = <HermesApiRequest>[];
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        bearerToken: 'token-123',
+        transport: (request) async {
+          requests.add(request);
+          expect(request.method, 'PATCH');
+          expect(request.path, '/auth/me');
+          expect(request.headers['Authorization'], 'Bearer token-123');
+          expect(request.body, {
+            'notification_preferences': {
+              'reminder_push': false,
+              'reminder_email': true,
+            },
+          });
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'id': 9,
+                'name': 'Bean User',
+                'email': 'bean@example.com',
+                'notification_preferences': {
+                  'reminder_push': false,
+                  'reminder_email': true,
+                },
+              },
+            }),
+          );
+        },
+      );
+
+      final user = await client.updateMe(
+        notificationPreferences: const HermesNotificationPreferences(
+          reminderPush: false,
+          reminderEmail: true,
+        ),
+      );
+
+      expect(user.notificationPreferences.reminderPush, isFalse);
+      expect(user.notificationPreferences.reminderEmail, isTrue);
+      expect(requests, hasLength(1));
+    },
+  );
+
   test('marks tasks complete with bearer token', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
