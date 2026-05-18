@@ -64,6 +64,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('Say: <span style="white-space: nowrap;">“Hey Bean…”</span> then say what you need.', false)
             ->assertDontSee('risky changes', false)
             ->assertSee('images/heybean-mobile-today-calendar.png', false)
+            ->assertSee('images/heybean-mobile-today-calendar.png?v=', false)
             ->assertSee('.phone img{display:block;width:min(306px,60vw);height:auto;max-height:665px;aspect-ratio:auto;object-fit:contain', false)
             ->assertSee('.phone img{width:min(286px,76vw);height:auto;max-height:620px;max-width:82vw}', false)
             ->assertSee('.callout{display:block;transform:scale(.86)', false)
