@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -4816,15 +4817,18 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
   static const int _daysPerTimelinePage = 2;
 
   late final PageController _dayPageController;
+  late final ScrollController _timelineScrollController;
   late DateTime _pageAnchorDay;
   int _visibleDayPage = _initialDayPage;
   double _headerHorizontalDrag = 0;
+  String? _autoScrolledCurrentTimeDayKey;
 
   @override
   void initState() {
     super.initState();
     _pageAnchorDay = _dateOnly(widget.selectedDay);
     _dayPageController = PageController(initialPage: _initialDayPage);
+    _timelineScrollController = ScrollController();
   }
 
   @override
@@ -4849,6 +4853,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
   @override
   void dispose() {
     _dayPageController.dispose();
+    _timelineScrollController.dispose();
     super.dispose();
   }
 
@@ -4883,6 +4888,27 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     }
   }
 
+  void _scheduleInitialCurrentTimeScroll({
+    required bool showCurrentTimeMarker,
+    required double markerOffset,
+    required double viewportHeight,
+    required double timelineHeight,
+  }) {
+    if (!showCurrentTimeMarker) return;
+    final selectedDayKey = _dateOnly(widget.selectedDay).toIso8601String();
+    if (_autoScrolledCurrentTimeDayKey == selectedDayKey) return;
+    _autoScrolledCurrentTimeDayKey = selectedDayKey;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_timelineScrollController.hasClients) return;
+      final maxScrollExtent =
+          _timelineScrollController.position.maxScrollExtent;
+      final targetOffset = (markerOffset - (viewportHeight / 2))
+          .clamp(0.0, math.max(0.0, math.min(maxScrollExtent, timelineHeight)))
+          .toDouble();
+      _timelineScrollController.jumpTo(targetOffset);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -4913,6 +4939,16 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     final showCurrentTimeMarker =
         _sameCalendarDay(selectedDay, today) ||
         _sameCalendarDay(selectedDay.add(const Duration(days: 1)), today);
+    final timelineViewportHeight = math.min(
+      timelineHeight,
+      math.max(320.0, MediaQuery.sizeOf(context).height - 220),
+    );
+    _scheduleInitialCurrentTimeScroll(
+      showCurrentTimeMarker: showCurrentTimeMarker,
+      markerOffset: markerOffset,
+      viewportHeight: timelineViewportHeight,
+      timelineHeight: timelineHeight,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4927,94 +4963,105 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
           onHorizontalDayScrollEnd: _handleHeaderWeekScroll,
         ),
         const SizedBox(height: 10),
-        Container(
-          key: const Key('apple-style-day-timeline'),
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: HeyBeanTheme.border)),
-          ),
-          height: timelineHeight,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Row(
-                children: [
-                  _FixedTimelineHoursColumn(visibleHours: visibleHours),
-                  Expanded(
-                    child: PageView.builder(
-                      key: const PageStorageKey<String>(
-                        'apple-style-day-page-view',
-                      ),
-                      controller: _dayPageController,
-                      physics: const BouncingScrollPhysics(
-                        parent: PageScrollPhysics(),
-                      ),
-                      allowImplicitScrolling: true,
-                      onPageChanged: _handlePageChanged,
-                      itemBuilder: (context, page) => _TwoDayTimelinePage(
-                        key: ValueKey('two-day-timeline-page-$page'),
-                        calendar: widget.calendar,
-                        eventCategories: widget.eventCategories,
-                        googleCalendarStatus: widget.googleCalendarStatus,
-                        selectedDay: _dateForPage(page),
-                        today: today,
-                        startHour: visibleHours.first,
-                        endHour: visibleHours.last,
-                        visibleHours: visibleHours,
-                        isActivePage: page == _visibleDayPage,
-                        onEventTap: widget.onEventTap,
-                        onEventDeleted: widget.onEventDeleted,
-                        onEventCategorySaved: widget.onEventCategorySaved,
-                        onEventCategoryDeleted: widget.onEventCategoryDeleted,
-                      ),
-                    ),
-                  ),
-                ],
+        SizedBox(
+          height: timelineViewportHeight,
+          child: SingleChildScrollView(
+            key: const Key('apple-style-day-timeline-scroll'),
+            controller: _timelineScrollController,
+            child: Container(
+              key: const Key('apple-style-day-timeline'),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: HeyBeanTheme.border)),
               ),
-              if (showCurrentTimeMarker)
-                Positioned(
-                  key: const Key('calendar-current-time-marker'),
-                  top: markerOffset,
-                  left: 0,
-                  right: 0,
-                  child: Row(
+              height: timelineHeight,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Row(
                     children: [
-                      SizedBox(
-                        width: _calendarTimeColumnWidth,
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: Container(
-                            key: const Key('calendar-current-time-label'),
-                            margin: const EdgeInsets.only(right: 3),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: HeyBeanTheme.accent,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                _naturalTimeLabel(now),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
+                      _FixedTimelineHoursColumn(visibleHours: visibleHours),
+                      Expanded(
+                        child: PageView.builder(
+                          key: const PageStorageKey<String>(
+                            'apple-style-day-page-view',
+                          ),
+                          controller: _dayPageController,
+                          physics: const BouncingScrollPhysics(
+                            parent: PageScrollPhysics(),
+                          ),
+                          allowImplicitScrolling: true,
+                          onPageChanged: _handlePageChanged,
+                          itemBuilder: (context, page) => _TwoDayTimelinePage(
+                            key: ValueKey('two-day-timeline-page-$page'),
+                            calendar: widget.calendar,
+                            eventCategories: widget.eventCategories,
+                            googleCalendarStatus: widget.googleCalendarStatus,
+                            selectedDay: _dateForPage(page),
+                            today: today,
+                            startHour: visibleHours.first,
+                            endHour: visibleHours.last,
+                            visibleHours: visibleHours,
+                            isActivePage: page == _visibleDayPage,
+                            onEventTap: widget.onEventTap,
+                            onEventDeleted: widget.onEventDeleted,
+                            onEventCategorySaved: widget.onEventCategorySaved,
+                            onEventCategoryDeleted:
+                                widget.onEventCategoryDeleted,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (showCurrentTimeMarker)
+                    Positioned(
+                      key: const Key('calendar-current-time-marker'),
+                      top: markerOffset,
+                      left: 0,
+                      right: 0,
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: _calendarTimeColumnWidth,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Container(
+                                key: const Key('calendar-current-time-label'),
+                                margin: const EdgeInsets.only(right: 3),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: HeyBeanTheme.accent,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    _naturalTimeLabel(now),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Container(
+                              height: 2,
+                              color: HeyBeanTheme.accent,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Container(height: 2, color: HeyBeanTheme.accent),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
+                    ),
+                ],
+              ),
+            ),
           ),
         ),
       ],

@@ -1600,6 +1600,13 @@ void main() {
     final currentTimeLabel = tester.getRect(
       find.byKey(const Key('calendar-current-time-label')),
     );
+    final timelineScrollRect = tester.getRect(
+      find.byKey(const Key('apple-style-day-timeline-scroll')),
+    );
+    expect(
+      currentTimeLabel.center.dy,
+      closeTo(timelineScrollRect.center.dy, 12),
+    );
     expect(currentTimeLabel.left, greaterThanOrEqualTo(fixedHourColumn.left));
     expect(currentTimeLabel.right, lessThanOrEqualTo(fixedHourColumn.right));
     expect(fixedHourColumn.height, closeTo(36 + 42 + (16 * 52.5), .1));
@@ -1617,7 +1624,13 @@ void main() {
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
     );
     await tester.dragFrom(
-      pageViewTopLeft + const Offset(360, 120),
+      Offset(
+        pageViewTopLeft.dx + 360,
+        (timelineScrollRect.center.dy + 80).clamp(
+          timelineScrollRect.top + 24,
+          timelineScrollRect.bottom - 24,
+        ),
+      ),
       const Offset(-420, 0),
     );
     await tester.pumpAndSettle();
@@ -2457,10 +2470,12 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.fling(
+    final refreshScrollTopLeft = tester.getTopLeft(
       find.byKey(const Key('signed-in-refresh-scroll')),
-      const Offset(0, 320),
-      1000,
+    );
+    await tester.dragFrom(
+      refreshScrollTopLeft + const Offset(40, 20),
+      const Offset(0, 360),
     );
     await tester.pumpAndSettle();
 
@@ -2479,10 +2494,12 @@ void main() {
     expect(api.googleCalendarSyncCalls, 1);
     expect(find.textContaining('Imported Google event'), findsOneWidget);
 
-    await tester.fling(
+    final refreshScrollTopLeft = tester.getTopLeft(
       find.byKey(const Key('signed-in-refresh-scroll')),
-      const Offset(0, 320),
-      1000,
+    );
+    await tester.dragFrom(
+      refreshScrollTopLeft + const Offset(40, 20),
+      const Offset(0, 360),
     );
     await tester.pumpAndSettle();
 
