@@ -5757,7 +5757,10 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   }) async {
     final trimmedName = name.trim();
     if (trimmedName.isEmpty) return;
-    setState(() => _savingCategory = true);
+    setState(() {
+      _savingCategory = true;
+      _validationError = null;
+    });
     try {
       final saved = await widget.onEventCategorySaved(
         category: category,
@@ -5774,6 +5777,11 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             : [..._categories, saved];
         _category.text = saved.name;
         _color = saved.color;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _validationError = 'Could not save category. Try a different name.';
       });
     } finally {
       if (mounted) setState(() => _savingCategory = false);
@@ -6482,58 +6490,141 @@ class _EventCategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: selected ? color.withValues(alpha: .14) : Colors.white,
+    color: Colors.white,
     shape: StadiumBorder(
       side: BorderSide(
-        color: selected ? color : HeyBeanTheme.border,
-        width: 1.4,
+        color: selected ? HeyBeanTheme.accent : HeyBeanTheme.border,
+        width: selected ? 1.8 : 1.2,
       ),
     ),
-    child: InkWell(
-      key: chipKey,
-      borderRadius: BorderRadius.circular(999),
-      onTap: onSelected,
-      child: Padding(
-        padding: const EdgeInsets.only(left: 10, right: 4, top: 4, bottom: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircleAvatar(radius: 6, backgroundColor: color),
-            const SizedBox(width: 7),
-            Text(
-              category.name,
-              style: TextStyle(
-                color: HeyBeanTheme.text,
-                fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+    child: Padding(
+      padding: const EdgeInsets.only(left: 4, right: 4, top: 4, bottom: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            key: chipKey,
+            borderRadius: BorderRadius.circular(999),
+            onTap: saving ? null : onSelected,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircleAvatar(radius: 6, backgroundColor: color),
+                  const SizedBox(width: 7),
+                  Text(
+                    category.name,
+                    style: TextStyle(
+                      color: HeyBeanTheme.text,
+                      fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                    ),
+                  ),
+                  if (selected) ...[
+                    const SizedBox(width: 5),
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      size: 15,
+                      color: HeyBeanTheme.accent,
+                    ),
+                  ],
+                ],
               ),
             ),
-            const SizedBox(width: 4),
-            if (category.id >= 0)
-              InkResponse(
-                key: editKey,
-                radius: 16,
-                onTap: saving ? null : onEdited,
-                child: Icon(
-                  Icons.edit_rounded,
-                  size: 16,
-                  color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
-                ),
-              ),
-            InkResponse(
-              key: deleteKey,
-              radius: 16,
-              onTap: saving ? null : onDeleted,
-              child: Icon(
-                Icons.close_rounded,
-                size: 18,
+          ),
+          if (category.id >= 0)
+            IconButton(
+              key: editKey,
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+              tooltip: 'Edit ${category.name}',
+              onPressed: saving ? null : onEdited,
+              icon: Icon(
+                Icons.edit_rounded,
+                size: 16,
                 color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
               ),
             ),
-          ],
-        ),
+          IconButton(
+            key: deleteKey,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            tooltip: 'Delete ${category.name}',
+            onPressed: saving ? null : onDeleted,
+            icon: Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
+            ),
+          ),
+        ],
       ),
     ),
   );
+}
+
+class _CategoryOptionPill extends StatelessWidget {
+  const _CategoryOptionPill({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.color,
+    this.dotKey,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final Color? color;
+  final Key? dotKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final dotColor = color ?? HeyBeanTheme.muted;
+    return Material(
+      color: Colors.white,
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: selected ? HeyBeanTheme.accent : HeyBeanTheme.border,
+          width: selected ? 1.8 : 1.2,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (color != null) ...[
+                CircleAvatar(key: dotKey, radius: 6, backgroundColor: dotColor),
+                const SizedBox(width: 7),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  color: HeyBeanTheme.text,
+                  fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                ),
+              ),
+              if (selected) ...[
+                const SizedBox(width: 6),
+                const Icon(
+                  Icons.check_circle_rounded,
+                  size: 15,
+                  color: HeyBeanTheme.accent,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _EventCategoryCreateDialog extends StatefulWidget {
@@ -6559,6 +6650,7 @@ class _EventCategoryCreateDialogState
   late final TextEditingController _nameController;
   late String _selectedColor;
   late double _hue;
+  String? _validationError;
 
   @override
   void initState() {
@@ -6591,6 +6683,15 @@ class _EventCategoryCreateDialogState
     });
   }
 
+  void _submit() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _validationError = 'Enter a category name.');
+      return;
+    }
+    Navigator.of(context).pop({'name': name, 'color': _selectedColor});
+  }
+
   @override
   Widget build(BuildContext context) {
     final previewColor = _colorFromHex(_selectedColor);
@@ -6606,9 +6707,12 @@ class _EventCategoryCreateDialogState
               key: const Key('event-category-modal-name-field'),
               controller: _nameController,
               autofocus: true,
-              decoration: const InputDecoration(
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(
                 labelText: 'Category name',
-                prefixIcon: Icon(Icons.sell_outlined),
+                prefixIcon: const Icon(Icons.sell_outlined),
+                errorText: _validationError,
               ),
             ),
             const SizedBox(height: 14),
@@ -6671,9 +6775,7 @@ class _EventCategoryCreateDialogState
         ),
         FilledButton(
           key: const Key('event-category-modal-save-action'),
-          onPressed: () => Navigator.of(
-            context,
-          ).pop({'name': _nameController.text.trim(), 'color': _selectedColor}),
+          onPressed: _submit,
           child: Text(widget.editing ? 'Save' : 'Create'),
         ),
       ],
@@ -8125,27 +8227,27 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      ChoiceChip(
+                      _CategoryOptionPill(
                         key: const Key('title-time-editor-category-none'),
-                        label: const Text('No category'),
+                        label: 'No category',
                         selected: selectedCategory.isEmpty,
-                        onSelected: (_) => setModalState(() {
+                        onTap: () => setModalState(() {
                           selectedCategory = '';
                           selectedColor = '';
                         }),
                       ),
                       for (final category in modalCategories)
-                        ChoiceChip(
+                        _CategoryOptionPill(
                           key: Key(
                             'title-time-editor-category-${category.name.toLowerCase().replaceAll(' ', '-')}',
                           ),
-                          avatar: CircleAvatar(
-                            radius: 5,
-                            backgroundColor: _safeCategoryColor(category.color),
+                          dotKey: Key(
+                            'title-time-editor-category-dot-${category.name.toLowerCase().replaceAll(' ', '-')}',
                           ),
-                          label: Text(category.name),
+                          label: category.name,
+                          color: _safeCategoryColor(category.color),
                           selected: selectedCategory == category.name,
-                          onSelected: (_) => setModalState(() {
+                          onTap: () => setModalState(() {
                             selectedCategory = category.name;
                             selectedColor = category.color;
                           }),
@@ -11093,28 +11195,13 @@ class _BeanFab extends StatelessWidget {
             ],
           ),
           child: Center(
-            child: Container(
-              key: const Key('heybean-center-bean-logo-badge'),
-              width: 42,
-              height: 42,
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: .10),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Image.asset(
-                'assets/images/bean/bean-logo.png',
-                key: const Key('heybean-center-bean-logo'),
-                fit: BoxFit.contain,
-                semanticLabel: 'Bean chat',
-              ),
+            child: Image.asset(
+              'assets/images/bean/bean-logo-white-overlay.png',
+              key: const Key('heybean-center-bean-logo'),
+              width: 38,
+              height: 38,
+              fit: BoxFit.contain,
+              semanticLabel: 'Bean chat',
             ),
           ),
         ),
