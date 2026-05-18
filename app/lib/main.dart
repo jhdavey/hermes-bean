@@ -1937,7 +1937,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                   if (_phase == _AuthPhase.signedIn) ...[
                     _CalendarHeaderButton(
                       key: const Key('calendar-today-button'),
-                      label: _calendarHeaderDayLabel(_selectedCalendarDay),
+                      label: _calendarHeaderDayLabel(DateTime.now()),
                       icon: null,
                       horizontalPadding: 10,
                       verticalPadding: 7,

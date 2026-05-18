@@ -1460,6 +1460,7 @@ void main() {
     );
 
     final headingBeforeSwipe = _activeSelectedDayHeading(tester);
+    expect(_topHeaderDayLabelFinder(), findsOneWidget);
     final pageViewTopLeft = tester.getTopLeft(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
     );
@@ -1471,6 +1472,7 @@ void main() {
     final headingAfterSwipe = _activeSelectedDayHeading(tester);
 
     expect(headingAfterSwipe, _headingDaysAfter(headingBeforeSwipe, 2));
+    expect(_topHeaderDayLabelFinder(), findsOneWidget);
   });
 
   testWidgets('recurring calendar events render on their occurrence days', (

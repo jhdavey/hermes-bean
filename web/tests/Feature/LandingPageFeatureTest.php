@@ -15,6 +15,8 @@ class LandingPageFeatureTest extends TestCase
 
         $response->assertOk()
             ->assertSee('Meet Bean, your new assistant for real-life', false)
+            ->assertDontSee('First 100 early-access invites now opening', false)
+            ->assertDontSee('● First 100 early-access invites now opening', false)
             ->assertDontSee('Your AI operating system for the real-world', false)
             ->assertDontSee('Live your best life, let Bean handle the rest', false)
             ->assertDontSee('Bean is your new AI executive assistant.', false)
@@ -68,6 +70,9 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('class="logistics-layout"', false)
             ->assertSee('Type or speak “Hey Bean…”', false)
             ->assertSee('class="mobile-menu"', false)
+            ->assertSee('class="mobile-menu-icon"', false)
+            ->assertSee('<summary aria-label="Open menu"><span class="mobile-menu-icon" aria-hidden="true"><span></span><span></span><span></span></span></summary>', false)
+            ->assertDontSee('<summary aria-label="Open menu">Menu</summary>', false)
             ->assertSee('images/bean-logo.png', false)
             ->assertDontSee('images/bean-logo-color.png', false)
             ->assertDontSee('Voice shortcut:', false)
