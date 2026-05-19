@@ -983,6 +983,7 @@ void main() {
       expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
       expect(find.byKey(const Key('calendar-month-chevron')), findsOneWidget);
       expect(_topHeaderDayLabelFinder(), findsOneWidget);
+      expect(_topHeaderDayMonthTextFinder(), findsNothing);
       expect(_topHeaderMonthLabelFinder(), findsOneWidget);
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
 
@@ -1033,6 +1034,25 @@ void main() {
     expect(find.text('Plan launch'), findsWidgets);
     expect(find.textContaining('Design review'), findsWidgets);
     expect(find.byKey(const Key('critical-reminder-item-2')), findsNothing);
+  });
+
+  testWidgets('iPhone app icon badge mirrors the visible critical count', (
+    WidgetTester tester,
+  ) async {
+    final appBadgeCounts = <int>[];
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _SignedInFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+        updateAppIconBadge: (count) async => appBadgeCounts.add(count),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
+    expect(find.text('2'), findsWidgets);
+    expect(appBadgeCounts, containsAllInOrder([0, 2]));
+    expect(appBadgeCounts.last, 2);
   });
 
   testWidgets('reminder editor uses the shared date/time picker dock', (
@@ -1302,6 +1322,7 @@ void main() {
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
       expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
       expect(_topHeaderDayLabelFinder(), findsOneWidget);
+      expect(_topHeaderDayMonthTextFinder(), findsNothing);
       expect(
         find.descendant(
           of: find.byKey(const Key('calendar-today-button')),
@@ -1603,13 +1624,18 @@ void main() {
     final timelineScrollRect = tester.getRect(
       find.byKey(const Key('apple-style-day-timeline-scroll')),
     );
+    expect(currentTimeLabel.top, greaterThanOrEqualTo(timelineScrollRect.top));
     expect(
-      currentTimeLabel.center.dy,
-      closeTo(timelineScrollRect.center.dy, 12),
+      currentTimeLabel.bottom,
+      lessThanOrEqualTo(timelineScrollRect.bottom),
     );
     expect(currentTimeLabel.left, greaterThanOrEqualTo(fixedHourColumn.left));
     expect(currentTimeLabel.right, lessThanOrEqualTo(fixedHourColumn.right));
     expect(fixedHourColumn.height, closeTo(36 + 42 + (16 * 52.5), .1));
+    expect(
+      tester.getSize(find.byKey(const Key('apple-style-day-timeline'))).height,
+      closeTo(fixedHourColumn.height + 1, .1),
+    );
     final scrollingDayColumns = tester.getRect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
     );
@@ -1620,6 +1646,7 @@ void main() {
 
     final headingBeforeSwipe = _activeSelectedDayHeading(tester);
     expect(_topHeaderDayLabelFinder(), findsOneWidget);
+    expect(_topHeaderMonthLabelFinder(), findsOneWidget);
     final pageViewTopLeft = tester.getTopLeft(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
     );
@@ -1638,7 +1665,39 @@ void main() {
 
     expect(headingAfterSwipe, _headingDaysAfter(headingBeforeSwipe, 2));
     expect(_topHeaderDayLabelFinder(), findsOneWidget);
+    expect(_topHeaderMonthLabelFinder(), findsOneWidget);
   });
+
+  testWidgets(
+    'calendar top header keeps current month label while browsing another month',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _SignedInFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(_topHeaderMonthLabelFinder(), findsOneWidget);
+      expect(_topHeaderDayLabelFinder(), findsOneWidget);
+      expect(_topHeaderDayMonthTextFinder(), findsNothing);
+
+      await tester.tap(find.byKey(const Key('calendar-month-chevron')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
+
+      final nextMonthPill = find.byKey(const Key('calendar-month-pill-13'));
+      await tester.ensureVisible(nextMonthPill);
+      await tester.tap(nextMonthPill);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
+      expect(_topHeaderMonthLabelFinder(), findsOneWidget);
+      expect(_topHeaderDayLabelFinder(), findsOneWidget);
+      expect(_topHeaderDayMonthTextFinder(), findsNothing);
+    },
+  );
 
   testWidgets(
     'early calendar events extend visible hours instead of disappearing',
@@ -2645,34 +2704,53 @@ void main() {
     );
   });
 
-  testWidgets('critical event edits persist and update header critical count', (
-    WidgetTester tester,
-  ) async {
-    final api = _EditableCalendarFakeHermesApiClient();
-    await tester.pumpWidget(
-      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'critical event star persists immediately and updates header critical count',
+    (WidgetTester tester) async {
+      final api = _EditableCalendarFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
 
-    expect(api.updatedEvent?.isCritical, isNull);
-    final eventBlock = find.byKey(
-      const Key('calendar-event-block-design-review'),
-    );
-    await tester.ensureVisible(eventBlock);
-    await tester.pumpAndSettle();
-    await tester.tap(eventBlock);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('event-detail-critical-toggle')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('event-save-action')));
-    await tester.pumpAndSettle();
+      expect(api.updatedEvent?.isCritical, isNull);
+      final eventBlock = find.byKey(
+        const Key('calendar-event-block-design-review'),
+      );
+      await tester.ensureVisible(eventBlock);
+      await tester.pumpAndSettle();
+      await tester.tap(eventBlock);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('event-detail-critical-toggle')));
+      await tester.pumpAndSettle();
 
-    expect(api.updatedEvent?.isCritical, isTrue);
-    await tester.tap(find.byKey(const Key('critical-task-count')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('critical-event-item-3')), findsOneWidget);
-    expect(find.textContaining('Design review'), findsWidgets);
-  });
+      expect(api.updatedEvent?.isCritical, isTrue);
+      await tester.tap(find.byKey(const Key('event-detail-back-action')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('event-critical-star-3')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('critical-task-count')),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('critical-task-count')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('critical-event-item-3')), findsOneWidget);
+      expect(find.textContaining('Design review'), findsWidgets);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      await tester.tap(eventBlock);
+      await tester.pumpAndSettle();
+      final criticalToggle = tester.widget<IconButton>(
+        find.byKey(const Key('event-detail-critical-toggle')),
+      );
+      expect(criticalToggle.tooltip, 'Remove critical star');
+    },
+  );
 
   testWidgets('calendar event detail page can delete an event', (
     WidgetTester tester,
@@ -3162,7 +3240,14 @@ void main() {
 
     await tester.ensureVisible(eventBlock.first);
     await tester.pumpAndSettle();
-    await tester.tap(eventBlock.first);
+    if (eventBlock.hitTestable().evaluate().isEmpty) {
+      await tester.drag(
+        find.byKey(const Key('apple-style-day-timeline-scroll')),
+        const Offset(0, 500),
+      );
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(eventBlock.hitTestable().first);
     await tester.pumpAndSettle();
     final startEditor = tester.widget<EditableText>(
       find.descendant(
@@ -3249,6 +3334,55 @@ void main() {
       ).toUtc().toIso8601String();
       expect(api.updatedEvent?.startsAt, expectedStart);
       expect(api.updatedEvent?.endsAt, expectedEnd);
+    },
+  );
+
+  testWidgets(
+    'critical event edits normalize local ISO fields to UTC wire values',
+    (WidgetTester tester) async {
+      final localStart = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+        10,
+        30,
+      );
+      final localEnd = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+        11,
+      );
+      final api = _EditableCalendarFakeHermesApiClient(
+        initialEvent: HermesCalendarEvent(
+          id: 3,
+          title: 'Local wire event',
+          startsAt: localStart.toIso8601String(),
+          endsAt: localEnd.toIso8601String(),
+          category: 'Personal',
+          color: '#34C759',
+          recurrence: 'none',
+        ),
+      );
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-event-block-local-wire-event')),
+      );
+      await tester.tap(
+        find.byKey(const Key('calendar-event-block-local-wire-event')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('event-detail-critical-toggle')));
+      await tester.pumpAndSettle();
+
+      expect(api.updatedEvent?.startsAt, localStart.toUtc().toIso8601String());
+      expect(api.updatedEvent?.endsAt, localEnd.toUtc().toIso8601String());
+      expect(api.updatedEvent?.isCritical, isTrue);
     },
   );
 
@@ -3484,6 +3618,12 @@ void main() {
     expect(find.text('Today reminder'), findsNothing);
     expect(find.text('Tomorrow task'), findsNothing);
     expect(find.text('Tomorrow reminder'), findsNothing);
+    expect(
+      tester.getTopLeft(find.byKey(const Key('today-task-list'))).dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('heybean-bottom-menu'))).dy,
+      ),
+    );
 
     await tester.tap(find.byKey(const Key('week-date-pill-next-visible')));
     await tester.pumpAndSettle();
@@ -4775,10 +4915,12 @@ class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
 
 class _EditableCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
-  _EditableCalendarFakeHermesApiClient() {
+  _EditableCalendarFakeHermesApiClient({HermesCalendarEvent? initialEvent})
+    : _initialEvent = initialEvent {
     googleCalendarConnected = true;
   }
 
+  final HermesCalendarEvent? _initialEvent;
   HermesCalendarEvent? updatedEvent;
   HermesCalendarEvent? createdEvent;
   Map<String, Object?>? createdReminder;
@@ -4901,6 +5043,7 @@ class _EditableCalendarFakeHermesApiClient
     if (createdEvent != null) createdEvent!,
     if (deletedEventId != 3)
       updatedEvent ??
+          _initialEvent ??
           HermesCalendarEvent(
             id: 3,
             title: 'Design review',
@@ -5175,11 +5318,20 @@ String? _headingDaysAfter(String? heading, int days) {
 
 Finder _topHeaderDayLabelFinder() {
   final now = DateTime.now();
-  final label =
-      '${_testCompactWeekdayNames[now.weekday - 1]} ${_testShortMonthNames[now.month - 1]} ${now.day}';
+  final label = '${_testCompactWeekdayNames[now.weekday - 1]} ${now.day}';
   return find.descendant(
     of: find.byKey(const Key('calendar-today-button')),
     matching: find.text(label),
+  );
+}
+
+Finder _topHeaderDayMonthTextFinder() {
+  final now = DateTime.now();
+  final oldLabel =
+      '${_testCompactWeekdayNames[now.weekday - 1]} ${_testShortMonthNames[now.month - 1]} ${now.day}';
+  return find.descendant(
+    of: find.byKey(const Key('calendar-today-button')),
+    matching: find.text(oldLabel),
   );
 }
 

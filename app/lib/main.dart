@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'hermes_api_client.dart';
 
 typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
+typedef AppIconBadgeUpdater = Future<void> Function(int count);
 
 const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
 final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
@@ -134,6 +135,20 @@ Future<bool> _launchExternalUrlWithNativeFallback(Uri url) async {
     return false;
   } on MissingPluginException {
     return false;
+  }
+}
+
+Future<void> _defaultUpdateAppIconBadge(int count) async {
+  final normalizedCount = math.max(0, count);
+  try {
+    await _heyBeanPlatformChannel.invokeMethod<void>('setAppBadge', {
+      'count': normalizedCount,
+    });
+  } on PlatformException {
+    // Badge support is platform/native-shell dependent. Keep the app usable if
+    // the native channel cannot update the icon badge.
+  } on MissingPluginException {
+    // Widget tests, web/desktop, and stale native shells may not expose this.
   }
 }
 
@@ -342,13 +357,16 @@ class HermesBeanApp extends StatelessWidget {
     HermesApiClient? apiClient,
     AuthTokenStore? tokenStore,
     ExternalUrlLauncher? launchExternalUrl,
+    AppIconBadgeUpdater? updateAppIconBadge,
   }) : apiClient = apiClient ?? HermesApiClient(),
        tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore(),
-       launchExternalUrl = launchExternalUrl ?? _defaultLaunchExternalUrl;
+       launchExternalUrl = launchExternalUrl ?? _defaultLaunchExternalUrl,
+       updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge;
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
+  final AppIconBadgeUpdater updateAppIconBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -360,6 +378,7 @@ class HermesBeanApp extends StatelessWidget {
         apiClient: apiClient,
         tokenStore: tokenStore,
         launchExternalUrl: launchExternalUrl,
+        updateAppIconBadge: updateAppIconBadge,
       ),
     );
   }
@@ -522,17 +541,20 @@ class CommandCenterShell extends StatefulWidget {
     required this.apiClient,
     required this.tokenStore,
     required this.launchExternalUrl,
+    required this.updateAppIconBadge,
   });
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
+  final AppIconBadgeUpdater updateAppIconBadge;
 
   @override
   State<CommandCenterShell> createState() => _CommandCenterShellState();
 }
 
-class _CommandCenterShellState extends State<CommandCenterShell> {
+class _CommandCenterShellState extends State<CommandCenterShell>
+    with WidgetsBindingObserver {
   _AuthPhase _phase = _AuthPhase.loading;
   HermesUser? _user;
   HermesSession? _session;
@@ -570,10 +592,12 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
   final _ReminderNotificationService _reminderNotifications =
       _ReminderNotificationService();
   Timer? _reminderDueTimer;
+  int? _lastScheduledAppIconBadgeCount;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_reminderNotifications.initialize());
     _reminderDueTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -584,8 +608,31 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _reminderDueTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _scheduleAppIconBadgeSync(_criticalItemCountForToday());
+    }
+  }
+
+  int _criticalItemCountForToday() {
+    if (_phase != _AuthPhase.signedIn) return 0;
+    return _criticalTasksForToday(_tasks).length +
+        _criticalEventsForToday(_calendar).length;
+  }
+
+  void _scheduleAppIconBadgeSync(int count) {
+    final normalizedCount = math.max(0, count);
+    if (_lastScheduledAppIconBadgeCount == normalizedCount) return;
+    _lastScheduledAppIconBadgeCount = normalizedCount;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(widget.updateAppIconBadge(normalizedCount));
+    });
   }
 
   void _checkReminderDueState() {
@@ -1717,11 +1764,13 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? reminderIntervalUnit,
     List<Object> syncToWorkspaceIds = const [],
   }) async {
+    final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
+    final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
     try {
       final createdEvent = await widget.apiClient.createCalendarEvent(
         title: title,
-        startsAt: startsAt,
-        endsAt: endsAt,
+        startsAt: wireStartsAt,
+        endsAt: wireEndsAt,
         category: category,
         color: color,
         recurrence: recurrence,
@@ -1731,7 +1780,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         syncToWorkspaceIds: syncToWorkspaceIds,
       );
       if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
-        final start = _parseCalendarEventDateTime(startsAt);
+        final start = _parseCalendarEventDateTime(wireStartsAt);
         if (start != null) {
           await widget.apiClient.createEventReminder(
             calendarEventId: createdEvent.id,
@@ -1787,17 +1836,19 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
     String? reminderIntervalUnit,
     List<Object> syncToWorkspaceIds = const [],
   }) async {
+    final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
+    final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
     final previousCalendar = _calendar;
     final optimisticEvent = event.copyWith(
       title: title,
-      startsAt: startsAt,
-      endsAt: endsAt,
+      startsAt: wireStartsAt,
+      endsAt: wireEndsAt,
       category: category,
       color: color,
       recurrence: recurrence,
       metadata: metadata,
       isCritical: isCritical ?? event.isCritical,
-      clearEndsAt: endsAt == null,
+      clearEndsAt: wireEndsAt == null,
       clearCategory: category == null,
       clearColor: color == null,
       clearRecurrence: recurrence == null,
@@ -1816,8 +1867,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
       final updatedEvent = await widget.apiClient.updateCalendarEvent(
         event.id,
         title: title,
-        startsAt: startsAt,
-        endsAt: endsAt,
+        startsAt: wireStartsAt,
+        endsAt: wireEndsAt,
         category: category,
         color: color,
         recurrence: recurrence,
@@ -1826,13 +1877,14 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
         syncToWorkspaceIds: syncToWorkspaceIds,
       );
       if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
-        final start = _parseCalendarEventDateTime(startsAt);
+        final start = _parseCalendarEventDateTime(wireStartsAt);
         if (start != null) {
           await widget.apiClient.createEventReminder(
             calendarEventId: event.id,
             title: 'Reminder: $title',
             remindAt: start
                 .subtract(Duration(minutes: reminderMinutesBefore))
+                .toUtc()
                 .toIso8601String(),
             metadata: {
               'minutes_before': reminderMinutesBefore,
@@ -2139,6 +2191,8 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
 
   @override
   Widget build(BuildContext context) {
+    final criticalItemCount = _criticalItemCountForToday();
+    _scheduleAppIconBadgeSync(criticalItemCount);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: HeyBeanTheme.lightSystemOverlayStyle,
       child: Container(
@@ -2171,7 +2225,7 @@ class _CommandCenterShellState extends State<CommandCenterShell> {
                 title: _phase == _AuthPhase.signedIn
                     ? _CalendarHeaderButton(
                         key: const Key('calendar-month-chevron'),
-                        label: _calendarHeaderMonthLabel(_selectedCalendarDay),
+                        label: _calendarHeaderMonthLabel(DateTime.now()),
                         icon: Icons.chevron_left_rounded,
                         secondaryIcon: Icons.calendar_month_rounded,
                         iconSize: 16,
@@ -4923,11 +4977,11 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
       widget.startHour,
       widget.endHour,
     );
-    final timelineHeight =
-        1 +
+    final timelineContentHeight =
         _calendarDayHeaderHeight +
         _calendarAllDayRowHeight +
         (visibleHours.length * _calendarHourHeight);
+    final timelineHeight = 1 + timelineContentHeight;
     final markerOffset =
         _calendarDayHeaderHeight +
         _calendarAllDayRowHeight +
@@ -4941,7 +4995,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
         _sameCalendarDay(selectedDay.add(const Duration(days: 1)), today);
     final timelineViewportHeight = math.min(
       timelineHeight,
-      math.max(320.0, MediaQuery.sizeOf(context).height - 220),
+      math.max(250.0, MediaQuery.sizeOf(context).height - 360),
     );
     _scheduleInitialCurrentTimeScroll(
       showCurrentTimeMarker: showCurrentTimeMarker,
@@ -4977,40 +5031,43 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  Row(
-                    children: [
-                      _FixedTimelineHoursColumn(visibleHours: visibleHours),
-                      Expanded(
-                        child: PageView.builder(
-                          key: const PageStorageKey<String>(
-                            'apple-style-day-page-view',
-                          ),
-                          controller: _dayPageController,
-                          physics: const BouncingScrollPhysics(
-                            parent: PageScrollPhysics(),
-                          ),
-                          allowImplicitScrolling: true,
-                          onPageChanged: _handlePageChanged,
-                          itemBuilder: (context, page) => _TwoDayTimelinePage(
-                            key: ValueKey('two-day-timeline-page-$page'),
-                            calendar: widget.calendar,
-                            eventCategories: widget.eventCategories,
-                            googleCalendarStatus: widget.googleCalendarStatus,
-                            selectedDay: _dateForPage(page),
-                            today: today,
-                            startHour: visibleHours.first,
-                            endHour: visibleHours.last,
-                            visibleHours: visibleHours,
-                            isActivePage: page == _visibleDayPage,
-                            onEventTap: widget.onEventTap,
-                            onEventDeleted: widget.onEventDeleted,
-                            onEventCategorySaved: widget.onEventCategorySaved,
-                            onEventCategoryDeleted:
-                                widget.onEventCategoryDeleted,
+                  SizedBox(
+                    height: timelineContentHeight,
+                    child: Row(
+                      children: [
+                        _FixedTimelineHoursColumn(visibleHours: visibleHours),
+                        Expanded(
+                          child: PageView.builder(
+                            key: const PageStorageKey<String>(
+                              'apple-style-day-page-view',
+                            ),
+                            controller: _dayPageController,
+                            physics: const BouncingScrollPhysics(
+                              parent: PageScrollPhysics(),
+                            ),
+                            allowImplicitScrolling: true,
+                            onPageChanged: _handlePageChanged,
+                            itemBuilder: (context, page) => _TwoDayTimelinePage(
+                              key: ValueKey('two-day-timeline-page-$page'),
+                              calendar: widget.calendar,
+                              eventCategories: widget.eventCategories,
+                              googleCalendarStatus: widget.googleCalendarStatus,
+                              selectedDay: _dateForPage(page),
+                              today: today,
+                              startHour: visibleHours.first,
+                              endHour: visibleHours.last,
+                              visibleHours: visibleHours,
+                              isActivePage: page == _visibleDayPage,
+                              onEventTap: widget.onEventTap,
+                              onEventDeleted: widget.onEventDeleted,
+                              onEventCategorySaved: widget.onEventCategorySaved,
+                              onEventCategoryDeleted:
+                                  widget.onEventCategoryDeleted,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   if (showCurrentTimeMarker)
                     Positioned(
@@ -5684,6 +5741,19 @@ class _AllDayEventRow extends StatelessWidget {
                   reminderInterval: reminderInterval,
                   reminderIntervalUnit: reminderIntervalUnit,
                 ),
+            onCriticalChanged: (savedEvent, isCritical) => onEventTap(
+              savedEvent,
+              title: savedEvent.title,
+              startsAt:
+                  savedEvent.startsAt ??
+                  DateTime.now().toUtc().toIso8601String(),
+              endsAt: savedEvent.endsAt,
+              category: savedEvent.category,
+              color: savedEvent.color,
+              recurrence: savedEvent.recurrence,
+              metadata: savedEvent.metadata,
+              isCritical: isCritical,
+            ),
             onEventCategorySaved: onEventCategorySaved,
             onEventCategoryDeleted: onEventCategoryDeleted,
           ),
@@ -5837,6 +5907,18 @@ class _TimelineEventBlock extends StatelessWidget {
                 reminderInterval: reminderInterval,
                 reminderIntervalUnit: reminderIntervalUnit,
               ),
+          onCriticalChanged: (savedEvent, isCritical) => onTap(
+            savedEvent,
+            title: savedEvent.title,
+            startsAt:
+                savedEvent.startsAt ?? DateTime.now().toUtc().toIso8601String(),
+            endsAt: savedEvent.endsAt,
+            category: savedEvent.category,
+            color: savedEvent.color,
+            recurrence: savedEvent.recurrence,
+            metadata: savedEvent.metadata,
+            isCritical: isCritical,
+          ),
           onEventCategorySaved: onEventCategorySaved,
           onEventCategoryDeleted: onEventCategoryDeleted,
           onDelete: onDelete,
@@ -5933,6 +6015,8 @@ Future<void> _showCalendarEventDetails(
   onEventCategorySaved,
   required Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted,
+  Future<void> Function(HermesCalendarEvent event, bool isCritical)?
+  onCriticalChanged,
   Future<void> Function(HermesCalendarEvent event)? onDelete,
   List<HermesWorkspace> workspaces = const [],
   String? activeWorkspaceId,
@@ -5947,6 +6031,7 @@ Future<void> _showCalendarEventDetails(
         activeWorkspaceId: activeWorkspaceId,
         onEventCategorySaved: onEventCategorySaved,
         onEventCategoryDeleted: onEventCategoryDeleted,
+        onCriticalChanged: onCriticalChanged,
         onDelete: onDelete,
       ),
     ),
@@ -5993,6 +6078,7 @@ class _CalendarEventDetailPage extends StatefulWidget {
     this.activeWorkspaceId,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
+    this.onCriticalChanged,
     this.onDelete,
   });
 
@@ -6009,6 +6095,8 @@ class _CalendarEventDetailPage extends StatefulWidget {
   onEventCategorySaved;
   final Future<void> Function(HermesEventCategory category)
   onEventCategoryDeleted;
+  final Future<void> Function(HermesCalendarEvent event, bool isCritical)?
+  onCriticalChanged;
   final Future<void> Function(HermesCalendarEvent event)? onDelete;
 
   @override
@@ -6268,6 +6356,27 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     }
   }
 
+  Future<void> _toggleCritical() async {
+    final nextValue = !_isCritical;
+    setState(() {
+      _isCritical = nextValue;
+      _validationError = null;
+    });
+
+    final onCriticalChanged = widget.onCriticalChanged;
+    if (onCriticalChanged == null) return;
+
+    try {
+      await onCriticalChanged(widget.event, nextValue);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isCritical = !nextValue;
+        _validationError = 'Could not update critical status. Try again.';
+      });
+    }
+  }
+
   Future<void> _openCategoryCreationModal() async {
     final result = await showDialog<Map<String, String>>(
       context: context,
@@ -6412,8 +6521,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       tooltip: _isCritical
                           ? 'Remove critical star'
                           : 'Mark critical',
-                      onPressed: () =>
-                          setState(() => _isCritical = !_isCritical),
+                      onPressed: _toggleCritical,
                       icon: Icon(
                         _isCritical
                             ? Icons.star_rounded
@@ -7600,7 +7708,7 @@ String _compactWeekdayName(int weekday) =>
     const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
 
 String _calendarHeaderDayLabel(DateTime date) =>
-    '${_compactWeekdayName(date.weekday)} ${_shortMonthName(date.month)} ${date.day}';
+    '${_compactWeekdayName(date.weekday)} ${date.day}';
 
 String _calendarHeaderMonthLabel(DateTime date) =>
     "${_shortMonthName(date.month)} '${(date.year % 100).toString().padLeft(2, '0')}";
@@ -7701,6 +7809,13 @@ String _eventDateRangeLabel({String? startsAt, String? endsAt}) {
   return '$startLabel – $endLabel';
 }
 
+String? _calendarEventWireValueToUtcIso(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) return null;
+  final parsed = _parseCalendarEventDateTime(trimmed);
+  return parsed == null ? trimmed : parsed.toUtc().toIso8601String();
+}
+
 String? _calendarEventInputToWireValue(
   String value, {
   required String? originalValue,
@@ -7712,7 +7827,7 @@ String? _calendarEventInputToWireValue(
 
   final originalDisplay = _formatCalendarEventDateTime(originalValue);
   if (originalValue != null && trimmed == originalDisplay) {
-    return _calendarEventOriginalToWireValue(originalValue);
+    return _calendarEventWireValueToUtcIso(originalValue) ?? originalValue;
   }
 
   final parsed = _parseCalendarEventDateTime(
@@ -7720,12 +7835,6 @@ String? _calendarEventInputToWireValue(
     referenceValue ?? originalValue,
   );
   return parsed?.toUtc().toIso8601String() ?? trimmed;
-}
-
-String _calendarEventOriginalToWireValue(String originalValue) {
-  final parsed = DateTime.tryParse(originalValue.trim());
-  if (parsed == null) return originalValue;
-  return parsed.isUtc ? originalValue : parsed.toUtc().toIso8601String();
 }
 
 String _dateTimeToWireIsoString(DateTime value) {
@@ -8329,6 +8438,19 @@ class _CalendarAgenda extends StatelessWidget {
                           reminderInterval: reminderInterval,
                           reminderIntervalUnit: reminderIntervalUnit,
                         ),
+                    onCriticalChanged: (savedEvent, isCritical) => onEventTap!(
+                      savedEvent,
+                      title: savedEvent.title,
+                      startsAt:
+                          savedEvent.startsAt ??
+                          DateTime.now().toUtc().toIso8601String(),
+                      endsAt: savedEvent.endsAt,
+                      category: savedEvent.category,
+                      color: savedEvent.color,
+                      recurrence: savedEvent.recurrence,
+                      metadata: savedEvent.metadata,
+                      isCritical: isCritical,
+                    ),
                     onEventCategorySaved: onEventCategorySaved!,
                     onEventCategoryDeleted: onEventCategoryDeleted!,
                   ),
