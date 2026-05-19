@@ -1035,6 +1035,7 @@ void main() {
 
       expect(transcriber.started, isTrue);
       expect(find.byKey(const Key('chat-view')), findsOneWidget);
+      expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
       expect(find.text('Listening…'), findsWidgets);
       final voiceInput = tester.widget<TextField>(
         find.byKey(const Key('chat-input')),

@@ -12275,7 +12275,7 @@ class _MenuIconButton extends StatelessWidget {
   );
 }
 
-class _BeanFab extends StatelessWidget {
+class _BeanFab extends StatefulWidget {
   const _BeanFab({
     required this.selected,
     required this.listening,
@@ -12291,55 +12291,141 @@ class _BeanFab extends StatelessWidget {
   final VoidCallback onLongPressEnd;
 
   @override
+  State<_BeanFab> createState() => _BeanFabState();
+}
+
+class _BeanFabState extends State<_BeanFab>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 950),
+    );
+    _syncPulseAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant _BeanFab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.listening != widget.listening) {
+      _syncPulseAnimation();
+    }
+  }
+
+  void _syncPulseAnimation() {
+    if (widget.listening) {
+      _pulseController.repeat(reverse: true);
+    } else {
+      _pulseController.stop();
+      _pulseController.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => GestureDetector(
     key: const Key('nav-bean'),
-    onLongPressStart: (_) => onLongPressStart(),
-    onLongPressEnd: (_) => onLongPressEnd(),
-    child: Material(
-      color: Colors.transparent,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onPressed,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          key: const Key('heybean-center-bean-button'),
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF22C55E), Color(0xFF16A34A), Color(0xFF15803D)],
+    onLongPressStart: (_) => widget.onLongPressStart(),
+    onLongPressEnd: (_) => widget.onLongPressEnd(),
+    child: SizedBox(
+      width: 98,
+      height: 98,
+      child: Stack(
+        alignment: Alignment.center,
+        clipBehavior: Clip.none,
+        children: [
+          if (widget.listening)
+            AnimatedBuilder(
+              key: const Key('heybean-recording-pulse'),
+              animation: _pulseController,
+              builder: (context, child) {
+                final pulse = Curves.easeInOut.transform(
+                  _pulseController.value,
+                );
+                return Container(
+                  width: 82 + (pulse * 18),
+                  height: 82 + (pulse * 18),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(
+                      0xFF22C55E,
+                    ).withValues(alpha: .14 + (pulse * .10)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(
+                          0xFF22C55E,
+                        ).withValues(alpha: .42 + (pulse * .24)),
+                        blurRadius: 24 + (pulse * 18),
+                        spreadRadius: 5 + (pulse * 8),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
-            border: Border.all(
-              color: listening
-                  ? const Color(0xFF86EFAC)
-                  : (selected ? Colors.white : const Color(0xFFE2E8F0)),
-              width: listening ? 7 : 4,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: listening
-                    ? const Color(0x7F22C55E)
-                    : const Color(0x3D16A34A),
-                blurRadius: listening ? 34 : 24,
-                spreadRadius: listening ? 5 : 0,
-                offset: const Offset(0, 10),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: widget.onPressed,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                key: const Key('heybean-center-bean-button'),
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF22C55E),
+                      Color(0xFF16A34A),
+                      Color(0xFF15803D),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: widget.listening
+                        ? const Color(0xFFBBF7D0)
+                        : (widget.selected
+                              ? Colors.white
+                              : const Color(0xFFE2E8F0)),
+                    width: widget.listening ? 7 : 4,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: widget.listening
+                          ? const Color(0x8F22C55E)
+                          : const Color(0x3D16A34A),
+                      blurRadius: widget.listening ? 36 : 24,
+                      spreadRadius: widget.listening ? 5 : 0,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Image.asset(
+                    'assets/images/bean/bean-logo-white-overlay.png',
+                    key: const Key('heybean-center-bean-logo'),
+                    width: 38,
+                    height: 38,
+                    fit: BoxFit.contain,
+                    semanticLabel: 'Bean chat',
+                  ),
+                ),
               ),
-            ],
-          ),
-          child: Center(
-            child: Image.asset(
-              'assets/images/bean/bean-logo-white-overlay.png',
-              key: const Key('heybean-center-bean-logo'),
-              width: 38,
-              height: 38,
-              fit: BoxFit.contain,
-              semanticLabel: 'Bean chat',
             ),
           ),
-        ),
+        ],
       ),
     ),
   );
