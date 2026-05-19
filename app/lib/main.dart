@@ -9,12 +9,85 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:speech_to_text/speech_to_text.dart' as speech_to_text;
 import 'package:url_launcher/url_launcher.dart';
 
 import 'hermes_api_client.dart';
 
 typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
 typedef AppIconBadgeUpdater = Future<void> Function(int count);
+
+abstract class BeanVoiceTranscriber {
+  Future<bool> start({required ValueChanged<String> onTranscript});
+  Future<String> stop();
+  Future<void> cancel();
+}
+
+class SpeechToTextBeanVoiceTranscriber implements BeanVoiceTranscriber {
+  SpeechToTextBeanVoiceTranscriber({speech_to_text.SpeechToText? speech})
+    : _speech = speech ?? speech_to_text.SpeechToText();
+
+  final speech_to_text.SpeechToText _speech;
+  String _latestTranscript = '';
+
+  @override
+  Future<bool> start({required ValueChanged<String> onTranscript}) async {
+    _latestTranscript = '';
+    try {
+      final available = await _speech.initialize(
+        onError: (SpeechRecognitionError error) {},
+        onStatus: (String status) {},
+      );
+      if (!available) return false;
+      await _speech.listen(
+        onResult: (SpeechRecognitionResult result) {
+          final recognized = result.recognizedWords.trim();
+          if (recognized.isEmpty) return;
+          _latestTranscript = recognized;
+          onTranscript(recognized);
+        },
+        listenOptions: speech_to_text.SpeechListenOptions(
+          listenMode: speech_to_text.ListenMode.dictation,
+          partialResults: true,
+          cancelOnError: false,
+        ),
+      );
+      return true;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<String> stop() async {
+    try {
+      await _speech.stop();
+    } on MissingPluginException {
+      return _latestTranscript;
+    } on PlatformException {
+      return _latestTranscript;
+    } catch (_) {
+      return _latestTranscript;
+    }
+
+    return _latestTranscript;
+  }
+
+  @override
+  Future<void> cancel() async {
+    try {
+      await _speech.cancel();
+    } catch (_) {
+      // Keep the app usable if the speech plugin is unavailable or already idle.
+    }
+  }
+}
 
 const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
 final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
@@ -358,15 +431,19 @@ class HermesBeanApp extends StatelessWidget {
     AuthTokenStore? tokenStore,
     ExternalUrlLauncher? launchExternalUrl,
     AppIconBadgeUpdater? updateAppIconBadge,
+    BeanVoiceTranscriber? voiceTranscriber,
   }) : apiClient = apiClient ?? HermesApiClient(),
        tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore(),
        launchExternalUrl = launchExternalUrl ?? _defaultLaunchExternalUrl,
-       updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge;
+       updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge,
+       voiceTranscriber =
+           voiceTranscriber ?? SpeechToTextBeanVoiceTranscriber();
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
+  final BeanVoiceTranscriber voiceTranscriber;
 
   @override
   Widget build(BuildContext context) {
@@ -379,6 +456,7 @@ class HermesBeanApp extends StatelessWidget {
         tokenStore: tokenStore,
         launchExternalUrl: launchExternalUrl,
         updateAppIconBadge: updateAppIconBadge,
+        voiceTranscriber: voiceTranscriber,
       ),
     );
   }
@@ -542,12 +620,14 @@ class CommandCenterShell extends StatefulWidget {
     required this.tokenStore,
     required this.launchExternalUrl,
     required this.updateAppIconBadge,
+    required this.voiceTranscriber,
   });
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
+  final BeanVoiceTranscriber voiceTranscriber;
 
   @override
   State<CommandCenterShell> createState() => _CommandCenterShellState();
@@ -1051,23 +1131,59 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  void _startBeanVoiceDraft() {
+  Future<void> _startBeanVoiceDraft() async {
+    if (_busy || _beanVoiceListening) return;
     setState(() {
       _selectedDestination = _HomeDestination.bean;
       _beanVoiceListening = true;
       _beanVoiceDraft = '';
+      _error = null;
       _chatRunState = 'Listening…';
     });
+
+    final started = await widget.voiceTranscriber.start(
+      onTranscript: (draft) {
+        if (!mounted || !_beanVoiceListening) return;
+        setState(() => _beanVoiceDraft = draft);
+      },
+    );
+    if (!started && mounted && _beanVoiceListening) {
+      setState(() {
+        _beanVoiceListening = false;
+        _beanVoiceDraft = null;
+        _chatRunState = 'Ready';
+        _error =
+            'Bean could not access speech recognition. Please check microphone and speech permissions, then try again.';
+      });
+    }
   }
 
   void _updateBeanVoiceDraft(String draft) {
     setState(() => _beanVoiceDraft = draft);
   }
 
-  void _finishBeanVoiceDraft() {
-    final draft = (_beanVoiceDraft ?? '').trim();
+  Future<void> _finishBeanVoiceDraft() async {
+    if (!_beanVoiceListening) return;
+    final typedDraft = (_beanVoiceDraft ?? '').trim();
     setState(() {
       _beanVoiceListening = false;
+      _chatRunState = typedDraft.isEmpty
+          ? 'Transcribing…'
+          : 'Sending voice note…';
+    });
+
+    var draft = typedDraft;
+    try {
+      final spokenDraft = (await widget.voiceTranscriber.stop()).trim();
+      if (spokenDraft.isNotEmpty) {
+        draft = spokenDraft;
+      }
+    } catch (_) {
+      await widget.voiceTranscriber.cancel();
+    }
+
+    if (!mounted) return;
+    setState(() {
       _beanVoiceDraft = null;
       _chatRunState = draft.isEmpty ? 'Ready' : 'Sending voice note…';
     });
@@ -2299,8 +2415,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                       selected: _selectedDestination,
                       beanListening: _beanVoiceListening,
                       onSelected: _selectDestination,
-                      onBeanLongPressStart: _startBeanVoiceDraft,
-                      onBeanLongPressEnd: _finishBeanVoiceDraft,
+                      onBeanLongPressStart: () =>
+                          unawaited(_startBeanVoiceDraft()),
+                      onBeanLongPressEnd: () =>
+                          unawaited(_finishBeanVoiceDraft()),
                     )
                   : null,
             ),
@@ -3688,8 +3806,12 @@ class _HeroChatCardState extends State<_HeroChatCard> {
   final _scrollController = ScrollController();
 
   @override
-  void didUpdateWidget(covariant _HeroChatCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
+  void initState() {
+    super.initState();
+    _syncVoiceDraftToInput();
+  }
+
+  void _syncVoiceDraftToInput() {
     if (widget.voiceListening &&
         widget.voiceDraft != null &&
         widget.voiceDraft != _controller.text) {
@@ -3698,6 +3820,12 @@ class _HeroChatCardState extends State<_HeroChatCard> {
         offset: _controller.text.length,
       );
     }
+  }
+
+  @override
+  void didUpdateWidget(covariant _HeroChatCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncVoiceDraftToInput();
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 

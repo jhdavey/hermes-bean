@@ -1012,6 +1012,44 @@ void main() {
     },
   );
 
+  testWidgets(
+    'holding the Bean chat button transcribes speech and sends on release',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      final transcriber = _FakeBeanVoiceTranscriber(
+        'Move lunch tomorrow to noon',
+      );
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: _MemoryAuthTokenStore(),
+          voiceTranscriber: transcriber,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('nav-bean'))),
+      );
+      await tester.pump(const Duration(milliseconds: 650));
+
+      expect(transcriber.started, isTrue);
+      expect(find.byKey(const Key('chat-view')), findsOneWidget);
+      expect(find.text('Listening…'), findsWidgets);
+      final voiceInput = tester.widget<TextField>(
+        find.byKey(const Key('chat-input')),
+      );
+      expect(voiceInput.controller?.text, 'Move lunch tomorrow to noon');
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(transcriber.stopped, isTrue);
+      expect(api.sentMessages, contains('Move lunch tomorrow to noon'));
+      expect(find.text('Done — I updated your day.'), findsOneWidget);
+    },
+  );
+
   testWidgets('critical count opens a dropdown with listed critical items', (
     WidgetTester tester,
   ) async {
@@ -5529,6 +5567,30 @@ const _testCompactWeekdayNames = [
   'Sat',
   'Sun',
 ];
+
+class _FakeBeanVoiceTranscriber implements BeanVoiceTranscriber {
+  _FakeBeanVoiceTranscriber(this.transcript);
+
+  final String transcript;
+  bool started = false;
+  bool stopped = false;
+
+  @override
+  Future<bool> start({required ValueChanged<String> onTranscript}) async {
+    started = true;
+    onTranscript(transcript);
+    return true;
+  }
+
+  @override
+  Future<String> stop() async {
+    stopped = true;
+    return transcript;
+  }
+
+  @override
+  Future<void> cancel() async {}
+}
 
 class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {
   @override
