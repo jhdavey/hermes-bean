@@ -149,10 +149,10 @@ class GoogleCalendarSyncService
         $deleted = 0;
         $metadata = $connection->metadata ?? [];
         $syncTokens = is_array($metadata['sync_tokens'] ?? null) ? $metadata['sync_tokens'] : [];
-        if (($metadata['google_datetime_import_mode'] ?? null) !== 'wall_clock_v1') {
+        if (($metadata['google_datetime_import_mode'] ?? null) !== 'instant_v1') {
             $syncTokens = [];
             $metadata['sync_tokens'] = [];
-            $metadata['google_datetime_import_mode'] = 'wall_clock_v1';
+            $metadata['google_datetime_import_mode'] = 'instant_v1';
             $connection->forceFill(['sync_token' => null, 'metadata' => $metadata])->save();
         }
 
@@ -629,15 +629,13 @@ class GoogleCalendarSyncService
             return null;
         }
 
-        // Google timed events are already expressed in the calendar's wall-clock
-        // schedule time (for example 1:00 PM America/New_York as
-        // 2026-05-20T13:00:00-04:00). Hermes Bean's calendar UI intentionally
-        // treats API timestamps as wall-clock schedule values, so preserve those
-        // literal date/time components instead of converting the instant to UTC
-        // and shifting the visible block by the timezone offset.
-        $wallClock = preg_replace('/(?:Z|[+-]\d{2}:?\d{2})$/i', '', trim($dateTime));
-
-        return Carbon::parse($wallClock ?: $dateTime);
+        // Google timed events include the actual instant plus the calendar's offset
+        // (for example 3:15 PM America/New_York as 2026-05-20T15:15:00-04:00).
+        // Preserve that instant in UTC so Flutter can parse the API's Z timestamp
+        // and render it back in the user's device-local timezone. Stripping the
+        // offset here makes the next app refresh display the event one timezone
+        // offset earlier (3:15 PM -> 11:15 AM during EDT).
+        return Carbon::parse($dateTime)->utc();
     }
 
     private function markFailed(GoogleCalendarConnection $connection, string $message): void

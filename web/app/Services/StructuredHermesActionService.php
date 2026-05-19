@@ -21,6 +21,8 @@ use InvalidArgumentException;
 
 class StructuredHermesActionService
 {
+    public function __construct(private readonly GoogleCalendarSyncService $googleCalendar) {}
+
     /**
      * @param  array<string, mixed>  $envelope
      * @return Collection<int, ActivityEvent>
@@ -341,6 +343,7 @@ class StructuredHermesActionService
                 'recurrence' => $parameters['recurrence'] ?? null,
             ], static fn ($value) => $value !== null),
         ]);
+        $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh());
 
         return $this->recordEvent($session, 'assistant.calendar_event.created', [
             'calendar_event_id' => $calendarEvent->id,
@@ -376,17 +379,36 @@ class StructuredHermesActionService
 
     private function updateCalendarEvent(ConversationSession $session, array $parameters): ActivityEvent
     {
-        $calendarEvent = $this->ownedModel(CalendarEvent::class, $session, $parameters);
+        $calendarEvent = $this->calendarEventForUpdate($session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'status', 'metadata']);
         if (array_key_exists('starts_at', $parameters)) {
             $updates['starts_at'] = $this->parseDashboardDateTime($session, $parameters['starts_at']);
         }
         if (array_key_exists('ends_at', $parameters)) {
             $updates['ends_at'] = $parameters['ends_at'] ? $this->parseDashboardDateTime($session, $parameters['ends_at']) : null;
+        } elseif (isset($updates['starts_at']) && $calendarEvent->starts_at && $calendarEvent->ends_at) {
+            $updates['ends_at'] = (clone $updates['starts_at'])->addSeconds(
+                $calendarEvent->starts_at->diffInSeconds($calendarEvent->ends_at)
+            );
         }
         $calendarEvent->update($updates);
+        $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh());
 
         return $this->recordEvent($session, 'assistant.calendar_event.updated', ['calendar_event_id' => $calendarEvent->id, 'title' => $calendarEvent->title], 'calendar.update', 'succeeded');
+    }
+
+    private function exportCalendarEventBestEffort(ConversationSession $session, CalendarEvent $calendarEvent): void
+    {
+        try {
+            $this->googleCalendar->exportEvent($calendarEvent);
+        } catch (\Throwable $exception) {
+            $this->recordEvent($session, 'assistant.google_calendar.export_failed', [
+                'calendar_event_id' => $calendarEvent->id,
+                'title' => $calendarEvent->title,
+                'reason' => 'Google Calendar export failed after the local calendar update succeeded.',
+                'exception' => $exception->getMessage(),
+            ], 'google_calendar.export', 'failed');
+        }
     }
 
     private function createEventCategory(ConversationSession $session, array $parameters): ActivityEvent
@@ -702,6 +724,107 @@ class StructuredHermesActionService
         }
 
         return $query->findOrFail($id);
+    }
+
+    private function calendarEventForUpdate(ConversationSession $session, array $parameters): CalendarEvent
+    {
+        if (! empty($parameters['id'])) {
+            return $this->ownedModel(CalendarEvent::class, $session, $parameters);
+        }
+
+        $query = CalendarEvent::query()->where('user_id', $session->user_id);
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+
+        $title = $this->calendarEventLookupTitle($parameters);
+        if ($title !== null) {
+            $query->where('title', 'like', '%'.addcslashes($title, '%_\\').'%');
+        }
+
+        $candidates = $query->latest('updated_at')->limit(20)->get();
+        if ($candidates->isEmpty()) {
+            throw new InvalidArgumentException('Bean could not find a matching calendar event to update.');
+        }
+
+        $sourceDate = $this->calendarEventSourceDate($session, $parameters);
+        if ($sourceDate !== null) {
+            $timezone = $this->clientTimezoneOffset($session) ?: 'UTC';
+            $dateMatches = $candidates->filter(function (CalendarEvent $event) use ($sourceDate, $timezone): bool {
+                return $event->starts_at?->copy()->setTimezone($timezone)->toDateString() === $sourceDate;
+            })->values();
+
+            if ($dateMatches->count() === 1) {
+                return $dateMatches->first();
+            }
+
+            if ($dateMatches->count() > 1) {
+                $candidates = $dateMatches;
+            }
+        }
+
+        if ($candidates->count() === 1) {
+            return $candidates->first();
+        }
+
+        throw new InvalidArgumentException('Bean found multiple matching calendar events. Please include the event time or date.');
+    }
+
+    private function calendarEventLookupTitle(array $parameters): ?string
+    {
+        foreach (['match_title', 'original_title', 'current_title', 'lookup_title', 'title'] as $key) {
+            $value = trim((string) ($parameters[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function calendarEventSourceDate(ConversationSession $session, array $parameters): ?string
+    {
+        foreach (['from_date', 'current_date', 'original_date', 'match_date', 'date'] as $key) {
+            $value = trim((string) ($parameters[$key] ?? ''));
+            if ($value !== '') {
+                return $this->parseDashboardDateTime($session, $value)
+                    ->setTimezone($this->clientTimezoneOffset($session) ?: 'UTC')
+                    ->toDateString();
+            }
+        }
+
+        $message = strtolower((string) $session->messages()->where('role', 'user')->latest('id')->value('content'));
+        if ($message === '') {
+            return null;
+        }
+
+        $now = $this->clientNow($session);
+        if (preg_match('/\btomorrow\b/', $message)) {
+            return $now->copy()->addDay()->toDateString();
+        }
+
+        if (preg_match('/\btoday\b/', $message)) {
+            return $now->toDateString();
+        }
+
+        return null;
+    }
+
+    private function clientNow(ConversationSession $session): Carbon
+    {
+        $message = $session->messages()
+            ->where('role', 'user')
+            ->latest('id')
+            ->first();
+        $metadata = is_array($message?->metadata) ? $message->metadata : [];
+        $currentLocalTime = data_get($metadata, 'client_context.current_local_time');
+        if (is_string($currentLocalTime) && trim($currentLocalTime) !== '') {
+            return Carbon::parse($currentLocalTime);
+        }
+
+        $offset = $this->clientTimezoneOffset($session);
+
+        return $offset ? now()->setTimezone($offset) : now();
     }
 
     private function onlyPresent(array $parameters, array $keys): array

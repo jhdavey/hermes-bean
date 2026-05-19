@@ -959,6 +959,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void _selectDestination(_HomeDestination destination) {
     setState(() {
       _selectedDestination = destination;
+      if (destination == _HomeDestination.today) {
+        _selectedCalendarDay = _dateOnly(DateTime.now());
+        _showCalendarMonth = false;
+      }
       if (destination == _HomeDestination.bean && _needsBeanIntroduction) {
         _ensureBeanIntroductionPrompt();
       }
@@ -4881,7 +4885,10 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
   void initState() {
     super.initState();
     _pageAnchorDay = _dateOnly(widget.selectedDay);
-    _dayPageController = PageController(initialPage: _initialDayPage);
+    _dayPageController = PageController(
+      initialPage: _initialDayPage,
+      keepPage: false,
+    );
     _timelineScrollController = ScrollController();
   }
 
@@ -5195,6 +5202,18 @@ class _TwoDayTimelinePage extends StatelessWidget {
               _eventIsAllDay(event) && _eventFallsOnDay(event, selectedNextDay),
         )
         .toList();
+    final selectedTimedEventLayouts = _timelineEventLayoutsForDay(
+      calendar,
+      selectedDay,
+      startHour,
+      endHour,
+    );
+    final nextTimedEventLayouts = _timelineEventLayoutsForDay(
+      calendar,
+      selectedNextDay,
+      startHour,
+      endHour,
+    );
 
     return Column(
       children: [
@@ -5270,52 +5289,40 @@ class _TwoDayTimelinePage extends StatelessWidget {
                       const _TimelineDayGridRow(),
                   ],
                 ),
-                for (final event in calendar) ...[
-                  if (!_eventIsAllDay(event) &&
-                      _eventFallsOnDay(event, selectedDay) &&
-                      _eventFallsWithinHours(
-                        event,
-                        selectedDay,
-                        startHour,
-                        endHour,
-                      ))
-                    _TimelineEventBlock(
-                      event: event,
-                      day: selectedDay,
-                      startHour: startHour,
-                      endHour: endHour,
-                      columnIndex: 0,
-                      timelineWidth: constraints.maxWidth,
-                      eventCategories: eventCategories,
-                      googleCalendarStatus: googleCalendarStatus,
-                      onTap: onEventTap,
-                      onDelete: onEventDeleted,
-                      onEventCategorySaved: onEventCategorySaved,
-                      onEventCategoryDeleted: onEventCategoryDeleted,
-                    ),
-                  if (!_eventIsAllDay(event) &&
-                      _eventFallsOnDay(event, selectedNextDay) &&
-                      _eventFallsWithinHours(
-                        event,
-                        selectedNextDay,
-                        startHour,
-                        endHour,
-                      ))
-                    _TimelineEventBlock(
-                      event: event,
-                      day: selectedNextDay,
-                      startHour: startHour,
-                      endHour: endHour,
-                      columnIndex: 1,
-                      timelineWidth: constraints.maxWidth,
-                      eventCategories: eventCategories,
-                      googleCalendarStatus: googleCalendarStatus,
-                      onTap: onEventTap,
-                      onDelete: onEventDeleted,
-                      onEventCategorySaved: onEventCategorySaved,
-                      onEventCategoryDeleted: onEventCategoryDeleted,
-                    ),
-                ],
+                for (final layout in selectedTimedEventLayouts)
+                  _TimelineEventBlock(
+                    event: layout.event,
+                    day: selectedDay,
+                    startHour: startHour,
+                    endHour: endHour,
+                    columnIndex: 0,
+                    laneIndex: layout.laneIndex,
+                    laneCount: layout.laneCount,
+                    timelineWidth: constraints.maxWidth,
+                    eventCategories: eventCategories,
+                    googleCalendarStatus: googleCalendarStatus,
+                    onTap: onEventTap,
+                    onDelete: onEventDeleted,
+                    onEventCategorySaved: onEventCategorySaved,
+                    onEventCategoryDeleted: onEventCategoryDeleted,
+                  ),
+                for (final layout in nextTimedEventLayouts)
+                  _TimelineEventBlock(
+                    event: layout.event,
+                    day: selectedNextDay,
+                    startHour: startHour,
+                    endHour: endHour,
+                    columnIndex: 1,
+                    laneIndex: layout.laneIndex,
+                    laneCount: layout.laneCount,
+                    timelineWidth: constraints.maxWidth,
+                    eventCategories: eventCategories,
+                    googleCalendarStatus: googleCalendarStatus,
+                    onTap: onEventTap,
+                    onDelete: onEventDeleted,
+                    onEventCategorySaved: onEventCategorySaved,
+                    onEventCategoryDeleted: onEventCategoryDeleted,
+                  ),
               ],
             ),
           ),
@@ -5761,7 +5768,7 @@ class _AllDayEventRow extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 180),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: .14),
+              color: color.withValues(alpha: .90),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: color.withValues(alpha: .35)),
             ),
@@ -5804,6 +5811,8 @@ class _TimelineEventBlock extends StatelessWidget {
     required this.startHour,
     required this.endHour,
     required this.columnIndex,
+    required this.laneIndex,
+    required this.laneCount,
     required this.timelineWidth,
     required this.eventCategories,
     required this.googleCalendarStatus,
@@ -5818,6 +5827,8 @@ class _TimelineEventBlock extends StatelessWidget {
   final int startHour;
   final int endHour;
   final int columnIndex;
+  final int laneIndex;
+  final int laneCount;
   final double timelineWidth;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
@@ -5859,8 +5870,20 @@ class _TimelineEventBlock extends StatelessWidget {
     final eventHeight = ((endDecimal - startDecimal) * _calendarHourHeight - 4)
         .clamp(34.0, (endHour + 1 - startHour) * _calendarHourHeight);
     final dayColumnWidth = timelineWidth / 2;
-    final left = (dayColumnWidth * columnIndex) + 2;
-    final width = (dayColumnWidth - 4).clamp(0.0, double.infinity);
+    final normalizedLaneCount = math.max(1, laneCount);
+    final normalizedLaneIndex = laneIndex.clamp(0, normalizedLaneCount - 1);
+    final availableWidth = (dayColumnWidth - 4).clamp(0.0, double.infinity);
+    final laneGap = normalizedLaneCount > 1 ? 2.0 : 0.0;
+    final laneWidth = math.max(
+      0.0,
+      (availableWidth - (laneGap * (normalizedLaneCount - 1))) /
+          normalizedLaneCount,
+    );
+    final left =
+        (dayColumnWidth * columnIndex) +
+        2 +
+        ((laneWidth + laneGap) * normalizedLaneIndex);
+    final width = laneWidth.clamp(0.0, double.infinity);
     final timeLabel = _eventTimeRangeShort(event);
     return Positioned(
       top: hourPosition + 2,
@@ -5927,7 +5950,7 @@ class _TimelineEventBlock extends StatelessWidget {
           height: eventHeight,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: _calendarEventColor(event).withValues(alpha: .14),
+            color: _calendarEventColor(event).withValues(alpha: .90),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
               color: _calendarEventColor(event).withValues(alpha: .35),
@@ -7621,12 +7644,102 @@ List<int> _calendarVisibleHoursForEvents(
   return _calendarVisibleHours(start, end);
 }
 
-bool _eventFallsWithinHours(
-  HermesCalendarEvent event,
+class _TimelineEventLayout {
+  const _TimelineEventLayout({
+    required this.event,
+    required this.laneIndex,
+    required this.laneCount,
+  });
+
+  final HermesCalendarEvent event;
+  final int laneIndex;
+  final int laneCount;
+}
+
+class _TimelineEventLayoutCandidate {
+  const _TimelineEventLayoutCandidate({
+    required this.event,
+    required this.start,
+    required this.end,
+  });
+
+  final HermesCalendarEvent event;
+  final DateTime start;
+  final DateTime end;
+}
+
+List<_TimelineEventLayout> _timelineEventLayoutsForDay(
+  List<HermesCalendarEvent> events,
   DateTime day,
   int startHour,
   int endHour,
-) => _eventVisibleSegment(event, day, startHour, endHour) != null;
+) {
+  final candidates = <_TimelineEventLayoutCandidate>[];
+  for (final event in events) {
+    if (_eventIsAllDay(event)) continue;
+    final segment = _eventVisibleSegment(event, day, startHour, endHour);
+    if (segment == null) continue;
+    candidates.add(
+      _TimelineEventLayoutCandidate(
+        event: event,
+        start: segment.start,
+        end: segment.end,
+      ),
+    );
+  }
+  candidates.sort((a, b) {
+    final startComparison = a.start.compareTo(b.start);
+    if (startComparison != 0) return startComparison;
+    return a.end.compareTo(b.end);
+  });
+
+  final layouts = <_TimelineEventLayout>[];
+  final group = <_TimelineEventLayoutCandidate>[];
+  DateTime? groupEnd;
+
+  void flushGroup() {
+    if (group.isEmpty) return;
+    final laneEnds = <DateTime>[];
+    final assigned = <({HermesCalendarEvent event, int laneIndex})>[];
+    for (final candidate in group) {
+      var laneIndex = laneEnds.indexWhere(
+        (laneEnd) => !candidate.start.isBefore(laneEnd),
+      );
+      if (laneIndex == -1) {
+        laneIndex = laneEnds.length;
+        laneEnds.add(candidate.end);
+      } else {
+        laneEnds[laneIndex] = candidate.end;
+      }
+      assigned.add((event: candidate.event, laneIndex: laneIndex));
+    }
+    final laneCount = math.max(1, laneEnds.length);
+    for (final item in assigned) {
+      layouts.add(
+        _TimelineEventLayout(
+          event: item.event,
+          laneIndex: item.laneIndex,
+          laneCount: laneCount,
+        ),
+      );
+    }
+    group.clear();
+    groupEnd = null;
+  }
+
+  for (final candidate in candidates) {
+    if (groupEnd != null && !candidate.start.isBefore(groupEnd!)) {
+      flushGroup();
+    }
+    group.add(candidate);
+    if (groupEnd == null || candidate.end.isAfter(groupEnd!)) {
+      groupEnd = candidate.end;
+    }
+  }
+  flushGroup();
+
+  return layouts;
+}
 
 ({DateTime start, DateTime end})? _eventVisibleSegment(
   HermesCalendarEvent event,

@@ -3,11 +3,16 @@
 namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
+use App\Models\GoogleCalendarConnection;
 use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AssistantDomainApiTest extends TestCase
@@ -26,6 +31,8 @@ class AssistantDomainApiTest extends TestCase
 
     protected function tearDown(): void
     {
+        Carbon::setTestNow();
+
         if (isset($this->tempDir) && File::isDirectory($this->tempDir)) {
             File::deleteDirectory($this->tempDir);
         }
@@ -325,6 +332,144 @@ PHP);
         ]);
     }
 
+    public function test_agent_can_move_named_calendar_event_from_relative_source_day_without_id(): void
+    {
+        Carbon::setTestNow('2026-05-19T19:09:00Z');
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Quick Lunch is moved to next Monday at 12:00 PM.',
+    'actions' => [
+        [
+            'type' => 'calendar_event.update',
+            'risk' => 'low',
+            'parameters' => [
+                'match_title' => 'lunch',
+                'starts_at' => '2026-05-25T12:00:00-04:00',
+            ],
+        ],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Quick Lunch',
+            'starts_at' => '2026-05-20T12:30:00-04:00',
+            'ends_at' => '2026-05-20T13:15:00-04:00',
+        ])->assertCreated()->json('data.id');
+        $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Quick Lunch',
+            'starts_at' => '2026-05-27T12:30:00-04:00',
+            'ends_at' => '2026-05-27T13:15:00-04:00',
+        ])->assertCreated();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Calendar edits',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Move lunch tomorrow to next Monday at 12',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_context' => [
+                    'current_local_time' => '2026-05-19T15:09:00-04:00',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated();
+
+        $event = CalendarEvent::findOrFail($eventId);
+        $this->assertSame('2026-05-25T16:00:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-25T16:45:00+00:00', $event->ends_at->utc()->toIso8601String());
+        $this->assertDatabaseHas('activity_events', [
+            'conversation_session_id' => $sessionId,
+            'event_type' => 'assistant.calendar_event.updated',
+            'status' => 'succeeded',
+        ]);
+    }
+
+    public function test_agent_calendar_update_still_succeeds_when_google_export_fails(): void
+    {
+        Carbon::setTestNow('2026-05-19T19:09:00Z');
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Quick Lunch is moved to next Monday at 12:00 PM.',
+    'actions' => [
+        [
+            'type' => 'calendar_event.update',
+            'risk' => 'low',
+            'parameters' => [
+                'match_title' => 'lunch',
+                'from_date' => '2026-05-20',
+                'starts_at' => '2026-05-25T12:00:00-04:00',
+            ],
+        ],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken('google-export-failure@example.com');
+        $user = User::where('email', 'google-export-failure@example.com')->firstOrFail();
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Quick Lunch',
+            'starts_at' => '2026-05-20T12:30:00-04:00',
+            'ends_at' => '2026-05-20T13:15:00-04:00',
+        ])->assertCreated()->json('data.id');
+
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'calendars' => [['id' => 'primary', 'summary' => 'Primary', 'primary' => true, 'access_role' => 'owner']],
+            ],
+        ]);
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response(['error' => ['message' => 'Forbidden']], 403),
+        ]);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Calendar edits',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => "move tomorrow's lunch to next Monday at 12",
+            'metadata' => [
+                'source' => 'flutter',
+                'client_context' => [
+                    'current_local_time' => '2026-05-19T15:25:00-04:00',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Quick Lunch is moved to next Monday at 12:00 PM.');
+
+        $event = CalendarEvent::findOrFail($eventId);
+        $this->assertSame('2026-05-25T16:00:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-25T16:45:00+00:00', $event->ends_at->utc()->toIso8601String());
+        $this->assertDatabaseHas('activity_events', [
+            'conversation_session_id' => $sessionId,
+            'event_type' => 'assistant.calendar_event.updated',
+            'status' => 'succeeded',
+        ]);
+        $this->assertDatabaseHas('activity_events', [
+            'conversation_session_id' => $sessionId,
+            'event_type' => 'assistant.google_calendar.export_failed',
+            'status' => 'failed',
+        ]);
+    }
+
     public function test_task_list_shows_overdue_open_tasks_while_today_stays_date_scoped(): void
     {
         $token = $this->apiToken();
@@ -428,6 +573,152 @@ PHP);
 
         $this->assertDatabaseMissing('tasks', ['id' => $oldCompletedId]);
         $this->assertDatabaseHas('tasks', ['id' => $recentCompletedId]);
+    }
+
+    public function test_agent_runtime_handles_100_complex_requests_through_structured_actions(): void
+    {
+        Carbon::setTestNow('2026-05-19T19:25:00Z');
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = '';
+foreach ($argv as $arg) {
+    if (str_contains($arg, 'Runtime payload:')) {
+        $prompt = $arg;
+        break;
+    }
+}
+$marker = 'Runtime payload:';
+$position = strpos($prompt, $marker);
+$payload = $position === false ? '{}' : trim(substr($prompt, $position + strlen($marker)));
+$data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+$content = (string) ($data['message']['content'] ?? '');
+preg_match('/REQ-(\d{3})/', $content, $matches);
+$index = (int) ($matches[1] ?? 1);
+$day = 20 + (($index - 1) % 8);
+$hour = 8 + (($index - 1) % 9);
+$minute = (($index * 5) % 60);
+$start = sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour, $minute);
+$end = sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour + 1, $minute);
+$due = sprintf('2026-05-%02dT17:00:00-04:00', $day);
+$remind = sprintf('2026-05-%02dT07:30:00-04:00', $day);
+$actions = [
+    [
+        'type' => 'event_category.create',
+        'risk' => 'low',
+        'parameters' => [
+            'name' => 'Complex Sweep',
+            'color' => '#34C759',
+            'metadata' => ['request_index' => $index],
+        ],
+    ],
+    [
+        'type' => 'calendar_event.create',
+        'risk' => 'low',
+        'parameters' => [
+            'title' => sprintf('REQ-%03d planning block', $index),
+            'description' => $content,
+            'category' => 'Complex Sweep',
+            'color' => '#34C759',
+            'is_critical' => $index % 10 === 0,
+            'starts_at' => $start,
+            'ends_at' => $end,
+            'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
+        ],
+    ],
+    [
+        'type' => 'task.create',
+        'risk' => 'low',
+        'parameters' => [
+            'title' => sprintf('REQ-%03d follow-up task', $index),
+            'type' => $index % 3 === 0 ? 'maintenance' : 'todo',
+            'status' => 'open',
+            'notes' => 'Generated by complex request sweep from the agent response.',
+            'category' => 'Complex Sweep',
+            'color' => '#34C759',
+            'is_critical' => $index % 9 === 0,
+            'due_at' => $due,
+            'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
+        ],
+    ],
+    [
+        'type' => 'reminder.create',
+        'risk' => 'low',
+        'parameters' => [
+            'title' => sprintf('REQ-%03d reminder', $index),
+            'notes' => 'Generated by complex request sweep from the agent response.',
+            'category' => 'Complex Sweep',
+            'color' => '#34C759',
+            'remind_at' => $remind,
+            'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
+        ],
+    ],
+];
+echo json_encode([
+    'message' => sprintf('Handled REQ-%03d with a plan, task, reminder, and calendar block.', $index),
+    'actions' => $actions,
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('security.rate_limits.api_per_minute', 500);
+
+        $token = $this->apiToken('complex-sweep@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => '100 complex requests',
+        ])->assertCreated()->json('data.id');
+
+        foreach ($this->complexRequestSweepPrompts() as $prompt) {
+            $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+                'content' => $prompt,
+                'metadata' => [
+                    'source' => 'flutter',
+                    'client_context' => [
+                        'current_local_time' => '2026-05-19T15:25:00-04:00',
+                        'timezone_offset' => '-04:00',
+                        'timezone_offset_minutes' => -240,
+                    ],
+                ],
+            ]);
+            $response->assertCreated()
+                ->assertJsonPath('data.status', 'completed');
+        }
+
+        $this->assertSame(100, Task::where('category', 'Complex Sweep')->count());
+        $this->assertSame(100, Reminder::where('category', 'Complex Sweep')->count());
+        $this->assertSame(100, CalendarEvent::where('category', 'Complex Sweep')->count());
+        $this->assertDatabaseCount('conversation_messages', 200);
+        $this->assertDatabaseHas('activity_events', [
+            'conversation_session_id' => $sessionId,
+            'event_type' => 'runtime.hermes_cli_started',
+            'status' => 'started',
+        ]);
+        $this->assertSame(100, \App\Models\ActivityEvent::where('conversation_session_id', $sessionId)->where('event_type', 'runtime.hermes_cli_started')->count());
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function complexRequestSweepPrompts(): array
+    {
+        $templates = [
+            'Plan the school morning handoff, add prep tasks, remind me early, and block the calendar.',
+            'Coordinate a work deadline with a prep task, critical reminder, and focus block.',
+            'Schedule a family logistics block, make a checklist, and remind me before it starts.',
+            'Create a project follow-up plan with calendar time, task notes, and a morning nudge.',
+            'Organize an appointment sequence with travel buffer, prep task, and reminder.',
+            'Prepare a household maintenance plan with a calendar hold and materials checklist.',
+            'Set up a birthday planning workflow with a task, reminder, and calendar planning block.',
+            'Plan dinner prep around the afternoon schedule and remind me before groceries.',
+            'Create a health-admin workflow with paperwork task, calendar hold, and reminder.',
+            'Set up a weekly review prep plan with task notes, reminder, and focus block.',
+        ];
+
+        $prompts = [];
+        for ($i = 1; $i <= 100; $i++) {
+            $prompts[] = sprintf('REQ-%03d: %s Include category, color, critical flags when useful, and keep everything in the current workspace.', $i, $templates[($i - 1) % count($templates)]);
+        }
+
+        return $prompts;
     }
 
     public function test_activity_events_can_be_polled_for_a_session(): void

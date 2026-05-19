@@ -85,10 +85,10 @@ class GoogleCalendarSyncTest extends TestCase
         $this->assertSame('sync-token-1', $connection->sync_token);
     }
 
-    public function test_google_timed_events_import_using_calendar_wall_clock_time(): void
+    public function test_google_timed_events_import_preserves_offset_instant(): void
     {
-        $token = $this->apiToken('calendar-wall-clock@example.com');
-        $user = User::where('email', 'calendar-wall-clock@example.com')->firstOrFail();
+        $token = $this->apiToken('calendar-instant@example.com');
+        $user = User::where('email', 'calendar-instant@example.com')->firstOrFail();
         GoogleCalendarConnection::create([
             'user_id' => $user->id,
             'status' => 'connected',
@@ -98,7 +98,8 @@ class GoogleCalendarSyncTest extends TestCase
             'token_expires_at' => now()->addHour(),
             'metadata' => [
                 'selected_calendar_ids' => ['primary'],
-                'sync_tokens' => ['primary' => 'stale-instant-token'],
+                'sync_tokens' => ['primary' => 'stale-wall-clock-token'],
+                'google_datetime_import_mode' => 'wall_clock_v1',
             ],
         ]);
 
@@ -108,23 +109,26 @@ class GoogleCalendarSyncTest extends TestCase
                     'id' => 'offset-event-1',
                     'summary' => 'Afternoon Google block',
                     'status' => 'confirmed',
-                    'start' => ['dateTime' => '2026-05-20T13:00:00-04:00', 'timeZone' => 'America/New_York'],
-                    'end' => ['dateTime' => '2026-05-20T17:00:00-04:00', 'timeZone' => 'America/New_York'],
+                    'start' => ['dateTime' => '2026-05-20T15:15:00-04:00', 'timeZone' => 'America/New_York'],
+                    'end' => ['dateTime' => '2026-05-20T17:45:00-04:00', 'timeZone' => 'America/New_York'],
                 ]],
-                'nextSyncToken' => 'wall-clock-token',
+                'nextSyncToken' => 'instant-token',
             ]),
         ]);
 
-        $this->withToken($token)->getJson('/api/calendar-events')->assertOk();
+        $response = $this->withToken($token)->getJson('/api/calendar-events')->assertOk();
 
         $event = CalendarEvent::where('google_event_id', 'offset-event-1')->firstOrFail();
-        $this->assertSame('2026-05-20 13:00:00', $event->getRawOriginal('starts_at'));
-        $this->assertSame('2026-05-20 17:00:00', $event->getRawOriginal('ends_at'));
-        $this->assertSame('2026-05-20T13:00:00+00:00', $event->starts_at->toIso8601String());
-        $this->assertSame('2026-05-20T17:00:00+00:00', $event->ends_at->toIso8601String());
+        $this->assertSame('2026-05-20 19:15:00', $event->getRawOriginal('starts_at'));
+        $this->assertSame('2026-05-20 21:45:00', $event->getRawOriginal('ends_at'));
+        $this->assertSame('2026-05-20T19:15:00+00:00', $event->starts_at->toIso8601String());
+        $this->assertSame('2026-05-20T21:45:00+00:00', $event->ends_at->toIso8601String());
+        $response->assertJsonPath('data.0.starts_at', '2026-05-20T19:15:00.000000Z')
+            ->assertJsonPath('data.0.ends_at', '2026-05-20T21:45:00.000000Z');
         $connection = GoogleCalendarConnection::where('user_id', $user->id)->firstOrFail();
-        $this->assertSame('wall_clock_v1', $connection->metadata['google_datetime_import_mode']);
-        $this->assertContains('wall-clock-token', $connection->metadata['sync_tokens']);
+        $this->assertSame('instant_v1', $connection->metadata['google_datetime_import_mode']);
+        $this->assertContains('instant-token', $connection->metadata['sync_tokens']);
+        $this->assertNotContains('stale-wall-clock-token', $connection->metadata['sync_tokens']);
     }
 
     public function test_user_can_select_google_calendars_and_sync_imports_only_selected_calendars(): void
@@ -428,8 +432,8 @@ class GoogleCalendarSyncTest extends TestCase
             'token_expires_at' => now()->addHour(),
             'metadata' => [
                 'selected_calendar_ids' => ['primary'],
-                'sync_tokens' => ['primary' => 'personal-token'],
-                'google_datetime_import_mode' => 'wall_clock_v1',
+                'sync_tokens' => [$personalWorkspaceId.':primary' => 'personal-token'],
+                'google_datetime_import_mode' => 'instant_v1',
                 'calendars' => [
                     ['id' => 'primary', 'summary' => 'Main calendar', 'primary' => true, 'accessRole' => 'owner'],
                 ],
@@ -489,7 +493,7 @@ class GoogleCalendarSyncTest extends TestCase
             'google_event_id' => 'household-existing-event-1',
             'title' => 'Personal copy of shared Google event',
         ]);
-        $this->assertSame('personal-token', $connection->refresh()->metadata['sync_tokens']['primary']);
+        $this->assertSame('personal-token', $connection->refresh()->metadata['sync_tokens'][$personalWorkspaceId.':primary']);
         $this->assertSame(2, CalendarEvent::where('google_event_id', 'household-existing-event-1')->count());
     }
 

@@ -1611,6 +1611,7 @@ void main() {
     final eventBlockDecoration =
         eventBlockContainer.decoration! as BoxDecoration;
     expect(eventBlockDecoration.borderRadius, BorderRadius.circular(6));
+    expect(eventBlockDecoration.color?.a, closeTo(.90, .01));
     expect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
       findsOneWidget,
@@ -1666,6 +1667,80 @@ void main() {
     expect(headingAfterSwipe, _headingDaysAfter(headingBeforeSwipe, 2));
     expect(_topHeaderDayLabelFinder(), findsOneWidget);
     expect(_topHeaderMonthLabelFinder(), findsOneWidget);
+  });
+
+  testWidgets('calendar bottom nav returns to the current day pair', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _TwoDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final currentDayHeading = _activeSelectedDayHeading(tester);
+    final timelineScrollRect = tester.getRect(
+      find.byKey(const Key('apple-style-day-timeline-scroll')),
+    );
+    final pageViewTopLeft = tester.getTopLeft(
+      find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
+    );
+    await tester.dragFrom(
+      Offset(
+        pageViewTopLeft.dx + 360,
+        (timelineScrollRect.center.dy + 80).clamp(
+          timelineScrollRect.top + 24,
+          timelineScrollRect.bottom - 24,
+        ),
+      ),
+      const Offset(-420, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(_activeSelectedDayHeading(tester), isNot(currentDayHeading));
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('tasks-view')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('nav-today')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+    expect(_activeSelectedDayHeading(tester), currentDayHeading);
+  });
+
+  testWidgets('overlapping calendar events share the day column side by side', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _OverlappingCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final selectedHeading = tester.getRect(
+      find.byKey(const Key('day-column-heading-selected')),
+    );
+    final firstOverlap = tester.getRect(
+      find.byKey(const Key('calendar-event-block-overlap-one')),
+    );
+    final secondOverlap = tester.getRect(
+      find.byKey(const Key('calendar-event-block-overlap-two')),
+    );
+    final laterOverlap = tester.getRect(
+      find.byKey(const Key('calendar-event-block-overlap-three')),
+    );
+
+    expect(firstOverlap.left, closeTo(selectedHeading.left + 2, 1));
+    expect(firstOverlap.right, lessThan(secondOverlap.left));
+    expect(secondOverlap.right, closeTo(selectedHeading.right - 2, 1));
+    expect(firstOverlap.width, closeTo(secondOverlap.width, 1));
+    expect(laterOverlap.left, closeTo(firstOverlap.left, 1));
+    expect(laterOverlap.right, closeTo(firstOverlap.right, 1));
   });
 
   testWidgets(
@@ -4706,6 +4781,66 @@ class _TwoDayCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
           11,
         ).toIso8601String(),
         recurrence: 'daily',
+      ),
+    ];
+  }
+}
+
+class _OverlappingCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final selectedDay = DateTime.now();
+    return [
+      HermesCalendarEvent(
+        id: 1061,
+        title: 'Overlap one',
+        startsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          10,
+        ).toIso8601String(),
+        endsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          11,
+        ).toIso8601String(),
+      ),
+      HermesCalendarEvent(
+        id: 1062,
+        title: 'Overlap two',
+        startsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          10,
+          30,
+        ).toIso8601String(),
+        endsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          11,
+          30,
+        ).toIso8601String(),
+      ),
+      HermesCalendarEvent(
+        id: 1063,
+        title: 'Overlap three',
+        startsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          11,
+        ).toIso8601String(),
+        endsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          12,
+        ).toIso8601String(),
       ),
     ];
   }
