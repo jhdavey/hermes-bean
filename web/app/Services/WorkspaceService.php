@@ -5,9 +5,11 @@ namespace App\Services;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
+use App\Notifications\WorkspaceInvitationNotification;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -133,7 +135,7 @@ class WorkspaceService
         $email = Str::lower(trim($email));
         $invitee = User::where('email', $email)->first();
 
-        return DB::transaction(function () use ($actor, $workspace, $email, $invitee): WorkspaceMembership {
+        $membership = DB::transaction(function () use ($actor, $workspace, $email, $invitee): WorkspaceMembership {
             $existingActiveMembership = WorkspaceMembership::query()
                 ->where('workspace_id', $workspace->id)
                 ->where('status', 'active')
@@ -175,20 +177,21 @@ class WorkspaceService
                 ],
             ])->save();
 
-            return $membership->refresh()->setAttribute('invitation_token', $token);
+            return $membership->refresh()
+                ->setAttribute('invitation_token', $token)
+                ->setAttribute('invitation_accept_url', route('workspace-invitations.accept', ['token' => $token]));
         });
+
+        Notification::route('mail', $email)->notify(
+            new WorkspaceInvitationNotification($workspace->refresh(), $actor, $membership->invitation_token),
+        );
+
+        return $membership;
     }
 
     public function acceptInvite(User $user, string $token): WorkspaceMembership
     {
-        $tokenHash = hash('sha256', $token);
-        $membership = WorkspaceMembership::query()
-            ->whereIn('status', ['pending', 'invited'])
-            ->where(function ($query) use ($token, $tokenHash): void {
-                $query->where('metadata->invitation_token_hash', $tokenHash)
-                    ->orWhere('metadata->invitation_token', $token);
-            })
-            ->firstOrFail();
+        $membership = $this->pendingInvitationByToken($token);
 
         if ($membership->user_id && (int) $membership->user_id !== (int) $user->id) {
             throw new AuthorizationException('This invitation belongs to another user.');
@@ -198,18 +201,68 @@ class WorkspaceService
             throw new AuthorizationException('This invitation belongs to another email address.');
         }
 
-        $metadata = $membership->metadata ?? [];
-        unset($metadata['invitation_token_hash'], $metadata['invitation_token']);
-        $metadata['accepted_at'] = now()->toISOString();
+        return $this->activateInvite($membership, $user);
+    }
 
-        $membership->forceFill([
-            'user_id' => $user->id,
-            'status' => 'active',
-            'accepted_at' => now(),
-            'metadata' => $metadata,
-        ])->save();
+    public function acceptInviteFromEmailLink(string $token): WorkspaceMembership
+    {
+        $membership = $this->pendingInvitationByToken($token);
+        $user = $membership->user_id
+            ? User::find($membership->user_id)
+            : User::where('email', Str::lower((string) $membership->invited_email))->first();
 
-        return $membership->refresh();
+        if (! $user) {
+            throw new InvalidArgumentException('Create a HeyBean account with the invited email address before accepting this invitation.');
+        }
+
+        return $this->activateInvite($membership, $user);
+    }
+
+    private function pendingInvitationByToken(string $token): WorkspaceMembership
+    {
+        $tokenHash = hash('sha256', $token);
+
+        return WorkspaceMembership::query()
+            ->whereIn('status', ['pending', 'invited'])
+            ->where(function ($query) use ($token, $tokenHash): void {
+                $query->where('metadata->invitation_token_hash', $tokenHash)
+                    ->orWhere('metadata->invitation_token', $token);
+            })
+            ->firstOrFail();
+    }
+
+    private function activateInvite(WorkspaceMembership $membership, User $user): WorkspaceMembership
+    {
+        if ($membership->invited_email && Str::lower($membership->invited_email) !== Str::lower($user->email)) {
+            throw new AuthorizationException('This invitation belongs to another email address.');
+        }
+
+        return DB::transaction(function () use ($membership, $user): WorkspaceMembership {
+            $activeMembership = WorkspaceMembership::query()
+                ->where('workspace_id', $membership->workspace_id)
+                ->where('user_id', $user->id)
+                ->where('status', 'active')
+                ->first();
+
+            if ($activeMembership && (int) $activeMembership->id !== (int) $membership->id) {
+                $membership->delete();
+
+                return $activeMembership->refresh();
+            }
+
+            $metadata = $membership->metadata ?? [];
+            unset($metadata['invitation_token_hash'], $metadata['invitation_token']);
+            $metadata['accepted_at'] = now()->toISOString();
+
+            $membership->forceFill([
+                'user_id' => $user->id,
+                'status' => 'active',
+                'accepted_at' => now(),
+                'metadata' => $metadata,
+            ])->save();
+
+            return $membership->refresh();
+        });
     }
 
     public function updateMemberRole(User $actor, Workspace $workspace, WorkspaceMembership $member, string $role): WorkspaceMembership

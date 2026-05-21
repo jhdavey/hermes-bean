@@ -928,6 +928,7 @@ class HermesWorkspace {
     bool? active,
     bool? isDefault,
     String? googleCalendarId,
+    List<HermesWorkspaceMembership>? memberships,
     List<HermesWorkspaceMemberUser>? members,
   }) => HermesWorkspace(
     id: id,
@@ -943,7 +944,7 @@ class HermesWorkspace {
     createdByUserId: createdByUserId,
     settings: settings,
     metadata: metadata,
-    memberships: memberships,
+    memberships: memberships ?? this.memberships,
     members: members ?? this.members,
     agentProfile: agentProfile,
     googleCalendarMappings: googleCalendarMappings,
@@ -1003,6 +1004,8 @@ class HermesWorkspaceMembership {
     this.invitedByUserId,
     this.invitedEmail,
     this.acceptedAt,
+    this.invitationToken,
+    this.invitationAcceptUrl,
     this.metadata = const {},
     this.user,
     this.workspace,
@@ -1016,11 +1019,11 @@ class HermesWorkspaceMembership {
   final int? invitedByUserId;
   final String? invitedEmail;
   final String? acceptedAt;
+  final String? invitationToken;
+  final String? invitationAcceptUrl;
   final Map<String, Object?> metadata;
   final HermesWorkspaceMemberUser? user;
   final HermesWorkspace? workspace;
-
-  String? get invitationToken => metadata['invitation_token']?.toString();
 
   factory HermesWorkspaceMembership.fromJson(Map<String, Object?> json) =>
       HermesWorkspaceMembership(
@@ -1032,6 +1035,11 @@ class HermesWorkspaceMembership {
         invitedByUserId: _readIntOrNull(json['invited_by_user_id']),
         invitedEmail: json['invited_email']?.toString(),
         acceptedAt: json['accepted_at']?.toString(),
+        invitationToken:
+            (json['invitation_token'] ??
+                    _expectMapOrNull(json['metadata'])?['invitation_token'])
+                ?.toString(),
+        invitationAcceptUrl: json['invitation_accept_url']?.toString(),
         metadata: _expectMapOrNull(json['metadata']) ?? const {},
         user: json['user'] is Map<String, Object?>
             ? HermesWorkspaceMemberUser.fromJson(_expectMap(json['user']))

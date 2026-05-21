@@ -2,6 +2,9 @@
 
 use App\Models\EarlyAccessSignup;
 use App\Models\User;
+use App\Services\WorkspaceService;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
@@ -52,6 +55,24 @@ Route::post('/reset-password', function (Request $request) {
 
     return response()->view('auth.reset-complete');
 })->name('password.update');
+
+Route::get('/workspace-invitations/{token}/accept', function (string $token) {
+    try {
+        $membership = app(WorkspaceService::class)->acceptInviteFromEmailLink($token);
+
+        return response()->view('workspace-invitations.accepted', [
+            'workspace' => $membership->workspace,
+        ]);
+    } catch (AuthorizationException|InvalidArgumentException $exception) {
+        return response()->view('workspace-invitations.unavailable', [
+            'message' => $exception->getMessage(),
+        ], 409);
+    } catch (ModelNotFoundException) {
+        return response()->view('workspace-invitations.unavailable', [
+            'message' => 'This invitation link is invalid or has already been used.',
+        ], 404);
+    }
+})->name('workspace-invitations.accept');
 
 Route::post('/early-access', function (Request $request) {
     $validated = $request->validate([

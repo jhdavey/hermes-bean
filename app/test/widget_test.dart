@@ -292,6 +292,82 @@ void main() {
     },
   );
 
+  testWidgets('inviting a household member shows a copyable invite link', (
+    WidgetTester tester,
+  ) async {
+    String? copiedText;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copiedText = (call.arguments as Map<Object?, Object?>)['text']
+                ?.toString();
+            return null;
+          }
+          if (call.method == 'Clipboard.getData') {
+            return <String, Object?>{'text': copiedText};
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+
+    final api = _WorkspaceFakeHermesApiClient()
+      ..workspaces = const [
+        HermesWorkspace(
+          id: '1',
+          name: 'Personal',
+          type: 'personal',
+          role: 'owner',
+          active: true,
+          isDefault: true,
+        ),
+        HermesWorkspace(
+          id: '2',
+          name: 'Family',
+          type: 'household',
+          role: 'owner',
+        ),
+      ];
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('workspace-invite-2')));
+    await tester.tap(find.byKey(const Key('workspace-invite-2')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('workspace-invite-email-2')),
+      'pending@example.com',
+    );
+    await tester.tap(find.byKey(const Key('workspace-invite-save-2')));
+    await tester.pumpAndSettle();
+
+    expect(api.invitedWorkspaceId, 2);
+    expect(api.invitedEmail, 'pending@example.com');
+    expect(
+      find.text(
+        'https://heybean.org/workspace-invitations/new-invite-token/accept',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('workspace-invite-copy-link')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('workspace-invite-copy-link')));
+    await tester.pumpAndSettle();
+
+    expect(
+      copiedText,
+      'https://heybean.org/workspace-invitations/new-invite-token/accept',
+    );
+    expect(find.text('Invite pending - pending@example.com'), findsOneWidget);
+  });
+
   testWidgets(
     'workspace calendar list shows Google access info without duplicate display list',
     (WidgetTester tester) async {
@@ -516,6 +592,81 @@ void main() {
       expect(invite.top, greaterThan(leave.bottom));
     },
   );
+
+  testWidgets('household member actions use membership ids for removal', (
+    WidgetTester tester,
+  ) async {
+    final api = _WorkspaceFakeHermesApiClient()
+      ..workspaces = const [
+        HermesWorkspace(
+          id: '1',
+          name: 'Personal',
+          type: 'personal',
+          role: 'owner',
+          active: true,
+          isDefault: true,
+        ),
+        HermesWorkspace(
+          id: '2',
+          name: 'Family',
+          type: 'household',
+          role: 'owner',
+          memberships: [
+            HermesWorkspaceMembership(
+              id: 10,
+              workspaceId: 2,
+              userId: 1,
+              role: 'owner',
+              user: HermesWorkspaceMemberUser(
+                id: 1,
+                name: 'Bean User',
+                email: 'bean@example.com',
+              ),
+            ),
+            HermesWorkspaceMembership(
+              id: 77,
+              workspaceId: 2,
+              userId: 42,
+              role: 'member',
+              user: HermesWorkspaceMemberUser(
+                id: 42,
+                name: 'Invited User',
+                email: 'invited@example.com',
+              ),
+            ),
+            HermesWorkspaceMembership(
+              id: 88,
+              workspaceId: 2,
+              role: 'member',
+              status: 'invited',
+              invitedEmail: 'pending@example.com',
+            ),
+          ],
+        ),
+      ];
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('workspace-member-actions-2-77')),
+    );
+    await tester.tap(find.byKey(const Key('workspace-member-actions-2-77')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove').last);
+    await tester.pumpAndSettle();
+
+    expect(api.removedWorkspaceMemberId, 77);
+    expect(api.removedWorkspaceId, 2);
+    expect(find.byIcon(Icons.check_circle_rounded), findsWidgets);
+    expect(find.byIcon(Icons.schedule_send_rounded), findsOneWidget);
+    expect(find.text('pending@example.com'), findsOneWidget);
+    expect(find.text('Invite pending - pending@example.com'), findsOneWidget);
+  });
 
   testWidgets(
     'household personal sync button copies Personal into that workspace',
@@ -3986,6 +4137,12 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   int? defaultWorkspaceSetTo;
   int? syncedAllSourceWorkspaceId;
   int? syncedAllTargetWorkspaceId;
+  int? removedWorkspaceId;
+  int? removedWorkspaceMemberId;
+  int? updatedWorkspaceMemberId;
+  String? updatedWorkspaceMemberRole;
+  int? invitedWorkspaceId;
+  String? invitedEmail;
   String? acceptedInvitationToken;
   var workspaces = <HermesWorkspace>[
     const HermesWorkspace(
@@ -4045,6 +4202,39 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   }
 
   @override
+  Future<HermesWorkspaceMembership> inviteWorkspaceMember(
+    int workspaceId, {
+    required String email,
+  }) async {
+    invitedWorkspaceId = workspaceId;
+    invitedEmail = email;
+    final membership = HermesWorkspaceMembership(
+      id: 99,
+      workspaceId: workspaceId,
+      role: 'member',
+      status: 'invited',
+      invitedEmail: email,
+      invitationToken: 'new-invite-token',
+      invitationAcceptUrl:
+          'https://heybean.org/workspace-invitations/new-invite-token/accept',
+    );
+    workspaces = [
+      for (final workspace in workspaces)
+        workspace.numericId == workspaceId
+            ? workspace.copyWith(
+                memberships: [
+                  ...workspace.memberships.where(
+                    (existing) => existing.invitedEmail != email,
+                  ),
+                  membership,
+                ],
+              )
+            : workspace,
+    ];
+    return membership;
+  }
+
+  @override
   Future<HermesWorkspaceMembership> acceptWorkspaceInvitation(
     String token,
   ) async {
@@ -4083,6 +4273,37 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     return workspaces.firstWhere(
       (workspace) => workspace.numericId == workspaceId,
     );
+  }
+
+  @override
+  Future<HermesWorkspaceMembership> updateWorkspaceMember(
+    int workspaceId,
+    int memberId, {
+    required String role,
+  }) async {
+    updatedWorkspaceMemberId = memberId;
+    updatedWorkspaceMemberRole = role;
+    return HermesWorkspaceMembership(
+      id: memberId,
+      workspaceId: workspaceId,
+      role: role,
+    );
+  }
+
+  @override
+  Future<void> removeWorkspaceMember(int workspaceId, int memberId) async {
+    removedWorkspaceId = workspaceId;
+    removedWorkspaceMemberId = memberId;
+    workspaces = [
+      for (final workspace in workspaces)
+        workspace.numericId == workspaceId
+            ? workspace.copyWith(
+                memberships: workspace.memberships
+                    .where((membership) => membership.id != memberId)
+                    .toList(),
+              )
+            : workspace,
+    ];
   }
 
   @override

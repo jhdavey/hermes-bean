@@ -5,7 +5,10 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
+use App\Notifications\WorkspaceInvitationNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Notifications\AnonymousNotifiable;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -15,6 +18,7 @@ class WorkspaceInvitationTest extends TestCase
 
     public function test_owner_can_invite_without_leaking_invitation_token(): void
     {
+        Notification::fake();
         $ownerToken = $this->apiToken('invite-owner@example.com');
         $workspaceId = $this->withToken($ownerToken)->postJson('/api/workspaces', [
             'name' => 'Invite Household',
@@ -32,6 +36,8 @@ class WorkspaceInvitationTest extends TestCase
 
         $this->assertIsString($response->json('data.invitation_token'));
         $this->assertSame(64, strlen($response->json('data.invitation_token')));
+        $this->assertStringContainsString('/workspace-invitations/', $response->json('data.invitation_accept_url'));
+        $this->assertStringEndsWith('/accept', $response->json('data.invitation_accept_url'));
 
         $membership = WorkspaceMembership::where('workspace_id', $workspaceId)
             ->where('invited_email', 'new.member@example.com')
@@ -41,6 +47,56 @@ class WorkspaceInvitationTest extends TestCase
         $this->assertArrayHasKey('invitation_token_hash', $membership->metadata);
         $this->assertArrayNotHasKey('invitation_token', $membership->metadata);
         $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $membership->metadata['invitation_token_hash']);
+
+        Notification::assertSentOnDemand(WorkspaceInvitationNotification::class, function (WorkspaceInvitationNotification $notification, array $channels, AnonymousNotifiable $notifiable): bool {
+            return $channels === ['mail']
+                && ($notifiable->routes['mail'] ?? null) === 'new.member@example.com'
+                && str_contains($notification->acceptUrl(), '/workspace-invitations/')
+                && str_ends_with($notification->acceptUrl(), '/accept');
+        });
+    }
+
+    public function test_email_accept_link_adds_member_and_refreshes_workspace_membership_views(): void
+    {
+        Notification::fake();
+        $ownerToken = $this->apiToken('invite-owner-email-link@example.com');
+        $inviteeToken = $this->apiToken('email-link-invitee@example.com');
+        $invitee = User::where('email', 'email-link-invitee@example.com')->firstOrFail();
+        $workspace = $this->householdForToken($ownerToken, 'Daveys Household');
+
+        $this->withToken($ownerToken)->postJson("/api/workspaces/{$workspace->id}/invitations", [
+            'email' => 'email-link-invitee@example.com',
+        ])->assertCreated();
+
+        $acceptUrl = null;
+        Notification::assertSentOnDemand(WorkspaceInvitationNotification::class, function (WorkspaceInvitationNotification $notification) use (&$acceptUrl): bool {
+            $acceptUrl = $notification->acceptUrl();
+
+            return true;
+        });
+
+        $this->assertNotNull($acceptUrl);
+        $this->get($acceptUrl)
+            ->assertOk()
+            ->assertSee('Daveys Household')
+            ->assertSee('The household has been added to your HeyBean workspace settings.');
+
+        $this->assertDatabaseHas('workspace_memberships', [
+            'workspace_id' => $workspace->id,
+            'user_id' => $invitee->id,
+            'status' => 'active',
+            'role' => 'member',
+        ]);
+
+        $this->withToken($inviteeToken)->getJson('/api/workspaces')
+            ->assertOk()
+            ->assertJsonFragment(['name' => 'Daveys Household'])
+            ->assertJsonFragment(['email' => 'email-link-invitee@example.com']);
+
+        $this->withToken($ownerToken)->getJson("/api/workspaces/{$workspace->id}")
+            ->assertOk()
+            ->assertJsonFragment(['name' => 'Daveys Household'])
+            ->assertJsonFragment(['email' => 'email-link-invitee@example.com']);
     }
 
     public function test_non_owner_cannot_invite_to_workspace(): void

@@ -10097,12 +10097,58 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
       ),
     );
     if (email == null || email.trim().isEmpty) return;
-    await _run(
+    final membership = await _run(
       () => widget.apiClient.inviteWorkspaceMember(
         workspaceId,
         email: email.trim(),
       ),
       'Invitation sent.',
+    );
+    if (!mounted || membership == null) return;
+    await _showInvitationLinkDialog(membership);
+  }
+
+  Future<void> _showInvitationLinkDialog(
+    HermesWorkspaceMembership membership,
+  ) async {
+    final link = membership.invitationAcceptUrl;
+    if (link == null || link.trim().isEmpty) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Invitation sent'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Share this invite link if the email does not arrive.'),
+            const SizedBox(height: 12),
+            SelectableText(
+              link,
+              key: const Key('workspace-invite-share-link'),
+              style: const TextStyle(fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Done'),
+          ),
+          FilledButton.icon(
+            key: const Key('workspace-invite-copy-link'),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: link));
+              if (context.mounted) Navigator.of(context).pop();
+              if (mounted) {
+                setState(() => _message = 'Invitation link copied.');
+              }
+            },
+            icon: const Icon(Icons.copy_rounded),
+            label: const Text('Copy link'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -10250,6 +10296,66 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
     return defaultForWorkspace
         ? '$access · Default for new local events'
         : access;
+  }
+
+  Iterable<HermesWorkspaceMembership> _visibleMemberships(
+    HermesWorkspace workspace,
+  ) => workspace.memberships.where(
+    (membership) =>
+        membership.status != 'removed' && membership.status != 'left',
+  );
+
+  String _membershipTitle(HermesWorkspaceMembership membership) {
+    final name = membership.user?.name.trim();
+    if (name != null && name.isNotEmpty) return name;
+    final email = membership.invitedEmail?.trim();
+    if (email != null && email.isNotEmpty) return email;
+    return 'Invited member';
+  }
+
+  String _membershipSubtitle(HermesWorkspaceMembership membership) {
+    final email = membership.user?.email.trim().isNotEmpty == true
+        ? membership.user!.email.trim()
+        : membership.invitedEmail?.trim();
+    if (membership.status == 'invited' || membership.status == 'pending') {
+      return email == null || email.isEmpty
+          ? 'Invite pending'
+          : 'Invite pending - $email';
+    }
+    return email == null || email.isEmpty ? membership.role : email;
+  }
+
+  Future<void> _copyInviteLinkForMembership(
+    HermesWorkspace workspace,
+    HermesWorkspaceMembership membership,
+  ) async {
+    final workspaceId = workspace.numericId;
+    final email = membership.invitedEmail?.trim();
+    if (workspaceId == null || email == null || email.isEmpty) return;
+
+    final refreshedMembership = await _run(
+      () => widget.apiClient.inviteWorkspaceMember(workspaceId, email: email),
+      'Invite link ready.',
+    );
+    final link = refreshedMembership?.invitationAcceptUrl;
+    if (link == null || link.trim().isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: link));
+    if (mounted) setState(() => _message = 'Invitation link copied.');
+  }
+
+  Widget _membershipStatusIcon(HermesWorkspaceMembership membership) {
+    if (membership.status == 'active') {
+      return const Icon(
+        Icons.check_circle_rounded,
+        color: Color(0xFF16A34A),
+        size: 18,
+      );
+    }
+    return const Icon(
+      Icons.schedule_send_rounded,
+      color: HeyBeanTheme.muted,
+      size: 18,
+    );
   }
 
   @override
@@ -10407,22 +10513,23 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                           ),
                       ],
                     ),
-                    for (final member in workspace.members)
+                    for (final membership in _visibleMemberships(workspace))
                       ListTile(
                         key: Key(
-                          'workspace-member-${workspace.id}-${member.id}',
+                          'workspace-member-${workspace.id}-${membership.id}',
                         ),
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        title: Text(member.name),
-                        subtitle: Text(member.email),
+                        leading: _membershipStatusIcon(membership),
+                        title: Text(_membershipTitle(membership)),
+                        subtitle: Text(_membershipSubtitle(membership)),
                         trailing:
                             workspace.canManageMembers &&
                                 !workspace.isPersonal &&
                                 workspace.numericId != null
                             ? PopupMenuButton<String>(
                                 key: Key(
-                                  'workspace-member-actions-${workspace.id}-${member.id}',
+                                  'workspace-member-actions-${workspace.id}-${membership.id}',
                                 ),
                                 onSelected: (value) {
                                   if (value == 'owner') {
@@ -10430,28 +10537,40 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                                       () => widget.apiClient
                                           .updateWorkspaceMember(
                                             workspace.numericId!,
-                                            member.id,
+                                            membership.id,
                                             role: 'owner',
                                           ),
                                       'Member is now an owner.',
+                                    );
+                                  } else if (value == 'copy_link') {
+                                    _copyInviteLinkForMembership(
+                                      workspace,
+                                      membership,
                                     );
                                   } else if (value == 'remove') {
                                     _run(
                                       () => widget.apiClient
                                           .removeWorkspaceMember(
                                             workspace.numericId!,
-                                            member.id,
+                                            membership.id,
                                           ),
                                       'Member removed.',
                                     );
                                   }
                                 },
-                                itemBuilder: (context) => const [
-                                  PopupMenuItem(
-                                    value: 'owner',
-                                    child: Text('Make owner'),
-                                  ),
-                                  PopupMenuItem(
+                                itemBuilder: (context) => [
+                                  if (membership.status == 'active')
+                                    const PopupMenuItem(
+                                      value: 'owner',
+                                      child: Text('Make owner'),
+                                    ),
+                                  if (membership.status == 'invited' ||
+                                      membership.status == 'pending')
+                                    const PopupMenuItem(
+                                      value: 'copy_link',
+                                      child: Text('Copy invite link'),
+                                    ),
+                                  const PopupMenuItem(
                                     value: 'remove',
                                     child: Text('Remove'),
                                   ),

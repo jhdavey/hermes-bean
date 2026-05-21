@@ -800,7 +800,9 @@ void main() {
                 'role': 'member',
                 'status': 'invited',
                 'invited_email': 'parent@example.com',
-                'metadata': {'invitation_token': 'invite-token'},
+                'invitation_token': 'invite-token',
+                'invitation_accept_url':
+                    'https://heybean.org/workspace-invitations/invite-token/accept',
               },
             }),
           );
@@ -949,6 +951,13 @@ void main() {
         email: 'parent@example.com',
       )).invitationToken,
       'invite-token',
+    );
+    expect(
+      (await client.inviteWorkspaceMember(
+        2,
+        email: 'parent@example.com',
+      )).invitationAcceptUrl,
+      'https://heybean.org/workspace-invitations/invite-token/accept',
     );
     expect(
       (await client.acceptWorkspaceInvitation('invite-token')).workspace?.id,
