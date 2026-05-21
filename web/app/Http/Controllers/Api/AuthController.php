@@ -19,7 +19,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
 use App\Services\AgentProfileService;
-use App\Services\OnboardingSeedService;
+use App\Services\WelcomeConversationService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -44,11 +44,9 @@ class AuthController extends Controller
         ]);
 
         $user = User::create(collect($data)->only(['name', 'email', 'password'])->all());
-        $profile = app(AgentProfileService::class)->ensureForUser($user);
-        if (config('hermes_bean.seed_onboarding_resources', true)) {
-            app(OnboardingSeedService::class)->ensureForUser($user);
-        }
+        app(AgentProfileService::class)->ensureForUser($user);
         app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        app(WelcomeConversationService::class)->ensureForUser($user);
         $user->refresh()->load('agentProfile');
 
         return response()->json(['data' => [
@@ -77,10 +75,8 @@ class AuthController extends Controller
         app(AgentProfileService::class)->ensureForUser($user);
         $user->unsetRelation('agentProfile');
         $user->load('agentProfile');
-        if (config('hermes_bean.seed_onboarding_resources', true)) {
-            app(OnboardingSeedService::class)->ensureForUser($user);
-        }
         app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        app(WelcomeConversationService::class)->ensureForUser($user);
 
         return response()->json(['data' => [
             'user' => $user,

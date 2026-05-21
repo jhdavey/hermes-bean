@@ -117,38 +117,39 @@ class AuthAndAccountLifecycleTest extends TestCase
         ])->assertOk();
     }
 
-    public function test_registration_can_seed_visible_calendar_events_for_new_users(): void
+    public function test_registration_starts_with_empty_user_resources(): void
     {
-        config()->set('hermes_bean.seed_onboarding_resources', true);
-
         $token = $this->postJson('/api/auth/register', [
-            'name' => 'Seeded User',
-            'email' => 'seeded@example.com',
+            'name' => 'Clean User',
+            'email' => 'clean@example.com',
             'password' => 'correct-horse-battery-staple',
             'password_confirmation' => 'correct-horse-battery-staple',
         ])->assertCreated()->json('data.token');
 
         $this->withToken($token)->getJson('/api/today')
             ->assertOk()
-            ->assertJsonPath('data.counts.tasks', 1)
-            ->assertJsonPath('data.counts.reminders', 1)
-            ->assertJsonPath('data.counts.calendar_events', 2)
-            ->assertJsonFragment(['title' => 'Design review'])
-            ->assertJsonFragment(['title' => 'Plan dinner'])
-            ->assertJsonFragment(['event_type' => 'assistant.onboarding.seeded']);
+            ->assertJsonPath('data.counts.tasks', 0)
+            ->assertJsonPath('data.counts.reminders', 0)
+            ->assertJsonPath('data.counts.calendar_events', 0);
 
         $this->withToken($token)->getJson('/api/calendar-events')
             ->assertOk()
-            ->assertJsonCount(2, 'data')
-            ->assertJsonFragment(['title' => 'Design review'])
-            ->assertJsonFragment(['title' => 'Plan dinner']);
+            ->assertJsonCount(0, 'data');
+
+        $this->assertDatabaseHas('conversation_sessions', [
+            'user_id' => User::where('email', 'clean@example.com')->value('id'),
+            'title' => 'Welcome to Bean',
+            'runtime_mode' => 'onboarding',
+        ]);
+        $this->assertDatabaseCount('tasks', 0);
+        $this->assertDatabaseCount('reminders', 0);
+        $this->assertDatabaseCount('calendar_events', 0);
+        $this->assertDatabaseCount('activity_events', 0);
     }
 
-    public function test_login_backfills_visible_calendar_events_for_existing_users(): void
+    public function test_login_backfills_welcome_conversation_without_resources(): void
     {
-        config()->set('hermes_bean.seed_onboarding_resources', true);
-
-        User::factory()->create([
+        $user = User::factory()->create([
             'name' => 'Existing User',
             'email' => 'existing@example.com',
             'password' => Hash::make('correct-horse-battery-staple'),
@@ -161,9 +162,17 @@ class AuthAndAccountLifecycleTest extends TestCase
 
         $this->withToken($token)->getJson('/api/calendar-events')
             ->assertOk()
-            ->assertJsonCount(2, 'data')
-            ->assertJsonFragment(['title' => 'Design review'])
-            ->assertJsonFragment(['title' => 'Plan dinner']);
+            ->assertJsonCount(0, 'data');
+
+        $this->assertDatabaseHas('conversation_sessions', [
+            'user_id' => $user->id,
+            'title' => 'Welcome to Bean',
+            'runtime_mode' => 'onboarding',
+        ]);
+        $this->assertDatabaseCount('tasks', 0);
+        $this->assertDatabaseCount('reminders', 0);
+        $this->assertDatabaseCount('calendar_events', 0);
+        $this->assertDatabaseCount('activity_events', 0);
     }
 
     public function test_assistant_routes_require_auth_and_scope_route_model_binding_to_owner(): void

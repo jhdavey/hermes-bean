@@ -4,7 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\User;
 use App\Services\AgentProfileService;
-use App\Services\OnboardingSeedService;
+use App\Services\WelcomeConversationService;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -25,6 +25,6 @@ class DatabaseSeeder extends Seeder
         ]);
 
         app(AgentProfileService::class)->ensureForUser($user);
-        app(OnboardingSeedService::class)->ensureForUser($user);
+        app(WelcomeConversationService::class)->ensureForUser($user);
     }
 }
