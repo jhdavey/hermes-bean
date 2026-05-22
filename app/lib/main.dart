@@ -7050,14 +7050,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             children: [
                               const _SectionTitle(
                                 icon: Icons.calendar_month_rounded,
-                                title: 'Connected calendars',
+                                title: 'External Calendar Sync',
                                 subtitle:
-                                    'Add or update this event on selected writable connected calendars.',
+                                    'Add or update this event on selected writable external calendars.',
                                 infoKey: Key('event-google-calendars-info'),
-                                infoTitle: 'Calendar export',
+                                infoTitle: 'External Calendar Sync',
                                 infoBullets: [
-                                  'Checked calendars receive a copy of this local Bean event.',
-                                  'Only writable connected calendars are shown here.',
+                                  'Checked external calendars receive a copy of this local Bean event.',
+                                  'Only writable connected external calendars are shown here.',
                                   'Changing this list affects this event, not your whole account.',
                                 ],
                               ),
@@ -7110,11 +7110,11 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             children: [
                               const _SectionTitle(
                                 icon: Icons.home_work_outlined,
-                                title: 'Workspace sync',
+                                title: 'Local Workspace Sync',
                                 subtitle:
-                                    'Copy this event only to selected workspaces.',
+                                    'Copy this event only to selected HeyBean workspaces.',
                                 infoKey: Key('event-workspace-sync-info'),
-                                infoTitle: 'Workspace sync',
+                                infoTitle: 'Local Workspace Sync',
                                 infoBullets: [
                                   'Use this when a Personal event should also appear in a household workspace.',
                                   'Sync creates a copy for the selected workspace; future edits remain controlled by Bean.',

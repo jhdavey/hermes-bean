@@ -3195,6 +3195,7 @@ void main() {
         find.byKey(const Key('event-google-calendar-field')),
         findsOneWidget,
       );
+      expect(find.text('External Calendar Sync'), findsOneWidget);
       expect(find.text('Personal'), findsWidgets);
       final titleTop = tester
           .getTopLeft(find.byKey(const Key('event-title-field')))
