@@ -27,6 +27,3 @@ php artisan config:cache
 php artisan route:cache
 php artisan view:cache
 php artisan storage:link >/dev/null 2>&1 || true
-
-# Gracefully reload queue workers if they are running under Forge/Supervisor.
-php artisan queue:restart || true

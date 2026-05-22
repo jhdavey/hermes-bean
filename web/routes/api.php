@@ -76,8 +76,5 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/blockers', [DomainResourceController::class, 'storeBlocker']);
         Route::patch('/blockers/{blocker}', [DomainResourceController::class, 'updateBlocker']);
         Route::delete('/blockers/{blocker}', [DomainResourceController::class, 'destroyBlocker']);
-        Route::post('/scheduler-jobs', [DomainResourceController::class, 'storeSchedulerJob']);
-        Route::patch('/scheduler-jobs/{schedulerJob}', [DomainResourceController::class, 'updateSchedulerJob']);
-        Route::delete('/scheduler-jobs/{schedulerJob}', [DomainResourceController::class, 'destroySchedulerJob']);
     });
 });

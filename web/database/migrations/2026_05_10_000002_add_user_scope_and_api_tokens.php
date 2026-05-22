@@ -27,7 +27,6 @@ return new class extends Migration
             'calendar_events',
             'approvals',
             'blockers',
-            'scheduler_job_records',
         ] as $tableName) {
             Schema::table($tableName, function (Blueprint $table): void {
                 $table->foreignId('user_id')->after('id')->nullable()->constrained()->cascadeOnDelete();
@@ -39,7 +38,6 @@ return new class extends Migration
     public function down(): void
     {
         foreach ([
-            'scheduler_job_records',
             'blockers',
             'approvals',
             'calendar_events',

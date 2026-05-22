@@ -8,7 +8,6 @@ use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\EventCategory;
 use App\Models\Reminder;
-use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
@@ -473,45 +472,6 @@ class DomainResourceController extends Controller
         return $this->destroyed(Blocker::where('user_id', $request->user()->id)->findOrFail($blocker));
     }
 
-    public function storeSchedulerJob(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'status' => ['nullable', 'string', 'max:50'],
-            'scheduled_for' => ['nullable', 'date'],
-            'started_at' => ['nullable', 'date'],
-            'finished_at' => ['nullable', 'date'],
-            'payload' => ['nullable', 'array'],
-            'last_error' => ['nullable', 'string'],
-        ]);
-        $this->normalizeDateFields($validated, ['scheduled_for', 'started_at', 'finished_at']);
-
-        return $this->created(SchedulerJobRecord::create($this->owned($request, $validated)));
-    }
-
-    public function updateSchedulerJob(Request $request, string $schedulerJob): JsonResponse
-    {
-        $model = SchedulerJobRecord::where('user_id', $request->user()->id)->findOrFail($schedulerJob);
-        $validated = $request->validate([
-            'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'scheduled_for' => ['sometimes', 'nullable', 'date'],
-            'started_at' => ['sometimes', 'nullable', 'date'],
-            'finished_at' => ['sometimes', 'nullable', 'date'],
-            'payload' => ['sometimes', 'nullable', 'array'],
-            'last_error' => ['sometimes', 'nullable', 'string'],
-        ]);
-        $this->normalizeDateFields($validated, ['scheduled_for', 'started_at', 'finished_at']);
-        $model->update($validated);
-
-        return response()->json(['data' => $model->refresh()]);
-    }
-
-    public function destroySchedulerJob(Request $request, string $schedulerJob): JsonResponse
-    {
-        return $this->destroyed(SchedulerJobRecord::where('user_id', $request->user()->id)->findOrFail($schedulerJob));
-    }
-
     private function listed(mixed $models): JsonResponse
     {
         return response()->json(['data' => $models]);
@@ -604,7 +564,6 @@ class DomainResourceController extends Controller
             'storeEventCategory' => 'event_categories',
             'storeApproval' => 'approvals',
             'storeBlocker' => 'blockers',
-            'storeSchedulerJob' => 'scheduler_job_records',
             default => 'tasks',
         };
     }

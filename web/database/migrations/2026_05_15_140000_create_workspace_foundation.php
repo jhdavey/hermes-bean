@@ -168,7 +168,6 @@ return new class extends Migration
             'calendar_events' => 'null',
             'approvals' => 'null',
             'blockers' => 'null',
-            'scheduler_job_records' => 'null',
             'event_categories' => 'null',
         ];
     }

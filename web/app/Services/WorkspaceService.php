@@ -344,6 +344,6 @@ class WorkspaceService
 
     private function workspaceScopedTables(): array
     {
-        return ['agent_profiles', 'conversation_sessions', 'activity_events', 'tasks', 'reminders', 'calendar_events', 'approvals', 'blockers', 'scheduler_job_records', 'event_categories'];
+        return ['agent_profiles', 'conversation_sessions', 'activity_events', 'tasks', 'reminders', 'calendar_events', 'approvals', 'blockers', 'event_categories'];
     }
 }

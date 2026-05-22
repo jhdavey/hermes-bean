@@ -13,7 +13,6 @@ use App\Models\EventCategory;
 use App\Models\GoogleCalendarConnection;
 use App\Models\PersonalAccessToken;
 use App\Models\Reminder;
-use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
@@ -214,7 +213,6 @@ class AuthController extends Controller
             ]),
             'approvals' => Approval::where('user_id', $user->id)->orderBy('id')->get(),
             'blockers' => Blocker::where('user_id', $user->id)->orderBy('id')->get(),
-            'scheduler_jobs' => SchedulerJobRecord::where('user_id', $user->id)->orderBy('id')->get(),
             'activity_events' => ActivityEvent::where('user_id', $user->id)->orderBy('id')->get(),
         ]]);
     }

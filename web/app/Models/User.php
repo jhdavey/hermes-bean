@@ -37,6 +37,7 @@ class User extends Authenticatable
     public function getNotificationPreferencesAttribute($value): array
     {
         $decoded = is_string($value) ? json_decode($value, true) : $value;
+
         return array_merge(self::defaultNotificationPreferences(), is_array($decoded) ? $decoded : []);
     }
 
@@ -119,10 +120,5 @@ class User extends Authenticatable
             ->withPivot(['role', 'status', 'invited_email', 'accepted_at'])
             ->wherePivot('status', 'active')
             ->withTimestamps();
-    }
-
-    public function schedulerJobRecords(): HasMany
-    {
-        return $this->hasMany(SchedulerJobRecord::class, 'user_id');
     }
 }

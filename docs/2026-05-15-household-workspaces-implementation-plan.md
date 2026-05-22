@@ -63,7 +63,6 @@ Add nullable-then-backfilled `workspace_id` to:
 - `calendar_events`
 - `approvals`
 - `blockers`
-- `scheduler_job_records`
 - `event_categories`
 
 Also add `created_by_user_id` where shared workspace records need attribution, especially `tasks`, `reminders`, `calendar_events`, and conversation/session/activity rows.

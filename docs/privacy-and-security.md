@@ -13,7 +13,7 @@ This document describes the current privacy/security posture and the controls th
 - Assistant content:
   - Conversation sessions and messages
   - Runtime/activity events
-  - User-created tasks, reminders, calendar-like events, approvals, blockers, and scheduler job records
+  - User-created tasks, reminders, calendar-like events, approvals, and blockers
   - Metadata attached to assistant sessions/messages/resources
 - Operational data:
   - Server request logs and application logs may include IP address, user agent, timestamps, endpoint paths, status codes, and error context depending on deployment logging configuration.

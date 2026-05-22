@@ -92,22 +92,10 @@ return new class extends Migration
             $table->timestamps();
         });
 
-        Schema::create('scheduler_job_records', function (Blueprint $table): void {
-            $table->id();
-            $table->string('name')->index();
-            $table->string('status')->default('queued')->index();
-            $table->timestamp('scheduled_for')->nullable();
-            $table->timestamp('started_at')->nullable();
-            $table->timestamp('finished_at')->nullable();
-            $table->json('payload')->nullable();
-            $table->text('last_error')->nullable();
-            $table->timestamps();
-        });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('scheduler_job_records');
         Schema::dropIfExists('blockers');
         Schema::dropIfExists('approvals');
         Schema::dropIfExists('calendar_events');

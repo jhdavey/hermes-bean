@@ -418,49 +418,6 @@ PHP);
         ]);
     }
 
-    public function test_agent_scheduled_job_claims_are_materialized_on_today_calendar(): void
-    {
-        $this->configureFakeHermes(<<<'PHP'
-#!/usr/bin/env php
-<?php
-echo json_encode([
-    'message' => 'Scheduled Focus block for 3 PM.',
-    'actions' => [[
-        'type' => 'scheduler_job.create',
-        'risk' => 'low',
-        'parameters' => [
-            'name' => 'Focus block',
-            'scheduled_for' => '2026-05-13T15:00:00Z',
-            'payload' => ['kind' => 'user_scheduled_plan'],
-        ],
-    ]],
-], JSON_THROW_ON_ERROR);
-PHP);
-
-        $token = $this->apiToken();
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
-            'title' => 'Visible scheduled plan',
-        ])->assertCreated()->json('data.id');
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Schedule Focus block for 3 PM.',
-        ])->assertCreated()
-            ->assertJsonPath('data.assistant_message.content', 'Scheduled Focus block for 3 PM.')
-            ->assertJsonFragment(['event_type' => 'assistant.scheduler_job.created'])
-            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
-
-        $this->withToken($token)->getJson('/api/today')
-            ->assertOk()
-            ->assertJsonFragment(['title' => 'Focus block'])
-            ->assertJsonPath('data.counts.calendar_events', 1);
-
-        $this->assertDatabaseHas('calendar_events', [
-            'title' => 'Focus block',
-            'starts_at' => '2026-05-13 15:00:00',
-            'status' => 'scheduled',
-        ]);
-    }
-
     public function test_runtime_dashboard_state_exposes_calendar_category_color_and_recurrence_to_agent(): void
     {
         $this->configureFakeHermes(<<<'PHP'

@@ -6,7 +6,6 @@ use App\Models\ActivityEvent;
 use App\Models\CalendarEvent;
 use App\Models\GoogleCalendarConnection;
 use App\Models\Reminder;
-use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -97,20 +96,11 @@ class AssistantDomainApiTest extends TestCase
         ])->assertCreated()
             ->assertJsonPath('data.reason', 'Needs user credentials');
 
-        $this->withToken($token)->postJson('/api/scheduler-jobs', [
-            'name' => 'daily-review',
-            'status' => 'queued',
-            'scheduled_for' => '2026-05-11T07:00:00Z',
-            'payload' => ['timezone' => 'America/Los_Angeles'],
-        ])->assertCreated()
-            ->assertJsonPath('data.name', 'daily-review');
-
         $this->assertDatabaseHas('tasks', ['title' => 'Replace air filter', 'type' => 'maintenance', 'category' => 'Home', 'color' => '#FF9500']);
         $this->assertDatabaseHas('reminders', ['title' => 'Take out bins', 'category' => 'Home', 'color' => '#FF9500']);
         $this->assertDatabaseHas('calendar_events', ['title' => 'Dentist']);
         $this->assertDatabaseHas('approvals', ['title' => 'Confirm booking']);
         $this->assertDatabaseHas('blockers', ['reason' => 'Needs user credentials']);
-        $this->assertDatabaseHas('scheduler_job_records', ['name' => 'daily-review']);
     }
 
     public function test_direct_domain_api_normalizes_explicit_timezone_offsets_to_utc(): void
@@ -134,17 +124,11 @@ class AssistantDomainApiTest extends TestCase
             'ends_at' => '2026-05-18T14:00:00-07:00',
         ])->assertCreated()->json('data.id');
 
-        $jobId = $this->withToken($token)->postJson('/api/scheduler-jobs', [
-            'name' => 'offset-job',
-            'scheduled_for' => '2026-05-18T07:00:00-04:00',
-        ])->assertCreated()->json('data.id');
-
         $this->assertSame('2026-05-18T18:15:00+00:00', Task::findOrFail($taskId)->due_at->utc()->toIso8601String());
         $this->assertSame('2026-05-18T13:30:00+00:00', Reminder::findOrFail($reminderId)->remind_at->utc()->toIso8601String());
         $event = CalendarEvent::findOrFail($eventId);
         $this->assertSame('2026-05-18T20:45:00+00:00', $event->starts_at->utc()->toIso8601String());
         $this->assertSame('2026-05-18T21:00:00+00:00', $event->ends_at->utc()->toIso8601String());
-        $this->assertSame('2026-05-18T11:00:00+00:00', SchedulerJobRecord::findOrFail($jobId)->scheduled_for->utc()->toIso8601String());
     }
 
     public function test_created_tasks_are_immediately_visible_from_database_task_list(): void

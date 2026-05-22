@@ -56,7 +56,6 @@ return new class extends Migration
             'calendar_events',
             'approvals',
             'blockers',
-            'scheduler_job_records',
             'agent_profiles',
             'event_categories',
             'workspaces',
