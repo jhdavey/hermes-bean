@@ -86,7 +86,7 @@ class AgentProfileService
             'status' => 'active',
             'provider' => (string) config('services.hermes_runtime.default_provider', 'openrouter'),
             'model' => (string) config('services.hermes_runtime.default_model', 'gpt-5.5'),
-            'router_mode' => (string) config('services.hermes_runtime.router_mode', 'fixed'),
+            'router_mode' => (string) config('services.hermes_runtime.router_mode', 'heuristic'),
             'runtime_home' => rtrim((string) config('services.hermes_runtime.users_home', ''), '/').'/'.$slug,
             'settings' => [
                 'memory_enabled' => true,

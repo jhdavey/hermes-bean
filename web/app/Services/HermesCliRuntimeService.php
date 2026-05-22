@@ -105,7 +105,8 @@ class HermesCliRuntimeService implements HermesRuntimeService
             ]);
         }
 
-        $command = $this->commandFor($cliPath, $session, $userMessage);
+        $modelRoute = $this->modelRouteFor($userMessage);
+        $command = $this->commandFor($cliPath, $session, $userMessage, $modelRoute['model']);
         $profile = config('services.hermes_runtime.profile');
 
         $started = $this->recordEvent($session, 'runtime.hermes_cli_started', [
@@ -113,6 +114,9 @@ class HermesCliRuntimeService implements HermesRuntimeService
             'command' => basename($cliPath),
             'workdir' => config('services.hermes_runtime.workdir'),
             'profile' => $profile,
+            'provider' => config('services.hermes_runtime.default_provider'),
+            'model' => $modelRoute['model'],
+            'model_route' => $modelRoute,
         ], 'hermes.cli', 'started');
         $session->update(['status' => 'running', 'last_activity_at' => now()]);
 
@@ -221,7 +225,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
         });
     }
 
-    private function commandFor(string $cliPath, ConversationSession $session, ConversationMessage $message): array
+    private function commandFor(string $cliPath, ConversationSession $session, ConversationMessage $message, ?string $model = null): array
     {
         $command = [$cliPath];
         $profile = config('services.hermes_runtime.profile');
@@ -241,13 +245,82 @@ class HermesCliRuntimeService implements HermesRuntimeService
             $command[] = (string) $provider;
         }
 
-        $model = config('services.hermes_runtime.default_model');
         if (filled($model)) {
             $command[] = '-m';
             $command[] = (string) $model;
         }
 
         return $command;
+    }
+
+    /**
+     * @return array{mode:string,tier:string,model:string,reason:string}
+     */
+    private function modelRouteFor(ConversationMessage $message): array
+    {
+        $mode = (string) config('services.hermes_runtime.router_mode', 'heuristic');
+        $defaultModel = (string) config('services.hermes_runtime.default_model', 'gpt-5.5');
+
+        if ($mode !== 'heuristic') {
+            return [
+                'mode' => $mode,
+                'tier' => 'fixed',
+                'model' => $defaultModel,
+                'reason' => 'Fixed router mode uses the configured default model.',
+            ];
+        }
+
+        $content = trim(mb_strtolower((string) $message->content));
+        $tier = $this->messageLooksSimpleConversation($content)
+            ? 'simple'
+            : ($this->messageLooksSimpleDashboardCrud($content) ? 'standard' : 'complex');
+
+        return [
+            'mode' => $mode,
+            'tier' => $tier,
+            'model' => $this->modelForTier($tier, $defaultModel),
+            'reason' => match ($tier) {
+                'simple' => 'Greeting, thanks, or small-talk response with no app mutation requested.',
+                'standard' => 'Straightforward dashboard CRUD request for an internal Bean resource.',
+                default => 'Complex, ambiguous, multi-step, external, or high-risk request.',
+            },
+        ];
+    }
+
+    private function modelForTier(string $tier, string $defaultModel): string
+    {
+        return match ($tier) {
+            'simple' => (string) config('services.hermes_runtime.simple_model', 'gpt-5.4-mini'),
+            'standard' => (string) config('services.hermes_runtime.standard_model', 'gpt-5.4'),
+            default => (string) config('services.hermes_runtime.complex_model', $defaultModel),
+        };
+    }
+
+    private function messageLooksSimpleConversation(string $content): bool
+    {
+        if ($content === '' || mb_strlen($content) > 180 || $this->containsDashboardMutationVerb($content)) {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(hi|hello|hey|yo|good morning|good afternoon|good evening|thanks|thank you|appreciate it|how are you|what can you do|who are you|tell me a joke)\b/u', $content);
+    }
+
+    private function messageLooksSimpleDashboardCrud(string $content): bool
+    {
+        if (! $this->containsDashboardMutationVerb($content)) {
+            return false;
+        }
+
+        if (! (bool) preg_match('/\b(task|todo|reminder|event|calendar|category|blocker|approval)\b/u', $content)) {
+            return false;
+        }
+
+        return ! (bool) preg_match('/\b(plan|organize|optimize|reschedule|move|recurring|repeat|every|sync|google|email|mail|payment|purchase|deploy|delete account|all future|household|shared|if|when|unless|compare|decide|recommend)\b/u', $content);
+    }
+
+    private function containsDashboardMutationVerb(string $content): bool
+    {
+        return (bool) preg_match('/\b(create|add|make|update|edit|change|rename|delete|remove|complete|mark|set|clear|cancel)\b/u', $content);
     }
 
     private function configuredWorkdir(): ?string

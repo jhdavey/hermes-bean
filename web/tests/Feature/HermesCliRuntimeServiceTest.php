@@ -128,6 +128,61 @@ PHP);
         ]);
     }
 
+    public function test_heuristic_router_selects_simple_standard_and_complex_models(): void
+    {
+        $script = $this->writeExecutable('router-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = $argv[array_search('-q', $argv, true) + 1] ?? '';
+$payloadJson = trim(substr($prompt, strpos($prompt, "Runtime payload:") + strlen("Runtime payload:")));
+$payload = json_decode($payloadJson, true, flags: JSON_THROW_ON_ERROR);
+file_put_contents(getenv('HERMES_FAKE_LOG'), json_encode([
+    'content' => $payload['message']['content'],
+    'argv' => $argv,
+], JSON_THROW_ON_ERROR).PHP_EOL, FILE_APPEND);
+echo json_encode(['message' => 'ok', 'actions' => []], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.router_mode', 'heuristic');
+        config()->set('services.hermes_runtime.simple_model', 'cheap-fast-model');
+        config()->set('services.hermes_runtime.standard_model', 'capable-cheap-model');
+        config()->set('services.hermes_runtime.complex_model', 'frontier-model');
+        config()->set('services.hermes_runtime.environment', [
+            'HERMES_FAKE_LOG' => $this->tempDir.'/router.jsonl',
+        ]);
+
+        $token = $this->apiToken('router-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        foreach ([
+            'hey Bean' => 'cheap-fast-model',
+            'create a Maintenance category and make it yellow' => 'capable-cheap-model',
+            'plan my day around school pickup and move anything that conflicts' => 'frontier-model',
+        ] as $message => $expectedModel) {
+            $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+                'content' => $message,
+            ])->assertCreated();
+
+            $lastInvocation = collect(explode(PHP_EOL, trim(File::get($this->tempDir.'/router.jsonl'))))
+                ->map(fn (string $line): array => json_decode($line, true, flags: JSON_THROW_ON_ERROR))
+                ->last();
+            $this->assertSame($message, $lastInvocation['content']);
+            $this->assertContains($expectedModel, $lastInvocation['argv']);
+        }
+
+        $routes = ActivityEvent::where('conversation_session_id', $sessionId)
+            ->where('event_type', 'runtime.hermes_cli_started')
+            ->orderBy('id')
+            ->pluck('payload')
+            ->map(fn (array $payload): string => $payload['model_route']['tier'])
+            ->all();
+
+        $this->assertSame(['simple', 'standard', 'complex'], $routes);
+    }
+
     public function test_household_session_uses_household_agent_profile_runtime_home_and_workspace_payload(): void
     {
         $script = $this->writeExecutable('fake-household-hermes.php', <<<'PHP'
