@@ -420,9 +420,12 @@ class DomainResourceController extends Controller
     public function approveApproval(Request $request, string $approval): JsonResponse
     {
         $ownedApproval = Approval::where('user_id', $request->user()->id)->findOrFail($approval);
+        $validated = $request->validate([
+            'always_approve' => ['sometimes', 'boolean'],
+        ]);
 
         try {
-            $result = $this->actions->approve($ownedApproval);
+            $result = $this->actions->approve($ownedApproval, (bool) ($validated['always_approve'] ?? false));
         } catch (InvalidArgumentException $exception) {
             return response()->json(['message' => $exception->getMessage()], 409);
         }

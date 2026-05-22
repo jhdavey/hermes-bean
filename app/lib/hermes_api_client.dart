@@ -656,6 +656,23 @@ class HermesApiClient {
     ).map((json) => HermesActivityEvent.fromJson(_expectMap(json))).toList();
   }
 
+  Future<HermesApprovalResult> approveApproval(
+    int approvalId, {
+    bool alwaysApprove = false,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/approvals/$approvalId/approve',
+      body: {if (alwaysApprove) 'always_approve': true},
+    );
+    return HermesApprovalResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesApprovalResult> denyApproval(int approvalId) async {
+    final data = await _sendJson('POST', '/approvals/$approvalId/deny');
+    return HermesApprovalResult.fromJson(_expectMap(data['data']));
+  }
+
   HermesAuthResult _rememberAuth(HermesAuthResult result) {
     bearerToken = result.token;
     return result;
@@ -1695,17 +1712,42 @@ class HermesActivityEvent {
 }
 
 class HermesApproval {
-  const HermesApproval({required this.id, required this.title, this.status});
+  const HermesApproval({
+    required this.id,
+    required this.title,
+    this.status,
+    this.description,
+    this.payload = const {},
+  });
 
   final int id;
   final String title;
   final String? status;
+  final String? description;
+  final Map<String, Object?> payload;
 
   factory HermesApproval.fromJson(Map<String, Object?> json) => HermesApproval(
     id: _expectInt(json['id']),
     title: _readTitle(json),
     status: json['status'] as String?,
+    description: json['description']?.toString(),
+    payload: json['payload'] == null ? const {} : _expectMap(json['payload']),
   );
+}
+
+class HermesApprovalResult {
+  const HermesApprovalResult({required this.approval, this.events = const []});
+
+  final HermesApproval approval;
+  final List<HermesActivityEvent> events;
+
+  factory HermesApprovalResult.fromJson(Map<String, Object?> json) =>
+      HermesApprovalResult(
+        approval: HermesApproval.fromJson(_expectMap(json['approval'])),
+        events: _expectList(json['events'] ?? const [])
+            .map((event) => HermesActivityEvent.fromJson(_expectMap(event)))
+            .toList(),
+      );
 }
 
 class HermesBlocker {

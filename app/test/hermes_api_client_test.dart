@@ -700,6 +700,41 @@ void main() {
             );
           }
 
+          if (request.method == 'POST' &&
+              request.path == '/approvals/7/approve') {
+            expect(request.body, {'always_approve': true});
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {
+                  'approval': {
+                    'id': 7,
+                    'title': 'Send launch email',
+                    'status': 'approved',
+                  },
+                  'events': [
+                    {'id': 3, 'event_type': 'assistant.approval.approved'},
+                  ],
+                },
+              }),
+            );
+          }
+
+          if (request.method == 'POST' && request.path == '/approvals/8/deny') {
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {
+                  'approval': {
+                    'id': 8,
+                    'title': 'Deploy release',
+                    'status': 'denied',
+                  },
+                },
+              }),
+            );
+          }
+
           fail('Unexpected request: ${request.method} ${request.path}');
         },
       );
@@ -732,12 +767,21 @@ void main() {
         'assistant.calendar_event.created',
       ]);
 
+      final approved = await client.approveApproval(7, alwaysApprove: true);
+      expect(approved.approval.status, 'approved');
+      expect(approved.events.single.eventType, 'assistant.approval.approved');
+
+      final denied = await client.denyApproval(8);
+      expect(denied.approval.status, 'denied');
+
       expect(requests.map((r) => '${r.method} ${r.uri}'), [
         'POST http://local.test/api/assistant/sessions',
         'GET http://local.test/api/assistant/sessions/42',
         'POST http://local.test/api/assistant/sessions/42/cancel',
         'POST http://local.test/api/assistant/sessions/42/messages',
         'GET http://local.test/api/assistant/sessions/42/events',
+        'POST http://local.test/api/approvals/7/approve',
+        'POST http://local.test/api/approvals/8/deny',
       ]);
     },
   );

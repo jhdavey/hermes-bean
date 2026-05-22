@@ -532,6 +532,92 @@ PHP);
         $this->assertSame(1, Task::where('conversation_session_id', $sessionId)->where('title', 'Book flights')->count());
     }
 
+    public function test_event_category_creation_is_low_risk_and_available_in_runtime_payload(): void
+    {
+        $script = $this->writeExecutable('category-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = $argv[array_search('-q', $argv, true) + 1] ?? '';
+$payloadJson = trim(substr($prompt, strpos($prompt, "Runtime payload:") + strlen("Runtime payload:")));
+$payload = json_decode($payloadJson, true, flags: JSON_THROW_ON_ERROR);
+file_put_contents(getenv('HERMES_FAKE_LOG'), json_encode($payload['allowed_action_schema'], JSON_THROW_ON_ERROR));
+echo json_encode([
+    'message' => 'I created the Maintenance category in yellow.',
+    'actions' => [[
+        'type' => 'event_category.create',
+        'risk' => 'medium',
+        'parameters' => ['name' => 'Maintenance', 'color' => '#FACC15'],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.workdir', $this->tempDir);
+        config()->set('services.hermes_runtime.environment', [
+            'HERMES_FAKE_LOG' => $this->tempDir.'/allowed-actions.json',
+        ]);
+
+        $token = $this->apiToken('category-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a Maintenance category and make it yellow.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.event_category.saved']);
+
+        $this->assertDatabaseHas('event_categories', [
+            'name' => 'Maintenance',
+            'color' => '#FACC15',
+        ]);
+        $this->assertSame(0, Approval::where('conversation_session_id', $sessionId)->count());
+
+        $allowedActions = json_decode(File::get($this->tempDir.'/allowed-actions.json'), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertContains('event_category.create', $allowedActions['low_risk']);
+    }
+
+    public function test_always_approve_persists_action_type_exemption(): void
+    {
+        $script = $this->writeExecutable('always-approval-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'This needs approval before sending email.',
+    'actions' => [[
+        'type' => 'email.send',
+        'risk' => 'high',
+        'title' => 'Send email',
+        'description' => 'Send an email.',
+        'parameters' => ['to' => 'lauren@example.com', 'subject' => 'Hello'],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('always-approve-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Send Lauren an email.',
+        ])->assertCreated()
+            ->assertJsonFragment(['event_type' => 'assistant.approval.created']);
+
+        $approval = Approval::where('conversation_session_id', $sessionId)->firstOrFail();
+
+        $this->withToken($token)->postJson("/api/approvals/{$approval->id}/approve", [
+            'always_approve' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.approval.status', 'approved');
+
+        $profile = AgentProfile::query()->firstOrFail();
+        $this->assertContains('email.send', $profile->approval_policy['always_approve_action_types']);
+    }
+
     public function test_onboarding_agent_profile_update_marks_user_complete_and_saves_memory_settings(): void
     {
         $script = $this->writeExecutable('onboarding-hermes.php', <<<'PHP'

@@ -91,13 +91,13 @@ class StructuredHermesActionService
     /**
      * @return array{approval: Approval, events: Collection<int, ActivityEvent>}
      */
-    public function approve(Approval $approval): array
+    public function approve(Approval $approval, bool $alwaysApprove = false): array
     {
         if ($approval->status !== 'pending') {
             throw new InvalidArgumentException('Only pending approvals can be approved.');
         }
 
-        return DB::transaction(function () use ($approval): array {
+        return DB::transaction(function () use ($approval, $alwaysApprove): array {
             $session = ConversationSession::find($approval->conversation_session_id);
             if (! $session) {
                 throw new InvalidArgumentException('Approval is not attached to an active conversation session.');
@@ -109,11 +109,15 @@ class StructuredHermesActionService
             }
 
             $events = $this->executeAction($session, $action)->values();
+            if ($alwaysApprove) {
+                $this->rememberAlwaysApprovedAction($session, $action);
+            }
 
             $approval->update([
                 'status' => 'approved',
                 'payload' => array_merge($approval->payload ?? [], [
                     'approved_at' => now()->toIso8601String(),
+                    'always_approved' => $alwaysApprove,
                     'executed_event_ids' => $events->pluck('id')->all(),
                 ]),
             ]);
@@ -154,12 +158,22 @@ class StructuredHermesActionService
 
     private function requiresApproval(ConversationSession $session, array $action): bool
     {
+        $type = (string) ($action['type'] ?? '');
+        $profile = $this->profileForSession($session);
+        $alwaysApprovedTypes = $profile?->approval_policy['always_approve_action_types'] ?? [];
+        if (is_array($alwaysApprovedTypes) && in_array($type, $alwaysApprovedTypes, true)) {
+            return false;
+        }
+
+        if (in_array($type, ['event_category.create', 'event_category.update'], true)) {
+            return false;
+        }
+
         $risk = strtolower((string) ($action['risk'] ?? 'medium'));
         if (! in_array($risk, ['low', 'safe'], true)) {
             return true;
         }
 
-        $type = (string) ($action['type'] ?? '');
         if ($this->isLowRiskDashboardAction($type)) {
             return false;
         }
@@ -169,11 +183,36 @@ class StructuredHermesActionService
             return false;
         }
 
-        $profile = $this->profileForSession($session);
         $required = $profile?->approval_policy['require_approval_for']
             ?? config('services.hermes_runtime.require_approval_for', []);
 
         return is_array($required) && in_array($category, $required, true);
+    }
+
+    private function rememberAlwaysApprovedAction(ConversationSession $session, array $action): void
+    {
+        $type = (string) ($action['type'] ?? '');
+        if ($type === '') {
+            return;
+        }
+
+        $profile = $this->profileForSession($session);
+        if (! $profile) {
+            return;
+        }
+
+        $policy = $profile->approval_policy ?? [];
+        $alwaysApprovedTypes = $policy['always_approve_action_types'] ?? [];
+        if (! is_array($alwaysApprovedTypes)) {
+            $alwaysApprovedTypes = [];
+        }
+
+        $policy['always_approve_action_types'] = collect($alwaysApprovedTypes)
+            ->push($type)
+            ->unique()
+            ->values()
+            ->all();
+        $profile->update(['approval_policy' => $policy]);
     }
 
     private function isLowRiskDashboardAction(string $type): bool

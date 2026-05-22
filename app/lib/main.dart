@@ -670,6 +670,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _beanVoiceDraft;
   final Set<int> _dismissedReminderBannerIds = <int>{};
   final Set<int> _notifiedReminderIds = <int>{};
+  int? _shownApprovalSheetId;
+  bool _approvalSheetOpen = false;
   final _ReminderNotificationService _reminderNotifications =
       _ReminderNotificationService();
   Timer? _reminderDueTimer;
@@ -1528,6 +1530,87 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ),
       );
     }
+  }
+
+  HermesApproval? _nextPendingApproval() {
+    for (final approval in _approvals) {
+      if ((approval.status ?? 'pending') == 'pending') return approval;
+    }
+
+    return null;
+  }
+
+  void _scheduleApprovalSheet() {
+    if (_phase != _AuthPhase.signedIn || _approvalSheetOpen) return;
+    final approval = _nextPendingApproval();
+    if (approval == null || _shownApprovalSheetId == approval.id) return;
+
+    _shownApprovalSheetId = approval.id;
+    _approvalSheetOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        _approvalSheetOpen = false;
+        return;
+      }
+
+      final currentApproval = _approvals
+          .where(
+            (candidate) =>
+                candidate.id == approval.id &&
+                (candidate.status ?? 'pending') == 'pending',
+          )
+          .firstOrNull;
+      if (currentApproval == null) {
+        _approvalSheetOpen = false;
+        return;
+      }
+
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => _ApprovalRequestSheet(
+          approval: currentApproval,
+          onApprove: (approval) => _approveApproval(approval),
+          onAlwaysApprove: (approval) =>
+              _approveApproval(approval, alwaysApprove: true),
+          onDeny: _denyApproval,
+          onChange: _changeApproval,
+        ),
+      );
+      _approvalSheetOpen = false;
+    });
+  }
+
+  Future<void> _approveApproval(
+    HermesApproval approval, {
+    bool alwaysApprove = false,
+  }) async {
+    await widget.apiClient.approveApproval(
+      approval.id,
+      alwaysApprove: alwaysApprove,
+    );
+    if (!mounted) return;
+    await _refreshSignedInViews();
+  }
+
+  Future<void> _denyApproval(HermesApproval approval) async {
+    await widget.apiClient.denyApproval(approval.id);
+    if (!mounted) return;
+    await _refreshSignedInViews();
+  }
+
+  Future<void> _changeApproval(
+    HermesApproval approval,
+    String revisedRequest,
+  ) async {
+    await widget.apiClient.denyApproval(approval.id);
+    if (!mounted) return;
+    await _refreshSignedInViews();
+    if (!mounted) return;
+    _selectDestination(_HomeDestination.bean);
+    await _sendChat(revisedRequest);
   }
 
   Future<void> _toggleTaskCompletion(HermesTask task) async {
@@ -2556,6 +2639,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
     }
     final user = _user!;
+    _scheduleApprovalSheet();
     final showAgentOnboarding =
         _forceAgentOnboarding || _editingAgentPreferences;
     final showBeanIntroBubble =
@@ -2638,7 +2722,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     calendar: _calendar,
     eventCategories: _eventCategories,
     googleCalendarStatus: _googleCalendarStatus,
-    approvals: _approvals,
     events: _events,
     messages: _messages,
     busy: _busy,
@@ -3575,7 +3658,6 @@ class _CommandCenterContent extends StatelessWidget {
     required this.calendar,
     required this.eventCategories,
     required this.googleCalendarStatus,
-    required this.approvals,
     required this.events,
     required this.messages,
     required this.busy,
@@ -3627,7 +3709,6 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
-  final List<HermesApproval> approvals;
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
   final bool busy;
@@ -3738,16 +3819,12 @@ class _CommandCenterContent extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final pendingApprovals = approvals
-            .where((approval) => (approval.status ?? 'pending') == 'pending')
-            .toList();
         final activeTasks = _visibleSortedTasks(tasks);
         final selectedDayTasks = _tasksForDay(activeTasks, DateTime.now());
         final beanPanel = _HeroChatCard(
           messages: messages,
           busy: busy,
           runState: chatRunState,
-          approvals: pendingApprovals,
           events: events,
           voiceListening: beanVoiceListening,
           voiceDraft: beanVoiceDraft,
@@ -3763,7 +3840,6 @@ class _CommandCenterContent extends StatelessWidget {
             calendar: calendar,
             eventCategories: eventCategories,
             googleCalendarStatus: googleCalendarStatus,
-            approvals: pendingApprovals,
             selectedDay: selectedCalendarDay,
             showMonth: showCalendarMonth,
             startHour: calendarStartHour,
@@ -3807,7 +3883,6 @@ class _CommandCenterContent extends StatelessWidget {
             launchExternalUrl: launchExternalUrl,
             user: user,
             googleCalendarStatus: googleCalendarStatus,
-            approvals: pendingApprovals,
             calendarStartHour: calendarStartHour,
             calendarEndHour: calendarEndHour,
             onCalendarStartHourChanged: onCalendarStartHourChanged,
@@ -3878,7 +3953,6 @@ class _HeroChatCard extends StatefulWidget {
     required this.messages,
     required this.busy,
     required this.runState,
-    required this.approvals,
     required this.events,
     required this.voiceListening,
     required this.voiceDraft,
@@ -3891,7 +3965,6 @@ class _HeroChatCard extends StatefulWidget {
   final List<HermesMessage> messages;
   final bool busy;
   final String runState;
-  final List<HermesApproval> approvals;
   final List<HermesActivityEvent> events;
   final bool voiceListening;
   final String? voiceDraft;
@@ -3964,9 +4037,6 @@ class _HeroChatCardState extends State<_HeroChatCard> {
 
   @override
   Widget build(BuildContext context) {
-    final pendingApprovals = widget.approvals
-        .where((approval) => (approval.status ?? 'pending') == 'pending')
-        .toList();
     return SizedBox.expand(
       key: const Key('chat-view'),
       child: Stack(
@@ -3994,10 +4064,7 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                 child: ListView.builder(
                   key: const Key('chat-message-list'),
                   controller: _scrollController,
-                  padding: EdgeInsets.only(
-                    bottom: pendingApprovals.isEmpty ? 12 : 142,
-                    top: 8,
-                  ),
+                  padding: const EdgeInsets.only(bottom: 12, top: 8),
                   itemCount: widget.messages.length + (widget.busy ? 1 : 0),
                   itemBuilder: (context, index) {
                     if (index >= widget.messages.length) {
@@ -4033,13 +4100,6 @@ class _HeroChatCardState extends State<_HeroChatCard> {
               ),
             ],
           ),
-          if (pendingApprovals.isNotEmpty)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 84,
-              child: _ApprovalBottomDock(approvals: pendingApprovals),
-            ),
         ],
       ),
     );
@@ -4174,64 +4234,232 @@ class _ChatActivityMenu extends StatelessWidget {
   );
 }
 
-class _ApprovalBottomDock extends StatelessWidget {
-  const _ApprovalBottomDock({required this.approvals});
+typedef _ApprovalAction = Future<void> Function(HermesApproval approval);
+typedef _ApprovalChangeAction =
+    Future<void> Function(HermesApproval approval, String revisedRequest);
 
-  final List<HermesApproval> approvals;
+class _ApprovalRequestSheet extends StatefulWidget {
+  const _ApprovalRequestSheet({
+    required this.approval,
+    required this.onApprove,
+    required this.onAlwaysApprove,
+    required this.onDeny,
+    required this.onChange,
+  });
+
+  final HermesApproval approval;
+  final _ApprovalAction onApprove;
+  final _ApprovalAction onAlwaysApprove;
+  final _ApprovalAction onDeny;
+  final _ApprovalChangeAction onChange;
 
   @override
-  Widget build(BuildContext context) => Container(
-    key: const Key('chat-approval-bottom-dock'),
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: const Color(0xFFFFFBEB),
-      borderRadius: BorderRadius.circular(24),
-      border: Border.all(color: HeyBeanTheme.warning.withValues(alpha: .36)),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x22000000),
-          blurRadius: 24,
-          offset: Offset(0, 14),
+  State<_ApprovalRequestSheet> createState() => _ApprovalRequestSheetState();
+}
+
+class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
+  final TextEditingController _changeController = TextEditingController();
+  bool _changing = false;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _changeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+      if (mounted) Navigator.of(context).pop();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final approval = widget.approval;
+    final actionDescription = _approvalActionDescription(approval);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        key: const Key('global-approval-bottom-sheet'),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        decoration: const BoxDecoration(
+          color: HeyBeanTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x26000000),
+              blurRadius: 30,
+              offset: Offset(0, -12),
+            ),
+          ],
         ),
-      ],
-    ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Approval needed',
-          style: TextStyle(fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 8),
-        for (final approval in approvals.take(2))
-          Row(
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.priority_high_rounded, size: 18),
-              const SizedBox(width: 8),
-              Expanded(child: Text(approval.title)),
-              TextButton(
-                key: const Key('review-approval-action'),
-                onPressed: () => showDialog<void>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Pending approval'),
-                    content: Text(approval.title),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('OK'),
-                      ),
-                    ],
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: HeyBeanTheme.border,
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-                child: const Text('Review'),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: HeyBeanTheme.warning.withValues(alpha: .14),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(
+                      Icons.verified_user_rounded,
+                      color: HeyBeanTheme.warning,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'I need approval',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 3),
+                        const Text(
+                          "Approve or deny Bean's next action",
+                          style: TextStyle(
+                            color: HeyBeanTheme.muted,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: HeyBeanTheme.warning.withValues(alpha: .28),
+                  ),
+                ),
+                child: Text(
+                  actionDescription,
+                  key: const Key('approval-action-description'),
+                  style: const TextStyle(
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                    color: HeyBeanTheme.text,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (_changing) ...[
+                TextField(
+                  key: const Key('approval-change-input'),
+                  controller: _changeController,
+                  minLines: 2,
+                  maxLines: 4,
+                  enabled: !_busy,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Change Bean’s instruction',
+                    hintText: 'Tell Bean what to do instead…',
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.end,
+                children: [
+                  TextButton(
+                    key: const Key('approval-deny-action'),
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() => widget.onDeny(approval)),
+                    child: const Text('Deny'),
+                  ),
+                  OutlinedButton(
+                    key: const Key('approval-change-action'),
+                    onPressed: _busy
+                        ? null
+                        : () {
+                            if (!_changing) {
+                              setState(() => _changing = true);
+                              return;
+                            }
+                            final revised = _changeController.text.trim();
+                            if (revised.isEmpty) return;
+                            _run(() => widget.onChange(approval, revised));
+                          },
+                    child: Text(_changing ? 'Send change' : 'Change'),
+                  ),
+                  OutlinedButton(
+                    key: const Key('approval-always-approve-action'),
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() => widget.onAlwaysApprove(approval)),
+                    child: const Text('Always approve'),
+                  ),
+                  FilledButton(
+                    key: const Key('approval-approve-action'),
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() => widget.onApprove(approval)),
+                    child: _busy
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Approve'),
+                  ),
+                ],
               ),
             ],
           ),
-      ],
-    ),
-  );
+        ),
+      ),
+    );
+  }
+}
+
+String _approvalActionDescription(HermesApproval approval) {
+  final action = approval.payload['action'];
+  final actionMap = action is Map
+      ? action.map((key, value) => MapEntry(key.toString(), value))
+      : const <String, Object?>{};
+  final type = (actionMap['type'] ?? approval.title).toString();
+  final risk = (actionMap['risk'] ?? 'unknown').toString().toLowerCase();
+  final description = approval.description?.trim();
+  if (description != null && description.isNotEmpty) {
+    return '$description This action is marked $risk risk.';
+  }
+
+  return 'Bean wants to ${type.replaceAll('.', ' ')}. This action is marked $risk risk.';
 }
 
 class _ChatRunStatePill extends StatelessWidget {
@@ -4405,84 +4633,6 @@ class _MessageBubble extends StatelessWidget {
           Text(message),
         ],
       ),
-    ),
-  );
-}
-
-class _ApprovalBanner extends StatelessWidget {
-  const _ApprovalBanner({required this.approval});
-
-  final HermesApproval approval;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: const Color(0xFFFFFBEB),
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: .42)),
-      boxShadow: [
-        BoxShadow(
-          color: const Color(0xFFF59E0B).withValues(alpha: .12),
-          blurRadius: 22,
-          offset: const Offset(0, 12),
-        ),
-      ],
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: HeyBeanTheme.warning,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: const Icon(Icons.priority_high_rounded, color: Colors.white),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Approval needed',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: HeyBeanTheme.text,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                approval.title,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: HeyBeanTheme.muted,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        FilledButton(
-          key: const Key('review-approval-action'),
-          onPressed: () => showDialog<void>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('Pending approval'),
-              content: Text(approval.title),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          ),
-          child: const Text('Review'),
-        ),
-      ],
     ),
   );
 }
@@ -4718,7 +4868,6 @@ class _TodayHomeView extends StatelessWidget {
     required this.calendar,
     required this.eventCategories,
     required this.googleCalendarStatus,
-    required this.approvals,
     required this.selectedDay,
     required this.showMonth,
     required this.startHour,
@@ -4741,7 +4890,6 @@ class _TodayHomeView extends StatelessWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
-  final List<HermesApproval> approvals;
   final DateTime selectedDay;
   final bool showMonth;
   final int startHour;
@@ -4817,10 +4965,6 @@ class _TodayHomeView extends StatelessWidget {
     return Column(
       key: const Key('today-view'),
       children: [
-        if (approvals.isNotEmpty) ...[
-          _ApprovalBanner(approval: approvals.first),
-          const SizedBox(height: 16),
-        ],
         Column(
           key: const Key('calendar-view'),
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -10541,7 +10685,6 @@ class _SettingsView extends StatelessWidget {
     required this.launchExternalUrl,
     required this.user,
     this.googleCalendarStatus,
-    required this.approvals,
     required this.calendarStartHour,
     required this.calendarEndHour,
     required this.onCalendarStartHourChanged,
@@ -10559,7 +10702,6 @@ class _SettingsView extends StatelessWidget {
   final ExternalUrlLauncher launchExternalUrl;
   final HermesUser user;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
-  final List<HermesApproval> approvals;
   final int calendarStartHour;
   final int calendarEndHour;
   final ValueChanged<int> onCalendarStartHourChanged;
@@ -10633,13 +10775,6 @@ class _SettingsView extends StatelessWidget {
               endHour: calendarEndHour,
               onStartHourChanged: onCalendarStartHourChanged,
               onEndHourChanged: onCalendarEndHourChanged,
-            ),
-            _CompactItemTile(
-              icon: Icons.verified_user_outlined,
-              title: 'Approval rules',
-              subtitle: approvals.isEmpty
-                  ? 'No pending approvals'
-                  : '${approvals.length} pending approval needs review',
             ),
           ],
         ),

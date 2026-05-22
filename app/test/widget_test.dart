@@ -1121,13 +1121,34 @@ void main() {
   testWidgets(
     'Hermes Bean command center renders chat, progress, surfaces, and approvals',
     (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient()
+        ..approvals = const [
+          HermesApproval(
+            id: 7,
+            title: 'Review outgoing email before Bean sends it',
+            status: 'pending',
+            description: 'Bean wants to send an email to Lauren.',
+            payload: {
+              'action': {'type': 'email.send', 'risk': 'high'},
+            },
+          ),
+        ];
       await tester.pumpWidget(
-        HermesBeanApp(
-          apiClient: _SignedInFakeHermesApiClient(),
-          tokenStore: _MemoryAuthTokenStore(),
-        ),
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
       await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('global-approval-bottom-sheet')),
+        findsOneWidget,
+      );
+      expect(find.text('I need approval'), findsOneWidget);
+      expect(find.text("Approve or deny Bean's next action"), findsOneWidget);
+      expect(find.textContaining('high risk'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('approval-always-approve-action')));
+      await tester.pumpAndSettle();
+      expect(api.approvedApprovalId, 7);
+      expect(api.alwaysApprovedApproval, isTrue);
 
       expect(find.text('HeyBean'), findsNothing);
       expect(find.text('Bean assistant'), findsNothing);
@@ -1147,10 +1168,7 @@ void main() {
       expect(find.text('Agent progress'), findsNothing);
       expect(find.text('Activity feed'), findsNothing);
       expect(find.text('Pending approvals'), findsNothing);
-      expect(
-        find.byKey(const Key('chat-approval-bottom-dock')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('chat-approval-bottom-dock')), findsNothing);
 
       for (final label in <String>[
         'Calendar',
@@ -1755,13 +1773,6 @@ void main() {
       expect(api.sentMessages, ['Help me plan today']);
       expect(find.text('Done — I updated your day.'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('review-approval-action')));
-      await tester.pumpAndSettle();
-      expect(find.text('Pending approval'), findsOneWidget);
-      expect(find.textContaining('Review outgoing email'), findsWidgets);
-      await tester.tap(find.text('OK'));
-      await tester.pumpAndSettle();
-
       await tester.tap(find.byKey(const Key('nav-settings')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
@@ -1770,7 +1781,7 @@ void main() {
       expect(find.text('Calendar preferences'), findsOneWidget);
       expect(find.text('Start hour'), findsOneWidget);
       expect(find.text('End hour'), findsOneWidget);
-      expect(find.text('Approval rules'), findsOneWidget);
+      expect(find.text('Approval rules'), findsNothing);
       expect(find.byKey(const Key('delete-account-action')), findsOneWidget);
 
       await tester.ensureVisible(
@@ -4592,6 +4603,10 @@ class _FakeHermesApiClient extends HermesApiClient {
       const HermesNotificationPreferences();
   final passwordResetRequests = <String>[];
   HermesReminder? bannerUpdatedReminder;
+  List<HermesApproval> approvals = const [];
+  int? approvedApprovalId;
+  bool alwaysApprovedApproval = false;
+  int? deniedApprovalId;
 
   HermesUser _user({required String name, required String email}) {
     final persistedPersonality = staleSettingsAfterUpdate
@@ -4808,14 +4823,48 @@ class _FakeHermesApiClient extends HermesApiClient {
       reminders: await listReminders(),
       calendarEvents: await listCalendarEvents(),
       activityEvents: await pollActivityEvents(42),
-      approvals: const [
-        HermesApproval(
-          id: 7,
-          title: 'Review outgoing email before Hermes sends it',
-          status: 'pending',
-        ),
-      ],
+      approvals: approvals,
       blockers: const [],
+    );
+  }
+
+  @override
+  Future<HermesApprovalResult> approveApproval(
+    int approvalId, {
+    bool alwaysApprove = false,
+  }) async {
+    approvedApprovalId = approvalId;
+    alwaysApprovedApproval = alwaysApprove;
+    final approval = approvals.firstWhere((item) => item.id == approvalId);
+    approvals = approvals
+        .where((item) => item.id != approvalId)
+        .toList(growable: false);
+    return HermesApprovalResult(
+      approval: HermesApproval(
+        id: approval.id,
+        title: approval.title,
+        status: 'approved',
+        description: approval.description,
+        payload: approval.payload,
+      ),
+    );
+  }
+
+  @override
+  Future<HermesApprovalResult> denyApproval(int approvalId) async {
+    deniedApprovalId = approvalId;
+    final approval = approvals.firstWhere((item) => item.id == approvalId);
+    approvals = approvals
+        .where((item) => item.id != approvalId)
+        .toList(growable: false);
+    return HermesApprovalResult(
+      approval: HermesApproval(
+        id: approval.id,
+        title: approval.title,
+        status: 'denied',
+        description: approval.description,
+        payload: approval.payload,
+      ),
     );
   }
 
