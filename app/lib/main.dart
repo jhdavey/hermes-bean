@@ -1241,7 +1241,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final runToken = ++_chatRunToken;
     setState(() {
       _busy = true;
-      _chatRunState = 'Hermes is working…';
+      _chatRunState = 'Bean is working…';
       _messages.add(
         HermesMessage(id: _messages.length + 1, role: 'user', content: trimmed),
       );
