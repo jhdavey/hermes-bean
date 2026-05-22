@@ -202,10 +202,11 @@ class GoogleCalendarSyncService
                 $endsAt = $this->googleDateTime($item['end'] ?? []) ?? $startsAt;
                 $event = $this->existingGoogleEvent($workspace, $connection, $calendarId, (string) $item['id']);
                 $existingMetadata = $event->exists ? ($event->metadata ?? []) : [];
-                $preserveHeyBeanCategory = $this->shouldPreserveHeyBeanCategory($event);
+                $preserveHeyBeanSource = $this->isHeyBeanExportedEvent($event);
+                $preserveEventCategory = $preserveHeyBeanSource || $this->shouldPreserveExistingCategory($event);
                 $calendarSummary = $this->calendarSummary($connection, $calendarId);
                 $eventMetadata = array_merge($existingMetadata, [
-                    'source' => $preserveHeyBeanCategory ? ($existingMetadata['source'] ?? 'heybean') : 'google_calendar',
+                    'source' => $preserveHeyBeanSource ? ($existingMetadata['source'] ?? 'heybean') : 'google_calendar',
                     'google_html_link' => $item['htmlLink'] ?? null,
                     'google_calendar_id' => $calendarId,
                     'google_calendar_summary' => $calendarSummary,
@@ -221,8 +222,8 @@ class GoogleCalendarSyncService
                     'title' => $item['summary'] ?? 'Untitled Google event',
                     'description' => $item['description'] ?? null,
                     'location' => $item['location'] ?? null,
-                    'category' => $preserveHeyBeanCategory ? $event->category : $this->calendarCategoryLabel($connection, $calendarId),
-                    'color' => $preserveHeyBeanCategory ? $event->color : ($this->calendarColor($connection, $calendarId) ?? '#4285F4'),
+                    'category' => $preserveEventCategory ? $event->category : $this->calendarCategoryLabel($connection, $calendarId),
+                    'color' => $preserveEventCategory ? $event->color : ($this->calendarColor($connection, $calendarId) ?? '#4285F4'),
                     'starts_at' => $startsAt,
                     'ends_at' => $endsAt,
                     'status' => $item['status'] ?? 'confirmed',
@@ -575,7 +576,18 @@ class GoogleCalendarSyncService
             : 'Connected calendar';
     }
 
-    private function shouldPreserveHeyBeanCategory(CalendarEvent $event): bool
+    private function shouldPreserveExistingCategory(CalendarEvent $event): bool
+    {
+        if (! $event->exists) {
+            return false;
+        }
+
+        $category = trim((string) ($event->category ?? ''));
+
+        return $category !== '' && ! filter_var($category, FILTER_VALIDATE_EMAIL);
+    }
+
+    private function isHeyBeanExportedEvent(CalendarEvent $event): bool
     {
         if (! $event->exists) {
             return false;

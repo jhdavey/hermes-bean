@@ -272,10 +272,69 @@ class GoogleCalendarSyncTest extends TestCase
         $this->assertSame('calendar-preserve-category@example.com', $event->metadata['google_calendar_summary']);
     }
 
+    public function test_google_sync_preserves_existing_non_email_categories_even_after_old_metadata_overwrite(): void
+    {
+        $token = $this->apiToken('calendar-preserve-existing-category@example.com');
+        $user = User::where('email', 'calendar-preserve-existing-category@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'calendar-preserve-existing-category@example.com', 'accessRole' => 'owner', 'backgroundColor' => '#4285F4'],
+                ],
+            ],
+        ]);
+        CalendarEvent::create([
+            'workspace_id' => $workspaceId,
+            'user_id' => $user->id,
+            'created_by_user_id' => $user->id,
+            'google_calendar_id' => 'primary',
+            'google_event_id' => 'google-family-legacy-1',
+            'title' => 'Family dinner',
+            'category' => 'Family',
+            'color' => '#AF52DE',
+            'starts_at' => '2026-05-20T22:00:00Z',
+            'ends_at' => '2026-05-20T23:00:00Z',
+            'metadata' => [
+                'source' => 'google_calendar',
+                'google_calendar_id' => 'primary',
+                'google_calendar_summary' => 'calendar-preserve-existing-category@example.com',
+            ],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'items' => [[
+                    'id' => 'google-family-legacy-1',
+                    'summary' => 'Family dinner updated in Google',
+                    'status' => 'confirmed',
+                    'start' => ['dateTime' => '2026-05-20T22:30:00Z'],
+                    'end' => ['dateTime' => '2026-05-20T23:30:00Z'],
+                ]],
+                'nextSyncToken' => 'preserve-existing-token',
+            ]),
+        ]);
+
+        $this->withToken($token)->postJson('/api/google-calendar/sync')->assertOk();
+
+        $event = CalendarEvent::where('google_event_id', 'google-family-legacy-1')->firstOrFail();
+        $this->assertSame('Family', $event->category);
+        $this->assertSame('#AF52DE', $event->color);
+        $this->assertSame('google_calendar', $event->metadata['source']);
+    }
+
     public function test_google_sync_does_not_use_email_addresses_as_imported_event_categories(): void
     {
         $token = $this->apiToken('calendar-email-category@example.com');
         $user = User::where('email', 'calendar-email-category@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         GoogleCalendarConnection::create([
             'user_id' => $user->id,
             'status' => 'connected',
@@ -290,6 +349,23 @@ class GoogleCalendarSyncTest extends TestCase
                 ],
             ],
         ]);
+        CalendarEvent::create([
+            'workspace_id' => $workspaceId,
+            'user_id' => $user->id,
+            'created_by_user_id' => $user->id,
+            'google_calendar_id' => 'primary',
+            'google_event_id' => 'google-email-category-existing-1',
+            'title' => 'Existing imported block',
+            'category' => 'calendar-email-category@example.com',
+            'color' => '#AF52DE',
+            'starts_at' => '2026-05-20T12:00:00Z',
+            'ends_at' => '2026-05-20T13:00:00Z',
+            'metadata' => [
+                'source' => 'google_calendar',
+                'google_calendar_id' => 'primary',
+                'google_calendar_summary' => 'calendar-email-category@example.com',
+            ],
+        ]);
 
         Http::fake([
             'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
@@ -299,6 +375,12 @@ class GoogleCalendarSyncTest extends TestCase
                     'status' => 'confirmed',
                     'start' => ['dateTime' => '2026-05-20T15:00:00Z'],
                     'end' => ['dateTime' => '2026-05-20T16:00:00Z'],
+                ], [
+                    'id' => 'google-email-category-existing-1',
+                    'summary' => 'Existing imported block',
+                    'status' => 'confirmed',
+                    'start' => ['dateTime' => '2026-05-20T12:00:00Z'],
+                    'end' => ['dateTime' => '2026-05-20T13:00:00Z'],
                 ]],
                 'nextSyncToken' => 'email-category-token',
             ]),
@@ -312,8 +394,18 @@ class GoogleCalendarSyncTest extends TestCase
             'category' => 'Connected calendar',
             'color' => '#4285F4',
         ]);
+        $this->assertDatabaseHas('calendar_events', [
+            'title' => 'Existing imported block',
+            'google_event_id' => 'google-email-category-existing-1',
+            'category' => 'Connected calendar',
+            'color' => '#4285F4',
+        ]);
         $this->assertDatabaseMissing('calendar_events', [
             'google_event_id' => 'google-email-category-1',
+            'category' => 'calendar-email-category@example.com',
+        ]);
+        $this->assertDatabaseMissing('calendar_events', [
+            'google_event_id' => 'google-email-category-existing-1',
             'category' => 'calendar-email-category@example.com',
         ]);
     }
