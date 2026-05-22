@@ -62,6 +62,17 @@ class HermesCliRuntimeService implements HermesRuntimeService
         return $session->refresh();
     }
 
+    public function cancelSession(ConversationSession $session): ConversationSession
+    {
+        if (in_array($session->status, ['running', 'cancelling'], true)) {
+            $session->update(['status' => 'cancelling', 'last_activity_at' => now()]);
+
+            $this->recordEvent($session, 'runtime.cancel_requested');
+        }
+
+        return $session->refresh();
+    }
+
     public function progressEvents(ConversationSession $session): Collection
     {
         return $session->activityEvents()->orderBy('id')->get();
@@ -102,6 +113,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
             'workdir' => config('services.hermes_runtime.workdir'),
             'profile' => $profile,
         ], 'hermes.cli', 'started');
+        $session->update(['status' => 'running', 'last_activity_at' => now()]);
 
         $process = new Process(
             $command,
@@ -112,12 +124,27 @@ class HermesCliRuntimeService implements HermesRuntimeService
         );
 
         try {
-            $process->run();
+            $process->start();
+            while ($process->isRunning()) {
+                $process->checkTimeout();
+                $session->refresh();
+                if ($session->status === 'cancelling') {
+                    $process->stop(0.2);
+
+                    return $this->cancelled($session, $userMessage, collect([$received, $started]));
+                }
+                usleep(100_000);
+            }
         } catch (ProcessTimedOutException) {
             return $this->failClosed($session, $userMessage, collect([$received, $started]), 'Hermes CLI invocation timed out.', [
                 'failure_type' => 'timeout',
                 'timeout' => (float) config('services.hermes_runtime.timeout', 30),
             ]);
+        }
+
+        $session->refresh();
+        if ($session->status === 'cancelling') {
+            return $this->cancelled($session, $userMessage, collect([$received, $started]));
         }
 
         if (! $process->isSuccessful()) {
@@ -164,6 +191,30 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
                 'events' => collect([$received, $started, $completed])->concat($domainEvents)->push($messageCompleted),
+                'blocker' => null,
+            ];
+        });
+    }
+
+    private function cancelled(ConversationSession $session, ConversationMessage $userMessage, Collection $events): array
+    {
+        return DB::transaction(function () use ($session, $userMessage, $events): array {
+            $cancelled = $this->recordEvent($session, 'runtime.hermes_cli_cancelled', [
+                'message_id' => $userMessage->id,
+            ], 'hermes.cli', 'cancelled');
+
+            $messageCancelled = $this->recordEvent($session, 'runtime.message_cancelled', [
+                'message_id' => $userMessage->id,
+            ]);
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'cancelled',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => null,
+                'events' => $events->push($cancelled)->push($messageCancelled),
                 'blocker' => null,
             ];
         });

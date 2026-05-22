@@ -1202,6 +1202,38 @@ void main() {
     },
   );
 
+  testWidgets('chat stop cancels an in-flight Bean request', (
+    WidgetTester tester,
+  ) async {
+    final api = _SlowChatFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('chat-input')), 'Wait no');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump();
+
+    expect(find.byKey(const Key('primary-chat-stop-action')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('primary-chat-stop-action')));
+    await tester.pump();
+
+    expect(api.cancelledSessionCalls, 1);
+    expect(
+      find.text('Stopped. That request will not update your day.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('primary-chat-action')), findsOneWidget);
+
+    api.completeMessage();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Late response'), findsNothing);
+  });
+
   testWidgets('critical count opens a dropdown with listed critical items', (
     WidgetTester tester,
   ) async {
@@ -4496,6 +4528,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   int googleCalendarSyncCalls = 0;
   List<String> selectedGoogleCalendarIds = <String>['primary'];
   String defaultGoogleCalendarId = 'primary';
+  int cancelledSessionCalls = 0;
   String? registeredAgentPersonality;
   List<String>? registeredPriorities;
   String? registeredContext;
@@ -4607,6 +4640,12 @@ class _FakeHermesApiClient extends HermesApiClient {
     workspaceId: workspaceId,
     title: 'Today',
   );
+
+  @override
+  Future<HermesSession> cancelSession(int sessionId) async {
+    cancelledSessionCalls++;
+    return HermesSession(id: sessionId, status: 'cancelling', title: 'Today');
+  }
 
   @override
   Future<List<HermesTask>> listTasks() async => plannedToday
@@ -4860,6 +4899,38 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<void> deleteAccount() async {
     deletedAccount = true;
     bearerToken = null;
+  }
+}
+
+class _SlowChatFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  final Completer<HermesMessageResult> _messageCompleter =
+      Completer<HermesMessageResult>();
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) {
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return _messageCompleter.future;
+  }
+
+  void completeMessage() {
+    if (_messageCompleter.isCompleted) return;
+    _messageCompleter.complete(
+      const HermesMessageResult(
+        status: 'completed',
+        session: HermesSession(id: 42, status: 'active', title: 'Today'),
+        assistantMessage: HermesMessage(
+          id: 80,
+          role: 'assistant',
+          content: 'Late response',
+        ),
+        events: [],
+      ),
+    );
   }
 }
 

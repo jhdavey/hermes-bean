@@ -12,6 +12,8 @@ interface HermesRuntimeService
 
     public function resumeSession(ConversationSession $session): ConversationSession;
 
+    public function cancelSession(ConversationSession $session): ConversationSession;
+
     /**
      * @return Collection<int, ActivityEvent>
      */

@@ -657,6 +657,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _loadingStatusText;
   bool _busy = false;
   String _chatRunState = 'Ready';
+  int _chatRunToken = 0;
   _HomeDestination _selectedDestination = _HomeDestination.today;
   bool _showCalendarMonth = false;
   DateTime _selectedCalendarDay = _dateOnly(DateTime.now());
@@ -1162,6 +1163,47 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() => _beanVoiceDraft = draft);
   }
 
+  Future<void> _stopAgent() async {
+    final session = _session;
+    if (_beanVoiceListening) {
+      await widget.voiceTranscriber.cancel();
+      if (!mounted) return;
+      setState(() {
+        _beanVoiceListening = false;
+        _beanVoiceDraft = null;
+        _chatRunState = 'Ready';
+      });
+      return;
+    }
+
+    if (!_busy) return;
+    _chatRunToken++;
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _chatRunState = 'Stopped';
+        _messages.add(
+          HermesMessage(
+            id: _messages.length + 1,
+            role: 'assistant',
+            content: 'Stopped. That request will not update your day.',
+          ),
+        );
+      });
+    }
+
+    if (session == null) return;
+    unawaited(
+      widget.apiClient
+          .cancelSession(session.id)
+          .then((cancelledSession) {
+            if (!mounted) return;
+            setState(() => _session = cancelledSession);
+          })
+          .catchError((_) {}),
+    );
+  }
+
   Future<void> _finishBeanVoiceDraft() async {
     if (!_beanVoiceListening) return;
     final typedDraft = (_beanVoiceDraft ?? '').trim();
@@ -1196,6 +1238,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final trimmed = content.trim();
     final session = _session;
     if (trimmed.isEmpty || session == null) return;
+    final runToken = ++_chatRunToken;
     setState(() {
       _busy = true;
       _chatRunState = 'Hermes is working…';
@@ -1209,6 +1252,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         content: trimmed,
         metadata: _flutterChatMetadata(),
       );
+      if (!mounted || runToken != _chatRunToken) return;
       final refreshedEvents = await widget.apiClient
           .pollActivityEvents(session.id)
           .catchError((_) => result.events);
@@ -1231,11 +1275,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final refreshedTasks = await widget.apiClient.listTasks().catchError(
         (_) => refreshedSummary.tasks,
       );
-      if (!mounted) return;
+      if (!mounted || runToken != _chatRunToken) return;
       setState(() {
         _user = refreshedUser;
         _session = result.session;
-        if (result.assistantMessage != null) {
+        if (result.status == 'cancelled') {
+          _chatRunState = 'Stopped';
+        } else if (result.assistantMessage != null) {
           _messages.add(_displayableAssistantMessage(result.assistantMessage!));
         } else if (result.status == 'blocked' && result.blocker != null) {
           final reason = _readBlockerReason(result.blocker);
@@ -1258,7 +1304,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             ),
           );
         }
-        _chatRunState = result.status == 'blocked' ? 'Blocked' : 'Updated';
+        _chatRunState = switch (result.status) {
+          'blocked' => 'Blocked',
+          'cancelled' => 'Stopped',
+          _ => 'Updated',
+        };
         _tasks = refreshedTasks;
         _reminders = refreshedSummary.reminders;
         _calendar = refreshedCalendar;
@@ -1266,6 +1316,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _events = _mergeEvents(result.events, refreshedEvents);
       });
     } catch (error) {
+      if (!mounted || runToken != _chatRunToken) return;
       setState(() {
         _chatRunState = 'Failed';
         _messages.add(
@@ -1278,7 +1329,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _error = beanFriendlyErrorMessage(error, action: 'send that message');
       });
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
     }
   }
 
@@ -2579,6 +2630,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     onCalendarEndHourChanged: _setCalendarEndHour,
     onSelectDestination: _selectDestination,
     onSend: _sendChat,
+    onStop: _stopAgent,
     onNewChatSession: _startNewChatSession,
     beanVoiceListening: _beanVoiceListening,
     beanVoiceDraft: _beanVoiceDraft,
@@ -3514,6 +3566,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onCalendarEndHourChanged,
     required this.onSelectDestination,
     required this.onSend,
+    required this.onStop,
     required this.onNewChatSession,
     required this.beanVoiceListening,
     required this.beanVoiceDraft,
@@ -3565,6 +3618,7 @@ class _CommandCenterContent extends StatelessWidget {
   final ValueChanged<int> onCalendarEndHourChanged;
   final ValueChanged<_HomeDestination> onSelectDestination;
   final Future<void> Function(String content) onSend;
+  final Future<void> Function() onStop;
   final Future<void> Function() onNewChatSession;
   final bool beanVoiceListening;
   final String? beanVoiceDraft;
@@ -3674,6 +3728,7 @@ class _CommandCenterContent extends StatelessWidget {
           onVoiceDraftChanged: onBeanVoiceDraftChanged,
           onNewSession: onNewChatSession,
           onSend: onSend,
+          onStop: onStop,
         );
         final selectedPanel = switch (selectedDestination) {
           _HomeDestination.today => _TodayHomeView(
@@ -3804,6 +3859,7 @@ class _HeroChatCard extends StatefulWidget {
     required this.onVoiceDraftChanged,
     required this.onNewSession,
     required this.onSend,
+    required this.onStop,
   });
 
   final List<HermesMessage> messages;
@@ -3816,6 +3872,7 @@ class _HeroChatCard extends StatefulWidget {
   final ValueChanged<String> onVoiceDraftChanged;
   final Future<void> Function() onNewSession;
   final Future<void> Function(String content) onSend;
+  final Future<void> Function() onStop;
 
   @override
   State<_HeroChatCard> createState() => _HeroChatCardState();
@@ -3946,6 +4003,7 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                     ? widget.onVoiceDraftChanged
                     : null,
                 onSend: _sendCurrentDraft,
+                onStop: widget.onStop,
               ),
             ],
           ),
@@ -3968,6 +4026,7 @@ class _ChatInputDock extends StatelessWidget {
     required this.busy,
     required this.listening,
     required this.onSend,
+    required this.onStop,
     this.onChanged,
   });
 
@@ -3975,6 +4034,7 @@ class _ChatInputDock extends StatelessWidget {
   final bool busy;
   final bool listening;
   final VoidCallback onSend;
+  final Future<void> Function() onStop;
   final ValueChanged<String>? onChanged;
 
   @override
@@ -4020,11 +4080,24 @@ class _ChatInputDock extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        FilledButton(
-          key: const Key('primary-chat-action'),
-          onPressed: busy ? null : onSend,
-          child: const Icon(Icons.arrow_upward_rounded, size: 18),
-        ),
+        if (busy || listening)
+          FilledButton(
+            key: const Key('primary-chat-stop-action'),
+            style: FilledButton.styleFrom(
+              backgroundColor: HeyBeanTheme.destructive,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(44, 44),
+              padding: EdgeInsets.zero,
+            ),
+            onPressed: () => unawaited(onStop()),
+            child: const Icon(Icons.stop_rounded, size: 18),
+          )
+        else
+          FilledButton(
+            key: const Key('primary-chat-action'),
+            onPressed: onSend,
+            child: const Icon(Icons.arrow_upward_rounded, size: 18),
+          ),
       ],
     ),
   );

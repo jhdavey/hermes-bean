@@ -612,6 +612,11 @@ class HermesApiClient {
     return HermesSession.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesSession> cancelSession(int sessionId) async {
+    final data = await _sendJson('POST', '/assistant/sessions/$sessionId/cancel');
+    return HermesSession.fromJson(_expectMap(data['data']));
+  }
+
   Future<HermesMessageResult> sendMessage({
     required int sessionId,
     required String content,

@@ -649,6 +649,16 @@ void main() {
           }
 
           if (request.method == 'POST' &&
+              request.path == '/assistant/sessions/42/cancel') {
+            return HermesApiResponse(
+              202,
+              jsonEncode({
+                'data': {'id': 42, 'status': 'cancelling'},
+              }),
+            );
+          }
+
+          if (request.method == 'POST' &&
               request.path == '/assistant/sessions/42/messages') {
             expect(request.body, {
               'content': 'Schedule dentist tomorrow at 3pm',
@@ -702,6 +712,9 @@ void main() {
       final resumed = await client.resumeSession(42);
       expect(resumed.id, 42);
 
+      final cancelled = await client.cancelSession(42);
+      expect(cancelled.id, 42);
+
       final messageResult = await client.sendMessage(
         sessionId: 42,
         content: 'Schedule dentist tomorrow at 3pm',
@@ -720,6 +733,7 @@ void main() {
       expect(requests.map((r) => '${r.method} ${r.uri}'), [
         'POST http://local.test/api/assistant/sessions',
         'GET http://local.test/api/assistant/sessions/42',
+        'POST http://local.test/api/assistant/sessions/42/cancel',
         'POST http://local.test/api/assistant/sessions/42/messages',
         'GET http://local.test/api/assistant/sessions/42/events',
       ]);
@@ -1086,10 +1100,10 @@ void main() {
           }
           if (request.path == '/calendar-events/3' &&
               request.method == 'DELETE') {
-            expect(request.body, containsPair('delete_from_workspace_ids', [
-              1,
-              2,
-            ]));
+            expect(
+              request.body,
+              containsPair('delete_from_workspace_ids', [1, 2]),
+            );
             return const HermesApiResponse(204, '');
           }
           fail('Unexpected request: ${request.method} ${request.path}');

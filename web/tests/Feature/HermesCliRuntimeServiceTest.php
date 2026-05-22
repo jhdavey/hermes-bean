@@ -109,6 +109,25 @@ PHP);
         $this->assertSame('cli-owner@example.com', $invocation['payload']['user']['email']);
     }
 
+    public function test_cancel_endpoint_marks_running_session_for_cli_stop(): void
+    {
+        $token = $this->apiToken('cancel-cli-owner@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Cancelable session',
+        ])->assertCreated()
+            ->json('data.id');
+        ConversationSession::findOrFail($sessionId)->update(['status' => 'running']);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/cancel")
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'cancelling');
+
+        $this->assertDatabaseHas('activity_events', [
+            'conversation_session_id' => $sessionId,
+            'event_type' => 'runtime.cancel_requested',
+        ]);
+    }
+
     public function test_household_session_uses_household_agent_profile_runtime_home_and_workspace_payload(): void
     {
         $script = $this->writeExecutable('fake-household-hermes.php', <<<'PHP'
