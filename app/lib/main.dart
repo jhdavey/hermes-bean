@@ -6393,13 +6393,15 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
           ? _formatCalendarEventEndDate(event.startsAt, event.endsAt)
           : _formatCalendarEventDateTime(event.endsAt),
     );
-    _category = TextEditingController(text: event.category ?? 'Personal');
+    _categories = [...widget.eventCategories];
+    _category = TextEditingController(
+      text: event.category ?? _draftDefaultCategoryName(event),
+    );
     _reminder = TextEditingController();
     _eventInterval = TextEditingController(
       text: eventMetadata['interval']?.toString() ?? '1',
     );
     _reminderInterval = TextEditingController(text: '1');
-    _categories = [...widget.eventCategories];
     final writableGoogleCalendars =
         widget.googleCalendarStatus?.writableCalendars ??
         const <GoogleCalendarInfo>[];
@@ -6444,6 +6446,18 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         _intervalUnits.any((unit) => unit.value == eventMetadata['unit'])
         ? eventMetadata['unit'] as String
         : 'days';
+  }
+
+  String? _draftDefaultCategoryName(HermesCalendarEvent event) {
+    if (event.id != 0) return null;
+    final activeWorkspace = widget.workspaces
+        .where((workspace) => workspace.id == widget.activeWorkspaceId)
+        .firstOrNull;
+    if (activeWorkspace == null || activeWorkspace.isPersonal) {
+      return 'Personal';
+    }
+
+    return _categories.firstOrNull?.name;
   }
 
   @override

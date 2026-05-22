@@ -201,6 +201,17 @@ class GoogleCalendarSyncService
                 $isAllDay = isset($item['start']['date']);
                 $endsAt = $this->googleDateTime($item['end'] ?? []) ?? $startsAt;
                 $event = $this->existingGoogleEvent($workspace, $connection, $calendarId, (string) $item['id']);
+                $existingMetadata = $event->exists ? ($event->metadata ?? []) : [];
+                $preserveHeyBeanCategory = $this->shouldPreserveHeyBeanCategory($event);
+                $calendarSummary = $this->calendarSummary($connection, $calendarId);
+                $eventMetadata = array_merge($existingMetadata, [
+                    'source' => $preserveHeyBeanCategory ? ($existingMetadata['source'] ?? 'heybean') : 'google_calendar',
+                    'google_html_link' => $item['htmlLink'] ?? null,
+                    'google_calendar_id' => $calendarId,
+                    'google_calendar_summary' => $calendarSummary,
+                    'all_day' => $isAllDay,
+                    'last_synced_from_google_at' => now()->toIso8601String(),
+                ]);
                 $event->forceFill([
                     'workspace_id' => $workspace->id,
                     'user_id' => $user->id,
@@ -210,19 +221,13 @@ class GoogleCalendarSyncService
                     'title' => $item['summary'] ?? 'Untitled Google event',
                     'description' => $item['description'] ?? null,
                     'location' => $item['location'] ?? null,
-                    'category' => $this->calendarSummary($connection, $calendarId) ?? 'Connected calendar',
-                    'color' => $this->calendarColor($connection, $calendarId) ?? '#4285F4',
+                    'category' => $preserveHeyBeanCategory ? $event->category : $this->calendarCategoryLabel($connection, $calendarId),
+                    'color' => $preserveHeyBeanCategory ? $event->color : ($this->calendarColor($connection, $calendarId) ?? '#4285F4'),
                     'starts_at' => $startsAt,
                     'ends_at' => $endsAt,
                     'status' => $item['status'] ?? 'confirmed',
                     'google_updated_at' => isset($item['updated']) ? Carbon::parse($item['updated']) : null,
-                    'metadata' => [
-                        'source' => 'google_calendar',
-                        'google_html_link' => $item['htmlLink'] ?? null,
-                        'google_calendar_id' => $calendarId,
-                        'google_calendar_summary' => $this->calendarSummary($connection, $calendarId),
-                        'all_day' => $isAllDay,
-                    ],
+                    'metadata' => $eventMetadata,
                 ])->save();
                 $this->deleteDuplicateGoogleEventAliases($event, $connection, $calendarId);
                 $imported++;
@@ -559,6 +564,27 @@ class GoogleCalendarSyncService
         }
 
         return null;
+    }
+
+    private function calendarCategoryLabel(GoogleCalendarConnection $connection, string $calendarId): string
+    {
+        $summary = trim((string) ($this->calendarSummary($connection, $calendarId) ?? ''));
+
+        return $summary !== '' && ! filter_var($summary, FILTER_VALIDATE_EMAIL)
+            ? $summary
+            : 'Connected calendar';
+    }
+
+    private function shouldPreserveHeyBeanCategory(CalendarEvent $event): bool
+    {
+        if (! $event->exists) {
+            return false;
+        }
+
+        $metadata = $event->metadata ?? [];
+
+        return ($metadata['source'] ?? null) === 'heybean'
+            || is_array($metadata['google_event_exports'] ?? null);
     }
 
     private function calendarColor(GoogleCalendarConnection $connection, string $calendarId): ?string

@@ -2936,6 +2936,37 @@ void main() {
     },
   );
 
+  testWidgets(
+    'new shared workspace events default to shared workspace categories',
+    (WidgetTester tester) async {
+      final api = _SharedWorkspaceCategoryFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('calendar-add-event-action')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('event-category-chip-Family')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('event-category-chip-Personal')),
+        findsNothing,
+      );
+      await tester.enterText(
+        find.byKey(const Key('event-title-field')),
+        'Family dinner',
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      expect(api.createdEvent?.category, 'Family');
+    },
+  );
+
   testWidgets('event detail info icons explain scheduling options', (
     WidgetTester tester,
   ) async {
@@ -5613,6 +5644,52 @@ class _LinkedWorkspaceEditableCalendarFakeHermesApiClient
           15,
         ).toIso8601String(),
       ),
+  ];
+}
+
+class _SharedWorkspaceCategoryFakeHermesApiClient
+    extends _EditableCalendarFakeHermesApiClient {
+  static const _personal = HermesWorkspace(
+    id: '1',
+    name: 'Personal',
+    type: 'personal',
+    role: 'owner',
+    isDefault: true,
+  );
+  static const _family = HermesWorkspace(
+    id: '2',
+    name: 'Daveys',
+    type: 'household',
+    role: 'owner',
+    active: true,
+  );
+
+  @override
+  Future<HermesUser> me() async => const HermesUser(
+    id: 1,
+    name: 'Bean User',
+    email: 'bean@example.com',
+    onboardComplete: true,
+    defaultWorkspaceId: 2,
+    personalWorkspace: _personal,
+    activeWorkspace: _family,
+    workspaces: [_personal, _family],
+    agentProfile: HermesAgentProfile(
+      settings: {
+        'personality_type': 'balanced',
+        'onboarding': {'completed': true, 'priorities': <String>[]},
+      },
+    ),
+  );
+
+  @override
+  Future<List<HermesEventCategory>> listEventCategories() async => const [
+    HermesEventCategory(id: 30, name: 'Family', color: '#AF52DE'),
+  ];
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+    if (createdEvent != null) createdEvent!,
   ];
 }
 

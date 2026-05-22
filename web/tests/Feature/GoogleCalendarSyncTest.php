@@ -208,6 +208,116 @@ class GoogleCalendarSyncTest extends TestCase
         $this->assertTrue($holiday->metadata['all_day']);
     }
 
+    public function test_google_sync_preserves_heybean_category_on_exported_events(): void
+    {
+        $token = $this->apiToken('calendar-preserve-category@example.com');
+        $user = User::where('email', 'calendar-preserve-category@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'calendar-preserve-category@example.com', 'accessRole' => 'owner', 'backgroundColor' => '#4285F4'],
+                ],
+            ],
+        ]);
+        CalendarEvent::create([
+            'workspace_id' => $workspaceId,
+            'user_id' => $user->id,
+            'created_by_user_id' => $user->id,
+            'google_calendar_id' => 'primary',
+            'google_event_id' => 'google-family-1',
+            'title' => 'Family dinner',
+            'category' => 'Family',
+            'color' => '#AF52DE',
+            'starts_at' => '2026-05-20T22:00:00Z',
+            'ends_at' => '2026-05-20T23:00:00Z',
+            'metadata' => [
+                'source' => 'heybean',
+                'google_calendar_ids' => ['primary'],
+                'google_event_exports' => [
+                    'primary' => ['event_id' => 'google-family-1'],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'items' => [[
+                    'id' => 'google-family-1',
+                    'summary' => 'Family dinner updated in Google',
+                    'status' => 'confirmed',
+                    'start' => ['dateTime' => '2026-05-20T22:30:00Z'],
+                    'end' => ['dateTime' => '2026-05-20T23:30:00Z'],
+                    'updated' => '2026-05-15T12:00:00Z',
+                    'htmlLink' => 'https://calendar.google.com/event?eid=family',
+                ]],
+                'nextSyncToken' => 'preserve-token',
+            ]),
+        ]);
+
+        $this->withToken($token)->postJson('/api/google-calendar/sync')->assertOk();
+
+        $event = CalendarEvent::where('google_event_id', 'google-family-1')->firstOrFail();
+        $this->assertSame('Family dinner updated in Google', $event->title);
+        $this->assertSame('Family', $event->category);
+        $this->assertSame('#AF52DE', $event->color);
+        $this->assertSame('heybean', $event->metadata['source']);
+        $this->assertSame('calendar-preserve-category@example.com', $event->metadata['google_calendar_summary']);
+    }
+
+    public function test_google_sync_does_not_use_email_addresses_as_imported_event_categories(): void
+    {
+        $token = $this->apiToken('calendar-email-category@example.com');
+        $user = User::where('email', 'calendar-email-category@example.com')->firstOrFail();
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'calendar-email-category@example.com', 'accessRole' => 'owner', 'backgroundColor' => '#4285F4'],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'items' => [[
+                    'id' => 'google-email-category-1',
+                    'summary' => 'Imported block',
+                    'status' => 'confirmed',
+                    'start' => ['dateTime' => '2026-05-20T15:00:00Z'],
+                    'end' => ['dateTime' => '2026-05-20T16:00:00Z'],
+                ]],
+                'nextSyncToken' => 'email-category-token',
+            ]),
+        ]);
+
+        $this->withToken($token)->postJson('/api/google-calendar/sync')->assertOk();
+
+        $this->assertDatabaseHas('calendar_events', [
+            'title' => 'Imported block',
+            'google_event_id' => 'google-email-category-1',
+            'category' => 'Connected calendar',
+            'color' => '#4285F4',
+        ]);
+        $this->assertDatabaseMissing('calendar_events', [
+            'google_event_id' => 'google-email-category-1',
+            'category' => 'calendar-email-category@example.com',
+        ]);
+    }
+
     public function test_workspace_calendar_event_listing_syncs_workspace_selected_google_calendars(): void
     {
         $token = $this->apiToken('workspace-calendar-sync@example.com');
