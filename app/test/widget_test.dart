@@ -3397,6 +3397,57 @@ void main() {
     },
   );
 
+  testWidgets('calendar event editor saves all day events with date fields', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(
+      find.byKey(const Key('calendar-event-block-design-review')),
+    );
+    await tester.tap(
+      find.byKey(const Key('calendar-event-block-design-review')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('event-all-day-toggle')));
+    await tester.pumpAndSettle();
+
+    final today = DateTime.now();
+    final dateLabel =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    await tester.enterText(
+      find.byKey(const Key('event-start-field')),
+      dateLabel,
+    );
+    await tester.enterText(find.byKey(const Key('event-end-field')), dateLabel);
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedEvent?.metadata?['all_day'], isTrue);
+    expect(
+      api.updatedEvent?.startsAt,
+      DateTime(today.year, today.month, today.day).toUtc().toIso8601String(),
+    );
+    expect(
+      api.updatedEvent?.endsAt,
+      DateTime(
+        today.year,
+        today.month,
+        today.day + 1,
+      ).toUtc().toIso8601String(),
+    );
+    expect(find.byKey(const Key('calendar-all-day-event-3')), findsOneWidget);
+    expect(
+      find.byKey(const Key('calendar-event-block-design-review')),
+      findsNothing,
+    );
+  });
+
   testWidgets('all day Google events render in the all-day row only', (
     WidgetTester tester,
   ) async {
@@ -5501,7 +5552,7 @@ class _EditableCalendarFakeHermesApiClient
             category: 'Personal',
             color: '#34C759',
             recurrence: 'none',
-      ),
+          ),
   ];
 }
 

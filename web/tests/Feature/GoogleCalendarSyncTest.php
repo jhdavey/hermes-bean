@@ -737,6 +737,48 @@ class GoogleCalendarSyncTest extends TestCase
             && str_contains($request->url(), '/calendars/work%40example.com/events/google-work-delete'));
     }
 
+    public function test_all_day_local_calendar_events_export_as_google_date_events(): void
+    {
+        $token = $this->apiToken('calendar-all-day-export@example.com');
+        $user = User::where('email', 'calendar-all-day-export@example.com')->firstOrFail();
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Main calendar', 'primary' => true, 'accessRole' => 'owner'],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events' => Http::response([
+                'id' => 'google-all-day-1',
+                'updated' => '2026-05-15T12:00:00Z',
+            ]),
+        ]);
+
+        $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Field day',
+            'starts_at' => '2026-06-04T00:00:00Z',
+            'ends_at' => '2026-06-05T00:00:00Z',
+            'metadata' => [
+                'all_day' => true,
+                'google_calendar_ids' => ['primary'],
+            ],
+        ])->assertCreated();
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && str_contains($request->url(), '/calendars/primary/events')
+            && $request['start'] === ['date' => '2026-06-04']
+            && $request['end'] === ['date' => '2026-06-05']);
+    }
+
     public function test_google_api_failure_messages_do_not_persist_sensitive_response_bodies(): void
     {
         $token = $this->apiToken('calendar-error-sanitize@example.com');

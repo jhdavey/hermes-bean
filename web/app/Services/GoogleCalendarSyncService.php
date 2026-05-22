@@ -599,6 +599,20 @@ class GoogleCalendarSyncService
 
     private function eventPayload(CalendarEvent $event): array
     {
+        $metadata = $event->metadata ?? [];
+        $allDay = ($metadata['all_day'] ?? $metadata['allDay'] ?? false) === true
+            || in_array(strtolower((string) ($metadata['all_day'] ?? $metadata['allDay'] ?? '')), ['true', '1'], true);
+
+        if ($allDay) {
+            return [
+                'summary' => $event->title,
+                'description' => $event->description,
+                'location' => $event->location,
+                'start' => ['date' => $event->starts_at->toDateString()],
+                'end' => ['date' => ($event->ends_at ?: $event->starts_at->copy()->addDay())->toDateString()],
+            ];
+        }
+
         return [
             'summary' => $event->title,
             'description' => $event->description,

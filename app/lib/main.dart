@@ -6328,6 +6328,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   final Set<Object> _syncWorkspaceIds = <Object>{};
   String? _validationError;
   late bool _isCritical;
+  late bool _allDay;
   final Set<String> _eventSpecificDays = <String>{};
   final Set<String> _reminderSpecificDays = <String>{};
   bool _savingCategory = false;
@@ -6379,16 +6380,21 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   void initState() {
     super.initState();
     final event = widget.event;
+    final eventMetadata = event.metadata ?? const <String, Object?>{};
+    _allDay = _eventIsAllDay(event);
     _title = TextEditingController(text: event.title);
     _startsAt = TextEditingController(
-      text: _formatCalendarEventDateTime(event.startsAt),
+      text: _allDay
+          ? _formatCalendarEventDate(event.startsAt)
+          : _formatCalendarEventDateTime(event.startsAt),
     );
     _endsAt = TextEditingController(
-      text: _formatCalendarEventDateTime(event.endsAt),
+      text: _allDay
+          ? _formatCalendarEventEndDate(event.startsAt, event.endsAt)
+          : _formatCalendarEventDateTime(event.endsAt),
     );
     _category = TextEditingController(text: event.category ?? 'Personal');
     _reminder = TextEditingController();
-    final eventMetadata = event.metadata ?? const <String, Object?>{};
     _eventInterval = TextEditingController(
       text: eventMetadata['interval']?.toString() ?? '1',
     );
@@ -6453,38 +6459,88 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   }
 
   void _save() {
-    final startsAt = _calendarEventInputToWireValue(
-      _startsAt.text,
-      originalValue: widget.event.startsAt,
-    );
-    final endsAt = _calendarEventInputToWireValue(
-      _endsAt.text,
-      originalValue: widget.event.endsAt,
-      referenceValue: startsAt,
-      allowEmpty: true,
-    );
-    final parsedStart = _parseCalendarEventDateTime(startsAt);
-    final parsedEnd = _parseCalendarEventDateTime(endsAt, startsAt);
-    if (startsAt == null || startsAt.trim().isEmpty || parsedStart == null) {
-      setState(
-        () =>
-            _validationError = 'Enter a valid start time, like May 18 9:00 AM.',
+    late final String startsAt;
+    String? endsAt;
+    DateTime? parsedStart;
+    DateTime? parsedEnd;
+
+    if (_allDay) {
+      final startDate = _calendarEventDateInputToDate(
+        _startsAt.text,
+        originalValue: widget.event.startsAt,
       );
-      return;
-    }
-    if (endsAt != null && parsedEnd == null) {
-      setState(
-        () => _validationError = 'Enter a valid end time or leave it blank.',
+      final endDate = _endsAt.text.trim().isEmpty
+          ? startDate
+          : _calendarEventDateInputToDate(
+              _endsAt.text,
+              originalValue: widget.event.endsAt,
+              referenceValue: startDate,
+            );
+      if (startDate == null) {
+        setState(
+          () => _validationError = 'Enter a valid start date, like May 18.',
+        );
+        return;
+      }
+      if (endDate == null) {
+        setState(
+          () => _validationError = 'Enter a valid end date or leave it blank.',
+        );
+        return;
+      }
+      if (endDate.isBefore(startDate)) {
+        setState(
+          () =>
+              _validationError = 'End date must be on or after the start date.',
+        );
+        return;
+      }
+      parsedStart = DateTime(startDate.year, startDate.month, startDate.day);
+      parsedEnd = DateTime(
+        endDate.year,
+        endDate.month,
+        endDate.day,
+      ).add(const Duration(days: 1));
+      startsAt = parsedStart.toUtc().toIso8601String();
+      endsAt = parsedEnd.toUtc().toIso8601String();
+    } else {
+      final wireStartsAt = _calendarEventInputToWireValue(
+        _startsAt.text,
+        originalValue: widget.event.startsAt,
       );
-      return;
-    }
-    if (parsedEnd != null &&
-        (parsedEnd.isBefore(parsedStart) ||
-            parsedEnd.isAtSameMomentAs(parsedStart))) {
-      setState(
-        () => _validationError = 'End time must be after the start time.',
+      final wireEndsAt = _calendarEventInputToWireValue(
+        _endsAt.text,
+        originalValue: widget.event.endsAt,
+        referenceValue: wireStartsAt,
+        allowEmpty: true,
       );
-      return;
+      parsedStart = _parseCalendarEventDateTime(wireStartsAt);
+      parsedEnd = _parseCalendarEventDateTime(wireEndsAt, wireStartsAt);
+      if (wireStartsAt == null ||
+          wireStartsAt.trim().isEmpty ||
+          parsedStart == null) {
+        setState(
+          () => _validationError =
+              'Enter a valid start time, like May 18 9:00 AM.',
+        );
+        return;
+      }
+      if (wireEndsAt != null && parsedEnd == null) {
+        setState(
+          () => _validationError = 'Enter a valid end time or leave it blank.',
+        );
+        return;
+      }
+      if (parsedEnd != null &&
+          (parsedEnd.isBefore(parsedStart) ||
+              parsedEnd.isAtSameMomentAs(parsedStart))) {
+        setState(
+          () => _validationError = 'End time must be after the start time.',
+        );
+        return;
+      }
+      startsAt = wireStartsAt;
+      endsAt = wireEndsAt;
     }
 
     final eventInterval = int.tryParse(_eventInterval.text.trim()) ?? 1;
@@ -6492,6 +6548,10 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     final eventMetadata = <String, Object?>{
       ...?widget.event.metadata,
       'recurrence': _recurrence,
+      if (_allDay ||
+          (widget.event.metadata?.containsKey('all_day') ?? false) ||
+          (widget.event.metadata?.containsKey('allDay') ?? false))
+        'all_day': _allDay,
       if (sortedGoogleCalendarIds.isNotEmpty)
         'google_calendar_ids': sortedGoogleCalendarIds,
       if (sortedGoogleCalendarIds.isNotEmpty)
@@ -6690,30 +6750,30 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       for (final workspace in widget.workspaces)
         if (workspace.numericId != null) workspace.numericId!: workspace,
     };
-    final deleteChoices = linkedIds
-        .map(
-          (id) =>
-              workspaceById[id] ??
-              HermesWorkspace(
-                id: id.toString(),
-                name: id == widget.event.workspaceId
-                    ? 'Current workspace'
-                    : 'Workspace $id',
-              ),
-        )
-        .toList()
-      ..sort((a, b) {
-        if (a.numericId == widget.event.workspaceId) return -1;
-        if (b.numericId == widget.event.workspaceId) return 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
+    final deleteChoices =
+        linkedIds
+            .map(
+              (id) =>
+                  workspaceById[id] ??
+                  HermesWorkspace(
+                    id: id.toString(),
+                    name: id == widget.event.workspaceId
+                        ? 'Current workspace'
+                        : 'Workspace $id',
+                  ),
+            )
+            .toList()
+          ..sort((a, b) {
+            if (a.numericId == widget.event.workspaceId) return -1;
+            if (b.numericId == widget.event.workspaceId) return 1;
+            return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          });
 
     if (deleteChoices.length <= 1) {
       final confirmed = await _confirmDestructiveAction(
         context,
         title: 'Delete event?',
-        message:
-            'This removes "${widget.event.title}" from your calendar.',
+        message: 'This removes "${widget.event.title}" from your calendar.',
         confirmLabel: 'Delete event',
       );
       if (!confirmed) return null;
@@ -6793,6 +6853,15 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     required String? originalValue,
     String? referenceValue,
   }) async {
+    if (_allDay) {
+      await _showDateDock(
+        controller,
+        originalValue: originalValue,
+        referenceValue: referenceValue,
+      );
+      return;
+    }
+
     final selected = await _showStandardDateTimeDock(
       context,
       initialText: controller.text,
@@ -6807,6 +6876,81 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         );
       });
     }
+  }
+
+  Future<void> _showDateDock(
+    TextEditingController controller, {
+    required String? originalValue,
+    String? referenceValue,
+  }) async {
+    final initial =
+        _calendarEventDateInputToDate(
+          controller.text,
+          originalValue: originalValue,
+          referenceValue: _calendarEventDateInputToDate(referenceValue ?? ''),
+        ) ??
+        _dateOnly(DateTime.now());
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(initial.year - 2),
+      lastDate: DateTime(initial.year + 5),
+    );
+    if (selected != null && mounted) {
+      setState(() {
+        controller.text = _formatCalendarDateLabel(selected);
+      });
+    }
+  }
+
+  void _setAllDay(bool value) {
+    if (_allDay == value) return;
+    setState(() {
+      _allDay = value;
+      _validationError = null;
+      final start =
+          _parseCalendarEventDateTime(_startsAt.text, widget.event.startsAt) ??
+          _parseCalendarEventDateTime(widget.event.startsAt) ??
+          DateTime.now();
+      final end =
+          _parseCalendarEventDateTime(_endsAt.text, widget.event.endsAt) ??
+          _parseCalendarEventDateTime(
+            widget.event.endsAt,
+            widget.event.startsAt,
+          );
+
+      if (value) {
+        _startsAt.text = _formatCalendarDateLabel(start);
+        final endDate = _displayEndDateForAllDay(start, end);
+        _endsAt.text = _formatCalendarDateLabel(endDate);
+      } else {
+        final startDate =
+            _calendarEventDateInputToDate(_startsAt.text) ?? start;
+        final endDate = _calendarEventDateInputToDate(_endsAt.text);
+        _startsAt.text = _formatCalendarEventDateTime(
+          DateTime(
+            startDate.year,
+            startDate.month,
+            startDate.day,
+            start.hour == 0 ? 9 : start.hour,
+            start.minute,
+          ).toIso8601String(),
+        );
+        if (endDate == null) {
+          _endsAt.clear();
+        } else {
+          _endsAt.text = _formatCalendarEventDateTime(
+            DateTime(
+              endDate.year,
+              endDate.month,
+              endDate.day,
+              start.hour == 0 ? 17 : start.add(const Duration(hours: 1)).hour,
+              start.minute,
+            ).toIso8601String(),
+          );
+        }
+      }
+    });
   }
 
   @override
@@ -6898,6 +7042,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               infoKey: Key('event-schedule-info'),
                               infoTitle: 'Event schedule',
                               infoBullets: [
+                                'Turn on All day for date-only events with no start or end time.',
                                 'Tap a time field to use the date and time picker.',
                                 'You can also type natural entries like today at 2pm or May 18 at 9am.',
                                 'End time must be after the start time; leave it blank for a simple reminder-style event.',
@@ -6912,6 +7057,20 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               ),
                               const SizedBox(height: 8),
                             ],
+                            SwitchListTile(
+                              key: const Key('event-all-day-toggle'),
+                              contentPadding: EdgeInsets.zero,
+                              value: _allDay,
+                              onChanged: _setAllDay,
+                              title: const Text('All day'),
+                              subtitle: const Text(
+                                'Use dates only instead of start and end times.',
+                              ),
+                              secondary: const Icon(
+                                Icons.calendar_today_rounded,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
                             TextField(
                               key: const Key('event-start-field'),
                               controller: _startsAt,
@@ -6919,10 +7078,16 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 _startsAt,
                                 originalValue: widget.event.startsAt,
                               ),
-                              decoration: const InputDecoration(
-                                labelText: 'Start time',
-                                prefixIcon: Icon(Icons.play_arrow_rounded),
-                                suffixIcon: Icon(Icons.expand_less_rounded),
+                              decoration: InputDecoration(
+                                labelText: _allDay
+                                    ? 'Start date'
+                                    : 'Start time',
+                                prefixIcon: const Icon(
+                                  Icons.play_arrow_rounded,
+                                ),
+                                suffixIcon: const Icon(
+                                  Icons.expand_less_rounded,
+                                ),
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -6934,10 +7099,12 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 originalValue: widget.event.endsAt,
                                 referenceValue: _startsAt.text,
                               ),
-                              decoration: const InputDecoration(
-                                labelText: 'End time',
-                                prefixIcon: Icon(Icons.stop_rounded),
-                                suffixIcon: Icon(Icons.expand_less_rounded),
+                              decoration: InputDecoration(
+                                labelText: _allDay ? 'End date' : 'End time',
+                                prefixIcon: const Icon(Icons.stop_rounded),
+                                suffixIcon: const Icon(
+                                  Icons.expand_less_rounded,
+                                ),
                               ),
                             ),
                           ],
@@ -8174,6 +8341,38 @@ int? _monthNumber(String name) {
 String _formatCalendarEventDateTime(String? value) =>
     _formatNaturalDateTime(value);
 
+String _formatCalendarEventDate(String? value) {
+  final parsed = _parseCalendarEventDateTime(value);
+  return parsed == null ? '' : _formatCalendarDateLabel(parsed);
+}
+
+String _formatCalendarEventEndDate(String? startsAt, String? endsAt) {
+  final start = _parseCalendarEventDateTime(startsAt);
+  final end = _parseCalendarEventDateTime(endsAt, startsAt);
+  if (end == null) return start == null ? '' : _formatCalendarDateLabel(start);
+  return _formatCalendarDateLabel(_displayEndDateForAllDay(start, end));
+}
+
+DateTime _displayEndDateForAllDay(DateTime? start, DateTime? end) {
+  if (end == null) return _dateOnly(start ?? DateTime.now());
+  final normalizedEnd = _dateOnly(end);
+  final isExclusiveMidnight =
+      end.hour == 0 &&
+      end.minute == 0 &&
+      end.second == 0 &&
+      end.millisecond == 0 &&
+      start != null &&
+      end.isAfter(_dateOnly(start));
+  return isExclusiveMidnight
+      ? normalizedEnd.subtract(const Duration(days: 1))
+      : normalizedEnd;
+}
+
+String _formatCalendarDateLabel(DateTime value) {
+  final date = _dateOnly(value);
+  return '${_shortMonthName(date.month)} ${date.day}, ${date.year}';
+}
+
 String _formatNaturalDateTime(String? value, {DateTime? now}) {
   if (value == null || value.trim().isEmpty) return '';
   final parsed = _parseCalendarEventDateTime(value);
@@ -8243,6 +8442,75 @@ String? _calendarEventInputToWireValue(
     referenceValue ?? originalValue,
   );
   return parsed?.toUtc().toIso8601String() ?? trimmed;
+}
+
+DateTime? _calendarEventDateInputToDate(
+  String? value, {
+  String? originalValue,
+  DateTime? referenceValue,
+}) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) {
+    final original = _parseCalendarEventDateTime(originalValue);
+    return original == null ? null : _dateOnly(original);
+  }
+
+  final parsed = _parseCalendarDateOnly(
+    trimmed,
+    referenceValue: referenceValue,
+  );
+  if (parsed != null) return parsed;
+
+  final originalDisplay = _formatCalendarEventDate(originalValue);
+  if (originalValue != null && trimmed == originalDisplay) {
+    final original = _parseCalendarEventDateTime(originalValue);
+    return original == null ? null : _dateOnly(original);
+  }
+
+  final parsedDateTime = _parseCalendarEventDateTime(trimmed);
+  return parsedDateTime == null ? null : _dateOnly(parsedDateTime);
+}
+
+DateTime? _parseCalendarDateOnly(String value, {DateTime? referenceValue}) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return null;
+
+  final isoMatch = RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})$').firstMatch(trimmed);
+  if (isoMatch != null) {
+    final year = int.tryParse(isoMatch.group(1)!);
+    final month = int.tryParse(isoMatch.group(2)!);
+    final day = int.tryParse(isoMatch.group(3)!);
+    if (year != null && month != null && day != null) {
+      return DateTime(year, month, day);
+    }
+  }
+
+  final relative = trimmed.toLowerCase();
+  if (relative == 'today' || relative == 'tomorrow') {
+    return _dateOnly(
+      DateTime.now().add(
+        relative == 'tomorrow' ? const Duration(days: 1) : Duration.zero,
+      ),
+    );
+  }
+
+  final friendlyMatch = RegExp(
+    r'^(?:[A-Za-z]{3,9},?\s+)?([A-Za-z]{3,9})\s+(\d{1,2})(?:,?\s+(\d{4}))?$',
+    caseSensitive: false,
+  ).firstMatch(trimmed);
+  if (friendlyMatch != null) {
+    final month = _monthNumber(friendlyMatch.group(1)!);
+    final day = int.tryParse(friendlyMatch.group(2)!);
+    final year =
+        int.tryParse(friendlyMatch.group(3) ?? '') ??
+        referenceValue?.year ??
+        DateTime.now().year;
+    if (month != null && day != null) {
+      return DateTime(year, month, day);
+    }
+  }
+
+  return null;
 }
 
 String _dateTimeToWireIsoString(DateTime value) {
