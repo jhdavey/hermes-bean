@@ -660,6 +660,7 @@ void main() {
 
           if (request.method == 'POST' &&
               request.path == '/assistant/sessions/42/messages') {
+            expect(request.responseTimeout, const Duration(seconds: 120));
             expect(request.body, {
               'content': 'Schedule dentist tomorrow at 3pm',
               'metadata': {'source': 'flutter-test'},
@@ -687,6 +688,7 @@ void main() {
 
           if (request.method == 'GET' &&
               request.path == '/assistant/sessions/42/events') {
+            expect(request.responseTimeout, const Duration(seconds: 30));
             return HermesApiResponse(
               200,
               jsonEncode({

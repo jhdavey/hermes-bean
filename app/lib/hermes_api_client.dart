@@ -7,6 +7,9 @@ const String hermesApiBaseUrl = String.fromEnvironment(
   defaultValue: 'https://heybean.org/api',
 );
 
+const Duration _standardApiResponseTimeout = Duration(seconds: 30);
+const Duration _assistantApiResponseTimeout = Duration(seconds: 120);
+
 typedef HermesApiTransport =
     Future<HermesApiResponse> Function(HermesApiRequest request);
 
@@ -619,7 +622,10 @@ class HermesApiClient {
   }
 
   Future<HermesSession> cancelSession(int sessionId) async {
-    final data = await _sendJson('POST', '/assistant/sessions/$sessionId/cancel');
+    final data = await _sendJson(
+      'POST',
+      '/assistant/sessions/$sessionId/cancel',
+    );
     return HermesSession.fromJson(_expectMap(data['data']));
   }
 
@@ -635,6 +641,7 @@ class HermesApiClient {
       'POST',
       '/assistant/sessions/$sessionId/messages',
       body: body,
+      responseTimeout: _assistantApiResponseTimeout,
     );
     return HermesMessageResult.fromJson(_expectMap(data['data']));
   }
@@ -659,6 +666,7 @@ class HermesApiClient {
     String path, {
     Map<String, Object?>? body,
     bool authenticated = true,
+    Duration responseTimeout = _standardApiResponseTimeout,
   }) async {
     final headers = <String, String>{'Accept': 'application/json'};
     if (body != null) headers['Content-Type'] = 'application/json';
@@ -671,6 +679,7 @@ class HermesApiClient {
       path: path.startsWith('/') ? path : '/$path',
       headers: headers,
       body: body,
+      responseTimeout: responseTimeout,
     );
     final response = await _transport(request);
 
@@ -717,12 +726,12 @@ class HermesApiClient {
       if (request.body != null) ioRequest.write(jsonEncode(request.body));
 
       final ioResponse = await ioRequest.close().timeout(
-        const Duration(seconds: 30),
+        request.responseTimeout,
       );
       final responseBody = await utf8.decoder
           .bind(ioResponse)
           .join()
-          .timeout(const Duration(seconds: 30));
+          .timeout(request.responseTimeout);
       return HermesApiResponse(ioResponse.statusCode, responseBody);
     } on TimeoutException catch (error) {
       throw HermesApiException(
@@ -742,6 +751,7 @@ class HermesApiRequest {
     required this.path,
     this.headers = const {},
     this.body,
+    this.responseTimeout = _standardApiResponseTimeout,
   });
 
   final String method;
@@ -749,6 +759,7 @@ class HermesApiRequest {
   final String path;
   final Map<String, String> headers;
   final Map<String, Object?>? body;
+  final Duration responseTimeout;
 }
 
 class HermesApiResponse {
@@ -1546,10 +1557,9 @@ class HermesCalendarEvent {
       id: _expectInt(json['id']),
       title: _readTitle(json),
       workspaceId: _readIntOrNull(json['workspace_id']),
-      linkedWorkspaceIds: _expectList(json['linked_workspace_ids'] ?? const [])
-          .map(_readIntOrNull)
-          .whereType<int>()
-          .toList(),
+      linkedWorkspaceIds: _expectList(
+        json['linked_workspace_ids'] ?? const [],
+      ).map(_readIntOrNull).whereType<int>().toList(),
       startsAt: (json['starts_at'] ?? json['startsAt']) as String?,
       endsAt: (json['ends_at'] ?? json['endsAt']) as String?,
       category:

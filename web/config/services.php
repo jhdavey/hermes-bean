@@ -43,7 +43,7 @@ return [
         'users_home' => env('HERMES_USERS_HOME', storage_path('app/hermes-users')),
         'base_home' => env('HERMES_BASE_HOME'),
         'cli_path' => env('HERMES_CLI_PATH'),
-        'timeout' => (float) env('HERMES_CLI_TIMEOUT', 30),
+        'timeout' => (float) env('HERMES_CLI_TIMEOUT', 120),
         'workdir' => env('HERMES_CLI_WORKDIR'),
         'profile' => env('HERMES_CLI_PROFILE'),
         'environment' => [],
