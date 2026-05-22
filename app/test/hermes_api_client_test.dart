@@ -676,6 +676,10 @@ void main() {
                     'id': 8,
                     'role': 'assistant',
                     'content': 'Done',
+                    'metadata': {
+                      'model': 'gpt-5.4',
+                      'model_route': {'tier': 'standard'},
+                    },
                   },
                   'events': [
                     {'id': 1, 'event_type': 'runtime.message_received'},
@@ -759,6 +763,7 @@ void main() {
       );
       expect(messageResult.status, 'completed');
       expect(messageResult.assistantMessage?.content, 'Done');
+      expect(messageResult.assistantMessage?.modelName, 'gpt-5.4');
       expect(messageResult.events.single.eventType, 'runtime.message_received');
 
       final events = await client.pollActivityEvents(42);

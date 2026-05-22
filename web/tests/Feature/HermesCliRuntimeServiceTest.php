@@ -90,6 +90,11 @@ PHP);
             'role' => 'assistant',
             'content' => 'Hermes CLI answered: Plan my day',
         ]);
+        $assistantMessage = ConversationMessage::where('conversation_session_id', $sessionId)
+            ->where('role', 'assistant')
+            ->firstOrFail();
+        $this->assertSame('gpt-5.5', $assistantMessage->metadata['model']);
+        $this->assertSame('complex', $assistantMessage->metadata['model_route']['tier']);
         $this->assertSame([
             'runtime.session_started',
             'runtime.message_received',

@@ -1340,6 +1340,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       id: message.id,
       role: message.role,
       content: _naturalLanguageContent(message.content),
+      metadata: message.metadata,
     );
   }
 
@@ -4082,6 +4083,7 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                         sender: isUser ? 'You' : 'Bean',
                         message: message.content ?? '',
                         alignRight: isUser,
+                        modelName: isUser ? null : message.modelName,
                         onEdit: isUser ? () => _editSentMessage(message) : null,
                       ),
                     );
@@ -4575,6 +4577,7 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     this.alignRight = false,
     this.progress = false,
+    this.modelName,
     this.onEdit,
   });
 
@@ -4582,6 +4585,7 @@ class _MessageBubble extends StatelessWidget {
   final String message;
   final bool alignRight;
   final bool progress;
+  final String? modelName;
   final VoidCallback? onEdit;
 
   @override
@@ -4599,7 +4603,6 @@ class _MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
               if (progress) ...[
                 const SizedBox.square(
@@ -4608,13 +4611,43 @@ class _MessageBubble extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
               ],
-              Text(
-                sender,
-                style: const TextStyle(
-                  color: HeyBeanTheme.accentStrong,
-                  fontWeight: FontWeight.w800,
+              if (modelName == null)
+                Text(
+                  sender,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: HeyBeanTheme.accentStrong,
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              else
+                Expanded(
+                  child: Text(
+                    sender,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: HeyBeanTheme.accentStrong,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-              ),
+              if (modelName != null) ...[
+                const SizedBox(width: 10),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 160),
+                  child: Text(
+                    modelName!,
+                    key: const Key('assistant-message-model-label'),
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
               if (onEdit != null) ...[
                 const SizedBox(width: 8),
                 InkWell(

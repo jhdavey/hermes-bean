@@ -1679,16 +1679,42 @@ class HermesMessageResult {
 }
 
 class HermesMessage {
-  const HermesMessage({required this.id, required this.role, this.content});
+  const HermesMessage({
+    required this.id,
+    required this.role,
+    this.content,
+    this.metadata = const {},
+  });
 
   final int id;
   final String role;
   final String? content;
+  final Map<String, Object?> metadata;
+
+  String? get modelName {
+    final directModel = metadata['model'];
+    if (directModel != null && directModel.toString().trim().isNotEmpty) {
+      return directModel.toString().trim();
+    }
+
+    final route = metadata['model_route'];
+    if (route is Map) {
+      final routedModel = route['model'];
+      if (routedModel != null && routedModel.toString().trim().isNotEmpty) {
+        return routedModel.toString().trim();
+      }
+    }
+
+    return null;
+  }
 
   factory HermesMessage.fromJson(Map<String, Object?> json) => HermesMessage(
     id: _expectInt(json['id']),
     role: _expectString(json['role']),
     content: json['content'] as String?,
+    metadata: json['metadata'] == null
+        ? const {}
+        : _expectMap(json['metadata']),
   );
 }
 

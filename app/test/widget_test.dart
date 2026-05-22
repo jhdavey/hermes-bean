@@ -194,6 +194,11 @@ void main() {
       );
       expect(typedClientContext['timezone_offset_minutes'], isA<int>());
       expect(find.text('Done — I updated your day.'), findsOneWidget);
+      expect(find.text('gpt-5.4'), findsOneWidget);
+      expect(
+        find.byKey(const Key('assistant-message-model-label')),
+        findsOneWidget,
+      );
       tester.testTextInput.hide();
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('chat-activity-menu')), findsOneWidget);
@@ -4984,6 +4989,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       assistantMessage: HermesMessage(
         id: 8,
         role: 'assistant',
+        metadata: const {'model': 'gpt-5.4'},
         content: isIntroductionMessage
             ? 'Nice to meet you — I saved those Bean preferences.'
             : 'Done — I updated your day.',

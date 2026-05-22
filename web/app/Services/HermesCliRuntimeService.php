@@ -161,7 +161,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
             ]);
         }
 
-        return DB::transaction(function () use ($session, $userMessage, $received, $started, $process): array {
+        return DB::transaction(function () use ($session, $userMessage, $received, $started, $process, $modelRoute): array {
             $structuredOutput = $this->structuredOutputFrom($process->getOutput());
             $assistantContent = $this->assistantContentFrom($process->getOutput(), $structuredOutput);
 
@@ -180,6 +180,9 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 'content' => $assistantContent,
                 'metadata' => [
                     'runtime' => 'cli',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $modelRoute['model'],
+                    'model_route' => $modelRoute,
                     'stderr' => mb_substr($process->getErrorOutput(), 0, 2000),
                 ],
             ]);
