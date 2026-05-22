@@ -2096,26 +2096,52 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     List<Object> deleteFromWorkspaceIds = const [],
   }) async {
     final previousCalendar = _calendar;
+    final recurringDeleteMode = event.metadata?['_delete_recurring_mode']
+        ?.toString();
+    final recurringOccurrenceDate = event.metadata?['_delete_occurrence_date']
+        ?.toString();
+    final isRecurringOccurrenceDelete =
+        recurringDeleteMode != null &&
+        recurringDeleteMode != 'all' &&
+        recurringOccurrenceDate != null;
     final deleteWorkspaceIdSet = deleteFromWorkspaceIds
         .map((id) => id.toString())
         .toSet();
     setState(() {
-      _calendar = _calendar
-          .where(
-            (candidate) =>
-                candidate.id != event.id &&
-                (candidate.workspaceId == null ||
-                    !deleteWorkspaceIdSet.contains(
-                      candidate.workspaceId.toString(),
-                    )),
-          )
-          .toList();
+      if (isRecurringOccurrenceDelete) {
+        _calendar = _calendar
+            .map(
+              (candidate) => candidate.id == event.id
+                  ? candidate.copyWith(
+                      metadata: _metadataAfterRecurringDelete(
+                        candidate,
+                        recurringDeleteMode,
+                        recurringOccurrenceDate,
+                      ),
+                    )
+                  : candidate,
+            )
+            .toList();
+      } else {
+        _calendar = _calendar
+            .where(
+              (candidate) =>
+                  candidate.id != event.id &&
+                  (candidate.workspaceId == null ||
+                      !deleteWorkspaceIdSet.contains(
+                        candidate.workspaceId.toString(),
+                      )),
+            )
+            .toList();
+      }
       _error = null;
     });
     try {
       await widget.apiClient.deleteCalendarEvent(
         event.id,
         deleteFromWorkspaceIds: deleteFromWorkspaceIds,
+        recurringDeleteMode: recurringDeleteMode,
+        recurringOccurrenceDate: recurringOccurrenceDate,
       );
       await _refreshSignedInViews();
     } catch (error) {
@@ -5485,6 +5511,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                   key: Key(
                     'calendar-all-day-row-${selectedDay.toIso8601String()}',
                   ),
+                  day: selectedDay,
                   events: selectedAllDayEvents,
                   eventCategories: eventCategories,
                   googleCalendarStatus: googleCalendarStatus,
@@ -5499,6 +5526,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
                   key: Key(
                     'calendar-all-day-row-${selectedNextDay.toIso8601String()}',
                   ),
+                  day: selectedNextDay,
                   events: nextAllDayEvents,
                   eventCategories: eventCategories,
                   googleCalendarStatus: googleCalendarStatus,
@@ -5885,6 +5913,7 @@ class _TimelineDayGridRow extends StatelessWidget {
 class _AllDayEventRow extends StatelessWidget {
   const _AllDayEventRow({
     super.key,
+    required this.day,
     required this.events,
     required this.eventCategories,
     required this.googleCalendarStatus,
@@ -5894,6 +5923,7 @@ class _AllDayEventRow extends StatelessWidget {
     required this.onEventCategoryDeleted,
   });
 
+  final DateTime day;
   final List<HermesCalendarEvent> events;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
@@ -5950,6 +5980,9 @@ class _AllDayEventRow extends StatelessWidget {
           onTap: () => _showCalendarEventDetails(
             context,
             event,
+            occurrenceDate: _eventIsRecurring(event)
+                ? _calendarDateKey(day)
+                : null,
             eventCategories: eventCategories,
             googleCalendarStatus: googleCalendarStatus,
             onSave:
@@ -6000,6 +6033,7 @@ class _AllDayEventRow extends StatelessWidget {
             ),
             onEventCategorySaved: onEventCategorySaved,
             onEventCategoryDeleted: onEventCategoryDeleted,
+            onDelete: onEventDeleted,
           ),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 180),
@@ -6136,6 +6170,9 @@ class _TimelineEventBlock extends StatelessWidget {
         onTap: () => _showCalendarEventDetails(
           context,
           event,
+          occurrenceDate: _eventIsRecurring(event)
+              ? _calendarDateKey(day)
+              : null,
           eventCategories: eventCategories,
           googleCalendarStatus: googleCalendarStatus,
           onSave:
@@ -6253,6 +6290,7 @@ Future<void> _showCalendarEventDetails(
   HermesCalendarEvent event, {
   required List<HermesEventCategory> eventCategories,
   GoogleCalendarSyncStatus? googleCalendarStatus,
+  String? occurrenceDate,
   required Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -6293,6 +6331,7 @@ Future<void> _showCalendarEventDetails(
     MaterialPageRoute(
       builder: (_) => _CalendarEventDetailPage(
         event: event,
+        occurrenceDate: occurrenceDate,
         eventCategories: eventCategories,
         googleCalendarStatus: googleCalendarStatus,
         workspaces: workspaces,
@@ -6306,8 +6345,23 @@ Future<void> _showCalendarEventDetails(
   );
 
   if (result != null && result['action'] == 'delete') {
+    final recurringDeleteMode = result['recurringDeleteMode'] as String?;
+    final recurringOccurrenceDate =
+        result['recurringOccurrenceDate'] as String?;
+    final deleteEvent =
+        recurringDeleteMode == null && recurringOccurrenceDate == null
+        ? event
+        : event.copyWith(
+            metadata: {
+              ...?event.metadata,
+              if (recurringDeleteMode != null)
+                '_delete_recurring_mode': recurringDeleteMode,
+              if (recurringOccurrenceDate != null)
+                '_delete_occurrence_date': recurringOccurrenceDate,
+            },
+          );
     await onDelete?.call(
-      event,
+      deleteEvent,
       deleteFromWorkspaceIds:
           (result['deleteFromWorkspaceIds'] as List?)
               ?.whereType<Object>()
@@ -6347,6 +6401,7 @@ Future<void> _showCalendarEventDetails(
 class _CalendarEventDetailPage extends StatefulWidget {
   const _CalendarEventDetailPage({
     required this.event,
+    this.occurrenceDate,
     required this.eventCategories,
     this.googleCalendarStatus,
     this.workspaces = const [],
@@ -6358,6 +6413,7 @@ class _CalendarEventDetailPage extends StatefulWidget {
   });
 
   final HermesCalendarEvent event;
+  final String? occurrenceDate;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
   final List<HermesWorkspace> workspaces;
@@ -6823,7 +6879,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     }
   }
 
-  Future<List<Object>?> _confirmCalendarEventDelete() async {
+  Future<Map<String, Object?>?> _confirmCalendarEventDelete() async {
     final linkedIds = <int>{
       if (widget.event.workspaceId != null) widget.event.workspaceId!,
       ...widget.event.linkedWorkspaceIds,
@@ -6856,6 +6912,132 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             return a.name.toLowerCase().compareTo(b.name.toLowerCase());
           });
 
+    final isRecurring = _eventIsRecurring(widget.event);
+    final occurrenceDate = widget.occurrenceDate;
+    if (isRecurring && occurrenceDate != null) {
+      var recurringMode = 'single';
+      final selectedIds = deleteChoices
+          .map((workspace) => workspace.numericId ?? workspace.id)
+          .toSet();
+      return showDialog<Map<String, Object?>>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            final canDelete = selectedIds.isNotEmpty || deleteChoices.isEmpty;
+
+            return AlertDialog(
+              title: const Text('Delete recurring event'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      key: const Key('event-delete-recurring-single'),
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        recurringMode == 'single'
+                            ? Icons.radio_button_checked_rounded
+                            : Icons.radio_button_unchecked_rounded,
+                        color: recurringMode == 'single'
+                            ? HeyBeanTheme.accentStrong
+                            : HeyBeanTheme.muted,
+                      ),
+                      onTap: () =>
+                          setDialogState(() => recurringMode = 'single'),
+                      title: const Text('This event only'),
+                      subtitle: const Text(
+                        'The series resumes after this date.',
+                      ),
+                    ),
+                    ListTile(
+                      key: const Key('event-delete-recurring-future'),
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        recurringMode == 'future'
+                            ? Icons.radio_button_checked_rounded
+                            : Icons.radio_button_unchecked_rounded,
+                        color: recurringMode == 'future'
+                            ? HeyBeanTheme.accentStrong
+                            : HeyBeanTheme.muted,
+                      ),
+                      onTap: () =>
+                          setDialogState(() => recurringMode = 'future'),
+                      title: const Text('This and future events'),
+                      subtitle: const Text(
+                        'Earlier events stay on the calendar.',
+                      ),
+                    ),
+                    ListTile(
+                      key: const Key('event-delete-recurring-all'),
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        recurringMode == 'all'
+                            ? Icons.radio_button_checked_rounded
+                            : Icons.radio_button_unchecked_rounded,
+                        color: recurringMode == 'all'
+                            ? HeyBeanTheme.accentStrong
+                            : HeyBeanTheme.muted,
+                      ),
+                      onTap: () => setDialogState(() => recurringMode = 'all'),
+                      title: const Text('Entire series'),
+                      subtitle: const Text('Remove every occurrence.'),
+                    ),
+                    if (deleteChoices.length > 1) ...[
+                      const Divider(height: 20),
+                      for (final workspace in deleteChoices)
+                        CheckboxListTile(
+                          key: Key('event-delete-workspace-${workspace.id}'),
+                          contentPadding: EdgeInsets.zero,
+                          value: selectedIds.contains(
+                            workspace.numericId ?? workspace.id,
+                          ),
+                          onChanged: (value) => setDialogState(() {
+                            final id = workspace.numericId ?? workspace.id;
+                            if (value ?? false) {
+                              selectedIds.add(id);
+                            } else {
+                              selectedIds.remove(id);
+                            }
+                          }),
+                          title: Text(
+                            workspace.isPersonal ? 'Personal' : workspace.name,
+                          ),
+                          subtitle:
+                              workspace.numericId == widget.event.workspaceId
+                              ? const Text('Current copy')
+                              : null,
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  key: const Key('event-delete-recurring-action'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: HeyBeanTheme.destructive,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: canDelete
+                      ? () => Navigator.of(context).pop({
+                          'deleteFromWorkspaceIds': selectedIds.toList(),
+                          'recurringDeleteMode': recurringMode,
+                          'recurringOccurrenceDate': occurrenceDate,
+                        })
+                      : null,
+                  child: const Text('Delete'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
     if (deleteChoices.length <= 1) {
       final confirmed = await _confirmDestructiveAction(
         context,
@@ -6864,16 +7046,18 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         confirmLabel: 'Delete event',
       );
       if (!confirmed) return null;
-      return [
-        if (deleteChoices.isNotEmpty)
-          deleteChoices.first.numericId ?? deleteChoices.first.id,
-      ];
+      return {
+        'deleteFromWorkspaceIds': [
+          if (deleteChoices.isNotEmpty)
+            deleteChoices.first.numericId ?? deleteChoices.first.id,
+        ],
+      };
     }
 
     final selectedIds = deleteChoices
         .map((workspace) => workspace.numericId ?? workspace.id)
         .toSet();
-    return showDialog<List<Object>>(
+    return showDialog<Map<String, Object?>>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
@@ -6924,7 +7108,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                   foregroundColor: Colors.white,
                 ),
                 onPressed: canDelete
-                    ? () => Navigator.of(context).pop(selectedIds.toList())
+                    ? () => Navigator.of(
+                        context,
+                      ).pop({'deleteFromWorkspaceIds': selectedIds.toList()})
                     : null,
                 child: const Text('Delete event'),
               ),
@@ -7624,14 +7810,18 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                   tooltip: 'Delete event',
                   style: _destructiveIconButtonStyle(),
                   onPressed: () async {
-                    final deleteFromWorkspaceIds =
-                        await _confirmCalendarEventDelete();
-                    if (!context.mounted || deleteFromWorkspaceIds == null) {
+                    final deleteOptions = await _confirmCalendarEventDelete();
+                    if (!context.mounted || deleteOptions == null) {
                       return;
                     }
                     Navigator.of(context).pop({
                       'action': 'delete',
-                      'deleteFromWorkspaceIds': deleteFromWorkspaceIds,
+                      'deleteFromWorkspaceIds':
+                          deleteOptions['deleteFromWorkspaceIds'],
+                      'recurringDeleteMode':
+                          deleteOptions['recurringDeleteMode'],
+                      'recurringOccurrenceDate':
+                          deleteOptions['recurringOccurrenceDate'],
                     });
                   },
                   icon: const Icon(Icons.delete_outline_rounded),
@@ -8725,6 +8915,58 @@ bool _sameCalendarDay(DateTime a, DateTime b) =>
 
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 
+String _calendarDateKey(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-'
+    '${date.month.toString().padLeft(2, '0')}-'
+    '${date.day.toString().padLeft(2, '0')}';
+
+DateTime? _parseCalendarDateKey(String? value) {
+  if (value == null || value.trim().isEmpty) return null;
+  final parts = value.trim().split('-');
+  if (parts.length != 3) return null;
+  final year = int.tryParse(parts[0]);
+  final month = int.tryParse(parts[1]);
+  final day = int.tryParse(parts[2]);
+  if (year == null || month == null || day == null) return null;
+  return DateTime(year, month, day);
+}
+
+bool _eventIsRecurring(HermesCalendarEvent event) {
+  final recurrence = (event.recurrence ?? 'none').toLowerCase();
+  return recurrence.isNotEmpty && recurrence != 'none';
+}
+
+Set<String> _recurringExceptionDates(HermesCalendarEvent event) {
+  final raw =
+      event.metadata?['recurring_exception_dates'] ??
+      event.metadata?['recurringExceptionDates'] ??
+      event.metadata?['recurrence_exceptions'];
+  if (raw is! List) return const <String>{};
+  return raw
+      .map((value) => value.toString().trim())
+      .where((value) => value.isNotEmpty)
+      .toSet();
+}
+
+Map<String, Object?> _metadataAfterRecurringDelete(
+  HermesCalendarEvent event,
+  String mode,
+  String occurrenceDate,
+) {
+  final metadata = <String, Object?>{...?event.metadata}
+    ..remove('_delete_recurring_mode')
+    ..remove('_delete_occurrence_date');
+  if (mode == 'single') {
+    final exceptions = _recurringExceptionDates(event).toList()
+      ..add(occurrenceDate);
+    exceptions.sort();
+    metadata['recurring_exception_dates'] = exceptions.toSet().toList()..sort();
+  } else if (mode == 'future') {
+    metadata['recurrence_until'] = occurrenceDate;
+  }
+  return metadata;
+}
+
 bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
   final start = _parseCalendarEventDateTime(event.startsAt);
   if (start == null) return false;
@@ -8751,6 +8993,17 @@ bool _recurringEventFallsOnDay(
   DateTime dayEnd,
 ) {
   final originalStartDay = DateTime(start.year, start.month, start.day);
+  final dayKey = _calendarDateKey(dayStart);
+  if (_recurringExceptionDates(event).contains(dayKey)) {
+    return false;
+  }
+  final recurrenceUntil = _parseCalendarDateKey(
+    event.metadata?['recurrence_until']?.toString() ??
+        event.metadata?['recurrenceUntil']?.toString(),
+  );
+  if (recurrenceUntil != null && !dayStart.isBefore(recurrenceUntil)) {
+    return false;
+  }
   if (dayEnd.isBefore(originalStartDay) ||
       dayStart.isBefore(originalStartDay)) {
     return false;

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ActivityEvent;
 use App\Models\CalendarEvent;
 use App\Models\GoogleCalendarConnection;
 use App\Models\Reminder;
@@ -213,6 +214,35 @@ class AssistantDomainApiTest extends TestCase
             ->assertJsonPath('data.category', 'Kids')
             ->assertJsonPath('data.color', '#007AFF')
             ->assertJsonPath('data.recurrence', 'none');
+
+        $recurringEventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Piano lesson',
+            'starts_at' => '2026-05-15T15:00:00Z',
+            'ends_at' => '2026-05-15T16:00:00Z',
+            'recurrence' => 'weekly',
+        ])->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->deleteJson("/api/calendar-events/{$recurringEventId}", [
+            'recurring_delete_mode' => 'single',
+            'recurring_occurrence_date' => '2026-05-22',
+        ])->assertNoContent();
+
+        $this->assertDatabaseHas('calendar_events', ['id' => $recurringEventId]);
+        $this->assertSame(
+            ['2026-05-22'],
+            CalendarEvent::findOrFail($recurringEventId)->metadata['recurring_exception_dates']
+        );
+
+        $this->withToken($token)->deleteJson("/api/calendar-events/{$recurringEventId}", [
+            'recurring_delete_mode' => 'future',
+            'recurring_occurrence_date' => '2026-06-05',
+        ])->assertNoContent();
+
+        $this->assertSame(
+            '2026-06-05',
+            CalendarEvent::findOrFail($recurringEventId)->metadata['recurrence_until']
+        );
 
         $this->withToken($token)->postJson('/api/reminders', [
             'calendar_event_id' => $eventId,
@@ -692,7 +722,7 @@ PHP);
             'event_type' => 'runtime.hermes_cli_started',
             'status' => 'started',
         ]);
-        $this->assertSame(100, \App\Models\ActivityEvent::where('conversation_session_id', $sessionId)->where('event_type', 'runtime.hermes_cli_started')->count());
+        $this->assertSame(100, ActivityEvent::where('conversation_session_id', $sessionId)->where('event_type', 'runtime.hermes_cli_started')->count());
     }
 
     /**

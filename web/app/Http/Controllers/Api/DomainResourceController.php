@@ -302,6 +302,8 @@ class DomainResourceController extends Controller
         $validated = $request->validate([
             'delete_from_workspace_ids' => ['nullable', 'array'],
             'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+            'recurring_delete_mode' => ['nullable', Rule::in(['all', 'single', 'future'])],
+            'recurring_occurrence_date' => ['nullable', 'date_format:Y-m-d'],
         ]);
 
         $workspaceIds = array_values(array_unique(array_map(
@@ -324,6 +326,18 @@ class DomainResourceController extends Controller
         $eventsToDelete = $eventsByWorkspace->only($workspaceIds)->values();
         if ($eventsToDelete->isEmpty() && in_array((int) $event->workspace_id, $workspaceIds, true)) {
             $eventsToDelete = collect([$event]);
+        }
+
+        $recurringDeleteMode = $validated['recurring_delete_mode'] ?? 'all';
+        $recurringOccurrenceDate = $validated['recurring_occurrence_date'] ?? null;
+        if (
+            $recurringDeleteMode !== 'all'
+            && $recurringOccurrenceDate
+            && $this->calendarEventIsRecurring($event)
+        ) {
+            $eventsToDelete->each(fn (CalendarEvent $event): CalendarEvent => $this->applyRecurringCalendarDelete($event, $recurringDeleteMode, $recurringOccurrenceDate));
+
+            return response()->json(status: 204);
         }
 
         $eventIds = $eventsToDelete->pluck('id')->map(fn ($id): int => (int) $id)->all();
@@ -656,6 +670,38 @@ class DomainResourceController extends Controller
             ->whereIn('workspace_id', $accessibleWorkspaceIds)
             ->get()
             ->keyBy(fn (CalendarEvent $event): int => (int) $event->workspace_id);
+    }
+
+    private function calendarEventIsRecurring(CalendarEvent $event): bool
+    {
+        $recurrence = strtolower((string) ($event->recurrence ?? 'none'));
+
+        return $recurrence !== '' && $recurrence !== 'none';
+    }
+
+    private function applyRecurringCalendarDelete(CalendarEvent $event, string $mode, string $occurrenceDate): CalendarEvent
+    {
+        $metadata = $event->metadata ?? [];
+
+        if ($mode === 'single') {
+            $exceptions = collect($metadata['recurring_exception_dates'] ?? $metadata['recurrence_exceptions'] ?? [])
+                ->map(fn ($value): string => trim((string) $value))
+                ->filter()
+                ->push($occurrenceDate)
+                ->unique()
+                ->sort()
+                ->values()
+                ->all();
+            $metadata['recurring_exception_dates'] = $exceptions;
+        }
+
+        if ($mode === 'future') {
+            $metadata['recurrence_until'] = $occurrenceDate;
+        }
+
+        $event->forceFill(['metadata' => $metadata])->save();
+
+        return $event->refresh();
     }
 
     /**

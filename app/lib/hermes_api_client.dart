@@ -528,6 +528,8 @@ class HermesApiClient {
   Future<void> deleteCalendarEvent(
     int eventId, {
     List<Object> deleteFromWorkspaceIds = const [],
+    String? recurringDeleteMode,
+    String? recurringOccurrenceDate,
   }) async {
     await _sendJson(
       'DELETE',
@@ -535,6 +537,10 @@ class HermesApiClient {
       body: {
         if (deleteFromWorkspaceIds.isNotEmpty)
           'delete_from_workspace_ids': deleteFromWorkspaceIds,
+        if (recurringDeleteMode != null)
+          'recurring_delete_mode': recurringDeleteMode,
+        if (recurringOccurrenceDate != null)
+          'recurring_occurrence_date': recurringOccurrenceDate,
       },
     );
   }

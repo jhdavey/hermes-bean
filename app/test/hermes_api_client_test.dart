@@ -1104,6 +1104,14 @@ void main() {
               request.body,
               containsPair('delete_from_workspace_ids', [1, 2]),
             );
+            expect(
+              request.body,
+              containsPair('recurring_delete_mode', 'single'),
+            );
+            expect(
+              request.body,
+              containsPair('recurring_occurrence_date', '2026-05-27'),
+            );
             return const HermesApiResponse(204, '');
           }
           fail('Unexpected request: ${request.method} ${request.path}');
@@ -1135,7 +1143,12 @@ void main() {
         startsAt: '2026-05-20T10:00:00Z',
         syncToWorkspaceIds: [2, 3],
       );
-      await client.deleteCalendarEvent(3, deleteFromWorkspaceIds: [1, 2]);
+      await client.deleteCalendarEvent(
+        3,
+        deleteFromWorkspaceIds: [1, 2],
+        recurringDeleteMode: 'single',
+        recurringOccurrenceDate: '2026-05-27',
+      );
 
       expect(requests, hasLength(7));
     },

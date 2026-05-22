@@ -3161,6 +3161,59 @@ void main() {
     expect(api.deletedEventWorkspaceIds, [1]);
   });
 
+  testWidgets('recurring calendar event delete can stop future occurrences', (
+    WidgetTester tester,
+  ) async {
+    final today = DateTime.now();
+    final api = _EditableCalendarFakeHermesApiClient(
+      initialEvent: HermesCalendarEvent(
+        id: 3,
+        title: 'Morning standup',
+        startsAt: DateTime(
+          today.year,
+          today.month,
+          today.day,
+          9,
+        ).toIso8601String(),
+        endsAt: DateTime(
+          today.year,
+          today.month,
+          today.day,
+          9,
+          30,
+        ).toIso8601String(),
+        recurrence: 'daily',
+      ),
+    );
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    final eventKey = Key(
+      'calendar-event-block-morning-standup-${today.year}-${today.month}-${today.day}',
+    );
+    await tester.ensureVisible(find.byKey(eventKey));
+    await tester.tap(find.byKey(eventKey));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('event-delete-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete recurring event'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('event-delete-recurring-future')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('event-delete-recurring-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.deletedEventId, 3);
+    expect(api.deletedRecurringMode, 'future');
+    expect(
+      api.deletedRecurringOccurrenceDate,
+      '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}',
+    );
+  });
+
   testWidgets('event editor preserves custom category colors when resaving', (
     WidgetTester tester,
   ) async {
@@ -5513,6 +5566,8 @@ class _EditableCalendarFakeHermesApiClient
   int? deletedCategoryId;
   int? deletedEventId;
   List<Object> deletedEventWorkspaceIds = const [];
+  String? deletedRecurringMode;
+  String? deletedRecurringOccurrenceDate;
 
   @override
   Future<HermesCalendarEvent> updateCalendarEvent(
@@ -5623,9 +5678,13 @@ class _EditableCalendarFakeHermesApiClient
   Future<void> deleteCalendarEvent(
     int eventId, {
     List<Object> deleteFromWorkspaceIds = const [],
+    String? recurringDeleteMode,
+    String? recurringOccurrenceDate,
   }) async {
     deletedEventId = eventId;
     deletedEventWorkspaceIds = deleteFromWorkspaceIds;
+    deletedRecurringMode = recurringDeleteMode;
+    deletedRecurringOccurrenceDate = recurringOccurrenceDate;
   }
 
   @override
