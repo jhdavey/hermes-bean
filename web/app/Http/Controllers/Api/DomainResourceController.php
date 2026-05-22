@@ -11,6 +11,7 @@ use App\Models\Reminder;
 use App\Models\SchedulerJobRecord;
 use App\Models\Task;
 use App\Models\Workspace;
+use App\Models\WorkspaceItemLink;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\StructuredHermesActionService;
 use App\Services\WorkspaceItemSyncService;
@@ -76,7 +77,18 @@ class DomainResourceController extends Controller
         $query = $this->scoped(CalendarEvent::query(), $request);
         $this->scopeVisibleGoogleCalendars($query, $request, $workspace);
 
-        return $this->listed($query->orderBy('starts_at')->orderBy('id')->get());
+        $events = $query->orderBy('starts_at')->orderBy('id')->get();
+        $accessibleWorkspaceIds = app(WorkspaceService::class)
+            ->accessibleWorkspaces($request->user())
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+
+        $events->each(function (CalendarEvent $event) use ($accessibleWorkspaceIds): void {
+            $event->setAttribute('linked_workspace_ids', $this->linkedCalendarEventWorkspaceIds($event, $accessibleWorkspaceIds));
+        });
+
+        return $this->listed($events);
     }
 
     public function listEventCategories(Request $request): JsonResponse
@@ -286,7 +298,42 @@ class DomainResourceController extends Controller
 
     public function destroyCalendarEvent(Request $request, string $calendarEvent): JsonResponse
     {
-        return $this->destroyed($this->scoped(CalendarEvent::query(), $request, false)->findOrFail($calendarEvent));
+        $event = $this->scoped(CalendarEvent::query(), $request, false)->findOrFail($calendarEvent);
+        $validated = $request->validate([
+            'delete_from_workspace_ids' => ['nullable', 'array'],
+            'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+
+        $workspaceIds = array_values(array_unique(array_map(
+            'intval',
+            $validated['delete_from_workspace_ids'] ?? [$event->workspace_id]
+        )));
+        if ($workspaceIds === []) {
+            $workspaceIds = [(int) $event->workspace_id];
+        }
+
+        $workspaceService = app(WorkspaceService::class);
+        $accessibleWorkspaceIds = $workspaceService->accessibleWorkspaces($request->user())->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        foreach ($workspaceIds as $workspaceId) {
+            if (! in_array($workspaceId, $accessibleWorkspaceIds, true)) {
+                $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
+            }
+        }
+
+        $eventsByWorkspace = $this->linkedCalendarEventsByWorkspace($event, $accessibleWorkspaceIds);
+        $eventsToDelete = $eventsByWorkspace->only($workspaceIds)->values();
+        if ($eventsToDelete->isEmpty() && in_array((int) $event->workspace_id, $workspaceIds, true)) {
+            $eventsToDelete = collect([$event]);
+        }
+
+        $eventIds = $eventsToDelete->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        foreach ($eventsToDelete as $eventToDelete) {
+            $this->googleCalendar->deleteExportedEvent($eventToDelete);
+        }
+        CalendarEvent::whereIn('id', $eventIds)->delete();
+        $this->deleteWorkspaceItemLinksFor('calendar_events', $eventIds);
+
+        return response()->json(status: 204);
     }
 
     public function storeEventCategory(Request $request): JsonResponse
@@ -568,6 +615,98 @@ class DomainResourceController extends Controller
             $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
         }
         app(WorkspaceItemSyncService::class)->syncToWorkspaceIds($model, $workspaceIds, $request->user());
+    }
+
+    /**
+     * @param  array<int, int>  $accessibleWorkspaceIds
+     */
+    private function linkedCalendarEventsByWorkspace(CalendarEvent $event, array $accessibleWorkspaceIds)
+    {
+        $relatedIds = collect([(int) $event->id]);
+        $links = $this->calendarEventLinksFor($event);
+        $sourcePairs = collect();
+
+        foreach ($links as $link) {
+            $relatedIds->push((int) $link->source_id, (int) $link->target_id);
+            $sourcePairs->push([(int) $link->source_workspace_id, (int) $link->source_id]);
+        }
+
+        $sourcePairs = $sourcePairs->unique(fn (array $pair): string => $pair[0].':'.$pair[1])->values();
+        if ($sourcePairs->isNotEmpty()) {
+            WorkspaceItemLink::query()
+                ->where('source_type', 'calendar_events')
+                ->where('target_type', 'calendar_events')
+                ->where('link_type', 'copy')
+                ->where(function ($query) use ($sourcePairs): void {
+                    foreach ($sourcePairs as [$workspaceId, $sourceId]) {
+                        $query->orWhere(function ($query) use ($workspaceId, $sourceId): void {
+                            $query->where('source_workspace_id', $workspaceId)
+                                ->where('source_id', $sourceId);
+                        });
+                    }
+                })
+                ->get()
+                ->each(function (WorkspaceItemLink $link) use ($relatedIds): void {
+                    $relatedIds->push((int) $link->source_id, (int) $link->target_id);
+                });
+        }
+
+        return CalendarEvent::query()
+            ->whereIn('id', $relatedIds->unique()->values()->all())
+            ->whereIn('workspace_id', $accessibleWorkspaceIds)
+            ->get()
+            ->keyBy(fn (CalendarEvent $event): int => (int) $event->workspace_id);
+    }
+
+    /**
+     * @param  array<int, int>  $accessibleWorkspaceIds
+     * @return array<int, int>
+     */
+    private function linkedCalendarEventWorkspaceIds(CalendarEvent $event, array $accessibleWorkspaceIds): array
+    {
+        return $this->linkedCalendarEventsByWorkspace($event, $accessibleWorkspaceIds)
+            ->keys()
+            ->map(fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+    }
+
+    private function calendarEventLinksFor(CalendarEvent $event)
+    {
+        return WorkspaceItemLink::query()
+            ->where('source_type', 'calendar_events')
+            ->where('target_type', 'calendar_events')
+            ->where('link_type', 'copy')
+            ->where(function ($query) use ($event): void {
+                $query->where(function ($query) use ($event): void {
+                    $query->where('source_workspace_id', $event->workspace_id)
+                        ->where('source_id', $event->id);
+                })->orWhere(function ($query) use ($event): void {
+                    $query->where('target_workspace_id', $event->workspace_id)
+                        ->where('target_id', $event->id);
+                });
+            })
+            ->get();
+    }
+
+    /**
+     * @param  array<int, int>  $ids
+     */
+    private function deleteWorkspaceItemLinksFor(string $type, array $ids): void
+    {
+        if ($ids === []) {
+            return;
+        }
+
+        WorkspaceItemLink::query()
+            ->where(function ($query) use ($type, $ids): void {
+                $query->where(function ($query) use ($type, $ids): void {
+                    $query->where('source_type', $type)->whereIn('source_id', $ids);
+                })->orWhere(function ($query) use ($type, $ids): void {
+                    $query->where('target_type', $type)->whereIn('target_id', $ids);
+                });
+            })
+            ->delete();
     }
 
     private function taskStatusIsCompleted(?string $status): bool

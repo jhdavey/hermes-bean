@@ -688,6 +688,55 @@ class GoogleCalendarSyncTest extends TestCase
             && $request['summary'] === 'Multi calendar meeting');
     }
 
+    public function test_deleting_exported_local_event_removes_google_calendar_copies(): void
+    {
+        $token = $this->apiToken('calendar-delete-export@example.com');
+        $user = User::where('email', 'calendar-delete-export@example.com')->firstOrFail();
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary', 'work@example.com'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Main calendar', 'primary' => true, 'accessRole' => 'owner'],
+                    ['id' => 'work@example.com', 'summary' => 'Work', 'accessRole' => 'writer'],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events' => Http::response([
+                'id' => 'google-primary-delete',
+                'updated' => '2026-05-15T12:00:00Z',
+            ]),
+            'https://www.googleapis.com/calendar/v3/calendars/work%40example.com/events' => Http::response([
+                'id' => 'google-work-delete',
+                'updated' => '2026-05-15T12:01:00Z',
+            ]),
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events/google-primary-delete' => Http::response([], 204),
+            'https://www.googleapis.com/calendar/v3/calendars/work%40example.com/events/google-work-delete' => Http::response([], 204),
+        ]);
+
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Delete me externally',
+            'starts_at' => '2026-05-20T15:00:00Z',
+            'metadata' => ['google_calendar_ids' => ['primary', 'work@example.com']],
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$eventId)
+            ->assertNoContent();
+
+        $this->assertDatabaseMissing('calendar_events', ['id' => $eventId]);
+        Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
+            && str_contains($request->url(), '/calendars/primary/events/google-primary-delete'));
+        Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
+            && str_contains($request->url(), '/calendars/work%40example.com/events/google-work-delete'));
+    }
+
     public function test_google_api_failure_messages_do_not_persist_sensitive_response_bodies(): void
     {
         $token = $this->apiToken('calendar-error-sanitize@example.com');

@@ -343,6 +343,40 @@ class GoogleCalendarSyncService
         return $event->refresh();
     }
 
+    public function deleteExportedEvent(CalendarEvent $event): void
+    {
+        $connection = $event->user?->googleCalendarConnection()->first();
+        if (! $connection || $connection->status !== 'connected') {
+            return;
+        }
+
+        $metadata = $event->metadata ?? [];
+        $exports = is_array($metadata['google_event_exports'] ?? null) ? $metadata['google_event_exports'] : [];
+        if ($event->google_calendar_id && $event->google_event_id) {
+            $exports[$event->google_calendar_id] ??= ['event_id' => $event->google_event_id];
+        }
+
+        if ($exports === []) {
+            return;
+        }
+
+        $token = $this->validAccessToken($connection);
+        foreach ($exports as $calendarId => $export) {
+            $googleEventId = is_array($export) ? ($export['event_id'] ?? null) : null;
+            if (! $calendarId || ! $googleEventId || ! $this->calendarCanWrite($connection, (string) $calendarId)) {
+                continue;
+            }
+
+            $response = Http::withToken($token)->delete(
+                $this->calendarEventsUrl((string) $calendarId).'/'.rawurlencode((string) $googleEventId)
+            );
+            if (! $response->successful() && ! in_array($response->status(), [404, 410], true)) {
+                $this->markFailed($connection, 'Calendar event delete failed.');
+                throw new RuntimeException('Calendar event delete failed.');
+            }
+        }
+    }
+
     private function connectedConnection(User $user): GoogleCalendarConnection
     {
         $connection = $user->googleCalendarConnection()->first();

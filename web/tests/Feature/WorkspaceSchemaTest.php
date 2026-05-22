@@ -280,4 +280,39 @@ class WorkspaceSchemaTest extends TestCase
             'link_type' => 'copy',
         ]);
     }
+
+    public function test_calendar_event_delete_can_remove_selected_linked_workspace_copies(): void
+    {
+        $token = $this->apiToken('delete-linked-calendar@example.com');
+        $user = User::where('email', 'delete-linked-calendar@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $household = app(WorkspaceService::class)->createHousehold($user, 'Family');
+
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'School meeting',
+            'starts_at' => '2026-05-21T14:00:00Z',
+            'sync_to_workspace_ids' => [$household->id],
+        ])->assertCreated()->json('data.id');
+
+        $copiedId = CalendarEvent::where('workspace_id', $household->id)->value('id');
+
+        $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$personalWorkspaceId)
+            ->assertOk()
+            ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $household->id]);
+
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$eventId, [
+            'delete_from_workspace_ids' => [$personalWorkspaceId],
+        ])->assertNoContent();
+
+        $this->assertDatabaseMissing('calendar_events', ['id' => $eventId]);
+        $this->assertDatabaseHas('calendar_events', ['id' => $copiedId, 'workspace_id' => $household->id]);
+
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$copiedId, [
+            'delete_from_workspace_ids' => [$household->id],
+        ])->assertNoContent();
+
+        $this->assertDatabaseMissing('calendar_events', ['id' => $copiedId]);
+        $this->assertSame(0, WorkspaceItemLink::where('source_type', 'calendar_events')->count());
+    }
 }

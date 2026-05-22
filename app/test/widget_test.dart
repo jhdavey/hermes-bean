@@ -3062,6 +3062,42 @@ void main() {
     );
   });
 
+  testWidgets('calendar event delete can target selected workspaces', (
+    WidgetTester tester,
+  ) async {
+    final api = _LinkedWorkspaceEditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(
+      find.byKey(const Key('calendar-event-block-design-review')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('calendar-event-block-design-review')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('event-delete-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete event from'), findsOneWidget);
+    expect(find.byKey(const Key('event-delete-workspace-1')), findsOneWidget);
+    expect(find.byKey(const Key('event-delete-workspace-2')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('event-delete-workspace-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('event-delete-selected-workspaces-action')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.deletedEventId, 3);
+    expect(api.deletedEventWorkspaceIds, [1]);
+  });
+
   testWidgets('event editor preserves custom category colors when resaving', (
     WidgetTester tester,
   ) async {
@@ -5322,6 +5358,7 @@ class _EditableCalendarFakeHermesApiClient
   HermesEventCategory? savedCategory;
   int? deletedCategoryId;
   int? deletedEventId;
+  List<Object> deletedEventWorkspaceIds = const [];
 
   @override
   Future<HermesCalendarEvent> updateCalendarEvent(
@@ -5429,8 +5466,12 @@ class _EditableCalendarFakeHermesApiClient
   }
 
   @override
-  Future<void> deleteCalendarEvent(int eventId) async {
+  Future<void> deleteCalendarEvent(
+    int eventId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
     deletedEventId = eventId;
+    deletedEventWorkspaceIds = deleteFromWorkspaceIds;
   }
 
   @override
@@ -5459,7 +5500,67 @@ class _EditableCalendarFakeHermesApiClient
             category: 'Personal',
             color: '#34C759',
             recurrence: 'none',
-          ),
+      ),
+  ];
+}
+
+class _LinkedWorkspaceEditableCalendarFakeHermesApiClient
+    extends _EditableCalendarFakeHermesApiClient {
+  static const _personal = HermesWorkspace(
+    id: '1',
+    name: 'Personal',
+    type: 'personal',
+    role: 'owner',
+    active: true,
+    isDefault: true,
+  );
+  static const _family = HermesWorkspace(
+    id: '2',
+    name: 'Daveys',
+    type: 'household',
+    role: 'owner',
+  );
+
+  @override
+  Future<HermesUser> me() async => const HermesUser(
+    id: 1,
+    name: 'Bean User',
+    email: 'bean@example.com',
+    onboardComplete: true,
+    defaultWorkspaceId: 1,
+    personalWorkspace: _personal,
+    activeWorkspace: _personal,
+    workspaces: [_personal, _family],
+    agentProfile: HermesAgentProfile(
+      settings: {
+        'personality_type': 'balanced',
+        'onboarding': {'completed': true, 'priorities': <String>[]},
+      },
+    ),
+  );
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+    if (!deletedEventWorkspaceIds.map((id) => id.toString()).contains('1'))
+      HermesCalendarEvent(
+        id: 3,
+        workspaceId: 1,
+        linkedWorkspaceIds: [1, 2],
+        title: 'Design review',
+        startsAt: DateTime.utc(
+          DateTime.now().year,
+          DateTime.now().month,
+          DateTime.now().day,
+          14,
+          30,
+        ).toIso8601String(),
+        endsAt: DateTime.utc(
+          DateTime.now().year,
+          DateTime.now().month,
+          DateTime.now().day,
+          15,
+        ).toIso8601String(),
+      ),
   ];
 }
 

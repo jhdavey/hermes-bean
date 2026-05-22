@@ -2040,16 +2040,32 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  Future<void> _deleteCalendarEvent(HermesCalendarEvent event) async {
+  Future<void> _deleteCalendarEvent(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
     final previousCalendar = _calendar;
+    final deleteWorkspaceIdSet = deleteFromWorkspaceIds
+        .map((id) => id.toString())
+        .toSet();
     setState(() {
       _calendar = _calendar
-          .where((candidate) => candidate.id != event.id)
+          .where(
+            (candidate) =>
+                candidate.id != event.id &&
+                (candidate.workspaceId == null ||
+                    !deleteWorkspaceIdSet.contains(
+                      candidate.workspaceId.toString(),
+                    )),
+          )
           .toList();
       _error = null;
     });
     try {
-      await widget.apiClient.deleteCalendarEvent(event.id);
+      await widget.apiClient.deleteCalendarEvent(
+        event.id,
+        deleteFromWorkspaceIds: deleteFromWorkspaceIds,
+      );
       await _refreshSignedInViews();
     } catch (error) {
       if (!mounted) return;
@@ -3615,7 +3631,11 @@ class _CommandCenterContent extends StatelessWidget {
     List<Object> syncToWorkspaceIds,
   })
   onCalendarEventEdited;
-  final Future<void> Function(HermesCalendarEvent event) onCalendarEventDeleted;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onCalendarEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -4678,7 +4698,11 @@ class _TodayHomeView extends StatelessWidget {
     List<Object> syncToWorkspaceIds,
   })
   onCalendarEventEdited;
-  final Future<void> Function(HermesCalendarEvent event) onCalendarEventDeleted;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onCalendarEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -4983,7 +5007,11 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     String? reminderIntervalUnit,
   })
   onEventTap;
-  final Future<void> Function(HermesCalendarEvent event) onEventDeleted;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -5305,7 +5333,11 @@ class _TwoDayTimelinePage extends StatelessWidget {
     String? reminderIntervalUnit,
   })
   onEventTap;
-  final Future<void> Function(HermesCalendarEvent event) onEventDeleted;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -5809,7 +5841,11 @@ class _AllDayEventRow extends StatelessWidget {
     String? reminderIntervalUnit,
   })
   onEventTap;
-  final Future<void> Function(HermesCalendarEvent event) onEventDeleted;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -5977,7 +6013,11 @@ class _TimelineEventBlock extends StatelessWidget {
     String? reminderIntervalUnit,
   })
   onTap;
-  final Future<void> Function(HermesCalendarEvent event) onDelete;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onDelete;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -6168,7 +6208,11 @@ Future<void> _showCalendarEventDetails(
   onEventCategoryDeleted,
   Future<void> Function(HermesCalendarEvent event, bool isCritical)?
   onCriticalChanged,
-  Future<void> Function(HermesCalendarEvent event)? onDelete,
+  Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })?
+  onDelete,
   List<HermesWorkspace> workspaces = const [],
   String? activeWorkspaceId,
 }) async {
@@ -6189,7 +6233,14 @@ Future<void> _showCalendarEventDetails(
   );
 
   if (result != null && result['action'] == 'delete') {
-    await onDelete?.call(event);
+    await onDelete?.call(
+      event,
+      deleteFromWorkspaceIds:
+          (result['deleteFromWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
+    );
     return;
   }
 
@@ -6248,7 +6299,11 @@ class _CalendarEventDetailPage extends StatefulWidget {
   onEventCategoryDeleted;
   final Future<void> Function(HermesCalendarEvent event, bool isCritical)?
   onCriticalChanged;
-  final Future<void> Function(HermesCalendarEvent event)? onDelete;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })?
+  onDelete;
 
   @override
   State<_CalendarEventDetailPage> createState() =>
@@ -6619,6 +6674,118 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     } finally {
       if (mounted) setState(() => _savingCategory = false);
     }
+  }
+
+  Future<List<Object>?> _confirmCalendarEventDelete() async {
+    final linkedIds = <int>{
+      if (widget.event.workspaceId != null) widget.event.workspaceId!,
+      ...widget.event.linkedWorkspaceIds,
+    };
+    if (linkedIds.isEmpty && widget.activeWorkspaceId != null) {
+      final activeId = int.tryParse(widget.activeWorkspaceId!);
+      if (activeId != null) linkedIds.add(activeId);
+    }
+
+    final workspaceById = {
+      for (final workspace in widget.workspaces)
+        if (workspace.numericId != null) workspace.numericId!: workspace,
+    };
+    final deleteChoices = linkedIds
+        .map(
+          (id) =>
+              workspaceById[id] ??
+              HermesWorkspace(
+                id: id.toString(),
+                name: id == widget.event.workspaceId
+                    ? 'Current workspace'
+                    : 'Workspace $id',
+              ),
+        )
+        .toList()
+      ..sort((a, b) {
+        if (a.numericId == widget.event.workspaceId) return -1;
+        if (b.numericId == widget.event.workspaceId) return 1;
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+
+    if (deleteChoices.length <= 1) {
+      final confirmed = await _confirmDestructiveAction(
+        context,
+        title: 'Delete event?',
+        message:
+            'This removes "${widget.event.title}" from your calendar.',
+        confirmLabel: 'Delete event',
+      );
+      if (!confirmed) return null;
+      return [
+        if (deleteChoices.isNotEmpty)
+          deleteChoices.first.numericId ?? deleteChoices.first.id,
+      ];
+    }
+
+    final selectedIds = deleteChoices
+        .map((workspace) => workspace.numericId ?? workspace.id)
+        .toSet();
+    return showDialog<List<Object>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final canDelete = selectedIds.isNotEmpty;
+
+          return AlertDialog(
+            title: const Text('Delete event from'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '"${widget.event.title}" is linked across workspaces. Choose where to remove it.',
+                ),
+                const SizedBox(height: 10),
+                for (final workspace in deleteChoices)
+                  CheckboxListTile(
+                    key: Key('event-delete-workspace-${workspace.id}'),
+                    contentPadding: EdgeInsets.zero,
+                    value: selectedIds.contains(
+                      workspace.numericId ?? workspace.id,
+                    ),
+                    onChanged: (value) => setDialogState(() {
+                      final id = workspace.numericId ?? workspace.id;
+                      if (value ?? false) {
+                        selectedIds.add(id);
+                      } else {
+                        selectedIds.remove(id);
+                      }
+                    }),
+                    title: Text(
+                      workspace.isPersonal ? 'Personal' : workspace.name,
+                    ),
+                    subtitle: workspace.numericId == widget.event.workspaceId
+                        ? const Text('Current copy')
+                        : null,
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const Key('event-delete-selected-workspaces-action'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: HeyBeanTheme.destructive,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: canDelete
+                    ? () => Navigator.of(context).pop(selectedIds.toList())
+                    : null,
+                child: const Text('Delete event'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _showTimeDock(
@@ -7203,15 +7370,15 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                   tooltip: 'Delete event',
                   style: _destructiveIconButtonStyle(),
                   onPressed: () async {
-                    final confirmed = await _confirmDestructiveAction(
-                      context,
-                      title: 'Delete event?',
-                      message:
-                          'This removes "${widget.event.title}" from your calendar.',
-                      confirmLabel: 'Delete event',
-                    );
-                    if (!context.mounted || !confirmed) return;
-                    Navigator.of(context).pop({'action': 'delete'});
+                    final deleteFromWorkspaceIds =
+                        await _confirmCalendarEventDelete();
+                    if (!context.mounted || deleteFromWorkspaceIds == null) {
+                      return;
+                    }
+                    Navigator.of(context).pop({
+                      'action': 'delete',
+                      'deleteFromWorkspaceIds': deleteFromWorkspaceIds,
+                    });
                   },
                   icon: const Icon(Icons.delete_outline_rounded),
                 ),

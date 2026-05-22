@@ -383,6 +383,8 @@ void main() {
       });
       final event = HermesCalendarEvent.fromJson({
         'id': 3,
+        'workspace_id': 1,
+        'linked_workspace_ids': [1, 2],
         'title': 'Design review',
         'starts_at': '2026-05-10T14:30:00Z',
         'metadata': '{"google_calendar_id":"work@example.com"}',
@@ -392,6 +394,8 @@ void main() {
       expect(reminder.color, '#34C759');
       expect(reminder.isCritical, isTrue);
       expect(event.googleCalendarId, 'work@example.com');
+      expect(event.workspaceId, 1);
+      expect(event.linkedWorkspaceIds, [1, 2]);
     },
   );
 
@@ -1080,6 +1084,14 @@ void main() {
               }),
             );
           }
+          if (request.path == '/calendar-events/3' &&
+              request.method == 'DELETE') {
+            expect(request.body, containsPair('delete_from_workspace_ids', [
+              1,
+              2,
+            ]));
+            return const HermesApiResponse(204, '');
+          }
           fail('Unexpected request: ${request.method} ${request.path}');
         },
       );
@@ -1109,8 +1121,9 @@ void main() {
         startsAt: '2026-05-20T10:00:00Z',
         syncToWorkspaceIds: [2, 3],
       );
+      await client.deleteCalendarEvent(3, deleteFromWorkspaceIds: [1, 2]);
 
-      expect(requests, hasLength(6));
+      expect(requests, hasLength(7));
     },
   );
 

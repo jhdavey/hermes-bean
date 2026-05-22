@@ -525,8 +525,18 @@ class HermesApiClient {
     await _sendJson('DELETE', '/event-categories/$categoryId');
   }
 
-  Future<void> deleteCalendarEvent(int eventId) async {
-    await _sendJson('DELETE', '/calendar-events/$eventId');
+  Future<void> deleteCalendarEvent(
+    int eventId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
+    await _sendJson(
+      'DELETE',
+      '/calendar-events/$eventId',
+      body: {
+        if (deleteFromWorkspaceIds.isNotEmpty)
+          'delete_from_workspace_ids': deleteFromWorkspaceIds,
+      },
+    );
   }
 
   Future<HermesCalendarEvent> updateCalendarEvent(
@@ -1471,6 +1481,8 @@ class HermesCalendarEvent {
   const HermesCalendarEvent({
     required this.id,
     required this.title,
+    this.workspaceId,
+    this.linkedWorkspaceIds = const [],
     this.startsAt,
     this.endsAt,
     this.category,
@@ -1482,6 +1494,8 @@ class HermesCalendarEvent {
 
   final int id;
   final String title;
+  final int? workspaceId;
+  final List<int> linkedWorkspaceIds;
   final String? startsAt;
   final String? endsAt;
   final String? category;
@@ -1520,6 +1534,11 @@ class HermesCalendarEvent {
     return HermesCalendarEvent(
       id: _expectInt(json['id']),
       title: _readTitle(json),
+      workspaceId: _readIntOrNull(json['workspace_id']),
+      linkedWorkspaceIds: _expectList(json['linked_workspace_ids'] ?? const [])
+          .map(_readIntOrNull)
+          .whereType<int>()
+          .toList(),
       startsAt: (json['starts_at'] ?? json['startsAt']) as String?,
       endsAt: (json['ends_at'] ?? json['endsAt']) as String?,
       category:
@@ -1554,6 +1573,8 @@ class HermesCalendarEvent {
   }) => HermesCalendarEvent(
     id: id,
     title: title ?? this.title,
+    workspaceId: workspaceId,
+    linkedWorkspaceIds: linkedWorkspaceIds,
     startsAt: startsAt ?? this.startsAt,
     endsAt: clearEndsAt ? null : endsAt ?? this.endsAt,
     category: clearCategory ? null : category ?? this.category,
