@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HeyBean App</title>
+    <meta name="description" content="HeyBean browser command center">
+    <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
+    <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}">
+    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
+    <meta name="theme-color" content="#16a34a">
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
+</head>
+<body class="heybean-app-body">
+    <div
+        id="heybean-web-app"
+        data-logo="{{ asset('images/bean-logo.png') }}"
+        data-auth-mode="{{ request()->is('register') ? 'register' : (request()->is('forgot-password') ? 'forgot' : 'login') }}"
+    >
+        <div class="hb-loading-screen">
+            <div class="hb-spinner" aria-hidden="true"></div>
+            <p>Loading HeyBean…</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -96,7 +96,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('Apple-style', false)
             ->assertDontSee('Google Calendar', false)
             ->assertDontSee('iOS', false)
-            ->assertSee('<nav class="navlinks" aria-label="Primary navigation"><a href="#how">How it works</a><a href="#features">Features</a></nav>', false)
+            ->assertSee('<nav class="navlinks" aria-label="Primary navigation"><a href="#how">How it works</a><a href="#features">Features</a><a href="/login">Log in</a></nav>', false)
             ->assertSee('<div class="mobile-menu-panel">', false)
             ->assertDontSee('<a href="/privacy">Privacy</a>', false)
             ->assertDontSee('<a href="/terms">Terms</a>', false)
@@ -114,6 +114,17 @@ class LandingPageFeatureTest extends TestCase
         $html = $response->getContent();
         $this->assertLessThan(strpos($html, 'Voice-first requests'), strpos($html, 'No spam. Private beta invites only.'));
         $this->assertLessThan(strpos($html, 'Just say “Hey, Bean…!”'), strpos($html, 'Private by design'));
+    }
+
+    public function test_browser_app_auth_routes_render_the_heybean_app_shell(): void
+    {
+        foreach (['/login', '/register', '/forgot-password', '/app', '/dashboard'] as $path) {
+            $this->get($path)
+                ->assertOk()
+                ->assertSee('id="heybean-web-app"', false)
+                ->assertSee('/build/assets/app-', false)
+                ->assertSee('class="heybean-app-body"', false);
+        }
     }
 
     public function test_visitors_can_request_early_access(): void
