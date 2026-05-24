@@ -73,6 +73,12 @@
     animation: hb-spin .8s linear infinite;
 }
 
+.hb-spinner-tiny {
+    width: 17px;
+    height: 17px;
+    border-width: 2px;
+}
+
 @keyframes hb-spin {
     to { transform: rotate(360deg); }
 }
@@ -293,6 +299,12 @@
     transform: translateY(-1px);
     background: rgba(22, 163, 74, .15);
     border-color: rgba(22, 163, 74, .24);
+}
+
+.hb-icon-button:disabled {
+    cursor: not-allowed;
+    opacity: .58;
+    transform: none;
 }
 
 .hb-icon-button svg {

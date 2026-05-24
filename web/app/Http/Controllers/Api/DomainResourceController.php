@@ -71,7 +71,9 @@ class DomainResourceController extends Controller
     public function listCalendarEvents(Request $request): JsonResponse
     {
         $workspace = $this->workspace($request);
-        $this->googleCalendar->syncIfConnected($request->user(), $workspace);
+        if (! $request->boolean('skip_google_sync')) {
+            $this->googleCalendar->syncIfConnected($request->user(), $workspace);
+        }
 
         $query = $this->scoped(CalendarEvent::query(), $request);
         $this->scopeVisibleGoogleCalendars($query, $request, $workspace);

@@ -19,6 +19,7 @@ if (mount) {
         tune: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M2 14h4M10 8h4M18 16h4"/></svg>',
         activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
+        refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.2 6.5L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.2 5.5L21 8"/><path d="M21 3v5h-5"/></svg>',
     };
 
     const state = {
@@ -47,6 +48,7 @@ if (mount) {
         voiceListening: false,
         voiceRecognition: null,
         voiceDraft: '',
+        calendarRefreshing: false,
         taskFilter: 'active',
         reminderFilter: 'pending',
         busy: false,
@@ -243,6 +245,7 @@ if (mount) {
         const critical = criticalItems().length;
         const addTitle = state.selected === 'tasks' ? 'Add task' : state.selected === 'reminders' ? 'Add reminder' : 'Create event';
         const showAdd = ['today', 'tasks', 'reminders'].includes(state.selected);
+        const showCalendarRefresh = state.selected === 'today';
         return `
             <div class="hb-app">
                 <header class="hb-topbar">
@@ -251,6 +254,7 @@ if (mount) {
                     <button class="hb-header-pill" data-today type="button">${dayLabel(new Date())}</button>
                     <button class="hb-critical" type="button" title="${critical} critical items">${critical}</button>
                     ${showAdd ? `<button class="hb-icon-button" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
+                    ${showCalendarRefresh ? `<button class="hb-icon-button" type="button" data-refresh-calendar aria-label="Refresh calendar" title="Refresh calendar" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${topProfileMenuMarkup()}
                 </header>
                 <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''}">
@@ -943,6 +947,7 @@ if (mount) {
             state.showMonth = false;
             render();
         }));
+        mount.querySelector('[data-refresh-calendar]')?.addEventListener('click', refreshCalendar);
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
         mount.querySelectorAll('[data-edit-task]').forEach((button) => button.addEventListener('click', () => openModal('task', findById(state.tasks, button.dataset.editTask))));
         mount.querySelectorAll('[data-edit-reminder]').forEach((button) => button.addEventListener('click', () => openModal('reminder', findById(state.reminders, button.dataset.editReminder))));
@@ -1132,15 +1137,38 @@ if (mount) {
         if (!confirm(`Delete this ${kind}?`)) return;
         const path = kind === 'task' ? `/tasks/${id}` : kind === 'reminder' ? `/reminders/${id}` : `/calendar-events/${id}`;
         const body = kind === 'event' ? deleteEventPayload(state.modal?.item) : null;
+        const snapshot = snapshotLists(kind);
+        state.modal = null;
+        removeCachedItem(kind, id);
+        render();
         try {
             await api(path, { method: 'DELETE', ...(body ? { body } : {}) });
-            state.modal = null;
-            await refreshOnly();
+            await refreshOnly(true, { skipCalendarSync: kind === 'event' });
         } catch (error) {
-            state.modal = null;
+            restoreSnapshot(kind, snapshot);
             state.error = friendlyError(error, `delete that ${kind}`);
             render();
         }
+    }
+
+    function snapshotLists(kind) {
+        if (kind === 'task') return state.tasks.slice();
+        if (kind === 'reminder') return state.reminders.slice();
+        if (kind === 'event') return state.calendar.slice();
+        return [];
+    }
+
+    function restoreSnapshot(kind, snapshot) {
+        if (kind === 'task') state.tasks = snapshot;
+        if (kind === 'reminder') state.reminders = snapshot;
+        if (kind === 'event') state.calendar = snapshot;
+    }
+
+    function removeCachedItem(kind, id) {
+        const matches = (item) => String(item.id) === String(id);
+        if (kind === 'task') state.tasks = state.tasks.filter((item) => !matches(item));
+        if (kind === 'reminder') state.reminders = state.reminders.filter((item) => !matches(item));
+        if (kind === 'event') state.calendar = state.calendar.filter((item) => !matches(item));
     }
 
     function deleteEventPayload(event = null) {
@@ -1342,13 +1370,14 @@ if (mount) {
         }
     }
 
-    async function refreshOnly(shouldRender = true) {
+    async function refreshOnly(shouldRender = true, options = {}) {
         try {
+            const calendarPath = options.skipCalendarSync ? '/calendar-events?skip_google_sync=1' : '/calendar-events';
             const [summary, tasks, reminders, calendar, categories, googleStatus] = await Promise.all([
                 api('/today'),
                 api('/tasks'),
                 api('/reminders'),
-                api('/calendar-events'),
+                api(calendarPath),
                 api('/event-categories'),
                 api('/google-calendar/status').catch(() => state.googleStatus),
             ]);
@@ -1366,6 +1395,27 @@ if (mount) {
         } catch (error) {
             state.error = friendlyError(error, 'refresh the app');
             if (shouldRender) render();
+        }
+    }
+
+    async function refreshCalendar() {
+        if (state.calendarRefreshing) return;
+        state.calendarRefreshing = true;
+        state.error = '';
+        render();
+        try {
+            const [calendar, googleStatus] = await Promise.all([
+                api('/calendar-events'),
+                api('/google-calendar/status').catch(() => state.googleStatus),
+            ]);
+            state.calendar = normalizeList(calendar);
+            state.googleStatus = googleStatus;
+            state.notice = 'Calendar refreshed.';
+        } catch (error) {
+            state.error = friendlyError(error, 'refresh the calendar');
+        } finally {
+            state.calendarRefreshing = false;
+            render();
         }
     }
 
