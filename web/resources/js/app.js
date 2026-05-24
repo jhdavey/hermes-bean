@@ -60,8 +60,6 @@ if (mount) {
         modal: null,
     };
 
-    const voiceHoldDelay = 260;
-    let voiceHoldTimer = 0;
     let voiceHoldActive = false;
     let voiceSubmitOnEnd = false;
     let suppressNextSendClick = false;
@@ -1374,20 +1372,18 @@ if (mount) {
 
     function handleSendPointerDown(event) {
         if (state.busy || (typeof event.button === 'number' && event.button !== 0)) return;
-        window.clearTimeout(voiceHoldTimer);
         voiceHoldActive = false;
-        voiceHoldTimer = window.setTimeout(() => {
-            voiceHoldActive = startVoiceHoldInput();
-            suppressNextSendClick = true;
-            if (!voiceHoldActive) {
-                window.setTimeout(() => { suppressNextSendClick = false; }, 350);
-            }
-        }, voiceHoldDelay);
+        const typedContent = mount.querySelector('textarea[name="message"]')?.value.trim();
+        if (typedContent) return;
+        voiceHoldActive = startVoiceHoldInput();
+        suppressNextSendClick = true;
+        if (!voiceHoldActive) {
+            window.setTimeout(() => { suppressNextSendClick = false; }, 350);
+        }
         event.currentTarget.setPointerCapture?.(event.pointerId);
     }
 
     function handleSendPointerUp(event) {
-        window.clearTimeout(voiceHoldTimer);
         if (!voiceHoldActive && !state.voiceListening) return;
         event.preventDefault();
         suppressNextSendClick = true;
@@ -1395,7 +1391,6 @@ if (mount) {
     }
 
     function handleSendPointerCancel() {
-        window.clearTimeout(voiceHoldTimer);
         if (voiceHoldActive || state.voiceListening) {
             finishVoiceHoldInput(false);
             suppressNextSendClick = true;
@@ -1452,6 +1447,11 @@ if (mount) {
 
     function startVoiceHoldInput() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!window.isSecureContext) {
+            state.error = 'Voice input needs HTTPS, localhost, or another secure browser context in Chrome.';
+            render();
+            return false;
+        }
         if (!SpeechRecognition) {
             state.error = 'Voice input is not available in this browser.';
             render();
@@ -1485,12 +1485,14 @@ if (mount) {
             }
             render();
         };
-        recognition.onerror = () => {
+        recognition.onerror = (event) => {
             state.voiceListening = false;
             state.voiceRecognition = null;
             voiceHoldActive = false;
             voiceSubmitOnEnd = false;
-            state.error = 'Voice input stopped. You can still type to Bean.';
+            state.error = event.error === 'not-allowed'
+                ? 'Chrome blocked microphone access. Allow microphone permission for this site, then press and hold again.'
+                : 'Voice input stopped. You can still type to Bean.';
             render();
         };
         state.voiceRecognition = recognition;
