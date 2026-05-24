@@ -264,20 +264,21 @@ if (mount) {
 
     function todayMarkup() {
         const selected = parseLocalDate(state.selectedDay);
-        const events = eventsForDay(selected);
+        const visibleDays = twoDayWindow(selected);
+        const events = eventsForDays(visibleDays);
         return `
             <section class="hb-card hb-card-pad">
-                ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events for ${dayLabel(selected)}`)}
+                ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events across ${twoDayLabel(visibleDays)}`)}
                 <div class="hb-calendar">
                     ${state.showMonth ? monthGridMarkup(selected) : `<div class="hb-day-strip">
-                        ${weekDays(selected).map((day) => `
-                            <button class="hb-day ${sameDate(day, selected) ? 'hb-day-active' : ''}" type="button" data-select-day="${dateOnly(day)}">
+                        ${weekDaysForWindow(selected, visibleDays).map((day) => `
+                            <button class="hb-day ${visibleDays.some((visibleDay) => sameDate(day, visibleDay)) ? 'hb-day-active' : ''} ${sameDate(day, selected) ? 'hb-day-anchor' : ''}" type="button" data-select-day="${dateOnly(day)}" aria-pressed="${visibleDays.some((visibleDay) => sameDate(day, visibleDay))}">
                                 <strong>${weekdayShort(day)}</strong>
                                 <span>${day.getDate()} · ${eventsForDay(day).length} events</span>
                             </button>
                         `).join('')}
                     </div>`}
-                    ${state.showMonth ? '' : timelineMarkup(selected, events)}
+                    ${state.showMonth ? '' : timelineMarkup(visibleDays)}
                 </div>
             </section>`;
     }
@@ -495,21 +496,24 @@ if (mount) {
         return `<button class="hb-nav-item ${state.selected === key ? 'hb-nav-item-active' : ''}" type="button" data-nav="${key}">${icon}<span>${label}</span></button>`;
     }
 
-    function timelineMarkup(day, events) {
-        if (!events.length) {
-            return `<div class="hb-empty hb-surface-soft">No events scheduled for ${dayLabel(day)}</div>`;
-        }
+    function timelineMarkup(days) {
         const startHour = Number(localStorage.getItem('heybean.calendar.startHour') || 6);
         const endHour = Number(localStorage.getItem('heybean.calendar.endHour') || 22);
         const hours = Array.from({ length: Math.max(1, endHour - startHour + 1) }, (_, index) => startHour + index);
         return `
-            <div class="hb-timeline" aria-label="${escapeAttr(dayLabel(day))} timeline">
+            <div class="hb-timeline hb-timeline-two-day" aria-label="${escapeAttr(twoDayLabel(days))} timeline">
+                <div class="hb-timeline-head">
+                    <div class="hb-timeline-hour"></div>
+                    ${days.map((day) => `<div class="hb-timeline-day-head"><strong>${escapeHtml(dayLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></div>`).join('')}
+                </div>
                 ${hours.map((hour) => `
                     <div class="hb-timeline-row">
                         <div class="hb-timeline-hour">${hourLabel(hour)}</div>
-                        <div class="hb-timeline-slot">
-                            ${events.filter((event) => new Date(event.starts_at || event.startsAt || 0).getHours() === hour).map(eventMarkup).join('')}
-                        </div>
+                        ${days.map((day) => `
+                            <div class="hb-timeline-slot">
+                                ${eventsForDay(day).filter((event) => new Date(event.starts_at || event.startsAt || 0).getHours() === hour).map(eventMarkup).join('')}
+                            </div>
+                        `).join('')}
                     </div>
                 `).join('')}
             </div>`;
@@ -621,20 +625,22 @@ if (mount) {
         const isEvent = kind === 'event';
         const when = item ? toDatetimeLocal(item.due_at || item.dueAt || item.remind_at || item.starts_at || item.startsAt) : '';
         const end = item ? toDatetimeLocal(item.ends_at || item.endsAt) : '';
+        const workspaceId = item?.workspace_id || item?.workspaceId || currentWorkspaceId();
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="${kind}">
                     ${sectionTitle(isEvent ? icons.calendar : isReminder ? icons.reminders : icons.tasks, `${editing ? 'Edit' : 'New'} ${kind}`, '')}
                     ${labelInput(`${capitalize(kind)} title`, 'title', 'text', item?.title || item?.name || '', 'required')}
+                    ${isEvent ? eventDetailFieldsMarkup(item) : ''}
                     ${labelInput(isEvent ? 'Starts at' : isReminder ? 'Remind me at' : 'Due date', 'time', 'datetime-local', when, isReminder || isEvent ? 'required' : '')}
                     ${isEvent ? labelInput('Ends at', 'endsAt', 'datetime-local', end) : ''}
                     <div class="hb-field-row">
-                        ${labelInput('Category', 'category', 'text', item?.category || '', 'list="hb-categories"')}
-                        ${labelInput('Color', 'color', 'color', safeColor(item?.color))}
+                        ${categorySelectMarkup(item)}
+                        ${labelInput('Color', 'color', 'color', safeColor(item?.color || categoryColor(item?.category)))}
                     </div>
-                    <datalist id="hb-categories">${state.categories.map((category) => `<option value="${escapeAttr(category.name)}"></option>`).join('')}</datalist>
                     <button class="hb-button-ghost" type="button" data-open-categories>Manage categories</button>
                     ${!isReminder ? `<label class="hb-checkbox-row"><input type="checkbox" name="critical" ${item?.is_critical || item?.isCritical ? 'checked' : ''}> Critical</label>` : ''}
+                    ${isEvent ? eventConnectionsMarkup(item, workspaceId, editing) : ''}
                     ${isEvent ? recurrenceFieldsMarkup(item) : ''}
                     ${isReminder ? reminderRecurrenceFieldsMarkup(item) : ''}
                     <div class="hb-modal-actions">
@@ -644,6 +650,64 @@ if (mount) {
                     </div>
                 </form>
             </div>`;
+    }
+
+    function eventDetailFieldsMarkup(item = null) {
+        return `
+            <label class="hb-label">Description<textarea class="hb-textarea" name="description" placeholder="Description">${escapeHtml(item?.description || '')}</textarea></label>
+            <div class="hb-field-row">
+                ${labelInput('Location', 'location', 'text', item?.location || '')}
+                <label class="hb-label">Status<select class="hb-select" name="status">
+                    ${['confirmed', 'tentative', 'cancelled'].map((status) => `<option value="${status}" ${String(item?.status || 'confirmed') === status ? 'selected' : ''}>${capitalize(status)}</option>`).join('')}
+                </select></label>
+            </div>`;
+    }
+
+    function categorySelectMarkup(item = null) {
+        const current = item?.category || '';
+        const categories = categoryOptions(current);
+        return `
+            <label class="hb-label">Category<select class="hb-select" name="category" data-category-select>
+                <option value="" data-category-color="">None</option>
+                ${categories.map((category) => `<option value="${escapeAttr(category.name)}" data-category-color="${escapeAttr(safeColor(category.color))}" ${category.name === current ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
+            </select></label>`;
+    }
+
+    function eventConnectionsMarkup(item, workspaceId, editing) {
+        const linked = new Set(normalizeList(item?.linked_workspace_ids || item?.linkedWorkspaceIds).map(String));
+        const sourceWorkspaceId = String(workspaceId || currentWorkspaceId() || '');
+        const otherWorkspaces = workspaces().filter((workspace) => String(workspace.id) !== sourceWorkspaceId);
+        const sourceWorkspace = workspaces().find((workspace) => String(workspace.id) === sourceWorkspaceId);
+        return `
+            <div class="hb-surface-soft hb-card-pad hb-event-connections">
+                <strong>Connections</strong>
+                <label class="hb-label">Workspace
+                    <select class="hb-select" name="workspaceId" ${editing ? 'disabled' : ''}>
+                        ${workspaces().map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === sourceWorkspaceId ? 'selected' : ''}>${escapeHtml(workspace.name || 'Workspace')}</option>`).join('')}
+                    </select>
+                </label>
+                ${editing ? `<input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}"><p class="hb-item-meta">Saved in ${escapeHtml(sourceWorkspace?.name || 'this workspace')}.</p>` : ''}
+                ${otherWorkspaces.length ? `<div class="hb-label">Connected workspaces
+                    <div class="hb-option-list">
+                        ${otherWorkspaces.map((workspace) => `<label class="hb-switch-row"><input type="checkbox" name="syncWorkspaceIds" value="${escapeAttr(workspace.id)}" ${linked.has(String(workspace.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(workspace.name || 'Workspace')}</strong><small>${escapeHtml(workspace.type || workspace.kind || 'workspace')}</small></span></label>`).join('')}
+                    </div>
+                </div>` : '<p class="hb-item-meta">No other workspaces connected to this account.</p>'}
+                ${googleEventConnectionMarkup(item, sourceWorkspace)}
+            </div>`;
+    }
+
+    function googleEventConnectionMarkup(item, workspace) {
+        const googleCalendarId = item?.google_calendar_id || item?.googleCalendarId || item?.metadata?.google_calendar_id || item?.metadata?.googleCalendarId || '';
+        const googleSummary = item?.metadata?.google_calendar_summary || item?.metadata?.googleCalendarSummary || googleCalendarId;
+        const mappings = normalizeList(workspace?.google_calendar_mappings || workspace?.googleCalendarMappings);
+        const defaultMapping = mappings.find((mapping) => mapping.is_default_export || mapping.isDefaultExport) || mappings[0];
+        if (googleCalendarId) {
+            return `<p class="hb-item-meta">Google Calendar: ${escapeHtml(googleSummary || googleCalendarId)}</p>`;
+        }
+        if (defaultMapping) {
+            return `<p class="hb-item-meta">Google export: ${escapeHtml(defaultMapping.google_calendar_id || defaultMapping.googleCalendarId || 'default calendar')}</p>`;
+        }
+        return state.googleStatus?.connected ? '<p class="hb-item-meta">Google Calendar is connected. Pick workspace calendars in Settings.</p>' : '<p class="hb-item-meta">Google Calendar is not connected.</p>';
     }
 
     function profileModalMarkup() {
@@ -838,6 +902,7 @@ if (mount) {
         mount.querySelectorAll('[data-approval-deny]').forEach((button) => button.addEventListener('click', () => denyApproval(button.dataset.approvalDeny)));
         mount.querySelectorAll('[data-approval-change]').forEach((button) => button.addEventListener('click', () => changeApproval(button.dataset.approvalChange)));
         mount.querySelectorAll('[data-calendar-pref]').forEach((input) => input.addEventListener('change', () => localStorage.setItem(`heybean.calendar.${input.dataset.calendarPref}`, input.value)));
+        mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
         mount.querySelector('form[data-action="chat"]')?.addEventListener('submit', submitChat);
         mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
         mount.querySelector('[data-refresh-activity]')?.addEventListener('click', refreshOnly);
@@ -862,6 +927,7 @@ if (mount) {
         mount.querySelector('[data-open-categories]')?.addEventListener('click', () => openModal('categories'));
         mount.querySelectorAll('[data-category-row]').forEach((form) => form.addEventListener('submit', saveCategoryRow));
         mount.querySelectorAll('[data-delete-category]').forEach((button) => button.addEventListener('click', () => deleteCategory(button.dataset.deleteCategory)));
+        mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
         mount.querySelector('.hb-modal-backdrop')?.addEventListener('click', (event) => {
             if (event.target.classList.contains('hb-modal-backdrop')) {
                 state.modal = null;
@@ -943,14 +1009,19 @@ if (mount) {
             };
             item ? await api(`/reminders/${item.id}`, { method: 'PATCH', body }) : await api('/reminders', { method: 'POST', body });
         } else if (kind === 'event') {
+            const syncTo = Array.from(form.querySelectorAll('input[name="syncWorkspaceIds"]:checked')).map((input) => Number(input.value)).filter(Boolean);
             const body = {
                 title: data.title,
+                description: data.description || null,
+                location: data.location || null,
                 starts_at: fromDatetimeLocal(data.time),
                 ends_at: fromDatetimeLocal(data.endsAt),
                 category: data.category || null,
                 color,
                 is_critical: form.elements.critical?.checked || false,
                 recurrence: data.recurrence || 'none',
+                status: data.status || 'confirmed',
+                sync_to_workspace_ids: syncTo,
                 metadata: {
                     recurrence: data.recurrence || 'none',
                     specific_days: Array.from(form.querySelectorAll('input[name="specificDays"]:checked')).map((input) => input.value),
@@ -958,8 +1029,16 @@ if (mount) {
                     interval_unit: data.intervalUnit || null,
                 },
             };
+            if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
             item ? await api(`/calendar-events/${item.id}`, { method: 'PATCH', body }) : await api('/calendar-events', { method: 'POST', body });
         }
+    }
+
+    function syncSelectedCategoryColor(event) {
+        const option = event.currentTarget.selectedOptions?.[0];
+        const color = option?.dataset?.categoryColor;
+        const input = event.currentTarget.closest('form')?.querySelector('input[name="color"]');
+        if (input && color) input.value = safeColor(color);
     }
 
     async function deleteModalItem(event) {
@@ -1322,6 +1401,26 @@ if (mount) {
         return normalizeList(state.user?.workspaces || state.summary?.workspaces);
     }
 
+    function currentWorkspaceId() {
+        return state.user?.active_workspace?.id || state.user?.activeWorkspace?.id || state.summary?.workspace?.id || workspaces().find((workspace) => workspace.active || workspace.is_default || workspace.isDefault)?.id || workspaces()[0]?.id || '';
+    }
+
+    function categoryOptions(current = '') {
+        const byName = new Map();
+        state.categories.forEach((category) => {
+            if (!category?.name || byName.has(category.name)) return;
+            byName.set(category.name, category);
+        });
+        if (current && !byName.has(current)) {
+            byName.set(current, { name: current, color: categoryColor(current) });
+        }
+        return Array.from(byName.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    }
+
+    function categoryColor(name) {
+        return state.categories.find((category) => category.name === name)?.color || '';
+    }
+
     function findById(list, id) {
         return list.find((item) => String(item.id) === String(id));
     }
@@ -1371,6 +1470,10 @@ if (mount) {
             .sort((a, b) => new Date(a.starts_at || a.startsAt || 0) - new Date(b.starts_at || b.startsAt || 0));
     }
 
+    function eventsForDays(days) {
+        return days.flatMap((day) => eventsForDay(day));
+    }
+
     function eventTime(event) {
         const start = event.starts_at || event.startsAt;
         const end = event.ends_at || event.endsAt;
@@ -1389,6 +1492,27 @@ if (mount) {
             day.setDate(start.getDate() + index);
             return day;
         });
+    }
+
+    function weekDaysForWindow(center, visibleDays) {
+        const days = weekDays(center);
+        const lastVisible = visibleDays[visibleDays.length - 1];
+        while (!days.some((day) => sameDate(day, lastVisible))) {
+            days.shift();
+            days.push(addDays(days[days.length - 1], 1));
+        }
+        return days;
+    }
+
+    function twoDayWindow(start) {
+        const first = parseLocalDate(start);
+        return [first, addDays(first, 1)];
+    }
+
+    function addDays(date, amount) {
+        const next = new Date(parseLocalDate(date));
+        next.setDate(next.getDate() + amount);
+        return next;
     }
 
     function dateOnly(date) {
@@ -1421,11 +1545,20 @@ if (mount) {
     function dayLabel(date) {
         const parsed = parseLocalDate(date);
         if (sameDate(parsed, new Date())) return 'Today';
+        if (sameDate(parsed, addDays(new Date(), 1))) return 'Tomorrow';
         return parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     }
 
     function weekdayShort(date) {
         return parseLocalDate(date).toLocaleDateString(undefined, { weekday: 'short' });
+    }
+
+    function monthDayLabel(date) {
+        return parseLocalDate(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function twoDayLabel(days) {
+        return days.map((day) => dayLabel(day)).join(' and ');
     }
 
     function formatDateTime(value) {

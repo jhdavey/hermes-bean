@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
+use App\Models\EventCategory;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\WorkspaceItemLink;
@@ -165,6 +166,37 @@ class WorkspaceSchemaTest extends TestCase
             'google_calendar_id' => 'family@example.com',
             'is_default_export' => true,
         ]);
+    }
+
+    public function test_event_categories_list_defaults_to_all_accessible_workspaces(): void
+    {
+        $token = $this->apiToken('workspace-category-options@example.com');
+        $user = User::where('email', 'workspace-category-options@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $household = app(WorkspaceService::class)->createHousehold($user, 'Family');
+
+        EventCategory::create([
+            'user_id' => $user->id,
+            'workspace_id' => $personalWorkspaceId,
+            'name' => 'Personal',
+            'color' => '#34C759',
+        ]);
+        EventCategory::create([
+            'user_id' => $user->id,
+            'workspace_id' => $household->id,
+            'name' => 'Family',
+            'color' => '#007AFF',
+        ]);
+
+        $this->withToken($token)->getJson('/api/event-categories')
+            ->assertOk()
+            ->assertJsonFragment(['name' => 'Personal'])
+            ->assertJsonFragment(['name' => 'Family']);
+
+        $this->withToken($token)->getJson('/api/event-categories?workspace_id='.$personalWorkspaceId)
+            ->assertOk()
+            ->assertJsonFragment(['name' => 'Personal'])
+            ->assertJsonMissing(['name' => 'Family']);
     }
 
     public function test_sync_all_reuses_existing_copied_google_calendar_event(): void

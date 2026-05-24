@@ -92,7 +92,23 @@ class DomainResourceController extends Controller
 
     public function listEventCategories(Request $request): JsonResponse
     {
-        return $this->listed($this->scoped(EventCategory::query(), $request)->orderBy('name')->orderBy('id')->get());
+        if ($request->filled('workspace_id')) {
+            return $this->listed($this->scoped(EventCategory::query(), $request)->orderBy('name')->orderBy('id')->get());
+        }
+
+        $workspaceIds = app(WorkspaceService::class)->accessibleWorkspaces($request->user())->pluck('id')->all();
+
+        return $this->listed(
+            EventCategory::query()
+                ->where('user_id', $request->user()->id)
+                ->where(function ($query) use ($workspaceIds): void {
+                    $query->whereIn('workspace_id', $workspaceIds)
+                        ->orWhereNull('workspace_id');
+                })
+                ->orderBy('name')
+                ->orderBy('id')
+                ->get()
+        );
     }
 
     public function listApprovals(Request $request): JsonResponse
