@@ -299,7 +299,13 @@ if (mount) {
         const events = eventsForDays(visibleDays);
         return `
             <section class="hb-card hb-card-pad hb-calendar-card">
-                ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events across ${calendarRangeLabel(visibleDays)}`)}
+                <div class="hb-section-action-row">
+                    ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events across ${calendarRangeLabel(visibleDays)}`)}
+                    ${state.showMonth ? '' : `<div class="hb-calendar-week-actions" aria-label="Week navigation">
+                        <button class="hb-icon-button" type="button" data-shift-week="-1" aria-label="Previous week">${icons.chevronLeft}</button>
+                        <button class="hb-icon-button" type="button" data-shift-week="1" aria-label="Next week">${icons.chevronRight}</button>
+                    </div>`}
+                </div>
                 <div class="hb-calendar">
                     ${state.showMonth ? monthGridMarkup(selected) : ''}
                     ${state.showMonth ? '' : timelineMarkup(visibleDays)}
@@ -558,7 +564,7 @@ if (mount) {
             <div class="hb-timeline hb-timeline-multi-day" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${74 + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
                 <div class="hb-timeline-head">
                     <div class="hb-timeline-hour"></div>
-                    ${days.map((day) => `<div class="hb-timeline-day-head"><strong>${escapeHtml(timelineDayHeaderLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></div>`).join('')}
+                    ${days.map((day) => `<button class="hb-timeline-day-head ${sameDate(day, parseLocalDate(state.selectedDay)) ? 'hb-timeline-day-head-active' : ''}" type="button" data-select-day="${dateOnly(day)}" aria-pressed="${sameDate(day, parseLocalDate(state.selectedDay))}"><strong>${escapeHtml(timelineDayHeaderLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></button>`).join('')}
                 </div>
                 ${allDayRowMarkup(days)}
                 <div class="hb-timeline-body">
@@ -1026,6 +1032,9 @@ if (mount) {
         }));
         mount.querySelectorAll('[data-shift-month]').forEach((button) => button.addEventListener('click', () => {
             shiftMonth(Number(button.dataset.shiftMonth || 0));
+        }));
+        mount.querySelectorAll('[data-shift-week]').forEach((button) => button.addEventListener('click', () => {
+            shiftWeek(Number(button.dataset.shiftWeek || 0));
         }));
         mount.querySelector('[data-refresh-calendar]')?.addEventListener('click', refreshCalendar);
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
@@ -1515,6 +1524,12 @@ if (mount) {
         selectMonth(dateOnly(target));
     }
 
+    function shiftWeek(amount) {
+        state.selectedDay = dateOnly(addDays(state.selectedDay, amount * 7));
+        state.showMonth = false;
+        render();
+    }
+
     async function updateNotificationPrefs(event) {
         const current = state.user?.notification_preferences || {};
         const next = {
@@ -1873,20 +1888,9 @@ if (mount) {
         });
     }
 
-    function weekDaysForWindow(center, visibleDays) {
-        const days = weekDays(center);
-        const lastVisible = visibleDays[visibleDays.length - 1];
-        while (!days.some((day) => sameDate(day, lastVisible))) {
-            days.shift();
-            days.push(addDays(days[days.length - 1], 1));
-        }
-        return days;
-    }
-
     function visibleCalendarDays(start) {
         const selected = parseLocalDate(start);
-        if (state.calendarVisibleDayCount >= 7) return weekDays(selected);
-        return Array.from({ length: state.calendarVisibleDayCount }, (_, index) => addDays(selected, index));
+        return weekDays(selected);
     }
 
     function calendarVisibleDayCount() {

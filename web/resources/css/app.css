@@ -748,10 +748,22 @@
     padding: 3px;
 }
 
-.hb-calendar-card > .hb-section-title,
+.hb-calendar-card > .hb-section-action-row,
 .hb-today-tasks-card > .hb-section-action-row {
     padding: 10px 12px;
     margin-bottom: 0;
+}
+
+.hb-calendar-week-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.hb-calendar-week-actions .hb-icon-button {
+    width: 34px;
+    height: 34px;
 }
 
 .hb-calendar-card .hb-calendar {
@@ -983,8 +995,22 @@
     min-width: 0;
     display: grid;
     gap: 2px;
+    border: 0;
     padding: 10px;
+    background: transparent;
+    color: inherit;
     border-left: 1px solid var(--hb-border);
+    text-align: left;
+    cursor: pointer;
+}
+
+.hb-timeline-day-head:hover,
+.hb-timeline-day-head-active {
+    background: rgba(22, 163, 74, .10);
+}
+
+.hb-timeline-day-head-active {
+    box-shadow: inset 0 -2px 0 var(--hb-accent);
 }
 
 .hb-timeline-day-head strong {
