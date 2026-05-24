@@ -5,7 +5,7 @@ App Store screenshots should look like real in-app screens, not marketing mockup
 ## Target Screens
 
 1. **Today Calendar**
-   - Show the daily calendar section with seeded events.
+   - Show the daily calendar section with real or demo events.
    - Include a critical count if available.
    - Good caption: `See your day at a glance.`
 
@@ -38,7 +38,7 @@ The iOS project is configured for iPhone-only MVP launch with `TARGETED_DEVICE_F
 
 ## Capture Notes
 
-- Use production API unless using a dedicated seeded demo/review account.
+- Use production API unless using a dedicated demo/review account with sample data.
 - Avoid personal data in screenshots.
 - Use the app’s real UI, current icons, and HeyBean branding.
 - Do not use the website hero mockup as an App Store screenshot unless it exactly represents the app screen.

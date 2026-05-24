@@ -124,7 +124,7 @@ Apple may require Sign in with Apple only if third-party/social login is offered
 
 Prepare App Store screenshots for required iPhone sizes. Good screens to capture:
 
-1. Today calendar with seeded events and critical count.
+1. Today calendar with real or demo events and critical count.
 2. Bean chat showing a planning prompt/result.
 3. Tasks with categories/critical items.
 4. Reminders with date/time picker or list view.

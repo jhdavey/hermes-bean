@@ -48,7 +48,7 @@
         </section>
         <section class="phone-wrap" aria-label="HeyBean mobile Today screenshot">
             <div class="halo"></div>
-            <div class="phone"><img src="{{ asset('images/heybean-mobile-today-calendar.png') }}?v={{ filemtime(public_path('images/heybean-mobile-today-calendar.png')) }}" alt="HeyBean mobile app screenshot showing seeded events on the Today daily calendar"></div>
+            <div class="phone"><img src="{{ asset('images/heybean-mobile-today-calendar.png') }}?v={{ filemtime(public_path('images/heybean-mobile-today-calendar.png')) }}" alt="HeyBean mobile app screenshot showing Today calendar events"></div>
             <div class="callout c1">3 events planned<small>calendar updated</small></div>
             <div class="callout c2">Voice-first control<small>Hold the button and say “Hey, Bean…!” <span class="pointer">👇</span></small></div>
         </section>
