@@ -91,7 +91,7 @@ if (mount) {
     function bindCurrentTimeTicker() {
         window.setInterval(() => {
             if (state.phase !== 'signedIn' || state.selected !== 'today' || state.showMonth || state.modal) return;
-            render();
+            updateCurrentTimeMarker();
         }, 30000);
     }
 
@@ -301,12 +301,6 @@ if (mount) {
         const visibleDays = visibleCalendarDays(selected);
         return `
             <section class="hb-card hb-card-pad hb-calendar-card">
-                <div class="hb-calendar-toolbar">
-                    ${state.showMonth ? '' : `<div class="hb-calendar-week-actions" aria-label="Week navigation">
-                        <button class="hb-icon-button" type="button" data-shift-week="-1" aria-label="Previous week">${icons.chevronLeft}</button>
-                        <button class="hb-icon-button" type="button" data-shift-week="1" aria-label="Next week">${icons.chevronRight}</button>
-                    </div>`}
-                </div>
                 <div class="hb-calendar">
                     ${state.showMonth ? monthGridMarkup(selected) : ''}
                     ${state.showMonth ? '' : timelineMarkup(visibleDays)}
@@ -583,7 +577,7 @@ if (mount) {
         const minDayWidth = days.length >= 7 ? 150 : days.length >= 4 ? 180 : 220;
         const currentTimeMarker = currentTimeMarkerMarkup(days, startHour, endHour);
         return `
-            <div class="hb-timeline hb-timeline-multi-day" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${74 + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
+            <div class="hb-timeline hb-timeline-multi-day" data-timeline-start-hour="${startHour}" data-timeline-end-hour="${endHour}" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${74 + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
                 <div class="hb-timeline-head">
                     <div class="hb-timeline-hour"></div>
                     ${days.map((day) => `<button class="hb-timeline-day-head ${sameDate(day, parseLocalDate(state.selectedDay)) ? 'hb-timeline-day-head-active' : ''}" type="button" data-select-day="${dateOnly(day)}" aria-pressed="${sameDate(day, parseLocalDate(state.selectedDay))}"><strong>${escapeHtml(timelineDayHeaderLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></button>`).join('')}
@@ -623,7 +617,7 @@ if (mount) {
         const dayColumn = todayIndex + 2;
 
         return `
-            <div class="hb-now-marker" style="--hb-now-top:${top.toFixed(2)}px" aria-label="Current time ${escapeAttr(formatTime(now))}">
+            <div class="hb-now-marker" data-today-index="${todayIndex}" style="--hb-now-top:${top.toFixed(2)}px" aria-label="Current time ${escapeAttr(formatTime(now))}">
                 <div class="hb-now-label">${escapeHtml(formatTime(now))}</div>
                 <div class="hb-now-line" style="grid-column:${dayColumn}"></div>
             </div>`;
@@ -1061,9 +1055,6 @@ if (mount) {
         mount.querySelectorAll('[data-shift-month]').forEach((button) => button.addEventListener('click', () => {
             shiftMonth(Number(button.dataset.shiftMonth || 0));
         }));
-        mount.querySelectorAll('[data-shift-week]').forEach((button) => button.addEventListener('click', () => {
-            shiftWeek(Number(button.dataset.shiftWeek || 0));
-        }));
         mount.querySelector('[data-refresh-calendar]')?.addEventListener('click', refreshCalendar);
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
         mount.querySelectorAll('[data-edit-task]').forEach((button) => button.addEventListener('click', () => openModal('task', findById(state.tasks, button.dataset.editTask))));
@@ -1107,6 +1098,7 @@ if (mount) {
         mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
         mount.querySelector('[data-refresh-activity]')?.addEventListener('click', refreshOnly);
         mount.querySelector('[data-voice-toggle]')?.addEventListener('click', toggleVoiceInput);
+        scrollTimelineToSelected();
         scrollChatToBottom();
     }
 
@@ -1552,12 +1544,6 @@ if (mount) {
         selectMonth(dateOnly(target));
     }
 
-    function shiftWeek(amount) {
-        state.selectedDay = dateOnly(addDays(state.selectedDay, amount * 7));
-        state.showMonth = false;
-        render();
-    }
-
     async function updateNotificationPrefs(event) {
         const current = state.user?.notification_preferences || {};
         const next = {
@@ -1918,7 +1904,8 @@ if (mount) {
 
     function visibleCalendarDays(start) {
         const selected = parseLocalDate(start);
-        return weekDays(selected);
+        const firstVisible = addDays(weekDays(selected)[0], -7);
+        return Array.from({ length: 28 }, (_, index) => addDays(firstVisible, index));
     }
 
     function calendarVisibleDayCount() {
@@ -2099,6 +2086,35 @@ if (mount) {
             const scroller = document.getElementById('hb-chat-messages');
             if (scroller) scroller.scrollTop = scroller.scrollHeight;
         });
+    }
+
+    function scrollTimelineToSelected() {
+        if (state.selected !== 'today' || state.showMonth) return;
+        requestAnimationFrame(() => {
+            const timeline = mount.querySelector('.hb-timeline');
+            const selected = mount.querySelector('.hb-timeline-day-head-active');
+            if (!timeline || !selected) return;
+            timeline.scrollLeft = Math.max(0, selected.offsetLeft - 74);
+        });
+    }
+
+    function updateCurrentTimeMarker() {
+        const marker = mount.querySelector('.hb-now-marker');
+        const timeline = mount.querySelector('.hb-timeline');
+        if (!marker || !timeline) return;
+        const startHour = Number(timeline.dataset.timelineStartHour || 6);
+        const endHour = Number(timeline.dataset.timelineEndHour || 22);
+        const now = new Date();
+        const timelineStart = new Date(now);
+        timelineStart.setHours(startHour, 0, 0, 0);
+        const timelineEnd = new Date(now);
+        timelineEnd.setHours(endHour + 1, 0, 0, 0);
+        if (now < timelineStart || now > timelineEnd) return;
+        const top = ((now - timelineStart) / 60000) / 60 * 64;
+        const label = marker.querySelector('.hb-now-label');
+        marker.style.setProperty('--hb-now-top', `${top.toFixed(2)}px`);
+        marker.setAttribute('aria-label', `Current time ${formatTime(now)}`);
+        if (label) label.textContent = formatTime(now);
     }
 
     function friendlyError(error, action) {

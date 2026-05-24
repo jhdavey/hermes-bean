@@ -662,6 +662,7 @@
 
 .hb-list {
     display: grid;
+    align-content: start;
     gap: 10px;
 }
 
@@ -755,24 +756,6 @@
 .hb-today-tasks-card > .hb-section-action-row {
     padding: 10px 12px;
     margin-bottom: 0;
-}
-
-.hb-calendar-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    padding: 3px 3px 6px;
-}
-
-.hb-calendar-week-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 0 auto;
-}
-
-.hb-calendar-week-actions .hb-icon-button {
-    width: 34px;
-    height: 34px;
 }
 
 .hb-calendar-card .hb-calendar {
