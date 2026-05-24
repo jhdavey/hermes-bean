@@ -524,6 +524,7 @@ if (mount) {
                     <div class="hb-timeline-hour"></div>
                     ${days.map((day) => `<div class="hb-timeline-day-head"><strong>${escapeHtml(timelineDayHeaderLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></div>`).join('')}
                 </div>
+                ${allDayRowMarkup(days)}
                 <div class="hb-timeline-body">
                     <div class="hb-timeline-hour-grid" aria-hidden="true">
                         ${hours.map((hour) => `
@@ -535,9 +536,23 @@ if (mount) {
                     </div>
                     <div class="hb-timeline-events-grid">
                         <div class="hb-timeline-gutter" aria-hidden="true"></div>
-                        ${days.map((day) => `<div class="hb-timeline-day-column">${eventsForDay(day).map((event) => timedEventMarkup(event, day, startHour, endHour)).join('')}</div>`).join('')}
+                        ${days.map((day) => `<div class="hb-timeline-day-column">${eventsForDay(day).filter((event) => !eventAllDay(event)).map((event) => timedEventMarkup(event, day, startHour, endHour)).join('')}</div>`).join('')}
                     </div>
                 </div>
+            </div>`;
+    }
+
+    function allDayRowMarkup(days) {
+        const dayEvents = days.map((day) => allDayEventsForDay(day));
+        if (!dayEvents.some((events) => events.length)) return '';
+        return `
+            <div class="hb-all-day-row">
+                <div class="hb-timeline-hour">All day</div>
+                ${dayEvents.map((events) => `
+                    <div class="hb-all-day-cell">
+                        ${events.map((event) => allDayEventMarkup(event)).join('')}
+                    </div>
+                `).join('')}
             </div>`;
     }
 
@@ -606,6 +621,7 @@ if (mount) {
     }
 
     function timedEventMarkup(event, day, startHour, endHour) {
+        if (eventAllDay(event)) return '';
         const style = timelineEventStyle(event, day, startHour, endHour);
         if (!style) return '';
         const color = safeColor(event.color);
@@ -614,6 +630,11 @@ if (mount) {
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
                 <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
             </article>`;
+    }
+
+    function allDayEventMarkup(event) {
+        const color = safeColor(event.color);
+        return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>`;
     }
 
     function messageMarkup(message, index = 0, messages = []) {
@@ -666,8 +687,7 @@ if (mount) {
                     ${sectionTitle(isEvent ? icons.calendar : isReminder ? icons.reminders : icons.tasks, `${editing ? 'Edit' : 'New'} ${kind}`, '')}
                     ${labelInput(`${capitalize(kind)} title`, 'title', 'text', item?.title || item?.name || '', 'required')}
                     ${isEvent ? eventDetailFieldsMarkup(item) : ''}
-                    ${labelInput(isEvent ? 'Starts at' : isReminder ? 'Remind me at' : 'Due date', 'time', 'datetime-local', when, isReminder || isEvent ? 'required' : '')}
-                    ${isEvent ? labelInput('Ends at', 'endsAt', 'datetime-local', end) : ''}
+                    ${isEvent ? eventTimeFieldsMarkup(item, when, end) : labelInput(isReminder ? 'Remind me at' : 'Due date', 'time', 'datetime-local', when, isReminder ? 'required' : '')}
                     <div class="hb-field-row">
                         ${categorySelectMarkup(item)}
                         ${labelInput('Color', 'color', 'color', safeColor(item?.color || categoryColor(item?.category)))}
@@ -694,6 +714,22 @@ if (mount) {
                 <label class="hb-label">Status<select class="hb-select" name="status">
                     ${['confirmed', 'tentative', 'cancelled'].map((status) => `<option value="${status}" ${String(item?.status || 'confirmed') === status ? 'selected' : ''}>${capitalize(status)}</option>`).join('')}
                 </select></label>
+            </div>`;
+    }
+
+    function eventTimeFieldsMarkup(item = null, when = '', end = '') {
+        const allDay = eventAllDay(item);
+        const startDate = allDay ? storedDateOnly(item?.starts_at || item?.startsAt || new Date()) : dateOnly(item?.starts_at || item?.startsAt || new Date());
+        const endDate = allDayEndDateInputValue(item, startDate);
+        return `
+            <label class="hb-checkbox-row hb-all-day-toggle"><input type="checkbox" name="allDay" data-all-day-toggle ${allDay ? 'checked' : ''}> All day</label>
+            <div class="hb-field-row" data-timed-fields ${allDay ? 'hidden' : ''}>
+                ${labelInput('Starts at', 'time', 'datetime-local', when, allDay ? 'disabled' : 'required')}
+                ${labelInput('Ends at', 'endsAt', 'datetime-local', end, allDay ? 'disabled' : '')}
+            </div>
+            <div class="hb-field-row" data-all-day-fields ${allDay ? '' : 'hidden'}>
+                ${labelInput('Start date', 'allDayStart', 'date', startDate, allDay ? 'required' : 'disabled')}
+                ${labelInput('End date', 'allDayEnd', 'date', endDate, allDay ? 'required' : 'disabled')}
             </div>`;
     }
 
@@ -963,12 +999,16 @@ if (mount) {
             state.modal = null;
             render();
         }));
-        mount.querySelector('[data-modal-delete]')?.addEventListener('click', deleteModalItem);
+        mount.querySelectorAll('[data-modal-delete]').forEach((button) => button.addEventListener('click', deleteModalItem));
         mount.querySelector('[data-modal-form]')?.addEventListener('submit', submitModal);
         mount.querySelector('[data-open-categories]')?.addEventListener('click', () => openModal('categories'));
         mount.querySelectorAll('[data-category-row]').forEach((form) => form.addEventListener('submit', saveCategoryRow));
         mount.querySelectorAll('[data-delete-category]').forEach((button) => button.addEventListener('click', () => deleteCategory(button.dataset.deleteCategory)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
+        mount.querySelectorAll('[data-all-day-toggle]').forEach((checkbox) => {
+            checkbox.addEventListener('change', () => toggleAllDayFields(checkbox));
+            toggleAllDayFields(checkbox);
+        });
         mount.querySelector('.hb-modal-backdrop')?.addEventListener('click', (event) => {
             if (event.target.classList.contains('hb-modal-backdrop')) {
                 state.modal = null;
@@ -1051,12 +1091,14 @@ if (mount) {
             item ? await api(`/reminders/${item.id}`, { method: 'PATCH', body }) : await api('/reminders', { method: 'POST', body });
         } else if (kind === 'event') {
             const syncTo = Array.from(form.querySelectorAll('input[name="syncWorkspaceIds"]:checked')).map((input) => Number(input.value)).filter(Boolean);
+            const allDay = form.elements.allDay?.checked || false;
+            const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const body = {
                 title: data.title,
                 description: data.description || null,
                 location: data.location || null,
-                starts_at: fromDatetimeLocal(data.time),
-                ends_at: fromDatetimeLocal(data.endsAt),
+                starts_at: allDay ? fromDateInputStart(data.allDayStart) : fromDatetimeLocal(data.time),
+                ends_at: allDay ? fromDateInputEndInclusive(data.allDayEnd || data.allDayStart) : fromDatetimeLocal(data.endsAt),
                 category: data.category || null,
                 color,
                 is_critical: form.elements.critical?.checked || false,
@@ -1064,10 +1106,12 @@ if (mount) {
                 status: data.status || 'confirmed',
                 sync_to_workspace_ids: syncTo,
                 metadata: {
+                    ...existingMetadata,
                     recurrence: data.recurrence || 'none',
                     specific_days: Array.from(form.querySelectorAll('input[name="specificDays"]:checked')).map((input) => input.value),
                     interval: data.interval ? Number(data.interval) : null,
                     interval_unit: data.intervalUnit || null,
+                    all_day: allDay,
                 },
             };
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
@@ -1087,8 +1131,9 @@ if (mount) {
         const id = event.currentTarget.dataset.id;
         if (!confirm(`Delete this ${kind}?`)) return;
         const path = kind === 'task' ? `/tasks/${id}` : kind === 'reminder' ? `/reminders/${id}` : `/calendar-events/${id}`;
+        const body = kind === 'event' ? deleteEventPayload(state.modal?.item) : null;
         try {
-            await api(path, { method: 'DELETE' });
+            await api(path, { method: 'DELETE', ...(body ? { body } : {}) });
             state.modal = null;
             await refreshOnly();
         } catch (error) {
@@ -1096,6 +1141,46 @@ if (mount) {
             state.error = friendlyError(error, `delete that ${kind}`);
             render();
         }
+    }
+
+    function deleteEventPayload(event = null) {
+        if (!event) return {};
+        const workspaceIds = normalizeList(event.linked_workspace_ids || event.linkedWorkspaceIds)
+            .concat([event.workspace_id || event.workspaceId])
+            .map((id) => Number(id))
+            .filter(Boolean);
+        const uniqueWorkspaceIds = Array.from(new Set(workspaceIds));
+        return {
+            delete_from_workspace_ids: uniqueWorkspaceIds,
+            recurring_delete_mode: eventIsRecurring(event) ? 'all' : undefined,
+            recurring_occurrence_date: eventAllDay(event) ? storedDateOnly(event.starts_at || event.startsAt || new Date()) : dateOnly(event.starts_at || event.startsAt || new Date()),
+        };
+    }
+
+    function eventIsRecurring(event = null) {
+        const recurrence = event?.recurrence || event?.metadata?.recurrence || 'none';
+        return recurrence && recurrence !== 'none';
+    }
+
+    function toggleAllDayFields(checkbox) {
+        const form = checkbox.closest('form');
+        if (!form) return;
+        const allDay = checkbox.checked;
+        const timedFields = form.querySelector('[data-timed-fields]');
+        const allDayFields = form.querySelector('[data-all-day-fields]');
+        setFieldGroupState(timedFields, !allDay);
+        setFieldGroupState(allDayFields, allDay);
+    }
+
+    function setFieldGroupState(group, enabled) {
+        if (!group) return;
+        group.hidden = !enabled;
+        group.querySelectorAll('input, select, textarea').forEach((field) => {
+            field.disabled = !enabled;
+            if (field.name === 'time' || field.name === 'allDayStart' || field.name === 'allDayEnd') {
+                field.required = enabled && field.name !== 'endsAt';
+            }
+        });
     }
 
     async function toggleTask(task) {
@@ -1456,7 +1541,7 @@ if (mount) {
     function criticalItems() {
         return [
             ...state.tasks.filter((item) => !taskCompleted(item) && (item.is_critical || item.isCritical)),
-            ...state.calendar.filter((item) => (item.is_critical || item.isCritical) && isSameDay(item.starts_at || item.startsAt, new Date())),
+            ...state.calendar.filter((item) => (item.is_critical || item.isCritical) && (eventAllDay(item) ? eventIntersectsDay(item, new Date()) : isSameDay(item.starts_at || item.startsAt, new Date()))),
         ];
     }
 
@@ -1545,8 +1630,12 @@ if (mount) {
 
     function eventsForDay(day) {
         return state.calendar
-            .filter((event) => isSameDay(event.starts_at || event.startsAt, day))
+            .filter((event) => eventAllDay(event) ? eventIntersectsDay(event, day) : isSameDay(event.starts_at || event.startsAt, day))
             .sort((a, b) => new Date(a.starts_at || a.startsAt || 0) - new Date(b.starts_at || b.startsAt || 0));
+    }
+
+    function allDayEventsForDay(day) {
+        return eventsForDay(day).filter((event) => eventAllDay(event));
     }
 
     function eventsForDays(days) {
@@ -1554,6 +1643,7 @@ if (mount) {
     }
 
     function eventTime(event) {
+        if (eventAllDay(event)) return 'All day';
         const start = event.starts_at || event.startsAt;
         const end = event.ends_at || event.endsAt;
         if (!start) return 'All day';
@@ -1562,6 +1652,7 @@ if (mount) {
     }
 
     function timelineEventStyle(event, day, startHour, endHour) {
+        if (eventAllDay(event)) return null;
         const startValue = event.starts_at || event.startsAt;
         if (!startValue) return null;
         const start = new Date(startValue);
@@ -1582,6 +1673,31 @@ if (mount) {
             minutes: Math.round(durationMinutes),
             css: `top:${(minutesFromStart / 60) * hourHeight}px;height:${(durationMinutes / 60) * hourHeight}px`,
         };
+    }
+
+    function eventAllDay(event = null) {
+        const metadata = typeof event?.metadata === 'object' && event?.metadata ? event.metadata : {};
+        const value = event?.all_day ?? event?.allDay ?? metadata.all_day ?? metadata.allDay;
+        return value === true || value === 1 || ['true', '1', 'yes'].includes(String(value || '').toLowerCase());
+    }
+
+    function eventIntersectsDay(event, day) {
+        const startValue = event.starts_at || event.startsAt;
+        if (!startValue) return false;
+        if (eventAllDay(event)) {
+            const dayValue = dateOnly(day);
+            const startDate = storedDateOnly(startValue);
+            const endValue = event.ends_at || event.endsAt;
+            const endDate = endValue ? storedDateOnly(endValue) : dateOnly(addDays(startDate, 1));
+            return startDate <= dayValue && endDate > dayValue;
+        }
+        const dayStart = new Date(parseLocalDate(day));
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = addDays(dayStart, 1);
+        const start = new Date(startValue);
+        const endValue = event.ends_at || event.endsAt;
+        const end = endValue ? new Date(endValue) : addDays(start, 1);
+        return start < dayEnd && end > dayStart;
     }
 
     function weekDays(center) {
@@ -1628,6 +1744,19 @@ if (mount) {
     function dateOnly(date) {
         const d = parseLocalDate(date);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function allDayEndDateInputValue(item, fallbackStartDate) {
+        const end = item?.ends_at || item?.endsAt;
+        if (!end || !eventAllDay(item)) return fallbackStartDate;
+        const inclusive = parseLocalDate(storedDateOnly(end));
+        inclusive.setDate(inclusive.getDate() - 1);
+        return dateOnly(inclusive);
+    }
+
+    function storedDateOnly(value) {
+        if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+        return dateOnly(value);
     }
 
     function parseLocalDate(value) {
@@ -1715,6 +1844,19 @@ if (mount) {
 
     function fromDatetimeLocal(value) {
         return value ? new Date(value).toISOString() : null;
+    }
+
+    function fromDateInputStart(value) {
+        if (!value) return null;
+        return `${value}T00:00:00.000Z`;
+    }
+
+    function fromDateInputEndInclusive(value) {
+        if (!value) return null;
+        const end = parseLocalDate(value);
+        end.setDate(end.getDate() + 1);
+        end.setHours(0, 0, 0, 0);
+        return `${dateOnly(end)}T00:00:00.000Z`;
     }
 
     function safeColor(value) {
