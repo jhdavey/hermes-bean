@@ -386,6 +386,23 @@
     font-weight: 600;
 }
 
+.hb-section-action-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.hb-section-action-row .hb-section-title {
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.hb-section-action-row .hb-icon-button {
+    flex: 0 0 auto;
+}
+
 .hb-auth-wrap {
     min-height: 100vh;
     display: grid;
@@ -751,6 +768,71 @@
     margin-top: 3px;
     font-size: 11px;
     font-weight: 800;
+}
+
+.hb-month-view {
+    display: grid;
+    gap: 10px;
+}
+
+.hb-month-nav {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) 38px;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    background: rgba(246, 250, 244, .78);
+}
+
+.hb-month-arrow {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+}
+
+.hb-month-scroller {
+    min-width: 0;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+}
+
+.hb-month-chip {
+    min-width: 76px;
+    min-height: 38px;
+    display: grid;
+    align-content: center;
+    gap: 1px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .64);
+    color: var(--hb-text);
+    padding: 6px 9px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.hb-month-chip strong {
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.hb-month-chip span {
+    color: var(--hb-muted);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.hb-month-chip-active {
+    background: rgba(22, 163, 74, .12);
+    border-color: rgba(22, 163, 74, .34);
+    color: var(--hb-accent-strong);
 }
 
 .hb-month-grid {

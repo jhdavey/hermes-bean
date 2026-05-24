@@ -20,6 +20,8 @@ if (mount) {
         activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
         refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.2 6.5L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.2 5.5L21 8"/><path d="M21 3v5h-5"/></svg>',
+        chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
+        chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
     };
 
     const state = {
@@ -249,7 +251,7 @@ if (mount) {
         return `
             <div class="hb-app">
                 <header class="hb-topbar">
-                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">‹ ${monthLabel(new Date())} ${icons.calendar}</button>
+                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">‹ ${monthLabel(state.selectedDay)} ${icons.calendar}</button>
                     <span class="hb-spacer"></span>
                     <button class="hb-header-pill" data-today type="button">${dayLabel(new Date())}</button>
                     <button class="hb-critical" type="button" title="${critical} critical items">${critical}</button>
@@ -448,7 +450,10 @@ if (mount) {
         const tasks = activeTasks().filter((task) => isSameDay(task.due_at || task.dueAt, today));
         return `
             <section class="hb-card hb-card-pad hb-today-tasks-card">
-                ${sectionTitle(icons.tasks, 'Tasks for today', `${tasks.length} tasks`)}
+                <div class="hb-section-action-row">
+                    ${sectionTitle(icons.tasks, 'Tasks for today', `${tasks.length} tasks`)}
+                    <button class="hb-icon-button" type="button" data-open-create="event" aria-label="Create event" title="Create event">${icons.add}</button>
+                </div>
                 ${itemListMarkup(tasks, 'task', 'No tasks scheduled for today')}
             </section>`;
     }
@@ -566,15 +571,35 @@ if (mount) {
         const daysInMonth = new Date(selected.getFullYear(), selected.getMonth() + 1, 0).getDate();
         const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
         return `
-            <div class="hb-month-grid">
-                ${Array.from({ length: 7 }, (_, index) => `<div class="hb-month-weekday">${weekdayShort(new Date(2026, 1, index + 1))}</div>`).join('')}
-                ${Array.from({ length: totalCells }, (_, index) => {
-                    const dayNumber = index - leading + 1;
-                    if (dayNumber < 1 || dayNumber > daysInMonth) return '<div class="hb-month-cell hb-month-cell-empty"></div>';
-                    const day = new Date(selected.getFullYear(), selected.getMonth(), dayNumber);
-                    const count = eventsForDay(day).length;
-                    return `<button class="hb-month-cell ${sameDate(day, selected) ? 'hb-month-cell-active' : ''}" type="button" data-select-day="${dateOnly(day)}"><strong>${dayNumber}</strong><span>${count ? `${count} event${count === 1 ? '' : 's'}` : ''}</span></button>`;
-                }).join('')}
+            <div class="hb-month-view">
+                ${monthScrollerMarkup(selected)}
+                <div class="hb-month-grid">
+                    ${Array.from({ length: 7 }, (_, index) => `<div class="hb-month-weekday">${weekdayShort(new Date(2026, 1, index + 1))}</div>`).join('')}
+                    ${Array.from({ length: totalCells }, (_, index) => {
+                        const dayNumber = index - leading + 1;
+                        if (dayNumber < 1 || dayNumber > daysInMonth) return '<div class="hb-month-cell hb-month-cell-empty"></div>';
+                        const day = new Date(selected.getFullYear(), selected.getMonth(), dayNumber);
+                        const count = eventsForDay(day).length;
+                        return `<button class="hb-month-cell ${sameDate(day, selected) ? 'hb-month-cell-active' : ''}" type="button" data-select-day="${dateOnly(day)}"><strong>${dayNumber}</strong><span>${count ? `${count} event${count === 1 ? '' : 's'}` : ''}</span></button>`;
+                    }).join('')}
+                </div>
+            </div>`;
+    }
+
+    function monthScrollerMarkup(selected) {
+        const selectedMonth = new Date(selected.getFullYear(), selected.getMonth(), 1);
+        const months = Array.from({ length: 13 }, (_, index) => {
+            const month = new Date(selectedMonth);
+            month.setMonth(selectedMonth.getMonth() + index - 6);
+            return month;
+        });
+        return `
+            <div class="hb-month-nav" aria-label="Month navigation">
+                <button class="hb-icon-button hb-month-arrow" type="button" data-shift-month="-1" aria-label="Previous month">${icons.chevronLeft}</button>
+                <div class="hb-month-scroller">
+                    ${months.map((month) => `<button class="hb-month-chip ${sameMonth(month, selected) ? 'hb-month-chip-active' : ''}" type="button" data-select-month="${dateOnly(month)}" aria-pressed="${sameMonth(month, selected)}"><strong>${month.toLocaleDateString(undefined, { month: 'short' })}</strong><span>${month.getFullYear()}</span></button>`).join('')}
+                </div>
+                <button class="hb-icon-button hb-month-arrow" type="button" data-shift-month="1" aria-label="Next month">${icons.chevronRight}</button>
             </div>`;
     }
 
@@ -946,6 +971,12 @@ if (mount) {
             state.selectedDay = button.dataset.selectDay;
             state.showMonth = false;
             render();
+        }));
+        mount.querySelectorAll('[data-select-month]').forEach((button) => button.addEventListener('click', () => {
+            selectMonth(button.dataset.selectMonth);
+        }));
+        mount.querySelectorAll('[data-shift-month]').forEach((button) => button.addEventListener('click', () => {
+            shiftMonth(Number(button.dataset.shiftMonth || 0));
         }));
         mount.querySelector('[data-refresh-calendar]')?.addEventListener('click', refreshCalendar);
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
@@ -1419,6 +1450,21 @@ if (mount) {
         }
     }
 
+    function selectMonth(value) {
+        const month = parseLocalDate(value);
+        const selected = parseLocalDate(state.selectedDay);
+        const daysInTargetMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+        state.selectedDay = dateOnly(new Date(month.getFullYear(), month.getMonth(), Math.min(selected.getDate(), daysInTargetMonth)));
+        state.showMonth = true;
+        render();
+    }
+
+    function shiftMonth(amount) {
+        const selected = parseLocalDate(state.selectedDay);
+        const target = new Date(selected.getFullYear(), selected.getMonth() + amount, 1);
+        selectMonth(dateOnly(target));
+    }
+
     async function updateNotificationPrefs(event) {
         const current = state.user?.notification_preferences || {};
         const next = {
@@ -1825,6 +1871,12 @@ if (mount) {
 
     function sameDate(a, b) {
         return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    }
+
+    function sameMonth(a, b) {
+        const first = parseLocalDate(a);
+        const second = parseLocalDate(b);
+        return first.getFullYear() === second.getFullYear() && first.getMonth() === second.getMonth();
     }
 
     function monthLabel(date) {
