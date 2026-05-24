@@ -50,6 +50,7 @@ if (mount) {
         voiceListening: false,
         voiceRecognition: null,
         voiceDraft: '',
+        chatExpanded: false,
         calendarRefreshing: false,
         taskFilter: 'active',
         reminderFilter: 'pending',
@@ -259,6 +260,7 @@ if (mount) {
         return `
             <div class="hb-app">
                 <header class="hb-topbar">
+                    ${topNavMarkup()}
                     <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">‹ ${monthLabel(new Date())} ${icons.calendar}</button>
                     <span class="hb-spacer"></span>
                     <button class="hb-header-pill" data-today type="button">${dayLabel(new Date())}</button>
@@ -289,6 +291,7 @@ if (mount) {
                 <div class="hb-primary-column">${primary}</div>
                 <aside class="hb-side-column">
                     ${todayTasksMarkup()}
+                    ${desktopChatMarkup()}
                 </aside>
             </div>`;
     }
@@ -339,7 +342,7 @@ if (mount) {
             </section>`;
     }
 
-    function chatMarkup() {
+    function chatMarkup(options = {}) {
         const working = state.busy && state.chatRunState !== 'Ready';
         const messages = state.messages.length ? state.messages : [
             { id: 'intro', role: 'assistant', content: 'Hey, I’m Bean. Tell me what you need planned, captured, moved, or remembered.' },
@@ -349,6 +352,7 @@ if (mount) {
                 <div class="hb-chat-top">
                     <span class="hb-run-pill ${working ? 'hb-run-pill-working' : ''}">${escapeHtml(state.chatRunState)}</span>
                     <span class="hb-spacer"></span>
+                    ${options.expandable ? `<button class="hb-button-ghost hb-chat-expand-action" type="button" data-toggle-chat-expand>${state.chatExpanded ? 'Collapse' : 'Expand'}</button>` : ''}
                     <button class="hb-button-ghost" type="button" data-refresh-activity>${icons.activity} Activity</button>
                     <button class="hb-button-ghost" type="button" data-new-session>${icons.add} /new</button>
                 </div>
@@ -361,6 +365,13 @@ if (mount) {
                     <button class="hb-button-secondary hb-voice-button" type="button" data-voice-toggle aria-label="Voice input">${state.voiceListening ? '●' : '🎙'}</button>
                     <button class="${state.busy ? 'hb-button-danger' : 'hb-button'}" type="${state.busy ? 'button' : 'submit'}" ${state.busy ? 'data-stop-chat' : ''} aria-label="${state.busy ? 'Stop' : 'Send'}">${state.busy ? icons.stop : icons.send}</button>
                 </form>
+            </section>`;
+    }
+
+    function desktopChatMarkup() {
+        return `
+            <section class="hb-desktop-chat ${state.chatExpanded ? 'hb-desktop-chat-expanded' : ''}" aria-label="Bean chat">
+                ${chatMarkup({ expandable: true })}
             </section>`;
     }
 
@@ -545,6 +556,19 @@ if (mount) {
                     ${nav.slice(2).map(navButton).join('')}
                 </div>
                 <button class="hb-bean-button ${state.selected === 'bean' ? 'hb-bean-button-active' : ''}" type="button" data-nav="bean" aria-label="Bean chat"><img src="${escapeAttr(logoUrl)}" alt=""></button>
+            </nav>`;
+    }
+
+    function topNavMarkup() {
+        const nav = [
+            ['today', 'Calendar', icons.calendar],
+            ['tasks', 'Tasks', icons.tasks],
+            ['reminders', 'Reminders', icons.reminders],
+            ['settings', 'Settings', icons.settings],
+        ];
+        return `
+            <nav class="hb-top-nav" aria-label="App navigation">
+                ${nav.map(navButton).join('')}
             </nav>`;
     }
 
@@ -1004,8 +1028,14 @@ if (mount) {
     function bindSignedInActions() {
         mount.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => {
             state.selected = button.dataset.nav;
+            if (state.selected !== 'bean') state.chatExpanded = false;
             state.error = '';
             state.notice = '';
+            render();
+            scrollChatToBottom();
+        }));
+        mount.querySelectorAll('[data-toggle-chat-expand]').forEach((button) => button.addEventListener('click', () => {
+            state.chatExpanded = !state.chatExpanded;
             render();
             scrollChatToBottom();
         }));
