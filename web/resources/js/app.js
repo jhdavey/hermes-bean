@@ -296,11 +296,9 @@ if (mount) {
     function todayMarkup() {
         const selected = parseLocalDate(state.selectedDay);
         const visibleDays = visibleCalendarDays(selected);
-        const events = eventsForDays(visibleDays);
         return `
             <section class="hb-card hb-card-pad hb-calendar-card">
-                <div class="hb-section-action-row">
-                    ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events across ${calendarRangeLabel(visibleDays)}`)}
+                <div class="hb-calendar-toolbar">
                     ${state.showMonth ? '' : `<div class="hb-calendar-week-actions" aria-label="Week navigation">
                         <button class="hb-icon-button" type="button" data-shift-week="-1" aria-label="Previous week">${icons.chevronLeft}</button>
                         <button class="hb-icon-button" type="button" data-shift-week="1" aria-label="Next week">${icons.chevronRight}</button>

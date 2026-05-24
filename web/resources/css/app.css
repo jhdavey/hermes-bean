@@ -748,10 +748,15 @@
     padding: 3px;
 }
 
-.hb-calendar-card > .hb-section-action-row,
 .hb-today-tasks-card > .hb-section-action-row {
     padding: 10px 12px;
     margin-bottom: 0;
+}
+
+.hb-calendar-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 3px 3px 6px;
 }
 
 .hb-calendar-week-actions {
