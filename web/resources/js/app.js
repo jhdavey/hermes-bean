@@ -60,7 +60,12 @@ if (mount) {
         modal: null,
     };
 
+    const voiceHoldMinimumDuration = 220;
     let voiceHoldActive = false;
+    let voiceHoldStartedAt = 0;
+    let voiceHoldOriginalDraft = '';
+    let voiceFallbackSubmitOnEnd = '';
+    let voiceRestoreDraftOnEnd = null;
     let voiceSubmitOnEnd = false;
     let suppressNextSendClick = false;
 
@@ -1373,25 +1378,49 @@ if (mount) {
     function handleSendPointerDown(event) {
         if (state.busy || (typeof event.button === 'number' && event.button !== 0)) return;
         voiceHoldActive = false;
-        const typedContent = mount.querySelector('textarea[name="message"]')?.value.trim();
-        if (typedContent) return;
+        voiceHoldStartedAt = performance.now();
+        voiceHoldOriginalDraft = mount.querySelector('textarea[name="message"]')?.value || '';
+        voiceFallbackSubmitOnEnd = '';
+        voiceRestoreDraftOnEnd = null;
         voiceHoldActive = startVoiceHoldInput();
-        suppressNextSendClick = true;
         if (!voiceHoldActive) {
-            window.setTimeout(() => { suppressNextSendClick = false; }, 350);
+            if (voiceHoldOriginalDraft.trim()) {
+                voiceFallbackSubmitOnEnd = voiceHoldOriginalDraft.trim();
+                suppressNextSendClick = true;
+                event.preventDefault();
+            }
+            return;
         }
+        suppressNextSendClick = true;
+        event.preventDefault();
         event.currentTarget.setPointerCapture?.(event.pointerId);
     }
 
     function handleSendPointerUp(event) {
-        if (!voiceHoldActive && !state.voiceListening) return;
+        if (!voiceHoldActive && !state.voiceListening) {
+            const fallback = voiceFallbackSubmitOnEnd;
+            voiceFallbackSubmitOnEnd = '';
+            if (fallback && !state.busy) {
+                event.preventDefault();
+                sendChatContent(fallback);
+            }
+            return;
+        }
         event.preventDefault();
         suppressNextSendClick = true;
-        finishVoiceHoldInput(true);
+        const heldLongEnough = performance.now() - voiceHoldStartedAt >= voiceHoldMinimumDuration;
+        if (heldLongEnough) {
+            finishVoiceHoldInput(true);
+            return;
+        }
+        voiceFallbackSubmitOnEnd = voiceHoldOriginalDraft.trim();
+        voiceRestoreDraftOnEnd = voiceHoldOriginalDraft;
+        finishVoiceHoldInput(false);
     }
 
     function handleSendPointerCancel() {
         if (voiceHoldActive || state.voiceListening) {
+            voiceRestoreDraftOnEnd = voiceHoldOriginalDraft;
             finishVoiceHoldInput(false);
             suppressNextSendClick = true;
         }
@@ -1475,10 +1504,21 @@ if (mount) {
         recognition.onend = () => {
             const shouldSubmit = voiceSubmitOnEnd;
             const content = state.voiceDraft.trim();
+            const fallback = voiceFallbackSubmitOnEnd;
+            const restoreDraft = voiceRestoreDraftOnEnd;
             state.voiceListening = false;
             state.voiceRecognition = null;
             voiceHoldActive = false;
             voiceSubmitOnEnd = false;
+            voiceFallbackSubmitOnEnd = '';
+            voiceRestoreDraftOnEnd = null;
+            if (restoreDraft !== null) {
+                state.voiceDraft = restoreDraft;
+            }
+            if (fallback && !state.busy) {
+                sendChatContent(fallback);
+                return;
+            }
             if (shouldSubmit && content && !state.busy) {
                 sendChatContent(content);
                 return;
@@ -1508,6 +1548,7 @@ if (mount) {
             return false;
         }
         markVoiceListening();
+        clearVoiceDraft();
         return true;
     }
 
@@ -1537,6 +1578,15 @@ if (mount) {
         if (textarea) {
             textarea.placeholder = 'Listening… release to send';
             textarea.focus();
+        }
+    }
+
+    function clearVoiceDraft() {
+        state.voiceDraft = '';
+        const textarea = mount.querySelector('textarea[name="message"]');
+        if (textarea) {
+            textarea.value = '';
+            resizeChatInput(textarea);
         }
     }
 
