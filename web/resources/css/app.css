@@ -1053,6 +1053,20 @@
     overflow-wrap: anywhere;
 }
 
+.hb-message-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.hb-message-actions .hb-button,
+.hb-message-actions .hb-button-ghost {
+    min-height: 36px;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
 .hb-chat-dock {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1077,10 +1091,12 @@
 
 .hb-chat-dock textarea {
     min-height: 44px;
-    max-height: 118px;
+    max-height: 102px;
     border: 0;
     background: transparent;
     padding: 11px 8px;
+    line-height: 20px;
+    overflow-y: hidden;
     resize: none;
     outline: 0;
 }
@@ -1281,7 +1297,7 @@
 .hb-approval-sheet {
     position: fixed;
     left: 50%;
-    bottom: 0;
+    bottom: 94px;
     z-index: 50;
     width: min(760px, calc(100% - 24px));
     transform: translateX(-50%);
@@ -1289,8 +1305,7 @@
     gap: 12px;
     padding: 12px 20px 20px;
     border: 1px solid var(--hb-border);
-    border-bottom: 0;
-    border-radius: 28px 28px 0 0;
+    border-radius: 28px;
     background: var(--hb-surface);
     box-shadow: 0 -12px 30px rgba(0, 0, 0, .15);
 }
@@ -1456,7 +1471,7 @@
     }
 
     .hb-approval-sheet {
-        width: 100%;
-        border-radius: 24px 24px 0 0;
+        width: calc(100% - 24px);
+        border-radius: 24px;
     }
 }

@@ -256,7 +256,7 @@ if (mount) {
                 <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
                 </main>
-                ${approvalSheetMarkup()}
+                ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
                 ${bottomMenuMarkup()}
             </div>`;
     }
@@ -342,7 +342,7 @@ if (mount) {
                     <button class="hb-button-ghost" type="button" data-new-session>${icons.add} /new</button>
                 </div>
                 <div class="hb-chat-messages" id="hb-chat-messages">
-                    ${messages.map(messageMarkup).join('')}
+                    ${messages.map((message, index) => messageMarkup(message, index, messages)).join('')}
                     ${working ? messageMarkup({ id: 'busy', role: 'assistant', content: state.chatRunState || 'Working…', progress: true }) : ''}
                 </div>
                 <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''}" data-action="chat">
@@ -616,10 +616,11 @@ if (mount) {
             </article>`;
     }
 
-    function messageMarkup(message) {
+    function messageMarkup(message, index = 0, messages = []) {
         const user = message.role === 'user';
         const metadata = typeof message.metadata === 'object' && message.metadata ? message.metadata : {};
         const model = metadata.model || metadata?.model_route?.model || '';
+        const approval = !user && isLatestAssistantMessage(index, messages) ? pendingApprovalForSession() : null;
         return `
             <article class="hb-message ${user ? 'hb-message-user' : ''}">
                 <div class="hb-message-head">
@@ -628,6 +629,7 @@ if (mount) {
                     ${model ? `<span class="hb-message-model">${escapeHtml(model)}</span>` : ''}
                 </div>
                 <div class="hb-message-body">${escapeHtml(message.content || '')}</div>
+                ${approval ? `<div class="hb-message-actions"><button class="hb-button" type="button" data-approval-approve="${approval.id}">Approve</button><button class="hb-button-ghost" type="button" data-approval-deny="${approval.id}">Deny</button></div>` : ''}
             </article>`;
     }
 
@@ -935,7 +937,14 @@ if (mount) {
         mount.querySelectorAll('[data-approval-change]').forEach((button) => button.addEventListener('click', () => changeApproval(button.dataset.approvalChange)));
         mount.querySelectorAll('[data-calendar-pref]').forEach((input) => input.addEventListener('change', () => localStorage.setItem(`heybean.calendar.${input.dataset.calendarPref}`, input.value)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
-        mount.querySelector('form[data-action="chat"]')?.addEventListener('submit', submitChat);
+        const chatForm = mount.querySelector('form[data-action="chat"]');
+        chatForm?.addEventListener('submit', submitChat);
+        const chatInput = chatForm?.querySelector('textarea[name="message"]');
+        if (chatInput) {
+            chatInput.addEventListener('input', handleChatInput);
+            chatInput.addEventListener('keydown', handleChatKeydown);
+            resizeChatInput(chatInput);
+        }
         mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
         mount.querySelector('[data-refresh-activity]')?.addEventListener('click', refreshOnly);
         mount.querySelector('[data-voice-toggle]')?.addEventListener('click', toggleVoiceInput);
@@ -1111,6 +1120,25 @@ if (mount) {
         await refreshOnly();
     }
 
+    function handleChatInput(event) {
+        state.voiceDraft = event.currentTarget.value;
+        resizeChatInput(event.currentTarget);
+    }
+
+    function handleChatKeydown(event) {
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+        event.preventDefault();
+        event.currentTarget.form?.requestSubmit();
+    }
+
+    function resizeChatInput(textarea) {
+        const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight) || 20;
+        const maxHeight = Math.ceil((lineHeight * 4) + 22);
+        textarea.style.height = 'auto';
+        textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+        textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+    }
+
     async function submitChat(event) {
         event.preventDefault();
         const form = event.currentTarget;
@@ -1170,7 +1198,10 @@ if (mount) {
             const transcript = Array.from(event.results).map((result) => result[0]?.transcript || '').join(' ').trim();
             state.voiceDraft = transcript;
             const textarea = mount.querySelector('textarea[name="message"]');
-            if (textarea) textarea.value = transcript;
+            if (textarea) {
+                textarea.value = transcript;
+                resizeChatInput(textarea);
+            }
         };
         recognition.onend = () => {
             state.voiceListening = false;
@@ -1463,6 +1494,22 @@ if (mount) {
 
     function pendingApproval() {
         return state.approvals.find((approval) => !approval.status || String(approval.status).toLowerCase() === 'pending');
+    }
+
+    function pendingApprovalForSession() {
+        const sessionId = state.session?.id || state.summary?.session?.id;
+        return state.approvals.find((approval) => {
+            if (approval.status && String(approval.status).toLowerCase() !== 'pending') return false;
+            const approvalSessionId = approval.conversation_session_id || approval.conversationSessionId;
+            return !sessionId || !approvalSessionId || String(approvalSessionId) === String(sessionId);
+        });
+    }
+
+    function isLatestAssistantMessage(index, messages) {
+        for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
+            if (messages[cursor]?.role !== 'user') return cursor === index;
+        }
+        return false;
     }
 
     function approvalDescription(approval) {
