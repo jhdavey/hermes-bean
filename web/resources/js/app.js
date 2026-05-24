@@ -522,7 +522,7 @@ if (mount) {
             <div class="hb-timeline hb-timeline-multi-day" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${74 + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
                 <div class="hb-timeline-head">
                     <div class="hb-timeline-hour"></div>
-                    ${days.map((day) => `<div class="hb-timeline-day-head"><strong>${escapeHtml(dayLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></div>`).join('')}
+                    ${days.map((day) => `<div class="hb-timeline-day-head"><strong>${escapeHtml(timelineDayHeaderLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></div>`).join('')}
                 </div>
                 <div class="hb-timeline-body">
                     <div class="hb-timeline-hour-grid" aria-hidden="true">
@@ -1612,6 +1612,12 @@ if (mount) {
         if (sameDate(parsed, new Date())) return 'Today';
         if (sameDate(parsed, addDays(new Date(), 1))) return 'Tomorrow';
         return parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    function timelineDayHeaderLabel(date) {
+        const parsed = parseLocalDate(date);
+        if (sameDate(parsed, new Date())) return `Today, ${weekdayShort(parsed)}`;
+        return dayLabel(parsed);
     }
 
     function weekdayShort(date) {
