@@ -251,7 +251,7 @@ if (mount) {
         return `
             <div class="hb-app">
                 <header class="hb-topbar">
-                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">‹ ${monthLabel(state.selectedDay)} ${icons.calendar}</button>
+                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">‹ ${monthLabel(new Date())} ${icons.calendar}</button>
                     <span class="hb-spacer"></span>
                     <button class="hb-header-pill" data-today type="button">${dayLabel(new Date())}</button>
                     <button class="hb-critical" type="button" title="${critical} critical items">${critical}</button>
@@ -636,7 +636,6 @@ if (mount) {
                     <div class="hb-item-title">${item.is_critical || item.isCritical ? `<span class="hb-star" style="color:${escapeAttr(color)}">★</span>` : ''}<span>${escapeHtml(item.title || item.name || 'Untitled')}</span></div>
                     <div class="hb-item-meta">${escapeHtml(subtitle)}</div>
                 </button>
-                <button class="hb-icon-button" type="button" data-edit-${kind}="${item.id}" aria-label="Edit ${kind}">${icons.edit}</button>
             </article>`;
     }
 
