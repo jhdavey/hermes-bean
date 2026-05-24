@@ -816,6 +816,7 @@
 }
 
 .hb-timeline {
+    --hb-hour-height: 64px;
     display: grid;
     gap: 0;
     border: 1px solid var(--hb-border);
@@ -825,7 +826,8 @@
 }
 
 .hb-timeline-head,
-.hb-timeline-row {
+.hb-timeline-row,
+.hb-timeline-events-grid {
     display: grid;
     grid-template-columns: 74px repeat(2, minmax(0, 1fr));
     min-width: 640px;
@@ -860,7 +862,7 @@
 }
 
 .hb-timeline-row {
-    min-height: 58px;
+    min-height: var(--hb-hour-height);
     border-bottom: 1px solid var(--hb-border);
 }
 
@@ -877,12 +879,43 @@
 }
 
 .hb-timeline-slot {
-    display: grid;
-    gap: 8px;
-    align-content: start;
     min-width: 0;
     border-left: 1px solid var(--hb-border);
     padding: 7px;
+}
+
+.hb-timeline-body {
+    position: relative;
+    min-width: 640px;
+    height: calc(var(--hb-hour-count) * var(--hb-hour-height));
+}
+
+.hb-timeline-events-grid {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.hb-timeline-gutter {
+    background: transparent;
+}
+
+.hb-timeline-day-column {
+    position: relative;
+    min-width: 0;
+    border-left: 1px solid transparent;
+    pointer-events: none;
+}
+
+.hb-timed-event {
+    position: absolute;
+    left: 7px;
+    right: 7px;
+    z-index: 2;
+    min-height: 34px;
+    align-content: start;
+    overflow: hidden;
+    pointer-events: auto;
 }
 
 .hb-timeline-two-day .hb-event {

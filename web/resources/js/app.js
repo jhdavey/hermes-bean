@@ -501,21 +501,25 @@ if (mount) {
         const endHour = Number(localStorage.getItem('heybean.calendar.endHour') || 22);
         const hours = Array.from({ length: Math.max(1, endHour - startHour + 1) }, (_, index) => startHour + index);
         return `
-            <div class="hb-timeline hb-timeline-two-day" aria-label="${escapeAttr(twoDayLabel(days))} timeline">
+            <div class="hb-timeline hb-timeline-two-day" style="--hb-hour-count:${hours.length}" aria-label="${escapeAttr(twoDayLabel(days))} timeline">
                 <div class="hb-timeline-head">
                     <div class="hb-timeline-hour"></div>
                     ${days.map((day) => `<div class="hb-timeline-day-head"><strong>${escapeHtml(dayLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></div>`).join('')}
                 </div>
-                ${hours.map((hour) => `
-                    <div class="hb-timeline-row">
-                        <div class="hb-timeline-hour">${hourLabel(hour)}</div>
-                        ${days.map((day) => `
-                            <div class="hb-timeline-slot">
-                                ${eventsForDay(day).filter((event) => new Date(event.starts_at || event.startsAt || 0).getHours() === hour).map(eventMarkup).join('')}
+                <div class="hb-timeline-body">
+                    <div class="hb-timeline-hour-grid" aria-hidden="true">
+                        ${hours.map((hour) => `
+                            <div class="hb-timeline-row">
+                                <div class="hb-timeline-hour">${hourLabel(hour)}</div>
+                                ${days.map(() => '<div class="hb-timeline-slot"></div>').join('')}
                             </div>
                         `).join('')}
                     </div>
-                `).join('')}
+                    <div class="hb-timeline-events-grid">
+                        <div class="hb-timeline-gutter" aria-hidden="true"></div>
+                        ${days.map((day) => `<div class="hb-timeline-day-column">${eventsForDay(day).map((event) => timedEventMarkup(event, day, startHour, endHour)).join('')}</div>`).join('')}
+                    </div>
+                </div>
             </div>`;
     }
 
@@ -578,6 +582,18 @@ if (mount) {
         const color = safeColor(event.color);
         return `
             <article class="hb-event" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+                <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
+                <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
+                <button class="hb-icon-button" type="button" data-edit-event="${event.id}" aria-label="Edit event">${icons.edit}</button>
+            </article>`;
+    }
+
+    function timedEventMarkup(event, day, startHour, endHour) {
+        const style = timelineEventStyle(event, day, startHour, endHour);
+        if (!style) return '';
+        const color = safeColor(event.color);
+        return `
+            <article class="hb-event hb-timed-event" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
                 <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
                 <button class="hb-icon-button" type="button" data-edit-event="${event.id}" aria-label="Edit event">${icons.edit}</button>
@@ -1480,6 +1496,29 @@ if (mount) {
         if (!start) return 'All day';
         const startLabel = formatTime(start);
         return end ? `${startLabel} – ${formatTime(end)}` : startLabel;
+    }
+
+    function timelineEventStyle(event, day, startHour, endHour) {
+        const startValue = event.starts_at || event.startsAt;
+        if (!startValue) return null;
+        const start = new Date(startValue);
+        const fallbackEnd = new Date(start);
+        fallbackEnd.setHours(fallbackEnd.getHours() + 1);
+        const end = event.ends_at || event.endsAt ? new Date(event.ends_at || event.endsAt) : fallbackEnd;
+        const dayStart = new Date(parseLocalDate(day));
+        dayStart.setHours(startHour, 0, 0, 0);
+        const dayEnd = new Date(parseLocalDate(day));
+        dayEnd.setHours(endHour + 1, 0, 0, 0);
+        const visibleStart = new Date(Math.max(start.getTime(), dayStart.getTime()));
+        const visibleEnd = new Date(Math.min(end.getTime(), dayEnd.getTime()));
+        if (visibleEnd <= dayStart || visibleStart >= dayEnd || visibleEnd <= visibleStart) return null;
+        const minutesFromStart = Math.max(0, (visibleStart - dayStart) / 60000);
+        const durationMinutes = Math.max(15, (visibleEnd - visibleStart) / 60000);
+        const hourHeight = 64;
+        return {
+            minutes: Math.round(durationMinutes),
+            css: `top:${(minutesFromStart / 60) * hourHeight}px;height:${(durationMinutes / 60) * hourHeight}px`,
+        };
     }
 
     function weekDays(center) {
