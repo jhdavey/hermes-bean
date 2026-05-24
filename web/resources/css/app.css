@@ -1319,7 +1319,7 @@
 
 .hb-chat-dock {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     align-items: end;
     padding: 8px;
@@ -1334,9 +1334,25 @@
     box-shadow: 0 10px 26px rgba(22, 163, 74, .18);
 }
 
-.hb-voice-button {
+.hb-chat-send-button {
+    width: 44px;
     min-width: 44px;
-    padding-inline: 10px;
+    height: 44px;
+    padding: 0;
+    touch-action: none;
+    user-select: none;
+}
+
+.hb-chat-dock-listening .hb-chat-send-button {
+    box-shadow: 0 0 0 5px rgba(22, 163, 74, .16);
+}
+
+.hb-send-bean-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
+    pointer-events: none;
 }
 
 .hb-chat-dock textarea {

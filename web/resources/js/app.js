@@ -60,6 +60,12 @@ if (mount) {
         modal: null,
     };
 
+    const voiceHoldDelay = 260;
+    let voiceHoldTimer = 0;
+    let voiceHoldActive = false;
+    let voiceSubmitOnEnd = false;
+    let suppressNextSendClick = false;
+
     boot();
     bindResponsiveCalendar();
     bindCurrentTimeTicker();
@@ -355,9 +361,8 @@ if (mount) {
                     ${working ? messageMarkup({ id: 'busy', role: 'assistant', content: state.chatRunState || 'Working…', progress: true }) : ''}
                 </div>
                 <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''}" data-action="chat">
-                    <textarea name="message" placeholder="${state.voiceListening ? 'Listening… speak now or type to correct the transcript' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
-                    <button class="hb-button-secondary hb-voice-button" type="button" data-voice-toggle aria-label="Voice input">${state.voiceListening ? '●' : '🎙'}</button>
-                    <button class="${state.busy ? 'hb-button-danger' : 'hb-button'}" type="${state.busy ? 'button' : 'submit'}" ${state.busy ? 'data-stop-chat' : ''} aria-label="${state.busy ? 'Stop' : 'Send'}">${state.busy ? icons.stop : icons.send}</button>
+                    <textarea name="message" placeholder="${state.voiceListening ? 'Listening… release to send' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
+                    <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-send-button" type="${state.busy ? 'button' : 'submit'}" ${state.busy ? 'data-stop-chat' : 'data-chat-send'} aria-label="${state.busy ? 'Stop' : 'Send, or hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
                 </form>
             </section>`;
     }
@@ -1095,9 +1100,14 @@ if (mount) {
             chatInput.addEventListener('keydown', handleChatKeydown);
             resizeChatInput(chatInput);
         }
+        mount.querySelectorAll('[data-chat-send]').forEach((button) => {
+            button.addEventListener('pointerdown', handleSendPointerDown);
+            button.addEventListener('pointerup', handleSendPointerUp);
+            button.addEventListener('pointercancel', handleSendPointerCancel);
+            button.addEventListener('click', handleSendClick);
+        });
         mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
         mount.querySelector('[data-refresh-activity]')?.addEventListener('click', refreshOnly);
-        mount.querySelector('[data-voice-toggle]')?.addEventListener('click', toggleVoiceInput);
         scrollTimelineToSelected();
         scrollChatToBottom();
     }
@@ -1362,6 +1372,43 @@ if (mount) {
         textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
     }
 
+    function handleSendPointerDown(event) {
+        if (state.busy || (typeof event.button === 'number' && event.button !== 0)) return;
+        window.clearTimeout(voiceHoldTimer);
+        voiceHoldActive = false;
+        voiceHoldTimer = window.setTimeout(() => {
+            voiceHoldActive = startVoiceHoldInput();
+            suppressNextSendClick = true;
+            if (!voiceHoldActive) {
+                window.setTimeout(() => { suppressNextSendClick = false; }, 350);
+            }
+        }, voiceHoldDelay);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
+
+    function handleSendPointerUp(event) {
+        window.clearTimeout(voiceHoldTimer);
+        if (!voiceHoldActive && !state.voiceListening) return;
+        event.preventDefault();
+        suppressNextSendClick = true;
+        finishVoiceHoldInput(true);
+    }
+
+    function handleSendPointerCancel() {
+        window.clearTimeout(voiceHoldTimer);
+        if (voiceHoldActive || state.voiceListening) {
+            finishVoiceHoldInput(false);
+            suppressNextSendClick = true;
+        }
+    }
+
+    function handleSendClick(event) {
+        if (!suppressNextSendClick) return;
+        event.preventDefault();
+        event.stopPropagation();
+        suppressNextSendClick = false;
+    }
+
     async function submitChat(event) {
         event.preventDefault();
         const form = event.currentTarget;
@@ -1403,16 +1450,15 @@ if (mount) {
         }
     }
 
-    function toggleVoiceInput() {
+    function startVoiceHoldInput() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
             state.error = 'Voice input is not available in this browser.';
             render();
-            return;
+            return false;
         }
         if (state.voiceListening && state.voiceRecognition) {
-            state.voiceRecognition.stop();
-            return;
+            return true;
         }
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
@@ -1427,20 +1473,69 @@ if (mount) {
             }
         };
         recognition.onend = () => {
+            const shouldSubmit = voiceSubmitOnEnd;
+            const content = state.voiceDraft.trim();
             state.voiceListening = false;
             state.voiceRecognition = null;
+            voiceHoldActive = false;
+            voiceSubmitOnEnd = false;
+            if (shouldSubmit && content && !state.busy) {
+                sendChatContent(content);
+                return;
+            }
             render();
         };
         recognition.onerror = () => {
             state.voiceListening = false;
             state.voiceRecognition = null;
+            voiceHoldActive = false;
+            voiceSubmitOnEnd = false;
             state.error = 'Voice input stopped. You can still type to Bean.';
             render();
         };
         state.voiceRecognition = recognition;
         state.voiceListening = true;
-        recognition.start();
-        render();
+        state.error = '';
+        try {
+            recognition.start();
+        } catch (error) {
+            state.voiceListening = false;
+            state.voiceRecognition = null;
+            state.error = 'Voice input is already active. Release and try again.';
+            render();
+            return false;
+        }
+        markVoiceListening();
+        return true;
+    }
+
+    function finishVoiceHoldInput(shouldSubmit) {
+        voiceSubmitOnEnd = shouldSubmit;
+        if (!state.voiceRecognition) {
+            state.voiceListening = false;
+            voiceHoldActive = false;
+            voiceSubmitOnEnd = false;
+            if (!shouldSubmit) render();
+            return;
+        }
+        try {
+            state.voiceRecognition.stop();
+        } catch (error) {
+            state.voiceListening = false;
+            state.voiceRecognition = null;
+            voiceHoldActive = false;
+            voiceSubmitOnEnd = false;
+            render();
+        }
+    }
+
+    function markVoiceListening() {
+        mount.querySelectorAll('.hb-chat-dock').forEach((dock) => dock.classList.add('hb-chat-dock-listening'));
+        const textarea = mount.querySelector('textarea[name="message"]');
+        if (textarea) {
+            textarea.placeholder = 'Listening… release to send';
+            textarea.focus();
+        }
     }
 
     function replaceLocalUserMessage(message) {
