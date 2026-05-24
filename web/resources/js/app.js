@@ -364,6 +364,8 @@ if (mount) {
         const prefs = user.notification_preferences || {};
         const profile = user.active_workspace_agent_profile || user.agent_profile || {};
         const priorities = Array.isArray(profile.onboarding_priorities) ? profile.onboarding_priorities : [];
+        const workspaceItems = workspaces();
+        const activeWorkspaceId = String(currentWorkspaceId() || '');
         return `
             <section class="hb-card hb-card-pad hb-settings-grid">
                 ${sectionTitle(icons.settings, 'Settings', 'Focused Hermes Bean preferences')}
@@ -386,19 +388,24 @@ if (mount) {
                 </div>
                 <div class="hb-surface-soft hb-card-pad">
                     <strong>Workspaces</strong>
-                    <div class="hb-list" style="margin-top:10px">${workspaces().map((workspace) => `
+                    ${workspaceSwitcherMarkup(workspaceItems, activeWorkspaceId)}
+                    <div class="hb-list" style="margin-top:10px">${workspaceItems.map((workspace) => {
+                        const workspaceId = String(workspace.id || '');
+                        const active = workspaceId === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault;
+                        return `
                         <div class="hb-workspace-block">
                             <div class="hb-compact-item">
                                 <span class="hb-compact-icon">${icons.calendar}</span>
-                                <div><strong>${escapeHtml(workspace.name || 'Workspace')}</strong><small>${escapeHtml(workspace.type || workspace.kind || 'workspace')} ${workspace.active ? '· Active' : ''}</small></div>
+                                <div><strong>${escapeHtml(workspaceDisplayName(workspace))}</strong><small>${escapeHtml(workspaceTypeLabel(workspace))}${active ? ' · Active' : ''}</small></div>
                                 <div class="hb-row-actions">
-                                    <button class="hb-button-ghost" type="button" data-set-workspace="${escapeAttr(workspace.id)}">Set default</button>
+                                    <button class="${active ? 'hb-button-secondary' : 'hb-button-ghost'}" type="button" data-set-workspace="${escapeAttr(workspace.id)}" ${active ? 'disabled' : ''}>${active ? 'Current' : 'Switch'}</button>
                                     ${workspace.type === 'personal' || workspace.kind === 'personal' ? '' : `<button class="hb-button-ghost" type="button" data-rename-workspace="${escapeAttr(workspace.id)}">Rename</button><button class="hb-button-ghost" type="button" data-invite-workspace="${escapeAttr(workspace.id)}">Invite</button><button class="hb-button-ghost" type="button" data-leave-workspace="${escapeAttr(workspace.id)}">Leave</button>`}
                                 </div>
                             </div>
                             ${workspaceMembersMarkup(workspace)}
                         </div>
-                    `).join('') || '<div class="hb-empty">No workspaces loaded</div>'}</div>
+                    `;
+                    }).join('') || '<div class="hb-empty">No workspaces loaded</div>'}</div>
                     <div class="hb-account-actions">
                         <button class="hb-button-secondary" type="button" data-create-workspace>Create household</button>
                         <button class="hb-button-secondary" type="button" data-accept-workspace>Accept invite</button>
@@ -426,6 +433,24 @@ if (mount) {
                     </div>
                 </div>
             </section>`;
+    }
+
+    function workspaceSwitcherMarkup(workspaceItems, activeWorkspaceId) {
+        if (!workspaceItems.length) {
+            return '<p class="hb-item-meta">No workspaces loaded.</p>';
+        }
+
+        const activeWorkspace = workspaceItems.find((workspace) => String(workspace.id) === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault) || workspaceItems[0];
+
+        return `
+            <div class="hb-workspace-switcher">
+                <label class="hb-label">Active workspace
+                    <select class="hb-select" data-workspace-select ${workspaceItems.length < 2 ? 'disabled' : ''}>
+                        ${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}
+                    </select>
+                </label>
+                <p class="hb-item-meta">Using ${escapeHtml(workspaceDisplayName(activeWorkspace))}.</p>
+            </div>`;
     }
 
     function topProfileMenuMarkup() {
@@ -999,6 +1024,7 @@ if (mount) {
         mount.querySelectorAll('[data-remove-member]').forEach((button) => button.addEventListener('click', () => removeMember(button.dataset.workspaceId, button.dataset.removeMember)));
         mount.querySelectorAll('[data-member-role]').forEach((select) => select.addEventListener('change', () => updateMemberRole(select.dataset.workspaceId, select.dataset.memberRole, select.value)));
         mount.querySelectorAll('[data-set-workspace]').forEach((button) => button.addEventListener('click', () => setWorkspace(button.dataset.setWorkspace)));
+        mount.querySelector('[data-workspace-select]')?.addEventListener('change', (event) => setWorkspace(event.currentTarget.value));
         mount.querySelectorAll('[data-pref]').forEach((input) => input.addEventListener('change', updateNotificationPrefs));
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
@@ -1481,9 +1507,13 @@ if (mount) {
     }
 
     async function setWorkspace(id) {
+        if (!id || String(id) === String(currentWorkspaceId())) return;
+        const workspace = findWorkspace(id);
         try {
             await api('/workspaces/default', { method: 'PATCH', body: { workspace_id: Number(id) } });
             await loadSignedIn();
+            state.notice = `Switched to ${workspaceDisplayName(workspace)}.`;
+            render();
         } catch (error) {
             state.error = friendlyError(error, 'switch workspaces');
             render();
@@ -1646,6 +1676,17 @@ if (mount) {
 
     function currentWorkspaceId() {
         return state.user?.active_workspace?.id || state.user?.activeWorkspace?.id || state.summary?.workspace?.id || workspaces().find((workspace) => workspace.active || workspace.is_default || workspace.isDefault)?.id || workspaces()[0]?.id || '';
+    }
+
+    function workspaceDisplayName(workspace = {}) {
+        if (!workspace) return 'Workspace';
+        if (workspace.type === 'personal' || workspace.kind === 'personal') return 'Personal';
+        return workspace.name || 'Workspace';
+    }
+
+    function workspaceTypeLabel(workspace = {}) {
+        const type = workspace.type || workspace.kind || 'workspace';
+        return type === 'personal' ? 'private workspace' : `${type} workspace`;
     }
 
     function categoryOptions(current = '') {

@@ -1362,6 +1362,12 @@
     gap: 8px;
 }
 
+.hb-workspace-switcher {
+    display: grid;
+    gap: 6px;
+    margin-top: 10px;
+}
+
 .hb-row-actions {
     display: flex;
     align-items: center;

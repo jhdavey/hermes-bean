@@ -124,6 +124,31 @@ class WorkspaceSchemaTest extends TestCase
         $this->assertSame('owner', $workspaces->firstWhere('id', $householdWorkspaceId)['membership_role'] ?? null);
     }
 
+    public function test_user_can_switch_active_workspace_from_settings_endpoint(): void
+    {
+        $token = $this->apiToken('workspace-switcher@example.com');
+        $user = User::where('email', 'workspace-switcher@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $householdWorkspaceId = $this->withToken($token)->postJson('/api/workspaces', [
+            'name' => 'Family',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->patchJson('/api/workspaces/default', [
+            'workspace_id' => $householdWorkspaceId,
+        ])->assertOk()
+            ->assertJsonPath('data.id', $householdWorkspaceId);
+
+        $response = $this->withToken($token)->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.default_workspace_id', $householdWorkspaceId)
+            ->assertJsonPath('data.active_workspace.id', $householdWorkspaceId);
+
+        $workspaces = collect($response->json('data.workspaces'));
+
+        $this->assertFalse((bool) ($workspaces->firstWhere('id', $personalWorkspaceId)['active'] ?? true));
+        $this->assertTrue((bool) ($workspaces->firstWhere('id', $householdWorkspaceId)['active'] ?? false));
+    }
+
     public function test_workspace_list_includes_google_calendar_mappings_after_selection(): void
     {
         $token = $this->apiToken('workspace-calendar-map@example.com');
