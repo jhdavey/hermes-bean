@@ -668,6 +668,10 @@
     background: rgba(52, 199, 89, .14);
 }
 
+.hb-item > .hb-icon-button[aria-label^="Edit"] {
+    display: none;
+}
+
 .hb-item-complete {
     background: var(--hb-surface);
 }
