@@ -290,7 +290,7 @@ if (mount) {
         const visibleDays = visibleCalendarDays(selected);
         const events = eventsForDays(visibleDays);
         return `
-            <section class="hb-card hb-card-pad">
+            <section class="hb-card hb-card-pad hb-calendar-card">
                 ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events across ${calendarRangeLabel(visibleDays)}`)}
                 <div class="hb-calendar">
                     ${state.showMonth ? monthGridMarkup(selected) : `<div class="hb-day-strip">

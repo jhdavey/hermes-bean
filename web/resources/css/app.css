@@ -734,6 +734,36 @@
     gap: 10px;
 }
 
+.hb-calendar-card,
+.hb-today-tasks-card {
+    border-radius: 0;
+}
+
+.hb-calendar-card.hb-card-pad,
+.hb-today-tasks-card.hb-card-pad {
+    padding: 0;
+}
+
+.hb-calendar-card > .hb-section-title,
+.hb-today-tasks-card > .hb-section-action-row {
+    padding: 10px 12px;
+    margin-bottom: 0;
+}
+
+.hb-calendar-card .hb-calendar {
+    gap: 0;
+}
+
+.hb-calendar-card .hb-day-strip,
+.hb-calendar-card .hb-month-view,
+.hb-today-tasks-card .hb-list {
+    padding: 0;
+}
+
+.hb-calendar-card .hb-timeline {
+    border-radius: 0;
+}
+
 .hb-day-strip {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
