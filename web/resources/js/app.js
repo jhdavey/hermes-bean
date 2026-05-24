@@ -28,6 +28,7 @@ if (mount) {
         phase: 'loading',
         selected: 'today',
         selectedDay: dateOnly(new Date()),
+        calendarVisibleDayCount: calendarVisibleDayCount(),
         showMonth: false,
         user: null,
         summary: null,
@@ -55,6 +56,7 @@ if (mount) {
     };
 
     boot();
+    bindResponsiveCalendar();
 
     async function boot() {
         if (state.token) {
@@ -63,6 +65,21 @@ if (mount) {
             state.phase = 'signedOut';
             render();
         }
+    }
+
+    function bindResponsiveCalendar() {
+        let pending = 0;
+        window.addEventListener('resize', () => {
+            window.clearTimeout(pending);
+            pending = window.setTimeout(() => {
+                const count = calendarVisibleDayCount();
+                if (count === state.calendarVisibleDayCount) return;
+                state.calendarVisibleDayCount = count;
+                if (state.phase === 'signedIn' && state.selected === 'today' && !state.showMonth) {
+                    render();
+                }
+            }, 120);
+        });
     }
 
     function readToken() {
@@ -264,11 +281,11 @@ if (mount) {
 
     function todayMarkup() {
         const selected = parseLocalDate(state.selectedDay);
-        const visibleDays = twoDayWindow(selected);
+        const visibleDays = visibleCalendarDays(selected);
         const events = eventsForDays(visibleDays);
         return `
             <section class="hb-card hb-card-pad">
-                ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events across ${twoDayLabel(visibleDays)}`)}
+                ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events across ${calendarRangeLabel(visibleDays)}`)}
                 <div class="hb-calendar">
                     ${state.showMonth ? monthGridMarkup(selected) : `<div class="hb-day-strip">
                         ${weekDaysForWindow(selected, visibleDays).map((day) => `
@@ -500,8 +517,9 @@ if (mount) {
         const startHour = Number(localStorage.getItem('heybean.calendar.startHour') || 6);
         const endHour = Number(localStorage.getItem('heybean.calendar.endHour') || 22);
         const hours = Array.from({ length: Math.max(1, endHour - startHour + 1) }, (_, index) => startHour + index);
+        const minDayWidth = days.length >= 7 ? 150 : days.length >= 4 ? 180 : 220;
         return `
-            <div class="hb-timeline hb-timeline-two-day" style="--hb-hour-count:${hours.length}" aria-label="${escapeAttr(twoDayLabel(days))} timeline">
+            <div class="hb-timeline hb-timeline-multi-day" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${74 + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
                 <div class="hb-timeline-head">
                     <div class="hb-timeline-hour"></div>
                     ${days.map((day) => `<div class="hb-timeline-day-head"><strong>${escapeHtml(dayLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></div>`).join('')}
@@ -1543,9 +1561,17 @@ if (mount) {
         return days;
     }
 
-    function twoDayWindow(start) {
-        const first = parseLocalDate(start);
-        return [first, addDays(first, 1)];
+    function visibleCalendarDays(start) {
+        const selected = parseLocalDate(start);
+        if (state.calendarVisibleDayCount >= 7) return weekDays(selected);
+        return Array.from({ length: state.calendarVisibleDayCount }, (_, index) => addDays(selected, index));
+    }
+
+    function calendarVisibleDayCount() {
+        const width = window.innerWidth || 0;
+        if (width >= 1280) return 7;
+        if (width >= 820) return 4;
+        return 2;
     }
 
     function addDays(date, amount) {
@@ -1596,8 +1622,9 @@ if (mount) {
         return parseLocalDate(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     }
 
-    function twoDayLabel(days) {
-        return days.map((day) => dayLabel(day)).join(' and ');
+    function calendarRangeLabel(days) {
+        if (days.length <= 2) return days.map((day) => dayLabel(day)).join(' and ');
+        return `${dayLabel(days[0])} - ${dayLabel(days[days.length - 1])}`;
     }
 
     function formatDateTime(value) {

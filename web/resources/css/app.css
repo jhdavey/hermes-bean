@@ -829,8 +829,8 @@
 .hb-timeline-row,
 .hb-timeline-events-grid {
     display: grid;
-    grid-template-columns: 74px repeat(2, minmax(0, 1fr));
-    min-width: 640px;
+    grid-template-columns: 74px repeat(var(--hb-day-count), minmax(var(--hb-day-min-width), 1fr));
+    min-width: var(--hb-timeline-min-width);
 }
 
 .hb-timeline-head {
@@ -886,7 +886,7 @@
 
 .hb-timeline-body {
     position: relative;
-    min-width: 640px;
+    min-width: var(--hb-timeline-min-width);
     height: calc(var(--hb-hour-count) * var(--hb-hour-height));
 }
 
@@ -918,11 +918,11 @@
     pointer-events: auto;
 }
 
-.hb-timeline-two-day .hb-event {
+.hb-timeline-multi-day .hb-event {
     grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.hb-timeline-two-day .hb-event-time {
+.hb-timeline-multi-day .hb-event-time {
     grid-column: 1 / -1;
 }
 
