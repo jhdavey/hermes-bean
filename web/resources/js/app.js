@@ -602,7 +602,6 @@ if (mount) {
             <article class="hb-event" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
                 <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
-                <button class="hb-icon-button" type="button" data-edit-event="${event.id}" aria-label="Edit event">${icons.edit}</button>
             </article>`;
     }
 
@@ -614,7 +613,6 @@ if (mount) {
             <article class="hb-event hb-timed-event" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
                 <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
-                <button class="hb-icon-button" type="button" data-edit-event="${event.id}" aria-label="Edit event">${icons.edit}</button>
             </article>`;
     }
 

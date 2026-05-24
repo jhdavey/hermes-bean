@@ -320,7 +320,7 @@
 .hb-dashboard-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
+    gap: 8px;
 }
 
 .hb-card {
@@ -791,28 +791,36 @@
 
 .hb-event {
     display: grid;
-    grid-template-columns: 76px minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: center;
-    padding: 10px;
-    border-radius: 16px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+    align-items: start;
+    padding: 6px 8px;
+    border-radius: 12px;
     border: 1px solid rgba(22, 163, 74, .24);
     background: rgba(22, 163, 74, .10);
 }
 
 .hb-event-time {
     color: var(--hb-muted);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
+    line-height: 1.15;
 }
 
 .hb-event-title {
     min-width: 0;
+    border: 0;
+    background: transparent;
     color: var(--hb-text);
+    padding: 0;
+    font-size: 12px;
     font-weight: 900;
+    line-height: 1.18;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: left;
+    cursor: pointer;
 }
 
 .hb-timeline {
@@ -916,10 +924,6 @@
     align-content: start;
     overflow: hidden;
     pointer-events: auto;
-}
-
-.hb-timeline-multi-day .hb-event {
-    grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .hb-timeline-multi-day .hb-event-time {
@@ -1364,7 +1368,7 @@
     .hb-primary-column,
     .hb-side-column {
         display: grid;
-        gap: 16px;
+        gap: 8px;
     }
 
     .hb-bottom-menu {
@@ -1437,10 +1441,6 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-    }
-
-    .hb-event {
-        grid-template-columns: minmax(0, 1fr) auto;
     }
 
     .hb-event-time {
