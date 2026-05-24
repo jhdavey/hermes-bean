@@ -1086,6 +1086,53 @@
     pointer-events: auto;
 }
 
+.hb-now-marker {
+    position: absolute;
+    top: var(--hb-now-top);
+    right: 0;
+    left: 0;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: 74px repeat(var(--hb-day-count), minmax(var(--hb-day-min-width), 1fr));
+    min-width: var(--hb-timeline-min-width);
+    align-items: center;
+    pointer-events: none;
+    transform: translateY(-50%);
+}
+
+.hb-now-label {
+    justify-self: end;
+    margin-right: 8px;
+    border-radius: 999px;
+    background: var(--hb-accent);
+    color: #fff;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-weight: 950;
+    line-height: 1.1;
+    white-space: nowrap;
+    box-shadow: 0 4px 10px rgba(22, 163, 74, .22);
+}
+
+.hb-now-line {
+    position: relative;
+    height: 2px;
+    background: var(--hb-accent);
+}
+
+.hb-now-line::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--hb-accent);
+    transform: translateY(-50%);
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, .14);
+}
+
 .hb-timeline-multi-day .hb-event-time {
     grid-column: 1 / -1;
 }

@@ -61,6 +61,7 @@ if (mount) {
 
     boot();
     bindResponsiveCalendar();
+    bindCurrentTimeTicker();
 
     async function boot() {
         if (state.token) {
@@ -84,6 +85,13 @@ if (mount) {
                 }
             }, 120);
         });
+    }
+
+    function bindCurrentTimeTicker() {
+        window.setInterval(() => {
+            if (state.phase !== 'signedIn' || state.selected !== 'today' || state.showMonth || state.modal) return;
+            render();
+        }, 30000);
     }
 
     function readToken() {
@@ -552,6 +560,7 @@ if (mount) {
         const endHour = Number(localStorage.getItem('heybean.calendar.endHour') || 22);
         const hours = Array.from({ length: Math.max(1, endHour - startHour + 1) }, (_, index) => startHour + index);
         const minDayWidth = days.length >= 7 ? 150 : days.length >= 4 ? 180 : 220;
+        const currentTimeMarker = currentTimeMarkerMarkup(days, startHour, endHour);
         return `
             <div class="hb-timeline hb-timeline-multi-day" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${74 + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
                 <div class="hb-timeline-head">
@@ -572,7 +581,30 @@ if (mount) {
                         <div class="hb-timeline-gutter" aria-hidden="true"></div>
                         ${days.map((day) => `<div class="hb-timeline-day-column">${eventsForDay(day).filter((event) => !eventAllDay(event)).map((event) => timedEventMarkup(event, day, startHour, endHour)).join('')}</div>`).join('')}
                     </div>
+                    ${currentTimeMarker}
                 </div>
+            </div>`;
+    }
+
+    function currentTimeMarkerMarkup(days, startHour, endHour) {
+        const now = new Date();
+        const todayIndex = days.findIndex((day) => sameDate(parseLocalDate(day), now));
+        if (todayIndex < 0) return '';
+
+        const timelineStart = new Date(now);
+        timelineStart.setHours(startHour, 0, 0, 0);
+        const timelineEnd = new Date(now);
+        timelineEnd.setHours(endHour + 1, 0, 0, 0);
+        if (now < timelineStart || now > timelineEnd) return '';
+
+        const minutesFromStart = (now - timelineStart) / 60000;
+        const top = Math.max(0, minutesFromStart / 60 * 64);
+        const dayColumn = todayIndex + 2;
+
+        return `
+            <div class="hb-now-marker" style="--hb-now-top:${top.toFixed(2)}px" aria-label="Current time ${escapeAttr(formatTime(now))}">
+                <div class="hb-now-label">${escapeHtml(formatTime(now))}</div>
+                <div class="hb-now-line" style="grid-column:${dayColumn}"></div>
             </div>`;
     }
 
