@@ -234,6 +234,7 @@ if (mount) {
                     <button class="hb-header-pill" data-today type="button">${dayLabel(new Date())}</button>
                     <button class="hb-critical" type="button" title="${critical} critical items">${critical}</button>
                     ${showAdd ? `<button class="hb-icon-button" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
+                    ${topProfileMenuMarkup()}
                 </header>
                 <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
@@ -256,10 +257,7 @@ if (mount) {
             <div class="hb-shell hb-dashboard-grid">
                 <div class="hb-primary-column">${primary}</div>
                 <aside class="hb-side-column">
-                    ${accountCardMarkup()}
-                    ${progressMarkup()}
-                    ${activityMarkup()}
-                    ${agendaCardMarkup()}
+                    ${todayTasksMarkup()}
                 </aside>
             </div>`;
     }
@@ -267,7 +265,6 @@ if (mount) {
     function todayMarkup() {
         const selected = parseLocalDate(state.selectedDay);
         const events = eventsForDay(selected);
-        const tasks = activeTasks().filter((task) => isSameDay(task.due_at || task.dueAt, selected));
         return `
             <section class="hb-card hb-card-pad">
                 ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events for ${dayLabel(selected)}`)}
@@ -282,10 +279,6 @@ if (mount) {
                     </div>`}
                     ${state.showMonth ? '' : timelineMarkup(selected, events)}
                 </div>
-            </section>
-            <section class="hb-card hb-card-pad">
-                ${sectionTitle(icons.tasks, `Tasks for ${dayLabel(selected)}`, `${tasks.length} tasks`)}
-                ${itemListMarkup(tasks, 'task', 'No tasks scheduled for this day')}
             </section>`;
     }
 
@@ -411,15 +404,30 @@ if (mount) {
             </section>`;
     }
 
-    function accountCardMarkup() {
+    function topProfileMenuMarkup() {
         const user = state.user || {};
+        const name = user.name || 'Account';
+        const email = user.email || '';
         return `
-            <section class="hb-card hb-card-pad">
-                ${sectionTitle(icons.user, user.name || 'Account', user.email || '')}
-                <div class="hb-account-actions">
-                    <button class="hb-button-secondary" type="button" data-nav="settings">Settings</button>
-                    <button class="hb-button-ghost" type="button" data-logout>Sign out</button>
+            <details class="hb-profile-menu">
+                <summary class="hb-profile-trigger" aria-label="Account menu">
+                    <span class="hb-avatar" aria-hidden="true">${escapeHtml(userInitials(name, email))}</span>
+                    <span class="hb-profile-copy"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(email)}</small></span>
+                </summary>
+                <div class="hb-profile-popover">
+                    <button class="hb-profile-action" type="button" data-nav="settings">${icons.settings}<span>Settings</span></button>
+                    <button class="hb-profile-action" type="button" data-logout>${icons.user}<span>Sign out</span></button>
                 </div>
+            </details>`;
+    }
+
+    function todayTasksMarkup() {
+        const today = new Date();
+        const tasks = activeTasks().filter((task) => isSameDay(task.due_at || task.dueAt, today));
+        return `
+            <section class="hb-card hb-card-pad hb-today-tasks-card">
+                ${sectionTitle(icons.tasks, 'Tasks for today', `${tasks.length} tasks`)}
+                ${itemListMarkup(tasks, 'task', 'No tasks scheduled for today')}
             </section>`;
     }
 
@@ -463,38 +471,6 @@ if (mount) {
                 <button class="hb-button-secondary" type="button" data-google-action="sync" ${connected ? '' : 'disabled'}>Sync</button>
                 <button class="hb-button-ghost" type="button" data-google-action="disconnect" ${connected ? '' : 'disabled'}>Disconnect</button>
             </div>`;
-    }
-
-    function progressMarkup() {
-        const active = activeTasks().length;
-        return `
-            <section class="hb-card hb-card-pad">
-                ${sectionTitle(icons.tune, 'Today progress', `${active} active tasks`)}
-                <div class="hb-list">
-                    <div class="hb-compact-item"><span class="hb-compact-icon">${icons.tasks}</span><div><strong>${active}</strong><small>Open tasks</small></div></div>
-                    <div class="hb-compact-item"><span class="hb-compact-icon">${icons.reminders}</span><div><strong>${pendingReminders().length}</strong><small>Pending reminders</small></div></div>
-                    <div class="hb-compact-item"><span class="hb-compact-icon">${icons.calendar}</span><div><strong>${eventsForDay(new Date()).length}</strong><small>Events today</small></div></div>
-                </div>
-            </section>`;
-    }
-
-    function activityMarkup() {
-        return `
-            <section class="hb-card hb-card-pad">
-                ${sectionTitle(icons.activity, 'Activity', 'Recent Bean updates')}
-                <div class="hb-list">
-                    ${state.activity.slice(-5).reverse().map((event) => `<div class="hb-item-meta">${escapeHtml(event.event_type || event.eventType || 'activity')} · ${escapeHtml(event.status || 'updated')}</div>`).join('') || '<div class="hb-empty">No recent activity.</div>'}
-                </div>
-            </section>`;
-    }
-
-    function agendaCardMarkup() {
-        const events = eventsForDay(new Date());
-        return `
-            <section class="hb-card hb-card-pad">
-                ${sectionTitle(icons.calendar, 'Today agenda', `${events.length} events`)}
-                <div class="hb-agenda">${events.slice(0, 5).map(eventMarkup).join('') || '<div class="hb-empty">No events today.</div>'}</div>
-            </section>`;
     }
 
     function bottomMenuMarkup() {
@@ -844,8 +820,8 @@ if (mount) {
         mount.querySelectorAll('[data-logout]').forEach((button) => button.addEventListener('click', logout));
         mount.querySelector('[data-delete-account]')?.addEventListener('click', deleteAccount);
         mount.querySelector('[data-export-account]')?.addEventListener('click', exportAccount);
-        mount.querySelector('[data-open-profile]')?.addEventListener('click', () => openModal('profile'));
-        mount.querySelector('[data-open-agent]')?.addEventListener('click', () => openModal('agent'));
+        mount.querySelectorAll('[data-open-profile]').forEach((button) => button.addEventListener('click', () => openModal('profile')));
+        mount.querySelectorAll('[data-open-agent]').forEach((button) => button.addEventListener('click', () => openModal('agent')));
         mount.querySelector('[data-create-workspace]')?.addEventListener('click', () => openModal('workspace', { mode: 'create' }));
         mount.querySelector('[data-accept-workspace]')?.addEventListener('click', () => openModal('workspace', { mode: 'accept' }));
         mount.querySelectorAll('[data-rename-workspace]').forEach((button) => button.addEventListener('click', () => openModal('workspace', { mode: 'rename', workspace: findWorkspace(button.dataset.renameWorkspace) })));
@@ -1515,6 +1491,12 @@ if (mount) {
 
     function personalityLabel(value = 'balanced') {
         return { balanced: 'Balanced', coach: 'Coach', organizer: 'Organizer', creative: 'Creative' }[value] || 'Balanced';
+    }
+
+    function userInitials(name = '', email = '') {
+        const source = String(name || email || 'Account').trim();
+        const words = source.includes('@') ? [source.charAt(0)] : source.split(/\s+/).filter(Boolean);
+        return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join('') || 'A';
     }
 
     function capitalize(value) {
