@@ -965,7 +965,9 @@
     gap: 0;
     border: 1px solid var(--hb-border);
     border-radius: 18px;
-    overflow: auto hidden;
+    max-height: calc(100vh - 154px);
+    overflow: auto;
+    overscroll-behavior: contain;
     background: rgba(255, 255, 255, .58);
 }
 
@@ -979,8 +981,11 @@
 }
 
 .hb-timeline-head {
+    position: sticky;
+    top: 0;
+    z-index: 8;
     border-bottom: 1px solid var(--hb-border);
-    background: rgba(246, 250, 244, .82);
+    background: rgba(246, 250, 244, .96);
 }
 
 .hb-timeline-day-head {
@@ -1061,11 +1066,20 @@
 }
 
 .hb-timeline-hour {
+    position: sticky;
+    left: 0;
+    z-index: 4;
     padding: 10px;
     color: var(--hb-muted);
     font-size: 11px;
     font-weight: 900;
-    background: rgba(246, 250, 244, .7);
+    background: #f6faf4;
+    box-shadow: 1px 0 0 var(--hb-border);
+}
+
+.hb-timeline-head .hb-timeline-hour {
+    z-index: 10;
+    background: #f6faf4;
 }
 
 .hb-timeline-slot {
@@ -1123,6 +1137,9 @@
 }
 
 .hb-now-label {
+    position: sticky;
+    left: 6px;
+    z-index: 6;
     justify-self: end;
     margin-right: 8px;
     border-radius: 999px;
@@ -1687,6 +1704,10 @@
 
     .hb-main-today {
         padding-bottom: 0;
+    }
+
+    .hb-calendar-card .hb-timeline {
+        max-height: calc(100vh - 64px);
     }
 
     .hb-dashboard-grid {
