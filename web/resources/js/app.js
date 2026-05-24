@@ -267,7 +267,7 @@ if (mount) {
                     ${showCalendarRefresh ? `<button class="hb-icon-button" type="button" data-refresh-calendar aria-label="Refresh calendar" title="Refresh calendar" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${topProfileMenuMarkup()}
                 </header>
-                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''}">
+                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
@@ -301,14 +301,7 @@ if (mount) {
             <section class="hb-card hb-card-pad hb-calendar-card">
                 ${sectionTitle(icons.calendar, 'Calendar', `${events.length} events across ${calendarRangeLabel(visibleDays)}`)}
                 <div class="hb-calendar">
-                    ${state.showMonth ? monthGridMarkup(selected) : `<div class="hb-day-strip">
-                        ${weekDaysForWindow(selected, visibleDays).map((day) => `
-                            <button class="hb-day ${visibleDays.some((visibleDay) => sameDate(day, visibleDay)) ? 'hb-day-active' : ''} ${sameDate(day, selected) ? 'hb-day-anchor' : ''}" type="button" data-select-day="${dateOnly(day)}" aria-pressed="${visibleDays.some((visibleDay) => sameDate(day, visibleDay))}">
-                                <strong>${weekdayShort(day)}</strong>
-                                <span>${day.getDate()} · ${eventsForDay(day).length} events</span>
-                            </button>
-                        `).join('')}
-                    </div>`}
+                    ${state.showMonth ? monthGridMarkup(selected) : ''}
                     ${state.showMonth ? '' : timelineMarkup(visibleDays)}
                 </div>
             </section>`;

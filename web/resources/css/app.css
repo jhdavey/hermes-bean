@@ -317,6 +317,10 @@
     padding: 8px 20px 112px;
 }
 
+.hb-main-today {
+    padding: 0 0 112px;
+}
+
 .hb-main-chat {
     height: calc(100vh - 58px);
     min-height: 580px;
@@ -741,7 +745,7 @@
 
 .hb-calendar-card.hb-card-pad,
 .hb-today-tasks-card.hb-card-pad {
-    padding: 0;
+    padding: 3px;
 }
 
 .hb-calendar-card > .hb-section-title,
@@ -761,7 +765,7 @@
 }
 
 .hb-calendar-card .hb-timeline {
-    border-radius: 0;
+    border-radius: 14px;
 }
 
 .hb-day-strip {
@@ -1615,7 +1619,7 @@
 
     .hb-side-column {
         position: sticky;
-        top: 74px;
+        top: 58px;
     }
 
     .hb-today-tasks-card .hb-list {
@@ -1634,6 +1638,11 @@
     .hb-main {
         padding-left: 12px;
         padding-right: 12px;
+    }
+
+    .hb-main-today {
+        padding-left: 0;
+        padding-right: 0;
     }
 
     .hb-header-pill {
