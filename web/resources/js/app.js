@@ -780,12 +780,14 @@ if (mount) {
         const completed = kind === 'task' ? taskCompleted(item) : reminderCompleted(item);
         const color = safeColor(item.color);
         const subtitle = kind === 'task' ? taskSubtitle(item) : reminderSubtitle(item);
+        const critical = item.is_critical || item.isCritical;
         return `
-            <article class="hb-item ${completed ? 'hb-item-complete' : ''}" style="${completed ? '' : `background:${hexAlpha(color, .14)};border-color:${hexAlpha(color, .34)}`}">
+            <article class="hb-item hb-item-${kind} ${completed ? 'hb-item-complete' : ''}" style="${completed ? '' : `background:${hexAlpha(color, .14)};border-color:${hexAlpha(color, .34)}`}">
+                ${kind === 'task' && critical ? `<span class="hb-star hb-item-critical-star" style="color:${escapeAttr(color)}">★</span>` : ''}
                 <label class="hb-check"><input type="checkbox" data-toggle-${kind}="${item.id}" ${completed ? 'checked' : ''}></label>
                 <button class="hb-item-main" type="button" data-edit-${kind}="${item.id}">
-                    <div class="hb-item-title">${item.is_critical || item.isCritical ? `<span class="hb-star" style="color:${escapeAttr(color)}">★</span>` : ''}<span>${escapeHtml(item.title || item.name || 'Untitled')}</span></div>
-                    <div class="hb-item-meta">${escapeHtml(subtitle)}</div>
+                    <div class="hb-item-title">${kind !== 'task' && critical ? `<span class="hb-star" style="color:${escapeAttr(color)}">★</span>` : ''}<span>${escapeHtml(item.title || item.name || 'Untitled')}</span></div>
+                    ${subtitle ? `<div class="hb-item-meta">${escapeHtml(subtitle)}</div>` : ''}
                 </button>
             </article>`;
     }
@@ -2206,11 +2208,7 @@ if (mount) {
     }
 
     function taskSubtitle(task) {
-        const bits = [];
-        if (task.category) bits.push(task.category);
-        if (task.due_at || task.dueAt) bits.push(`Due ${formatDateTime(task.due_at || task.dueAt)}`);
-        if (task.is_critical || task.isCritical) bits.push('Critical');
-        return bits.join(' · ') || 'No due date';
+        return task.due_at || task.dueAt ? formatDateTime(task.due_at || task.dueAt) : '';
     }
 
     function reminderSubtitle(reminder) {

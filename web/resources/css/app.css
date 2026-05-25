@@ -667,6 +667,7 @@
 }
 
 .hb-item {
+    position: relative;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
@@ -706,6 +707,13 @@
     cursor: pointer;
 }
 
+.hb-item-task .hb-item-main {
+    min-height: 48px;
+    align-content: start;
+    padding-right: 28px;
+    padding-bottom: 18px;
+}
+
 .hb-item-title {
     display: flex;
     align-items: center;
@@ -713,6 +721,12 @@
     min-width: 0;
     color: var(--hb-text);
     font-weight: 900;
+}
+
+.hb-item-task .hb-item-title {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.25;
 }
 
 .hb-item-complete .hb-item-title {
@@ -732,10 +746,28 @@
     font-weight: 600;
 }
 
+.hb-item-task .hb-item-meta {
+    position: absolute;
+    right: 10px;
+    bottom: 7px;
+    max-width: calc(100% - 72px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
+}
+
 .hb-star {
     color: var(--hb-accent);
     font-size: 16px;
     line-height: 1;
+}
+
+.hb-item-critical-star {
+    position: absolute;
+    top: 7px;
+    right: 10px;
+    pointer-events: none;
 }
 
 .hb-calendar {
