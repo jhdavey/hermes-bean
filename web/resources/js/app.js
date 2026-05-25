@@ -61,6 +61,7 @@ if (mount) {
         calendarRefreshing: false,
         taskFilter: 'active',
         reminderFilter: 'pending',
+        expandedTaskIds: new Set(),
         busy: false,
         error: '',
         notice: '',
@@ -389,7 +390,9 @@ if (mount) {
 
     function tasksMarkup() {
         const completed = state.taskFilter === 'done';
-        const items = state.tasks.filter((task) => taskCompleted(task) === completed);
+        const items = completed
+            ? state.tasks.filter((task) => taskCompleted(task))
+            : activeTopLevelTasks();
         return `
             <section class="hb-card hb-card-pad">
                 ${sectionTitle(icons.tasks, 'Tasks', completed ? 'Completed tasks' : 'Active tasks')}
@@ -565,7 +568,7 @@ if (mount) {
 
     function todayTasksMarkup() {
         const today = new Date();
-        const tasks = activeTasks().filter((task) => isSameDay(task.due_at || task.dueAt, today));
+        const tasks = activeTopLevelTasks().filter((task) => isSameDay(task.due_at || task.dueAt, today));
         return `
             <section class="hb-card hb-card-pad hb-today-tasks-card">
                 <div class="hb-section-action-row">
@@ -781,15 +784,31 @@ if (mount) {
         const color = safeColor(item.color);
         const subtitle = kind === 'task' ? taskSubtitle(item) : reminderSubtitle(item);
         const critical = item.is_critical || item.isCritical;
+        const taskNotes = kind === 'task' ? taskNotesText(item) : '';
+        const subtasks = kind === 'task' ? subtasksFor(item) : [];
+        const expanded = kind === 'task' && state.expandedTaskIds.has(String(item.id));
+        const expandable = kind === 'task' && (taskNotes || subtasks.length || (!completed && !taskParentId(item)));
         return `
             <article class="hb-item hb-item-${kind} ${completed ? 'hb-item-complete' : ''}" style="${completed ? '' : `background:${hexAlpha(color, .14)};border-color:${hexAlpha(color, .34)}`}">
                 ${kind === 'task' && critical ? `<span class="hb-star hb-item-critical-star" style="color:${escapeAttr(color)}">★</span>` : ''}
                 <label class="hb-check"><input type="checkbox" data-toggle-${kind}="${item.id}" ${completed ? 'checked' : ''}></label>
                 <button class="hb-item-main" type="button" data-edit-${kind}="${item.id}">
-                    <div class="hb-item-title">${kind !== 'task' && critical ? `<span class="hb-star" style="color:${escapeAttr(color)}">★</span>` : ''}<span>${escapeHtml(item.title || item.name || 'Untitled')}</span></div>
+                    <div class="hb-item-title">${kind !== 'task' && critical ? `<span class="hb-star" style="color:${escapeAttr(color)}">★</span>` : ''}<span>${escapeHtml(item.title || item.name || 'Untitled')}</span>${expandable ? `<span class="hb-task-expand-icon" data-toggle-task-details="${item.id}" aria-label="${expanded ? 'Hide task details' : 'Show task details'}">${expanded ? '▲' : '▼'}</span>` : ''}</div>
                     ${subtitle ? `<div class="hb-item-meta">${escapeHtml(subtitle)}</div>` : ''}
                 </button>
+                ${expanded ? taskDetailsMarkup(item, taskNotes, subtasks) : ''}
             </article>`;
+    }
+
+    function taskDetailsMarkup(task, notes, subtasks) {
+        return `
+            <div class="hb-task-details">
+                ${notes ? `<div class="hb-task-notes">${escapeHtml(notes)}</div>` : ''}
+                <div class="hb-subtask-block">
+                    <div class="hb-subtask-header"><strong>Sub-tasks</strong><button class="hb-button-ghost hb-subtask-add" type="button" data-create-subtask="${task.id}">Add sub-task</button></div>
+                    ${subtasks.length ? `<div class="hb-subtask-list">${subtasks.map((subtask) => itemMarkup(subtask, 'task')).join('')}</div>` : '<div class="hb-empty hb-surface-soft">No active sub-tasks</div>'}
+                </div>
+            </div>`;
     }
 
     function eventMarkup(event) {
@@ -903,10 +922,10 @@ if (mount) {
         if (modal.type === 'agent') return agentModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
         if (modal.type === 'categories') return categoriesModalMarkup();
-        return itemModalMarkup(modal.type, modal.item);
+        return itemModalMarkup(modal.type, modal.item, modal.parentTask);
     }
 
-    function itemModalMarkup(kind, item = null) {
+    function itemModalMarkup(kind, item = null, parentTask = null) {
         const editing = Boolean(item);
         const isReminder = kind === 'reminder';
         const isEvent = kind === 'event';
@@ -916,8 +935,10 @@ if (mount) {
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="${kind}">
-                    ${sectionTitle(isEvent ? icons.calendar : isReminder ? icons.reminders : icons.tasks, `${editing ? 'Edit' : 'New'} ${kind}`, '')}
+                    ${parentTask ? `<input type="hidden" name="parentTaskId" value="${escapeAttr(parentTask.id)}">` : ''}
+                    ${sectionTitle(isEvent ? icons.calendar : isReminder ? icons.reminders : icons.tasks, parentTask ? 'New sub-task' : `${editing ? 'Edit' : 'New'} ${kind}`, parentTask ? `Assigned to ${parentTask.title || parentTask.name || 'task'}` : '')}
                     ${labelInput(`${capitalize(kind)} title`, 'title', 'text', item?.title || item?.name || '', 'required')}
+                    ${kind === 'task' ? `<label class="hb-label">Notes<textarea class="hb-textarea" name="notes" placeholder="Add task details">${escapeHtml(item?.notes || '')}</textarea></label>` : ''}
                     ${isEvent ? eventDetailFieldsMarkup(item) : ''}
                     ${isEvent ? eventTimeFieldsMarkup(item, when, end) : labelInput(isReminder ? 'Remind me at' : 'Due date', 'time', 'datetime-local', when, isReminder ? 'required' : '')}
                     <div class="hb-field-row">
@@ -929,6 +950,7 @@ if (mount) {
                     ${isEvent ? eventConnectionsMarkup(item, workspaceId, editing) : ''}
                     ${isEvent ? recurrenceFieldsMarkup(item) : ''}
                     ${isReminder ? reminderRecurrenceFieldsMarkup(item) : ''}
+                    ${kind === 'task' && editing && !taskParentId(item) ? `<button class="hb-button-ghost" type="button" data-create-subtask="${item.id}">Add sub-task</button>` : ''}
                     <div class="hb-modal-actions">
                         ${editing ? `<button class="hb-button-danger" type="button" data-modal-delete="${kind}" data-id="${item.id}">Delete</button>` : ''}
                         <button class="hb-button-secondary" type="button" data-close-modal>Cancel</button>
@@ -1225,6 +1247,17 @@ if (mount) {
         mount.querySelector('[data-export-account]')?.addEventListener('click', exportAccount);
         mount.querySelectorAll('[data-open-profile]').forEach((button) => button.addEventListener('click', () => openModal('profile')));
         mount.querySelectorAll('[data-open-agent]').forEach((button) => button.addEventListener('click', () => openModal('agent')));
+        mount.querySelectorAll('[data-toggle-task-details]').forEach((button) => button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleTaskDetails(button.dataset.toggleTaskDetails);
+        }));
+        mount.querySelectorAll('[data-create-subtask]').forEach((button) => button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const parent = findById(state.tasks, button.dataset.createSubtask);
+            if (parent) openModal('task', { parentTask: parent });
+        }));
         mount.querySelector('[data-create-workspace]')?.addEventListener('click', () => openModal('workspace', { mode: 'create' }));
         mount.querySelector('[data-accept-workspace]')?.addEventListener('click', () => openModal('workspace', { mode: 'accept' }));
         mount.querySelectorAll('[data-rename-workspace]').forEach((button) => button.addEventListener('click', () => openModal('workspace', { mode: 'rename', workspace: findWorkspace(button.dataset.renameWorkspace) })));
@@ -1265,7 +1298,20 @@ if (mount) {
     function openModal(type, itemOrOptions = null) {
         state.modal = itemOrOptions && type === 'workspace'
             ? { type, mode: itemOrOptions.mode, workspace: itemOrOptions.workspace }
+            : itemOrOptions && type === 'task' && itemOrOptions.parentTask
+                ? { type, item: null, parentTask: itemOrOptions.parentTask }
             : { type, item: itemOrOptions };
+        render();
+    }
+
+    function toggleTaskDetails(id) {
+        if (!id) return;
+        const key = String(id);
+        if (state.expandedTaskIds.has(key)) {
+            state.expandedTaskIds.delete(key);
+        } else {
+            state.expandedTaskIds.add(key);
+        }
         render();
     }
 
@@ -1345,13 +1391,20 @@ if (mount) {
     async function saveItem(kind, item, data, form) {
         const color = data.color || '#34C759';
         if (kind === 'task') {
+            const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
+            const parentTaskId = data.parentTaskId || taskParentId(item);
             const body = {
                 title: data.title,
                 type: 'todo',
                 due_at: fromDatetimeLocal(data.time),
+                notes: data.notes || null,
                 category: data.category || null,
                 color,
                 is_critical: form.elements.critical?.checked || false,
+                metadata: {
+                    ...existingMetadata,
+                    ...(parentTaskId ? { parent_task_id: Number(parentTaskId) } : {}),
+                },
             };
             item ? await api(`/tasks/${item.id}`, { method: 'PATCH', body }) : await api('/tasks', { method: 'POST', body });
         } else if (kind === 'reminder') {
@@ -2122,6 +2175,36 @@ if (mount) {
 
     function activeTasks() {
         return state.tasks.filter((task) => !taskCompleted(task));
+    }
+
+    function activeTopLevelTasks() {
+        return activeTasks().filter((task) => !taskParentId(task));
+    }
+
+    function taskParentId(task) {
+        const metadata = typeof task?.metadata === 'object' && task.metadata ? task.metadata : {};
+        return metadata.parent_task_id || metadata.parentTaskId || metadata.parent_id || metadata.parentId || null;
+    }
+
+    function subtasksFor(task, includeCompleted = false) {
+        return state.tasks
+            .filter((candidate) => String(taskParentId(candidate) || '') === String(task?.id || ''))
+            .filter((candidate) => includeCompleted || !taskCompleted(candidate))
+            .sort(compareTasks);
+    }
+
+    function taskNotesText(task) {
+        return String(task?.notes || task?.metadata?.notes || '').trim();
+    }
+
+    function compareTasks(a, b) {
+        const aDue = parseLocalDate(a?.due_at || a?.dueAt || '');
+        const bDue = parseLocalDate(b?.due_at || b?.dueAt || '');
+        const aHasDue = Boolean(a?.due_at || a?.dueAt);
+        const bHasDue = Boolean(b?.due_at || b?.dueAt);
+        if (aHasDue && bHasDue && aDue.getTime() !== bDue.getTime()) return aDue - bDue;
+        if (aHasDue !== bHasDue) return aHasDue ? -1 : 1;
+        return Number(a?.id || 0) - Number(b?.id || 0);
     }
 
     function pendingReminders() {

@@ -729,6 +729,18 @@
     line-height: 1.25;
 }
 
+.hb-task-expand-icon {
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    margin-left: 2px;
+    color: #111827;
+    font-size: 10px;
+    line-height: 1;
+}
+
 .hb-item-complete .hb-item-title {
     color: var(--hb-muted);
     text-decoration: line-through;
@@ -768,6 +780,52 @@
     top: 7px;
     right: 10px;
     pointer-events: none;
+}
+
+.hb-task-details {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 10px;
+    padding: 0 8px 8px 56px;
+}
+
+.hb-task-notes {
+    border-left: 3px solid rgba(17, 24, 39, .18);
+    padding: 8px 10px;
+    color: var(--hb-text);
+    font-size: 13px;
+    line-height: 1.35;
+    background: rgba(255, 255, 255, .42);
+    border-radius: 10px;
+}
+
+.hb-subtask-block {
+    display: grid;
+    gap: 8px;
+}
+
+.hb-subtask-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--hb-muted);
+    font-size: 12px;
+}
+
+.hb-subtask-add {
+    min-height: 30px;
+    padding: 6px 9px;
+    font-size: 12px;
+}
+
+.hb-subtask-list {
+    display: grid;
+    gap: 8px;
+}
+
+.hb-subtask-list .hb-item {
+    margin: 0;
 }
 
 .hb-calendar {

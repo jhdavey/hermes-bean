@@ -272,6 +272,7 @@ class HermesApiClient {
     String type = 'todo',
     String status = 'open',
     String? dueAt,
+    String? notes,
     String? category,
     String? color,
     bool isCritical = false,
@@ -284,6 +285,7 @@ class HermesApiClient {
       'type': type,
       'status': status,
       'due_at': dueAt,
+      if (notes != null) 'notes': notes,
       'category': category,
       'color': color,
       'is_critical': isCritical,
@@ -301,6 +303,7 @@ class HermesApiClient {
     String? title,
     String? status,
     String? dueAt,
+    String? notes,
     String? completedAt,
     String? category,
     String? color,
@@ -309,11 +312,13 @@ class HermesApiClient {
     List<Object> syncToWorkspaceIds = const [],
     bool clearCategory = false,
     bool clearColor = false,
+    bool clearNotes = false,
   }) async {
     final body = <String, Object?>{
       if (title != null) 'title': title,
       if (status != null) 'status': status,
       'due_at': dueAt,
+      if (notes != null || clearNotes) 'notes': notes,
       if (completedAt != null || status == 'open') 'completed_at': completedAt,
       if (category != null || clearCategory) 'category': category,
       if (color != null || clearColor) 'color': color,
@@ -1344,6 +1349,7 @@ class HermesTask {
     required this.title,
     this.status,
     this.dueAt,
+    this.notes,
     this.category,
     this.color,
     this.isCritical = false,
@@ -1355,6 +1361,7 @@ class HermesTask {
   final String title;
   final String? status;
   final String? dueAt;
+  final String? notes;
   final String? category;
   final String? color;
   final bool isCritical;
@@ -1364,6 +1371,18 @@ class HermesTask {
   List<String> get googleCalendarIds =>
       _googleCalendarIdsFromMetadata(metadata);
 
+  int? get parentTaskId {
+    final raw =
+        metadata?['parent_task_id'] ??
+        metadata?['parentTaskId'] ??
+        metadata?['parent_id'] ??
+        metadata?['parentId'];
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw);
+    return null;
+  }
+
   factory HermesTask.fromJson(Map<String, Object?> json) {
     final metadata = _expectMapOrNull(json['metadata']);
     return HermesTask(
@@ -1371,6 +1390,7 @@ class HermesTask {
       title: _readTitle(json),
       status: json['status'] as String?,
       dueAt: (json['due_at'] ?? json['dueAt']) as String?,
+      notes: json['notes'] as String?,
       category:
           json['category'] as String? ?? (metadata?['category'] as String?),
       color: json['color'] as String? ?? (metadata?['color'] as String?),
@@ -1389,12 +1409,14 @@ class HermesTask {
     String? title,
     String? status,
     String? dueAt,
+    String? notes,
     String? category,
     String? color,
     bool? isCritical,
     String? completedAt,
     Map<String, Object?>? metadata,
     bool clearDueAt = false,
+    bool clearNotes = false,
     bool clearCategory = false,
     bool clearColor = false,
     bool clearCompletedAt = false,
@@ -1403,6 +1425,7 @@ class HermesTask {
     title: title ?? this.title,
     status: status ?? this.status,
     dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
+    notes: clearNotes ? null : notes ?? this.notes,
     category: clearCategory ? null : category ?? this.category,
     color: clearColor ? null : color ?? this.color,
     isCritical: isCritical ?? this.isCritical,

@@ -1670,24 +1670,32 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     HermesTask? task, {
     required String title,
     String? dueAt,
+    String? notes,
     String? category,
     String? color,
     bool? isCritical,
+    int? parentTaskId,
     List<Object> syncToWorkspaceIds = const [],
     List<String> googleCalendarIds = const [],
   }) async {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
+    final metadata = <String, Object?>{
+      ...?task?.metadata,
+      if (googleCalendarIds.isNotEmpty || task != null)
+        'google_calendar_ids': googleCalendarIds,
+      if (parentTaskId != null || task?.parentTaskId != null)
+        'parent_task_id': parentTaskId ?? task!.parentTaskId,
+    };
     try {
       final saved = task == null
           ? await widget.apiClient.createTask(
               title: title,
               dueAt: normalizedDueAt,
+              notes: notes,
               category: category,
               color: color,
               isCritical: isCritical ?? false,
-              metadata: googleCalendarIds.isEmpty
-                  ? null
-                  : {'google_calendar_ids': googleCalendarIds},
+              metadata: metadata.isEmpty ? null : metadata,
               workspaceId: _user?.activeWorkspace?.numericId,
               syncToWorkspaceIds: syncToWorkspaceIds,
             )
@@ -1696,15 +1704,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               title: title,
               status: task.status ?? 'open',
               dueAt: normalizedDueAt,
+              notes: notes,
               category: category,
               color: color,
               isCritical: isCritical,
-              metadata: {
-                ...?task.metadata,
-                'google_calendar_ids': googleCalendarIds,
-              },
+              metadata: metadata,
               clearCategory: category == null,
               clearColor: color == null,
+              clearNotes: notes == null,
               syncToWorkspaceIds: syncToWorkspaceIds,
             );
       if (!mounted) return;
@@ -1736,7 +1743,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       timeLabel: 'Due date',
       initialTitle: '',
       initialTime: '',
+      initialNotes: '',
       allowEmptyTime: true,
+      showNotes: true,
       categories: _eventCategories,
       initialCritical: false,
       onEventCategorySaved: _saveEventCategory,
@@ -1751,6 +1760,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       null,
       title: title,
       dueAt: result['time'] as String?,
+      notes: result['notes'] as String?,
       category: result['category'] as String?,
       color: result['color'] as String?,
       isCritical: result['isCritical'] as bool?,
@@ -3737,9 +3747,11 @@ class _CommandCenterContent extends StatelessWidget {
     HermesTask? task, {
     required String title,
     String? dueAt,
+    String? notes,
     String? category,
     String? color,
     bool? isCritical,
+    int? parentTaskId,
     List<Object> syncToWorkspaceIds,
     List<String> googleCalendarIds,
   })
@@ -3859,6 +3871,7 @@ class _CommandCenterContent extends StatelessWidget {
           ),
           _HomeDestination.tasks => _TaskListCard(
             tasks: tasks,
+            pastTasks: pastTasks,
             eventCategories: eventCategories,
             pendingTaskIds: pendingTaskIds,
             onTaskCompleted: onTaskCompleted,
@@ -4935,9 +4948,11 @@ class _TodayHomeView extends StatelessWidget {
     HermesTask? task, {
     required String title,
     String? dueAt,
+    String? notes,
     String? category,
     String? color,
     bool? isCritical,
+    int? parentTaskId,
     List<Object> syncToWorkspaceIds,
     List<String> googleCalendarIds,
   })
@@ -5051,12 +5066,19 @@ class _TodayHomeView extends StatelessWidget {
             if (tasks.isEmpty)
               _EmptySurface(label: 'No tasks scheduled for $dayLabel')
             else ...[
-              for (final task in tasks)
+              for (final task in tasks.where((task) => !_taskIsSubtask(task)))
                 _TaskItemTile(
                   task: task,
                   subtitle: _taskSubtitle(task),
+                  subtasks: _subtasksFor(task, tasks),
                   onCompleted: onTaskCompleted,
                   onTap: () => _showTaskEditor(context, task: task),
+                  onSubtaskCompleted: onTaskCompleted,
+                  onSubtaskTap: (subtask) =>
+                      _showTaskEditor(context, task: subtask),
+                  onAddSubtask: !_taskIsSubtask(task)
+                      ? () => _showTaskEditor(context, parentTask: task)
+                      : null,
                 ),
             ],
           ],
@@ -5065,15 +5087,25 @@ class _TodayHomeView extends StatelessWidget {
     );
   }
 
-  Future<void> _showTaskEditor(BuildContext context, {HermesTask? task}) async {
+  Future<void> _showTaskEditor(
+    BuildContext context, {
+    HermesTask? task,
+    HermesTask? parentTask,
+  }) async {
     final result = await _showTitleTimeEditor(
       context,
-      title: task == null ? 'New task' : 'Edit task',
+      title: parentTask != null
+          ? 'New sub-task'
+          : task == null
+          ? 'New task'
+          : 'Edit task',
       titleLabel: 'Task title',
       timeLabel: 'Due date',
       initialTitle: task?.title ?? '',
       initialTime: _formatCalendarEventDateTime(task?.dueAt),
+      initialNotes: task?.notes ?? '',
       allowEmptyTime: true,
+      showNotes: true,
       categories: eventCategories,
       initialCategory: task?.category,
       initialColor: task?.color,
@@ -5096,9 +5128,11 @@ class _TodayHomeView extends StatelessWidget {
       task,
       title: title,
       dueAt: result['time'] as String?,
+      notes: result['notes'] as String?,
       category: result['category'] as String?,
       color: result['color'] as String?,
       isCritical: result['isCritical'] as bool?,
+      parentTaskId: parentTask?.id,
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
@@ -9911,6 +9945,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   required String timeLabel,
   required String initialTitle,
   required String initialTime,
+  String initialNotes = '',
   required bool allowEmptyTime,
   List<HermesEventCategory> categories = const [],
   String? initialCategory,
@@ -9919,6 +9954,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   String? completeLabel,
   bool initialCritical = false,
   bool showCritical = true,
+  bool showNotes = false,
   bool showTimeTextField = true,
   Future<HermesEventCategory> Function({
     HermesEventCategory? category,
@@ -9933,6 +9969,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
+  final notesController = TextEditingController(text: initialNotes);
   var selectedCategory = initialCategory?.trim() ?? '';
   var selectedColor = initialColor?.trim() ?? '';
   var modalCategories = [...categories];
@@ -10180,6 +10217,19 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                       ),
                     ),
                   ),
+                if (showNotes) ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    key: const Key('title-time-editor-notes'),
+                    controller: notesController,
+                    minLines: 2,
+                    maxLines: 5,
+                    decoration: const InputDecoration(
+                      labelText: 'Notes',
+                      hintText: 'Add task details',
+                    ),
+                  ),
+                ],
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -10365,6 +10415,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                           Navigator.of(context).pop({
                             'title': title,
                             'time': time.isEmpty ? null : time,
+                            'notes': notesController.text.trim().isEmpty
+                                ? null
+                                : notesController.text.trim(),
                             'category': selectedCategory.isEmpty
                                 ? null
                                 : selectedCategory,
@@ -10396,6 +10449,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                       Navigator.of(context).pop({
                         'title': title,
                         'time': time,
+                        'notes': notesController.text.trim().isEmpty
+                            ? null
+                            : notesController.text.trim(),
                         'complete': true,
                         'category': selectedCategory.isEmpty
                             ? null
@@ -10426,6 +10482,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
 class _TaskListCard extends StatefulWidget {
   const _TaskListCard({
     required this.tasks,
+    required this.pastTasks,
     required this.eventCategories,
     required this.pendingTaskIds,
     required this.onTaskCompleted,
@@ -10437,6 +10494,7 @@ class _TaskListCard extends StatefulWidget {
   });
 
   final List<HermesTask> tasks;
+  final List<HermesTask> pastTasks;
   final List<HermesEventCategory> eventCategories;
   final Set<int> pendingTaskIds;
   final Future<void> Function(HermesTask task) onTaskCompleted;
@@ -10444,9 +10502,11 @@ class _TaskListCard extends StatefulWidget {
     HermesTask? task, {
     required String title,
     String? dueAt,
+    String? notes,
     String? category,
     String? color,
     bool? isCritical,
+    int? parentTaskId,
     List<Object> syncToWorkspaceIds,
     List<String> googleCalendarIds,
   })
@@ -10470,8 +10530,17 @@ class _TaskListCardState extends State<_TaskListCard> {
 
   @override
   Widget build(BuildContext context) {
-    final visibleTasks = widget.tasks
-        .where((task) => _taskIsCompleted(task) == _showCompleted)
+    final allTasks = _mergeTaskLists(widget.tasks, widget.pastTasks);
+    final visibleTasks = allTasks
+        .where(
+          (task) =>
+              _taskIsCompleted(task) == _showCompleted &&
+              (_showCompleted || !_taskIsSubtask(task)),
+        )
+        .toList();
+    visibleTasks.sort(_compareTasksByCompletionAndDueDate);
+    final activeSubtasks = widget.tasks
+        .where((task) => !_taskIsCompleted(task) && _taskIsSubtask(task))
         .toList();
     return Column(
       key: const Key('tasks-view'),
@@ -10505,23 +10574,41 @@ class _TaskListCardState extends State<_TaskListCard> {
             _TaskItemTile(
               task: task,
               subtitle: _taskSubtitle(task),
+              subtasks: _subtasksFor(task, activeSubtasks),
               pending: widget.pendingTaskIds.contains(task.id),
               onTap: () => _showTaskEditor(context, task: task),
               onCompleted: widget.onTaskCompleted,
+              onSubtaskCompleted: widget.onTaskCompleted,
+              onSubtaskTap: (subtask) =>
+                  _showTaskEditor(context, task: subtask),
+              pendingTaskIds: widget.pendingTaskIds,
+              onAddSubtask: !_showCompleted && !_taskIsSubtask(task)
+                  ? () => _showTaskEditor(context, parentTask: task)
+                  : null,
             ),
       ],
     );
   }
 
-  Future<void> _showTaskEditor(BuildContext context, {HermesTask? task}) async {
+  Future<void> _showTaskEditor(
+    BuildContext context, {
+    HermesTask? task,
+    HermesTask? parentTask,
+  }) async {
     final result = await _showTitleTimeEditor(
       context,
-      title: task == null ? 'New task' : 'Edit task',
+      title: parentTask != null
+          ? 'New sub-task'
+          : task == null
+          ? 'New task'
+          : 'Edit task',
       titleLabel: 'Task title',
       timeLabel: 'Due date',
       initialTitle: task?.title ?? '',
       initialTime: _formatCalendarEventDateTime(task?.dueAt),
+      initialNotes: task?.notes ?? '',
       allowEmptyTime: true,
+      showNotes: true,
       categories: widget.eventCategories,
       initialCategory: task?.category,
       initialColor: task?.color,
@@ -10543,9 +10630,11 @@ class _TaskListCardState extends State<_TaskListCard> {
       task,
       title: title,
       dueAt: result['time'] as String?,
+      notes: result['notes'] as String?,
       category: result['category'] as String?,
       color: result['color'] as String?,
       isCritical: result['isCritical'] as bool?,
+      parentTaskId: parentTask?.id,
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
@@ -12097,13 +12186,18 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
   );
 }
 
-class _TaskItemTile extends StatelessWidget {
+class _TaskItemTile extends StatefulWidget {
   const _TaskItemTile({
     required this.task,
     required this.subtitle,
     required this.onCompleted,
     this.pending = false,
     this.onTap,
+    this.subtasks = const [],
+    this.onSubtaskCompleted,
+    this.onSubtaskTap,
+    this.pendingTaskIds = const {},
+    this.onAddSubtask,
   });
 
   final HermesTask task;
@@ -12111,9 +12205,22 @@ class _TaskItemTile extends StatelessWidget {
   final Future<void> Function(HermesTask task) onCompleted;
   final bool pending;
   final VoidCallback? onTap;
+  final List<HermesTask> subtasks;
+  final Future<void> Function(HermesTask task)? onSubtaskCompleted;
+  final ValueChanged<HermesTask>? onSubtaskTap;
+  final Set<int> pendingTaskIds;
+  final VoidCallback? onAddSubtask;
+
+  @override
+  State<_TaskItemTile> createState() => _TaskItemTileState();
+}
+
+class _TaskItemTileState extends State<_TaskItemTile> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
+    final task = widget.task;
     final completed = _taskIsCompleted(task);
     final categoryColor = _safeCategoryColor(task.color);
     final surfaceColor = completed
@@ -12131,81 +12238,245 @@ class _TaskItemTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: borderColor),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Stack(
         children: [
-          pending
-              ? const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : Checkbox(
-                  key: Key('task-complete-checkbox-${task.id}'),
-                  value: completed,
-                  onChanged: (_) => onCompleted(task),
-                  activeColor: HeyBeanTheme.accentStrong,
-                ),
-          Expanded(
-            child: InkWell(
-              key: Key('task-row-action-${task.id}'),
-              borderRadius: BorderRadius.circular(12),
-              onTap: onTap,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 2),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        if (task.isCritical) ...[
-                          Icon(
-                            Icons.star_rounded,
-                            key: Key('task-critical-star-${task.id}'),
-                            color: categoryColor,
-                            size: 16,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  widget.pending
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                          const SizedBox(width: 4),
-                        ],
-                        Expanded(
-                          child: Text(
-                            task.title,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              decoration: completed
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                              color: completed
-                                  ? HeyBeanTheme.muted
-                                  : HeyBeanTheme.text,
-                            ),
-                          ),
+                        )
+                      : Checkbox(
+                          key: Key('task-complete-checkbox-${task.id}'),
+                          value: completed,
+                          onChanged: (_) => widget.onCompleted(task),
+                          activeColor: HeyBeanTheme.accentStrong,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        color: HeyBeanTheme.muted,
-                        fontSize: 12,
+                  Expanded(
+                    child: InkWell(
+                      key: Key('task-row-action-${task.id}'),
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: widget.onTap,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 9,
+                          horizontal: 2,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    task.title,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: 14,
+                                      decoration: completed
+                                          ? TextDecoration.lineThrough
+                                          : null,
+                                      color: completed
+                                          ? HeyBeanTheme.muted
+                                          : HeyBeanTheme.text,
+                                    ),
+                                  ),
+                                ),
+                                if (_canExpand)
+                                  InkWell(
+                                    key: Key('task-expand-action-${task.id}'),
+                                    borderRadius: BorderRadius.circular(999),
+                                    onTap: () =>
+                                        setState(() => _expanded = !_expanded),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(2),
+                                      child: Icon(
+                                        _expanded
+                                            ? Icons.keyboard_arrow_up_rounded
+                                            : Icons.keyboard_arrow_down_rounded,
+                                        color: Colors.black,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            if (widget.subtitle.isNotEmpty) ...[
+                              const SizedBox(height: 3),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  widget.subtitle,
+                                  style: const TextStyle(
+                                    color: HeyBeanTheme.muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                     ),
-                  ],
+                  ),
+                  if (widget.onTap != null)
+                    IconButton(
+                      key: Key('task-edit-action-${task.id}'),
+                      tooltip: 'Edit task',
+                      onPressed: widget.onTap,
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                ],
+              ),
+              if (_expanded) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(54, 0, 8, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if ((task.notes ?? '').trim().isNotEmpty) ...[
+                        Container(
+                          key: Key('task-notes-${task.id}'),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: HeyBeanTheme.surface.withValues(alpha: .62),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: HeyBeanTheme.border),
+                          ),
+                          child: Text(
+                            task.notes!.trim(),
+                            style: const TextStyle(fontSize: 13, height: 1.35),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Sub-tasks',
+                              style: TextStyle(
+                                color: HeyBeanTheme.muted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (widget.onAddSubtask != null)
+                            TextButton.icon(
+                              key: Key('task-add-subtask-${task.id}'),
+                              onPressed: widget.onAddSubtask,
+                              icon: const Icon(Icons.add_rounded, size: 16),
+                              label: const Text('Add'),
+                            ),
+                        ],
+                      ),
+                      if (widget.subtasks.isEmpty)
+                        const Text(
+                          'No active sub-tasks',
+                          style: TextStyle(
+                            color: HeyBeanTheme.muted,
+                            fontSize: 12,
+                          ),
+                        )
+                      else
+                        for (final subtask in widget.subtasks)
+                          _SubtaskRow(
+                            task: subtask,
+                            pending: widget.pendingTaskIds.contains(subtask.id),
+                            onCompleted:
+                                widget.onSubtaskCompleted ?? widget.onCompleted,
+                            onTap: widget.onSubtaskTap == null
+                                ? null
+                                : () => widget.onSubtaskTap!(subtask),
+                          ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (task.isCritical)
+            Positioned(
+              key: Key('task-critical-star-${task.id}'),
+              top: 1,
+              right: 4,
+              child: Icon(Icons.star_rounded, color: categoryColor, size: 16),
+            ),
+        ],
+      ),
+    );
+  }
+
+  bool get _canExpand =>
+      (widget.task.notes ?? '').trim().isNotEmpty ||
+      widget.subtasks.isNotEmpty ||
+      widget.onAddSubtask != null;
+}
+
+class _SubtaskRow extends StatelessWidget {
+  const _SubtaskRow({
+    required this.task,
+    required this.onCompleted,
+    this.pending = false,
+    this.onTap,
+  });
+
+  final HermesTask task;
+  final Future<void> Function(HermesTask task) onCompleted;
+  final bool pending;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = _taskIsCompleted(task);
+    return InkWell(
+      key: Key('subtask-row-${task.id}'),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            pending
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Checkbox(
+                    key: Key('subtask-complete-checkbox-${task.id}'),
+                    value: completed,
+                    onChanged: (_) => onCompleted(task),
+                    visualDensity: VisualDensity.compact,
+                    activeColor: HeyBeanTheme.accentStrong,
+                  ),
+            if (task.isCritical)
+              const Icon(Icons.star_rounded, size: 14, color: Colors.black87),
+            Expanded(
+              child: Text(
+                task.title,
+                style: TextStyle(
+                  fontSize: 13,
+                  decoration: completed ? TextDecoration.lineThrough : null,
+                  color: completed ? HeyBeanTheme.muted : HeyBeanTheme.text,
                 ),
               ),
             ),
-          ),
-          if (onTap != null)
-            IconButton(
-              key: Key('task-edit-action-${task.id}'),
-              tooltip: 'Edit task',
-              onPressed: onTap,
-              icon: const Icon(Icons.edit_outlined),
-            ),
-        ],
+            if ((task.dueAt ?? '').trim().isNotEmpty)
+              Text(
+                _formatCalendarEventDateTime(task.dueAt),
+                style: const TextStyle(color: HeyBeanTheme.muted, fontSize: 11),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -12383,6 +12654,30 @@ List<HermesTask> _replaceTask(List<HermesTask> tasks, HermesTask replacement) =>
 List<HermesTask> _removeTask(List<HermesTask> tasks, int taskId) =>
     tasks.where((task) => task.id != taskId).toList(growable: false);
 
+List<HermesTask> _mergeTaskLists(
+  List<HermesTask> primary,
+  List<HermesTask> secondary,
+) {
+  final byId = <int, HermesTask>{};
+  for (final task in [...secondary, ...primary]) {
+    byId[task.id] = task;
+  }
+  return byId.values.toList(growable: false);
+}
+
+bool _taskIsSubtask(HermesTask task) => task.parentTaskId != null;
+
+List<HermesTask> _subtasksFor(HermesTask task, List<HermesTask> tasks) {
+  final subtasks = tasks
+      .where(
+        (candidate) =>
+            candidate.parentTaskId == task.id && !_taskIsCompleted(candidate),
+      )
+      .toList();
+  subtasks.sort(_compareTasksByCompletionAndDueDate);
+  return subtasks;
+}
+
 List<HermesTask> _visibleSortedTasks(List<HermesTask> tasks) {
   final today = _dateOnly(DateTime.now());
   final visible = tasks
@@ -12424,10 +12719,12 @@ int _compareTasksByCompletionAndDueDate(HermesTask a, HermesTask b) {
 }
 
 List<HermesTask> _criticalTasksForToday(List<HermesTask> tasks) {
-  return _tasksForDay(
-    tasks,
-    DateTime.now(),
-  ).where((task) => task.isCritical && !_taskIsCompleted(task)).toList();
+  return _tasksForDay(tasks, DateTime.now())
+      .where(
+        (task) =>
+            task.isCritical && !_taskIsCompleted(task) && !_taskIsSubtask(task),
+      )
+      .toList();
 }
 
 List<HermesCalendarEvent> _criticalEventsForToday(
@@ -12470,9 +12767,8 @@ bool _reminderIsCompleted(HermesReminder reminder) {
 String _taskSubtitle(HermesTask task) {
   final parts = <String>[
     if (_taskIsCompleted(task)) 'Completed',
-    if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
     if (task.dueAt != null && task.dueAt!.trim().isNotEmpty)
-      'Due ${_formatCalendarEventDateTime(task.dueAt)}',
+      _formatCalendarEventDateTime(task.dueAt),
     if (_taskIsRecurring(task)) 'Recurring',
   ];
   return parts.join(' · ');

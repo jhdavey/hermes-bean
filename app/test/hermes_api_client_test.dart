@@ -373,7 +373,9 @@ void main() {
         'id': 1,
         'title': 'Cut grass',
         'status': 'open',
-        'metadata': '{"google_calendar_ids":["family@example.com"]}',
+        'notes': 'Trim near the fence.',
+        'metadata':
+            '{"google_calendar_ids":["family@example.com"],"parent_task_id":42}',
       });
       final reminder = HermesReminder.fromJson({
         'id': 2,
@@ -391,6 +393,8 @@ void main() {
       });
 
       expect(task.googleCalendarIds, ['family@example.com']);
+      expect(task.notes, 'Trim near the fence.');
+      expect(task.parentTaskId, 42);
       expect(reminder.color, '#34C759');
       expect(reminder.isCritical, isTrue);
       expect(event.googleCalendarId, 'work@example.com');
