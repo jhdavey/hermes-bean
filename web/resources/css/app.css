@@ -1291,6 +1291,11 @@
     background: rgba(22, 163, 74, .12);
 }
 
+.hb-message-approval {
+    border-color: rgba(245, 158, 11, .38);
+    background: #fffbeb;
+}
+
 .hb-message-head {
     display: flex;
     align-items: center;

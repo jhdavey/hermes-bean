@@ -370,11 +370,11 @@ if (mount) {
                     <span class="hb-run-pill ${working ? 'hb-run-pill-working' : ''}">${escapeHtml(state.chatRunState)}</span>
                     <span class="hb-spacer"></span>
                     ${options.expandable ? `<button class="hb-button-secondary hb-chat-expand-action" type="button" data-toggle-chat-expand aria-label="${escapeAttr(expandLabel)}">${escapeHtml(expandLabel)}</button>` : ''}
-                    <button class="hb-button-ghost" type="button" data-refresh-activity>${icons.activity} Activity</button>
                     <button class="hb-button-ghost" type="button" data-new-session>${icons.add} /new</button>
                 </div>
                 <div class="hb-chat-messages" id="hb-chat-messages">
                     ${messages.map((message, index) => messageMarkup(message, index, messages)).join('')}
+                    ${working ? '' : pendingApprovalChatMarkup()}
                     ${working ? messageMarkup({ id: 'busy', role: 'assistant', content: state.chatRunState || 'Working…', progress: true }) : ''}
                 </div>
                 <div class="hb-chat-voice-status ${state.voiceStatusTone === 'error' ? 'hb-chat-voice-status-error' : ''}" data-voice-status ${state.voiceStatus ? '' : 'hidden'}>${escapeHtml(state.voiceStatus)}</div>
@@ -706,11 +706,8 @@ if (mount) {
                 <div class="hb-approval-handle"></div>
                 ${sectionTitle(icons.settings, 'I need approval', "Approve or deny Bean's next action")}
                 <div class="hb-approval-action">${escapeHtml(approvalDescription(approval))}</div>
-                <textarea class="hb-textarea hb-approval-change" placeholder="Tell Bean what to do instead…"></textarea>
                 <div class="hb-modal-actions">
                     <button class="hb-button-ghost" type="button" data-approval-deny="${approval.id}">Deny</button>
-                    <button class="hb-button-secondary" type="button" data-approval-change="${approval.id}">Send change</button>
-                    <button class="hb-button-secondary" type="button" data-approval-always="${approval.id}">Always approve</button>
                     <button class="hb-button" type="button" data-approval-approve="${approval.id}">Approve</button>
                 </div>
             </section>`;
@@ -764,7 +761,6 @@ if (mount) {
         const user = message.role === 'user';
         const metadata = typeof message.metadata === 'object' && message.metadata ? message.metadata : {};
         const model = metadata.model || metadata?.model_route?.model || '';
-        const approval = !user && isLatestAssistantMessage(index, messages) ? pendingApprovalForSession() : null;
         const content = user ? (message.content || '') : conversationalMessageContent(message.content || '');
         return `
             <article class="hb-message ${user ? 'hb-message-user' : ''}">
@@ -774,7 +770,23 @@ if (mount) {
                     ${model ? `<span class="hb-message-model">${escapeHtml(model)}</span>` : ''}
                 </div>
                 <div class="hb-message-body">${escapeHtml(content)}</div>
-                ${approval ? `<div class="hb-message-actions"><button class="hb-button" type="button" data-approval-approve="${approval.id}">Approve</button><button class="hb-button-ghost" type="button" data-approval-deny="${approval.id}">Deny</button></div>` : ''}
+            </article>`;
+    }
+
+    function pendingApprovalChatMarkup() {
+        const approval = pendingApprovalForSession();
+        if (!approval) return '';
+        return `
+            <article class="hb-message hb-message-approval">
+                <div class="hb-message-head">
+                    <span>Bean</span>
+                    <span class="hb-message-model">Approval needed</span>
+                </div>
+                <div class="hb-message-body">${escapeHtml(approvalDescription(approval))}</div>
+                <div class="hb-message-actions">
+                    <button class="hb-button-ghost" type="button" data-approval-deny="${approval.id}">Deny</button>
+                    <button class="hb-button" type="button" data-approval-approve="${approval.id}">Approve</button>
+                </div>
             </article>`;
     }
 
@@ -1164,9 +1176,7 @@ if (mount) {
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
         mount.querySelectorAll('[data-approval-approve]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalApprove, false)));
-        mount.querySelectorAll('[data-approval-always]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalAlways, true)));
         mount.querySelectorAll('[data-approval-deny]').forEach((button) => button.addEventListener('click', () => denyApproval(button.dataset.approvalDeny)));
-        mount.querySelectorAll('[data-approval-change]').forEach((button) => button.addEventListener('click', () => changeApproval(button.dataset.approvalChange)));
         mount.querySelectorAll('[data-calendar-pref]').forEach((input) => input.addEventListener('change', () => localStorage.setItem(`heybean.calendar.${input.dataset.calendarPref}`, input.value)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
         const chatForm = mount.querySelector('form[data-action="chat"]');
@@ -1186,7 +1196,6 @@ if (mount) {
         });
         bindTimelineHorizontalScroll();
         mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
-        mount.querySelector('[data-refresh-activity]')?.addEventListener('click', refreshOnly);
         scrollTimelineToSelected();
         scrollChatToBottom();
     }
@@ -1988,15 +1997,6 @@ if (mount) {
         await refreshOnly();
     }
 
-    async function changeApproval(id) {
-        const revised = mount.querySelector('.hb-approval-change')?.value?.trim();
-        await denyApproval(id);
-        if (revised) {
-            state.selected = 'bean';
-            await sendChatContent(revised);
-        }
-    }
-
     async function saveCategoryRow(event) {
         event.preventDefault();
         const form = event.currentTarget;
@@ -2125,13 +2125,6 @@ if (mount) {
             const approvalSessionId = approval.conversation_session_id || approval.conversationSessionId;
             return !sessionId || !approvalSessionId || String(approvalSessionId) === String(sessionId);
         });
-    }
-
-    function isLatestAssistantMessage(index, messages) {
-        for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
-            if (messages[cursor]?.role !== 'user') return cursor === index;
-        }
-        return false;
     }
 
     function approvalDescription(approval) {
