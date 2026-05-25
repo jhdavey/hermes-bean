@@ -353,6 +353,7 @@ if (mount) {
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
                 ${bottomMenuMarkup()}
+                ${state.selected === 'bean' ? '' : floatingBeanButtonMarkup()}
                 ${state.chatExpanded && state.selected !== 'bean' ? desktopChatMarkup({ expanded: true }) : ''}
             </div>`;
     }
@@ -370,8 +371,8 @@ if (mount) {
             <div class="hb-shell hb-dashboard-grid">
                 <div class="hb-primary-column">${primary}</div>
                 <aside class="hb-side-column">
+                    ${atAGlanceMarkup()}
                     ${todayTasksMarkup()}
-                    ${state.chatExpanded ? '' : desktopChatMarkup()}
                 </aside>
             </div>`;
     }
@@ -423,7 +424,7 @@ if (mount) {
         const messages = state.messages.length ? state.messages : [
             { id: 'intro', role: 'assistant', content: needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey, I’m Bean. Tell me what you need planned, captured, moved, or remembered.' },
         ];
-        const expandLabel = state.chatExpanded ? 'Collapse to column' : 'Expand';
+        const expandLabel = state.chatExpanded ? 'Close' : 'Expand';
         return `
             <section class="hb-chat">
                 <div class="hb-chat-top">
@@ -451,6 +452,13 @@ if (mount) {
             <section class="hb-desktop-chat ${options.expanded ? 'hb-desktop-chat-expanded' : ''}" aria-label="Bean chat">
                 ${chatMarkup({ expandable: true })}
             </section>`;
+    }
+
+    function floatingBeanButtonMarkup() {
+        return `
+            <button class="hb-bean-button hb-floating-bean-button ${state.chatExpanded ? 'hb-bean-button-active' : ''}" type="button" data-toggle-chat-expand aria-label="${state.chatExpanded ? 'Close Bean chat' : 'Open Bean chat'}">
+                <img src="${escapeAttr(logoUrl)}" alt="">
+            </button>`;
     }
 
     function settingsMarkup() {
@@ -573,10 +581,48 @@ if (mount) {
             <section class="hb-card hb-card-pad hb-today-tasks-card">
                 <div class="hb-section-action-row">
                     ${sectionTitle(icons.tasks, 'Tasks for today', `${tasks.length} tasks`)}
-                    <button class="hb-icon-button" type="button" data-open-create="event" aria-label="Create event" title="Create event">${icons.add}</button>
+                    <button class="hb-icon-button" type="button" data-open-create="task" aria-label="Create task" title="Create task">${icons.add}</button>
                 </div>
                 ${itemListMarkup(tasks, 'task', 'No tasks scheduled for today')}
             </section>`;
+    }
+
+    function atAGlanceMarkup() {
+        const days = [new Date(), addDays(new Date(), 1), addDays(new Date(), 2)];
+        const eventCount = eventsForDays(days).length;
+        return `
+            <section class="hb-card hb-card-pad hb-glance-card">
+                <div class="hb-section-action-row">
+                    ${sectionTitle(icons.calendar, 'At a glance', `${eventCount} upcoming ${eventCount === 1 ? 'event' : 'events'}`)}
+                    <button class="hb-icon-button" type="button" data-open-create="event" aria-label="Create event" title="Create event">${icons.add}</button>
+                </div>
+                <div class="hb-glance-list">
+                    ${days.map((day) => glanceDayMarkup(day)).join('')}
+                </div>
+            </section>`;
+    }
+
+    function glanceDayMarkup(day) {
+        const events = eventsForDay(day);
+        return `
+            <div class="hb-glance-day">
+                <div class="hb-glance-day-label">
+                    <strong>${escapeHtml(dayLabel(day))}</strong>
+                    <span>${escapeHtml(monthDayLabel(day))}</span>
+                </div>
+                <div class="hb-glance-events">
+                    ${events.length ? events.map((event) => glanceEventMarkup(event)).join('') : '<div class="hb-empty hb-glance-empty">No events</div>'}
+                </div>
+            </div>`;
+    }
+
+    function glanceEventMarkup(event) {
+        const color = safeColor(event.color);
+        return `
+            <article class="hb-glance-event" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+                <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
+                <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
+            </article>`;
     }
 
     function workspaceMembersMarkup(workspace) {
@@ -635,7 +681,6 @@ if (mount) {
                     <span></span>
                     ${nav.slice(2).map(navButton).join('')}
                 </div>
-                <button class="hb-bean-button ${state.selected === 'bean' ? 'hb-bean-button-active' : ''}" type="button" data-nav="bean" aria-label="Bean chat"><img src="${escapeAttr(logoUrl)}" alt=""></button>
             </nav>`;
     }
 
@@ -1198,6 +1243,14 @@ if (mount) {
 
     function bindSignedInActions() {
         mount.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => {
+            if (button.dataset.nav === 'bean') {
+                state.chatExpanded = true;
+                state.error = '';
+                state.notice = '';
+                render();
+                scrollChatToBottom();
+                return;
+            }
             state.selected = button.dataset.nav;
             if (state.selected !== 'bean') state.chatExpanded = false;
             state.error = '';

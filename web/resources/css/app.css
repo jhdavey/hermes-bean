@@ -834,15 +834,18 @@
 }
 
 .hb-calendar-card,
+.hb-glance-card,
 .hb-today-tasks-card {
     border-radius: 0;
 }
 
 .hb-calendar-card.hb-card-pad,
+.hb-glance-card.hb-card-pad,
 .hb-today-tasks-card.hb-card-pad {
     padding: 3px;
 }
 
+.hb-glance-card > .hb-section-action-row,
 .hb-today-tasks-card > .hb-section-action-row {
     padding: 10px 12px;
     margin-bottom: 0;
@@ -854,12 +857,105 @@
 
 .hb-calendar-card .hb-day-strip,
 .hb-calendar-card .hb-month-view,
+.hb-glance-card .hb-glance-list,
 .hb-today-tasks-card .hb-list {
     padding: 0;
 }
 
 .hb-calendar-card .hb-timeline {
     border-radius: 14px;
+}
+
+.hb-glance-card {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+}
+
+.hb-glance-list {
+    min-height: 0;
+    display: grid;
+    align-content: start;
+    gap: 3px;
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.hb-glance-day {
+    display: grid;
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 8px;
+    padding: 9px 10px;
+    border: 1px solid var(--hb-border);
+    background: rgba(246, 250, 244, .76);
+}
+
+.hb-glance-day-label {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    gap: 2px;
+}
+
+.hb-glance-day-label strong {
+    overflow: hidden;
+    color: var(--hb-text);
+    font-size: 13px;
+    font-weight: 950;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-glance-day-label span {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.hb-glance-events {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.hb-glance-event {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 62px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    border: 1px solid var(--hb-border);
+    border-radius: 12px;
+    padding: 7px 8px;
+}
+
+.hb-glance-event .hb-event-time {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 850;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-glance-event .hb-event-title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--hb-text);
+    font-size: 12px;
+    font-weight: 900;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-glance-empty {
+    min-height: 34px;
+    padding: 8px 10px;
+    font-size: 12px;
 }
 
 .hb-day-strip {
@@ -1507,6 +1603,50 @@
     outline: 0;
 }
 
+.hb-desktop-chat-expanded {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    padding: 12px;
+    background: rgba(15, 23, 42, .28);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: blur(3px);
+}
+
+.hb-desktop-chat-expanded .hb-chat {
+    width: min(1120px, 100%);
+    height: min(860px, calc(100vh - 24px));
+    margin: 0 auto;
+    padding: 12px;
+    border: 1px solid var(--hb-border-strong);
+    border-radius: 20px;
+    background: var(--hb-surface);
+    box-shadow: 0 28px 90px rgba(15, 23, 42, .34);
+}
+
+.hb-desktop-chat-expanded .hb-chat-messages {
+    padding: 12px 4px;
+}
+
+.hb-desktop-chat-expanded .hb-chat-top {
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--hb-border);
+}
+
+.hb-desktop-chat-expanded .hb-chat-expand-action {
+    background: var(--hb-accent);
+    color: #fff;
+    border-color: var(--hb-accent);
+}
+
+.hb-desktop-chat-expanded .hb-chat-dock {
+    border-color: var(--hb-border-strong);
+}
+
 .hb-bottom-menu {
     position: fixed;
     left: 0;
@@ -1571,9 +1711,10 @@
 }
 
 .hb-bean-button {
-    position: absolute;
+    position: fixed;
     left: 50%;
-    top: 0;
+    bottom: 20px;
+    z-index: 44;
     width: 72px;
     height: 72px;
     display: grid;
@@ -1585,6 +1726,12 @@
     box-shadow: 0 10px 24px rgba(22, 163, 74, .24);
     cursor: pointer;
     pointer-events: auto;
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+
+.hb-bean-button:hover {
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow: 0 14px 30px rgba(22, 163, 74, .30);
 }
 
 .hb-bean-button-active {
@@ -1891,9 +2038,10 @@
         position: sticky;
         top: 58px;
         height: calc(100vh - 58px);
-        grid-template-rows: minmax(0, 1fr) minmax(260px, 33vh);
+        grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     }
 
+    .hb-glance-card,
     .hb-today-tasks-card {
         min-height: 0;
         display: grid;
@@ -1901,6 +2049,7 @@
         overflow: hidden;
     }
 
+    .hb-glance-card .hb-glance-list,
     .hb-today-tasks-card .hb-list {
         min-height: 0;
         max-height: none;
