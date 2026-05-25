@@ -522,12 +522,7 @@ PROMPT.$this->payloadFor($session, $message);
             return null;
         }
 
-        try {
-            $decoded = json_decode($trimmed, true, flags: JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return null;
-        }
-
+        $decoded = $this->decodeStructuredJson($trimmed);
         if (! is_array($decoded)) {
             return null;
         }
@@ -538,13 +533,7 @@ PROMPT.$this->payloadFor($session, $message);
                 if ($nested === '') {
                     continue;
                 }
-
-                try {
-                    $nestedDecoded = json_decode($nested, true, flags: JSON_THROW_ON_ERROR);
-                } catch (\JsonException) {
-                    continue;
-                }
-
+                $nestedDecoded = $this->decodeStructuredJson($nested);
                 if (is_array($nestedDecoded) && array_key_exists('actions', $nestedDecoded)) {
                     return $nestedDecoded;
                 }
@@ -563,9 +552,8 @@ PROMPT.$this->payloadFor($session, $message);
 
         $decoded = $structuredOutput;
         if ($decoded === null) {
-            try {
-                $decoded = json_decode($trimmed, true, flags: JSON_THROW_ON_ERROR);
-            } catch (\JsonException) {
+            $decoded = $this->decodeStructuredJson($trimmed);
+            if (! is_array($decoded)) {
                 return $trimmed;
             }
         }
@@ -588,9 +576,8 @@ PROMPT.$this->payloadFor($session, $message);
             return '';
         }
 
-        try {
-            $decoded = json_decode($trimmed, true, flags: JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
+        $decoded = $this->decodeStructuredJson($trimmed);
+        if (! is_array($decoded)) {
             return $trimmed;
         }
 
@@ -603,6 +590,40 @@ PROMPT.$this->payloadFor($session, $message);
         }
 
         return $trimmed;
+    }
+
+    private function decodeStructuredJson(string $content): ?array
+    {
+        $trimmed = trim($content);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $candidates = [$trimmed];
+
+        if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/is', $trimmed, $matches) === 1) {
+            $candidates[] = trim($matches[1]);
+        }
+
+        $firstBrace = strpos($trimmed, '{');
+        $lastBrace = strrpos($trimmed, '}');
+        if ($firstBrace !== false && $lastBrace !== false && $lastBrace > $firstBrace) {
+            $candidates[] = substr($trimmed, $firstBrace, $lastBrace - $firstBrace + 1);
+        }
+
+        foreach (array_unique($candidates) as $candidate) {
+            try {
+                $decoded = json_decode($candidate, true, flags: JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                continue;
+            }
+
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return null;
     }
 
     private function failClosed(ConversationSession $session, ConversationMessage $userMessage, Collection $events, string $reason, array $context): array

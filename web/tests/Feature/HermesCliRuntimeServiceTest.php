@@ -549,6 +549,38 @@ PHP);
         $this->assertSame('high', $approval->payload['action']['risk']);
     }
 
+    public function test_structured_cli_output_inside_markdown_fence_only_persists_message_text(): void
+    {
+        $script = $this->writeExecutable('fenced-structured-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+$payload = [
+    'message' => 'Hello! How can I assist you today?',
+    'actions' => [[
+        'type' => 'agent_profile.update',
+        'risk' => 'low',
+        'parameters' => ['settings' => ['onboarding' => ['completed' => true]]],
+    ]],
+];
+echo "```json\n".json_encode($payload, JSON_THROW_ON_ERROR)."\n```";
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('fenced-structured-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'hello',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Hello! How can I assist you today?')
+            ->assertJsonMissingPath('data.assistant_message.content.actions')
+            ->assertJsonFragment(['event_type' => 'assistant.agent_profile.updated']);
+    }
+
     public function test_approving_a_queued_structured_action_executes_it_once(): void
     {
         $script = $this->writeExecutable('approval-hermes.php', <<<'PHP'

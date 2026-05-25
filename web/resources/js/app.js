@@ -745,6 +745,7 @@ if (mount) {
         const metadata = typeof message.metadata === 'object' && message.metadata ? message.metadata : {};
         const model = metadata.model || metadata?.model_route?.model || '';
         const approval = !user && isLatestAssistantMessage(index, messages) ? pendingApprovalForSession() : null;
+        const content = user ? (message.content || '') : conversationalMessageContent(message.content || '');
         return `
             <article class="hb-message ${user ? 'hb-message-user' : ''}">
                 <div class="hb-message-head">
@@ -752,9 +753,44 @@ if (mount) {
                     <span>${user ? 'You' : 'Bean'}</span>
                     ${model ? `<span class="hb-message-model">${escapeHtml(model)}</span>` : ''}
                 </div>
-                <div class="hb-message-body">${escapeHtml(message.content || '')}</div>
+                <div class="hb-message-body">${escapeHtml(content)}</div>
                 ${approval ? `<div class="hb-message-actions"><button class="hb-button" type="button" data-approval-approve="${approval.id}">Approve</button><button class="hb-button-ghost" type="button" data-approval-deny="${approval.id}">Deny</button></div>` : ''}
             </article>`;
+    }
+
+    function conversationalMessageContent(content) {
+        let current = String(content || '').trim();
+        for (let index = 0; index < 3; index += 1) {
+            const parsed = structuredMessageJson(current);
+            if (!parsed || Array.isArray(parsed)) return current;
+            const next = ['message', 'content', 'assistant_message', 'response']
+                .map((key) => parsed[key])
+                .find((value) => typeof value === 'string' && value.trim() !== '');
+            if (!next) return current;
+            current = next.trim();
+        }
+        return current;
+    }
+
+    function structuredMessageJson(content) {
+        const trimmed = String(content || '').trim();
+        if (!trimmed) return null;
+        const candidates = [trimmed];
+        const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+        if (fenced) candidates.push(fenced[1].trim());
+        const firstBrace = trimmed.indexOf('{');
+        const lastBrace = trimmed.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+        }
+        for (const candidate of candidates) {
+            try {
+                return JSON.parse(candidate);
+            } catch (error) {
+                // Try the next candidate form.
+            }
+        }
+        return null;
     }
 
     function sectionTitle(icon, title, subtitle = '') {
