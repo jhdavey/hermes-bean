@@ -1346,6 +1346,28 @@
     box-shadow: 0 10px 26px rgba(22, 163, 74, .18);
 }
 
+.hb-chat-voice-status {
+    min-height: 28px;
+    align-content: center;
+    border: 1px solid rgba(22, 163, 74, .18);
+    border-radius: 12px;
+    background: rgba(22, 163, 74, .08);
+    color: var(--hb-accent-strong);
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 850;
+}
+
+.hb-chat-voice-status[hidden] {
+    display: none;
+}
+
+.hb-chat-voice-status-error {
+    border-color: rgba(220, 38, 38, .20);
+    background: rgba(220, 38, 38, .08);
+    color: var(--hb-destructive);
+}
+
 .hb-chat-text-send-button,
 .hb-chat-voice-button {
     width: 44px;

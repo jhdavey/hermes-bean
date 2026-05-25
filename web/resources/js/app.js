@@ -50,6 +50,8 @@ if (mount) {
         voiceListening: false,
         voiceRecognition: null,
         voiceDraft: '',
+        voiceStatus: '',
+        voiceStatusTone: '',
         chatExpanded: false,
         calendarRefreshing: false,
         taskFilter: 'active',
@@ -373,6 +375,7 @@ if (mount) {
                     ${messages.map((message, index) => messageMarkup(message, index, messages)).join('')}
                     ${working ? messageMarkup({ id: 'busy', role: 'assistant', content: state.chatRunState || 'Working…', progress: true }) : ''}
                 </div>
+                <div class="hb-chat-voice-status ${state.voiceStatusTone === 'error' ? 'hb-chat-voice-status-error' : ''}" data-voice-status ${state.voiceStatus ? '' : 'hidden'}>${escapeHtml(state.voiceStatus)}</div>
                 <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''}" data-action="chat">
                     <textarea name="message" placeholder="${state.voiceListening ? 'Listening… release to send' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
                     <button class="hb-button-secondary hb-chat-text-send-button" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send message">${icons.send}</button>
@@ -1463,6 +1466,8 @@ if (mount) {
         state.messages.push({ id: `local-${Date.now()}`, role: 'user', content });
         state.busy = true;
         state.voiceDraft = '';
+        state.voiceStatus = '';
+        state.voiceStatusTone = '';
         state.chatRunState = 'Working…';
         render();
         try {
@@ -1495,12 +1500,14 @@ if (mount) {
     function startVoiceHoldInput() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!window.isSecureContext) {
-            state.error = 'Voice input needs HTTPS, localhost, or another secure browser context in Chrome.';
+            state.voiceStatus = 'Voice input needs HTTPS, localhost, or another secure browser context in Chrome.';
+            state.voiceStatusTone = 'error';
             render();
             return false;
         }
         if (!SpeechRecognition) {
-            state.error = 'Voice input is not available in this browser.';
+            state.voiceStatus = 'Voice input is not available in this browser. Chrome desktop supports it best; iPhone/iPad Chrome may not.';
+            state.voiceStatusTone = 'error';
             render();
             return false;
         }
@@ -1510,9 +1517,21 @@ if (mount) {
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
+        recognition.onaudiostart = () => {
+            setVoiceStatus('Microphone is on. Keep holding and speak.', '');
+        };
+        recognition.onspeechstart = () => {
+            setVoiceStatus('Listening… release to send.', '');
+        };
+        recognition.onspeechend = () => {
+            setVoiceStatus('Got it. Release to send.', '');
+        };
         recognition.onresult = (event) => {
             const transcript = Array.from(event.results).map((result) => result[0]?.transcript || '').join(' ').trim();
             state.voiceDraft = transcript;
+            if (transcript) {
+                setVoiceStatus('Release to send.', '');
+            }
             const textarea = mount.querySelector('textarea[name="message"]');
             if (textarea) {
                 textarea.value = transcript;
@@ -1527,8 +1546,14 @@ if (mount) {
             voiceHoldActive = false;
             voiceSubmitOnEnd = false;
             if (shouldSubmit && content && !state.busy) {
+                state.voiceStatus = '';
+                state.voiceStatusTone = '';
                 sendChatContent(content);
                 return;
+            }
+            if (shouldSubmit && !content) {
+                state.voiceStatus = 'I did not catch anything. Hold the Bean button, speak, then release.';
+                state.voiceStatusTone = 'error';
             }
             render();
         };
@@ -1537,20 +1562,21 @@ if (mount) {
             state.voiceRecognition = null;
             voiceHoldActive = false;
             voiceSubmitOnEnd = false;
-            state.error = event.error === 'not-allowed'
-                ? 'Chrome blocked microphone access. Allow microphone permission for this site, then press and hold again.'
-                : 'Voice input stopped. You can still type to Bean.';
+            state.voiceStatus = voiceErrorMessage(event.error);
+            state.voiceStatusTone = 'error';
             render();
         };
         state.voiceRecognition = recognition;
         state.voiceListening = true;
         state.error = '';
+        setVoiceStatus('Starting microphone…', '');
         try {
             recognition.start();
         } catch (error) {
             state.voiceListening = false;
             state.voiceRecognition = null;
-            state.error = 'Voice input is already active. Release and try again.';
+            state.voiceStatus = 'Voice input is already active. Release and try again.';
+            state.voiceStatusTone = 'error';
             render();
             return false;
         }
@@ -1575,12 +1601,15 @@ if (mount) {
             state.voiceRecognition = null;
             voiceHoldActive = false;
             voiceSubmitOnEnd = false;
+            state.voiceStatus = 'Voice input stopped. Hold the Bean button to try again.';
+            state.voiceStatusTone = 'error';
             render();
         }
     }
 
     function markVoiceListening() {
         mount.querySelectorAll('.hb-chat-dock').forEach((dock) => dock.classList.add('hb-chat-dock-listening'));
+        setVoiceStatus('Hold and speak. Release to send.', '');
         const textarea = mount.querySelector('textarea[name="message"]');
         if (textarea) {
             textarea.placeholder = 'Listening… release to send';
@@ -1595,6 +1624,32 @@ if (mount) {
             textarea.value = '';
             resizeChatInput(textarea);
         }
+    }
+
+    function setVoiceStatus(message, tone = '') {
+        state.voiceStatus = message;
+        state.voiceStatusTone = tone;
+        mount.querySelectorAll('[data-voice-status]').forEach((element) => {
+            element.hidden = !message;
+            element.textContent = message;
+            element.classList.toggle('hb-chat-voice-status-error', tone === 'error');
+        });
+    }
+
+    function voiceErrorMessage(error) {
+        if (error === 'not-allowed' || error === 'service-not-allowed') {
+            return 'Chrome blocked microphone access. Click the lock icon in the address bar, allow Microphone, then try again.';
+        }
+        if (error === 'no-speech') {
+            return 'I did not hear speech. Hold the Bean button, speak clearly, then release.';
+        }
+        if (error === 'audio-capture') {
+            return 'No microphone was found. Check your input device and browser microphone permission.';
+        }
+        if (error === 'network') {
+            return 'Chrome could not reach speech recognition. Check your connection and try again.';
+        }
+        return 'Voice input stopped. You can still type to Bean.';
     }
 
     function replaceLocalUserMessage(message) {
