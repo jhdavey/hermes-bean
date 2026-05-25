@@ -29,7 +29,9 @@ class TodaySummaryController extends Controller
             ->first();
 
         $tasks = Task::where('workspace_id', $workspace->id)->visibleInActiveViews()->latest('updated_at')->get();
-        $agentProfile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
+        $agentProfileService = app(AgentProfileService::class);
+        $agentProfile = $agentProfileService->ensureForWorkspace($workspace, $user);
+        $user = $agentProfileService->syncUserOnboardingFlag($user, $agentProfile);
         $reminders = Reminder::where('workspace_id', $workspace->id)->latest('remind_at')->get();
         $calendarEventsQuery = CalendarEvent::where('workspace_id', $workspace->id);
         $visibleGoogleCalendarIds = app(GoogleCalendarSyncService::class)->visibleGoogleCalendarIdsForWorkspace($user, $workspace);

@@ -46,10 +46,9 @@ class AuthController extends Controller
         app(AgentProfileService::class)->ensureForUser($user);
         app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         app(WelcomeConversationService::class)->ensureForUser($user);
-        $user->refresh()->load('agentProfile');
 
         return response()->json(['data' => [
-            'user' => $user,
+            'user' => $this->hydratedUser($user),
             'token' => $this->issueToken($user),
         ]], 201);
     }
@@ -72,13 +71,11 @@ class AuthController extends Controller
         }
 
         app(AgentProfileService::class)->ensureForUser($user);
-        $user->unsetRelation('agentProfile');
-        $user->load('agentProfile');
         app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         app(WelcomeConversationService::class)->ensureForUser($user);
 
         return response()->json(['data' => [
-            'user' => $user,
+            'user' => $this->hydratedUser($user),
             'token' => $this->issueToken($user),
         ]]);
     }
@@ -105,21 +102,7 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        $user = $request->user();
-        $workspaceService = app(WorkspaceService::class);
-        app(AgentProfileService::class)->ensureForUser($user);
-        $workspaceService->ensurePersonalWorkspaceForUser($user);
-        $user->unsetRelation('agentProfile');
-        $user->load('agentProfile');
-        $personalWorkspace = Workspace::where('personal_owner_user_id', $user->id)->first();
-        $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh());
-        $agentProfile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
-        $user->setAttribute('personal_workspace', $personalWorkspace);
-        $user->setAttribute('active_workspace', $activeWorkspace);
-        $user->setAttribute('workspaces', $workspaceService->accessibleWorkspaces($user));
-        $user->setAttribute('active_workspace_agent_profile', $agentProfile);
-
-        return response()->json(['data' => $user]);
+        return response()->json(['data' => $this->hydratedUser($request->user())]);
     }
 
     public function update(Request $request): JsonResponse
@@ -164,15 +147,15 @@ class AuthController extends Controller
         $user->save();
 
         if ($profileData !== []) {
-            $profile = app(AgentProfileService::class)->ensureForUser($user);
+            $workspaceService = app(WorkspaceService::class);
+            $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh());
+            $profile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
             app(AgentProfileService::class)->applyOnboarding($profile, $data, 'settings');
             $user->forceFill(['onboard_complete' => true])->save();
             $user->unsetRelation('agentProfile');
         }
 
-        $user->load('agentProfile');
-
-        return response()->json(['data' => $user]);
+        return response()->json(['data' => $this->hydratedUser($user)]);
     }
 
     public function logout(Request $request): JsonResponse
@@ -241,5 +224,32 @@ class AuthController extends Controller
         ]);
 
         return $plainToken;
+    }
+
+    private function hydratedUser(User $user): User
+    {
+        $workspaceService = app(WorkspaceService::class);
+        $agentProfiles = app(AgentProfileService::class);
+
+        $agentProfiles->ensureForUser($user);
+        $workspaceService->ensurePersonalWorkspaceForUser($user);
+
+        $user = $user->fresh();
+        $user->unsetRelation('agentProfile');
+        $user->load('agentProfile');
+
+        $personalWorkspace = Workspace::where('personal_owner_user_id', $user->id)->first();
+        $activeWorkspace = $workspaceService->resolveWorkspace($user);
+        $activeProfile = $agentProfiles->ensureForWorkspace($activeWorkspace, $user);
+        $user = $agentProfiles->syncUserOnboardingFlag($user, $activeProfile);
+        $user->unsetRelation('agentProfile');
+        $user->load('agentProfile');
+
+        $user->setAttribute('personal_workspace', $personalWorkspace);
+        $user->setAttribute('active_workspace', $activeWorkspace);
+        $user->setAttribute('workspaces', $workspaceService->accessibleWorkspaces($user));
+        $user->setAttribute('active_workspace_agent_profile', $activeProfile->refresh());
+
+        return $user;
     }
 }

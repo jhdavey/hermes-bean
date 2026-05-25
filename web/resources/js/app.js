@@ -179,6 +179,11 @@ if (mount) {
             state.session = summary?.session || null;
             state.phase = 'signedIn';
             state.error = '';
+            if (needsBeanOnboarding()) {
+                state.selected = 'bean';
+                state.chatExpanded = false;
+                state.chatRunState = 'Onboarding';
+            }
             if (state.session?.id) {
                 resumeSession(state.session.id);
             }
@@ -192,6 +197,53 @@ if (mount) {
 
     function mergeUser(...parts) {
         return Object.assign({}, ...parts.filter(Boolean));
+    }
+
+    function currentAgentProfile() {
+        return state.user?.active_workspace_agent_profile
+            || state.user?.activeWorkspaceAgentProfile
+            || state.user?.agent_profile
+            || state.user?.agentProfile
+            || state.summary?.agent_profile
+            || {};
+    }
+
+    function profileSettings(profile = currentAgentProfile()) {
+        return typeof profile.settings === 'object' && profile.settings ? profile.settings : {};
+    }
+
+    function profileOnboarding(profile = currentAgentProfile()) {
+        const settings = profileSettings(profile);
+        return typeof settings.onboarding === 'object' && settings.onboarding ? settings.onboarding : {};
+    }
+
+    function profilePersonality(profile = currentAgentProfile()) {
+        const settings = profileSettings(profile);
+        return profile.agent_personality || profile.agentPersonality || profile.personality_type || profile.personalityType || settings.personality_type || settings.personalityType || 'balanced';
+    }
+
+    function profilePriorities(profile = currentAgentProfile()) {
+        const onboarding = profileOnboarding(profile);
+        return normalizeList(profile.onboarding_priorities || profile.onboardingPriorities || onboarding.priorities);
+    }
+
+    function profileOnboardingContext(profile = currentAgentProfile()) {
+        const onboarding = profileOnboarding(profile);
+        return profile.onboarding_context || profile.onboardingContext || onboarding.context || '';
+    }
+
+    function profileOnboardingComplete(profile = currentAgentProfile()) {
+        const onboarding = profileOnboarding(profile);
+        return onboarding.completed === true || onboarding.completed === 1 || onboarding.completed === 'true';
+    }
+
+    function needsBeanOnboarding() {
+        const userComplete = state.user?.onboard_complete === true || state.user?.onboardComplete === true;
+        return !userComplete && !profileOnboardingComplete();
+    }
+
+    function onboardingIntroMessage() {
+        return 'Hey, I’m Bean. I’ll ask a few quick questions so I can learn your preferred style, top priorities, and anything important about your schedule or reminders. Start by telling me who you are and what you want Bean to help with most.';
     }
 
     function normalizeList(value) {
@@ -366,7 +418,7 @@ if (mount) {
     function chatMarkup(options = {}) {
         const working = state.busy && state.chatRunState !== 'Ready';
         const messages = state.messages.length ? state.messages : [
-            { id: 'intro', role: 'assistant', content: 'Hey, I’m Bean. Tell me what you need planned, captured, moved, or remembered.' },
+            { id: 'intro', role: 'assistant', content: needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey, I’m Bean. Tell me what you need planned, captured, moved, or remembered.' },
         ];
         const expandLabel = state.chatExpanded ? 'Collapse to column' : 'Expand';
         return `
@@ -401,8 +453,10 @@ if (mount) {
     function settingsMarkup() {
         const user = state.user || {};
         const prefs = user.notification_preferences || {};
-        const profile = user.active_workspace_agent_profile || user.agent_profile || {};
-        const priorities = Array.isArray(profile.onboarding_priorities) ? profile.onboarding_priorities : [];
+        const profile = currentAgentProfile();
+        const priorities = profilePriorities(profile);
+        const context = profileOnboardingContext(profile);
+        const complete = profileOnboardingComplete(profile);
         const workspaceItems = workspaces();
         const activeWorkspaceId = String(currentWorkspaceId() || '');
         return `
@@ -417,7 +471,7 @@ if (mount) {
                 </div>
                 <div class="hb-compact-item">
                     <span class="hb-compact-icon">${icons.tune}</span>
-                    <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profile.agent_personality || profile.personality_type))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')}</small></div>
+                    <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')}${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
                     <button class="hb-button-ghost" type="button" data-open-agent>Update</button>
                 </div>
                 <div class="hb-surface-soft hb-card-pad">
@@ -968,9 +1022,9 @@ if (mount) {
     }
 
     function agentModalMarkup() {
-        const profile = state.user?.active_workspace_agent_profile || state.user?.agent_profile || {};
-        const priorities = new Set(Array.isArray(profile.onboarding_priorities) ? profile.onboarding_priorities : []);
-        const personality = profile.agent_personality || profile.personality_type || 'balanced';
+        const profile = currentAgentProfile();
+        const priorities = new Set(profilePriorities(profile));
+        const personality = profilePersonality(profile);
         const options = ['balanced', 'coach', 'organizer', 'creative'];
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
@@ -980,7 +1034,7 @@ if (mount) {
                     <div class="hb-label">What should Bean prioritize?
                         <div class="hb-tabs">${['Work', 'Family', 'Health', 'Planning', 'Reminders', 'Focus'].map((priority) => `<label class="hb-chip"><input type="checkbox" name="priorities" value="${priority}" ${priorities.has(priority) ? 'checked' : ''}> ${priority}</label>`).join('')}</div>
                     </div>
-                    <label class="hb-label">Anything Bean should know?<textarea class="hb-textarea" name="context" placeholder="Example: I work nights, protect family time, and need gentle nudges.">${escapeHtml(profile.onboarding_context || '')}</textarea></label>
+                    <label class="hb-label">Anything Bean should know?<textarea class="hb-textarea" name="context" placeholder="Example: I work nights, protect family time, and need gentle nudges.">${escapeHtml(profileOnboardingContext(profile))}</textarea></label>
                     <div class="hb-modal-actions"><button class="hb-button-secondary" type="button" data-close-modal>Cancel</button><button class="hb-button" type="submit">Save</button></div>
                 </form>
             </div>`;
@@ -1547,9 +1601,10 @@ if (mount) {
         render();
         try {
             if (!state.session?.id) {
+                const onboarding = needsBeanOnboarding();
                 state.session = await api('/assistant/sessions', {
                     method: 'POST',
-                    body: { title: 'Workspace chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },
+                    body: { title: onboarding ? 'Welcome to Bean' : 'Workspace chat', runtime_mode: onboarding ? 'onboarding' : 'chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },
                 });
             }
             const result = await api(`/assistant/sessions/${state.session.id}/messages`, {
@@ -1816,9 +1871,10 @@ if (mount) {
 
     async function newSession() {
         try {
+            const onboarding = needsBeanOnboarding();
             state.session = await api('/assistant/sessions', {
                 method: 'POST',
-                body: { title: 'Workspace chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },
+                body: { title: onboarding ? 'Welcome to Bean' : 'Workspace chat', runtime_mode: onboarding ? 'onboarding' : 'chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },
             });
             state.messages = [];
             state.chatRunState = 'Ready';

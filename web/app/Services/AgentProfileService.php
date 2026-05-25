@@ -187,6 +187,22 @@ class AgentProfileService
         return $profile->refresh();
     }
 
+    public function onboardingComplete(?AgentProfile $profile): bool
+    {
+        return data_get($profile?->settings ?? [], 'onboarding.completed') === true;
+    }
+
+    public function syncUserOnboardingFlag(User $user, ?AgentProfile $profile = null): User
+    {
+        if ($user->onboard_complete || ! $this->onboardingComplete($profile)) {
+            return $user;
+        }
+
+        $user->forceFill(['onboard_complete' => true])->save();
+
+        return $user->refresh();
+    }
+
     public function memorySettingsFor(array $settings, string $source = 'settings'): array
     {
         $priorities = array_values(array_filter((array) data_get($settings, 'onboarding.priorities', [])));

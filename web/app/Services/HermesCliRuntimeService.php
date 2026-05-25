@@ -410,6 +410,9 @@ PROMPT.$this->payloadFor($session, $message);
         $user = User::find($session->user_id);
         $workspace = $this->workspaceForSession($session, $user);
         $profile = $workspace ? $this->agentProfileService->ensureForWorkspace($workspace, $user) : $this->profileForSession($session);
+        if ($user && $profile) {
+            $user = $this->agentProfileService->syncUserOnboardingFlag($user, $profile);
+        }
         $workspaceId = $workspace?->id;
         $accessibleWorkspaces = $user
             ? $this->workspaceService->accessibleWorkspaces($user)->map(fn (Workspace $workspace): array => [

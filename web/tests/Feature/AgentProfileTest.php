@@ -93,6 +93,65 @@ class AgentProfileTest extends TestCase
         $this->assertTrue($user->refresh()->onboard_complete);
     }
 
+    public function test_auth_me_updates_active_workspace_bean_preferences(): void
+    {
+        $user = User::factory()->create();
+        $workspaceService = app(WorkspaceService::class);
+        $personalProfile = app(AgentProfileService::class)->ensureForUser($user);
+        $household = $workspaceService->createHousehold($user, 'Davey House');
+        $user->forceFill(['default_workspace_id' => $household->id])->save();
+        $householdProfile = app(AgentProfileService::class)->ensureForWorkspace($household, $user);
+
+        $token = 'active-workspace-preferences-token';
+        PersonalAccessToken::create([
+            'user_id' => $user->id,
+            'name' => 'api',
+            'token' => hash('sha256', $token),
+        ]);
+
+        $this->withToken($token)
+            ->patchJson('/api/auth/me', [
+                'agent_personality' => 'coach',
+                'onboarding_priorities' => ['Family', 'Planning'],
+                'onboarding_context' => 'Protect dinner.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.onboard_complete', true)
+            ->assertJsonPath('data.active_workspace.id', $household->id)
+            ->assertJsonPath('data.active_workspace_agent_profile.id', $householdProfile->id)
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.personality_type', 'coach')
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.onboarding.priorities.0', 'Family');
+
+        $this->assertSame('balanced', $personalProfile->refresh()->settings['personality_type']);
+        $this->assertSame('coach', $householdProfile->refresh()->settings['personality_type']);
+    }
+
+    public function test_me_endpoint_syncs_user_onboarding_flag_from_completed_agent_profile(): void
+    {
+        $user = User::factory()->create(['onboard_complete' => false]);
+        $profile = app(AgentProfileService::class)->ensureForUser($user);
+        app(AgentProfileService::class)->applyOnboarding($profile, [
+            'agent_personality' => 'organizer',
+            'onboarding_priorities' => ['Work'],
+            'onboarding_context' => 'Protect deep work.',
+        ], 'settings');
+
+        $token = 'sync-onboarding-token';
+        PersonalAccessToken::create([
+            'user_id' => $user->id,
+            'name' => 'api',
+            'token' => hash('sha256', $token),
+        ]);
+
+        $this->withToken($token)
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.onboard_complete', true)
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.onboarding.completed', true);
+
+        $this->assertTrue($user->refresh()->onboard_complete);
+    }
+
     public function test_me_endpoint_backfills_agent_profile_for_existing_users(): void
     {
         $user = User::factory()->create(['onboard_complete' => false]);
