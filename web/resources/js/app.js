@@ -345,12 +345,13 @@ if (mount) {
         const messages = state.messages.length ? state.messages : [
             { id: 'intro', role: 'assistant', content: 'Hey, I’m Bean. Tell me what you need planned, captured, moved, or remembered.' },
         ];
+        const expandLabel = state.chatExpanded ? 'Collapse to column' : 'Expand';
         return `
             <section class="hb-chat">
                 <div class="hb-chat-top">
                     <span class="hb-run-pill ${working ? 'hb-run-pill-working' : ''}">${escapeHtml(state.chatRunState)}</span>
                     <span class="hb-spacer"></span>
-                    ${options.expandable ? `<button class="hb-button-ghost hb-chat-expand-action" type="button" data-toggle-chat-expand>${state.chatExpanded ? 'Collapse' : 'Expand'}</button>` : ''}
+                    ${options.expandable ? `<button class="hb-button-secondary hb-chat-expand-action" type="button" data-toggle-chat-expand aria-label="${escapeAttr(expandLabel)}">${escapeHtml(expandLabel)}</button>` : ''}
                     <button class="hb-button-ghost" type="button" data-refresh-activity>${icons.activity} Activity</button>
                     <button class="hb-button-ghost" type="button" data-new-session>${icons.add} /new</button>
                 </div>
