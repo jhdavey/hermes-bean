@@ -2235,7 +2235,18 @@ if (mount) {
             const selected = mount.querySelector('.hb-timeline-day-head-active');
             if (!timeline || !selected) return;
             timeline.scrollLeft = Math.max(0, selected.offsetLeft - 74);
+            scrollTimelineToCurrentTime(timeline);
         });
+    }
+
+    function scrollTimelineToCurrentTime(timeline) {
+        const marker = timeline.querySelector('.hb-now-marker');
+        const body = timeline.querySelector('.hb-timeline-body');
+        if (!marker || !body) return;
+        const markerTop = body.offsetTop + marker.offsetTop;
+        const target = markerTop - Math.round(timeline.clientHeight * 0.38);
+        const maxScrollTop = Math.max(0, timeline.scrollHeight - timeline.clientHeight);
+        timeline.scrollTop = Math.min(Math.max(target, 0), maxScrollTop);
     }
 
     function updateCurrentTimeMarker() {
