@@ -566,7 +566,6 @@ if (mount) {
             ['today', 'Calendar', icons.calendar],
             ['tasks', 'Tasks', icons.tasks],
             ['reminders', 'Reminders', icons.reminders],
-            ['settings', 'Settings', icons.settings],
         ];
         return `
             <nav class="hb-top-nav" aria-label="App navigation">
