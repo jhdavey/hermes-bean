@@ -63,6 +63,8 @@ if (mount) {
     let voiceHoldActive = false;
     let voiceSubmitOnEnd = false;
     let suppressNextSendClick = false;
+    let timelineDrag = null;
+    let timelineSuppressClick = false;
 
     boot();
     bindResponsiveCalendar();
@@ -1142,6 +1144,7 @@ if (mount) {
             button.addEventListener('pointercancel', handleVoicePointerCancel);
             button.addEventListener('click', handleVoiceClick);
         });
+        bindTimelineHorizontalScroll();
         mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
         mount.querySelector('[data-refresh-activity]')?.addEventListener('click', refreshOnly);
         scrollTimelineToSelected();
@@ -2247,6 +2250,83 @@ if (mount) {
         const target = markerTop - Math.round(timeline.clientHeight * 0.38);
         const maxScrollTop = Math.max(0, timeline.scrollHeight - timeline.clientHeight);
         timeline.scrollTop = Math.min(Math.max(target, 0), maxScrollTop);
+    }
+
+    function bindTimelineHorizontalScroll() {
+        const timeline = mount.querySelector('.hb-timeline');
+        if (!timeline) return;
+        timeline.addEventListener('pointerdown', handleTimelinePointerDown);
+        timeline.addEventListener('pointermove', handleTimelinePointerMove, { passive: false });
+        timeline.addEventListener('pointerup', handleTimelinePointerEnd);
+        timeline.addEventListener('pointercancel', handleTimelinePointerEnd);
+        timeline.addEventListener('click', handleTimelineClick, true);
+        timeline.addEventListener('wheel', handleTimelineWheel, { passive: false });
+    }
+
+    function handleTimelinePointerDown(event) {
+        const timeline = event.currentTarget;
+        if (state.showMonth || !timelineCanScrollHorizontally(timeline) || (typeof event.button === 'number' && event.button !== 0)) return;
+        timelineDrag = {
+            timeline,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            scrollLeft: timeline.scrollLeft,
+            active: false,
+        };
+    }
+
+    function handleTimelinePointerMove(event) {
+        if (!timelineDrag || timelineDrag.pointerId !== event.pointerId) return;
+        const deltaX = event.clientX - timelineDrag.startX;
+        const deltaY = event.clientY - timelineDrag.startY;
+        if (!timelineDrag.active) {
+            if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 8) return;
+            if (Math.abs(deltaX) <= Math.abs(deltaY)) {
+                timelineDrag = null;
+                return;
+            }
+            timelineDrag.active = true;
+            timelineDrag.timeline.classList.add('hb-timeline-dragging');
+            timelineDrag.timeline.setPointerCapture?.(event.pointerId);
+        }
+        event.preventDefault();
+        const maxScrollLeft = Math.max(0, timelineDrag.timeline.scrollWidth - timelineDrag.timeline.clientWidth);
+        timelineDrag.timeline.scrollLeft = Math.min(Math.max(timelineDrag.scrollLeft - deltaX, 0), maxScrollLeft);
+    }
+
+    function handleTimelinePointerEnd(event) {
+        if (!timelineDrag || timelineDrag.pointerId !== event.pointerId) return;
+        const wasDragging = timelineDrag.active;
+        timelineDrag.timeline.classList.remove('hb-timeline-dragging');
+        timelineDrag.timeline.releasePointerCapture?.(event.pointerId);
+        timelineDrag = null;
+        if (!wasDragging) return;
+        timelineSuppressClick = true;
+        window.setTimeout(() => { timelineSuppressClick = false; }, 0);
+    }
+
+    function handleTimelineClick(event) {
+        if (!timelineSuppressClick) return;
+        event.preventDefault();
+        event.stopPropagation();
+        timelineSuppressClick = false;
+    }
+
+    function handleTimelineWheel(event) {
+        const timeline = event.currentTarget;
+        if (!timelineCanScrollHorizontally(timeline)) return;
+        const horizontalDelta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0;
+        if (!horizontalDelta || Math.abs(horizontalDelta) <= Math.abs(event.deltaY) && !event.shiftKey) return;
+        const maxScrollLeft = Math.max(0, timeline.scrollWidth - timeline.clientWidth);
+        const nextScrollLeft = Math.min(Math.max(timeline.scrollLeft + horizontalDelta, 0), maxScrollLeft);
+        if (nextScrollLeft === timeline.scrollLeft) return;
+        event.preventDefault();
+        timeline.scrollLeft = nextScrollLeft;
+    }
+
+    function timelineCanScrollHorizontally(timeline) {
+        return timeline.scrollWidth - timeline.clientWidth > 2;
     }
 
     function updateCurrentTimeMarker() {

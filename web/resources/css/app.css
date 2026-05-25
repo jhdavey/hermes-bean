@@ -968,7 +968,15 @@
     max-height: calc(100vh - 154px);
     overflow: auto;
     overscroll-behavior: contain;
+    touch-action: pan-y;
     background: rgba(255, 255, 255, .58);
+    cursor: grab;
+    scrollbar-width: thin;
+}
+
+.hb-timeline-dragging {
+    cursor: grabbing;
+    user-select: none;
 }
 
 .hb-timeline-head,
