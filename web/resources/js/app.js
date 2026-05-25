@@ -986,11 +986,11 @@ if (mount) {
 
     function recurrenceFieldsMarkup(item) {
         const recurrence = item?.recurrence || item?.metadata?.recurrence || 'none';
-        const days = new Set(normalizeList(item?.metadata?.specific_days || item?.metadata?.specificDays));
+        const days = recurrenceDays(item?.metadata);
         return `
             <label class="hb-label">Event recurrence
                 <select class="hb-select" name="recurrence">
-                    ${['none', 'daily', 'weekly', 'monthly', 'specific_days', 'interval'].map((value) => `<option value="${value}" ${value === recurrence ? 'selected' : ''}>${recurrenceLabel(value)}</option>`).join('')}
+                    ${recurrenceOptions().map((value) => `<option value="${value}" ${value === recurrence ? 'selected' : ''}>${recurrenceLabel(value)}</option>`).join('')}
                 </select>
             </label>
             <div class="hb-tabs">
@@ -1003,8 +1003,31 @@ if (mount) {
     }
 
     function reminderRecurrenceFieldsMarkup(item) {
-        const recurrence = item?.metadata?.recurrence || 'none';
-        return `<label class="hb-label">Reminder repeats<select class="hb-select" name="reminderRecurrence">${['none', 'daily', 'weekly', 'monthly'].map((value) => `<option value="${value}" ${value === recurrence ? 'selected' : ''}>${recurrenceLabel(value)}</option>`).join('')}</select></label>`;
+        const metadata = item?.metadata || {};
+        const recurrence = metadata.recurrence || 'none';
+        const days = recurrenceDays(metadata);
+        const intervalUnit = metadata.interval_unit || metadata.intervalUnit || metadata.unit || 'days';
+        return `
+            <label class="hb-label">Reminder repeats
+                <select class="hb-select" name="reminderRecurrence">
+                    ${recurrenceOptions().map((value) => `<option value="${value}" ${value === recurrence ? 'selected' : ''}>${recurrenceLabel(value)}</option>`).join('')}
+                </select>
+            </label>
+            <div class="hb-tabs">
+                ${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => `<label class="hb-chip"><input type="checkbox" name="reminderSpecificDays" value="${day}" ${days.has(day) ? 'checked' : ''}> ${day.toUpperCase()}</label>`).join('')}
+            </div>
+            <div class="hb-field-row">
+                ${labelInput('Repeat interval', 'reminderInterval', 'number', metadata.interval || '', 'min="1"')}
+                <label class="hb-label">Interval unit<select class="hb-select" name="reminderIntervalUnit"><option value="days">Days</option><option value="weeks" ${intervalUnit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${intervalUnit === 'months' ? 'selected' : ''}>Months</option></select></label>
+            </div>`;
+    }
+
+    function recurrenceOptions() {
+        return ['none', 'daily', 'weekly', 'monthly', 'specific_days', 'interval'];
+    }
+
+    function recurrenceDays(metadata = {}) {
+        return new Set(normalizeList(metadata?.specific_days || metadata?.specificDays || metadata?.days));
     }
 
     function categoriesModalMarkup() {
@@ -1261,13 +1284,20 @@ if (mount) {
             };
             item ? await api(`/tasks/${item.id}`, { method: 'PATCH', body }) : await api('/tasks', { method: 'POST', body });
         } else if (kind === 'reminder') {
+            const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const body = {
                 title: data.title,
                 remind_at: fromDatetimeLocal(data.time),
                 status: item?.status || 'pending',
                 category: data.category || null,
                 color,
-                metadata: { recurrence: data.reminderRecurrence || 'none' },
+                metadata: {
+                    ...existingMetadata,
+                    recurrence: data.reminderRecurrence || 'none',
+                    specific_days: Array.from(form.querySelectorAll('input[name="reminderSpecificDays"]:checked')).map((input) => input.value),
+                    interval: data.reminderInterval ? Number(data.reminderInterval) : null,
+                    interval_unit: data.reminderIntervalUnit || null,
+                },
             };
             item ? await api(`/reminders/${item.id}`, { method: 'PATCH', body }) : await api('/reminders', { method: 'POST', body });
         } else if (kind === 'event') {
