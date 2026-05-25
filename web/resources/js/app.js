@@ -1159,6 +1159,7 @@ if (mount) {
             button.addEventListener('pointerup', handleVoicePointerUp);
             button.addEventListener('pointercancel', handleVoicePointerCancel);
             button.addEventListener('click', handleVoiceClick);
+            button.addEventListener('contextmenu', handleVoiceContextMenu);
         });
         bindTimelineHorizontalScroll();
         mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
@@ -1460,7 +1461,7 @@ if (mount) {
         if (!voiceHoldActive && !state.voiceListening) return;
         event.preventDefault();
         suppressNextSendClick = true;
-        finishVoiceHoldInput(true);
+        sendVoiceDraftImmediately();
     }
 
     function handleVoicePointerCancel() {
@@ -1476,6 +1477,11 @@ if (mount) {
         event.preventDefault();
         event.stopPropagation();
         suppressNextSendClick = false;
+    }
+
+    function handleVoiceContextMenu(event) {
+        event.preventDefault();
+        event.stopPropagation();
     }
 
     async function submitChat(event) {
@@ -1659,6 +1665,39 @@ if (mount) {
             state.voiceStatusTone = 'error';
             render();
         }
+    }
+
+    function sendVoiceDraftImmediately() {
+        const content = currentVoiceContent();
+        if (!content) {
+            finishVoiceHoldInput(true);
+            return;
+        }
+
+        const recognition = state.voiceRecognition;
+        voiceSubmitOnEnd = false;
+        state.voiceListening = false;
+        state.voiceRecognition = null;
+        voiceHoldActive = false;
+        voiceHoldPressed = false;
+        state.voiceStatus = '';
+        state.voiceStatusTone = '';
+
+        if (recognition) {
+            recognition.onend = null;
+            recognition.onerror = null;
+            try {
+                recognition.stop();
+            } catch (error) {
+                // The transcript is already captured; sending should not depend on stop().
+            }
+        }
+
+        sendChatContent(content);
+    }
+
+    function currentVoiceContent() {
+        return (state.voiceDraft || mount.querySelector('textarea[name="message"]')?.value || '').trim();
     }
 
     function markVoiceListening() {

@@ -1384,6 +1384,8 @@
 .hb-chat-voice-button {
     touch-action: none;
     user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
 }
 
 .hb-chat-dock-listening .hb-chat-voice-button {
