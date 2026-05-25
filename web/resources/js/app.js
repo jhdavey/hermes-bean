@@ -147,10 +147,11 @@ if (mount) {
         state.phase = 'loading';
         render();
         try {
-            const [user, summary, tasks, reminders, calendar, categories, googleStatus] = await Promise.all([
+            const [user, summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
                 api('/auth/me'),
                 api('/today'),
                 api('/tasks'),
+                api('/tasks/past'),
                 api('/reminders'),
                 api('/calendar-events'),
                 api('/event-categories'),
@@ -158,7 +159,7 @@ if (mount) {
             ]);
             state.user = mergeUser(user, summary?.user, summary);
             state.summary = summary;
-            state.tasks = normalizeList(tasks.length ? tasks : summary?.tasks);
+            state.tasks = mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks));
             state.reminders = normalizeList(reminders.length ? reminders : summary?.reminders);
             state.calendar = normalizeList(calendar.length ? calendar : summary?.calendar_events);
             state.categories = normalizeList(categories);
@@ -186,6 +187,16 @@ if (mount) {
 
     function normalizeList(value) {
         return Array.isArray(value) ? value : [];
+    }
+
+    function mergeById(...lists) {
+        const merged = new Map();
+        lists.flatMap(normalizeList).forEach((item, index) => {
+            if (!item) return;
+            const key = item.id === undefined || item.id === null ? `unkeyed-${index}` : String(item.id);
+            merged.set(key, { ...(merged.get(key) || {}), ...item });
+        });
+        return [...merged.values()];
     }
 
     function render() {
@@ -1626,16 +1637,17 @@ if (mount) {
     async function refreshOnly(shouldRender = true, options = {}) {
         try {
             const calendarPath = options.skipCalendarSync ? '/calendar-events?skip_google_sync=1' : '/calendar-events';
-            const [summary, tasks, reminders, calendar, categories, googleStatus] = await Promise.all([
+            const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
                 api('/today'),
                 api('/tasks'),
+                api('/tasks/past'),
                 api('/reminders'),
                 api(calendarPath),
                 api('/event-categories'),
                 api('/google-calendar/status').catch(() => state.googleStatus),
             ]);
             state.summary = summary;
-            state.tasks = normalizeList(tasks.length ? tasks : summary?.tasks);
+            state.tasks = mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks));
             state.reminders = normalizeList(reminders.length ? reminders : summary?.reminders);
             state.calendar = normalizeList(calendar.length ? calendar : summary?.calendar_events);
             state.categories = normalizeList(categories);

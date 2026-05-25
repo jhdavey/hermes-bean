@@ -54,9 +54,6 @@ class DomainResourceController extends Controller
                     $query->whereIn('status', ['completed', 'complete', 'done'])
                         ->orWhereIn('status', ['COMPLETED', 'Complete', 'Done']);
                 })
-                ->whereNot(function ($query): void {
-                    $query->visibleInActiveViews();
-                })
                 ->orderByDesc('completed_at')
                 ->orderByDesc('id')
                 ->get()

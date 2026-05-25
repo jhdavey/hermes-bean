@@ -563,6 +563,31 @@ PHP);
             ->assertJsonFragment(['title' => 'Archived oil change']);
     }
 
+    public function test_past_tasks_lists_recent_completed_tasks_that_were_due_today(): void
+    {
+        $token = $this->apiToken();
+
+        $todayTaskId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Finish today checklist',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->toIso8601String(),
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->patchJson("/api/tasks/{$todayTaskId}", [
+            'status' => 'completed',
+        ])->assertOk()
+            ->assertJsonPath('data.completed_at', fn ($value) => is_string($value));
+
+        $this->withToken($token)->getJson('/api/tasks')
+            ->assertOk()
+            ->assertJsonMissing(['title' => 'Finish today checklist']);
+
+        $this->withToken($token)->getJson('/api/tasks/past')
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Finish today checklist']);
+    }
+
     public function test_completed_tasks_are_purged_after_ten_days(): void
     {
         $token = $this->apiToken();
