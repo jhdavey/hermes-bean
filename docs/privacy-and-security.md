@@ -72,7 +72,7 @@ The public privacy policy should cover:
   - `X-Content-Type-Options: nosniff`
   - `X-Frame-Options: DENY`
   - `Referrer-Policy: no-referrer`
-  - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+  - `Permissions-Policy: camera=(), microphone=(self), geolocation=()`
   - `Cache-Control: no-store`
 - API rate limiting is configurable through:
   - `HERMES_API_RATE_LIMIT_PER_MINUTE`

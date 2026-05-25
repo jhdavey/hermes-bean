@@ -24,7 +24,7 @@ class ProductionReadinessSecurityTest extends TestCase
             ->assertHeader('X-Content-Type-Options', 'nosniff')
             ->assertHeader('X-Frame-Options', 'DENY')
             ->assertHeader('Referrer-Policy', 'no-referrer')
-            ->assertHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+            ->assertHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()')
             ->assertJsonPath('error.code', 'unauthenticated')
             ->assertJsonPath('error.message', 'Unauthenticated.');
     }
@@ -76,7 +76,7 @@ class ProductionReadinessSecurityTest extends TestCase
                 ->assertHeader('X-Content-Type-Options', 'nosniff')
                 ->assertHeader('X-Frame-Options', 'DENY')
                 ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
-                ->assertHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+                ->assertHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()')
                 ->assertHeader('Content-Security-Policy');
         }
     }
