@@ -1319,7 +1319,7 @@
 
 .hb-chat-dock {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 8px;
     align-items: end;
     padding: 8px;
@@ -1334,16 +1334,25 @@
     box-shadow: 0 10px 26px rgba(22, 163, 74, .18);
 }
 
-.hb-chat-send-button {
+.hb-chat-text-send-button,
+.hb-chat-voice-button {
     width: 44px;
     min-width: 44px;
     height: 44px;
     padding: 0;
+}
+
+.hb-chat-text-send-button svg {
+    width: 20px;
+    height: 20px;
+}
+
+.hb-chat-voice-button {
     touch-action: none;
     user-select: none;
 }
 
-.hb-chat-dock-listening .hb-chat-send-button {
+.hb-chat-dock-listening .hb-chat-voice-button {
     box-shadow: 0 0 0 5px rgba(22, 163, 74, .16);
 }
 

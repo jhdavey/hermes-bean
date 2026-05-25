@@ -60,12 +60,7 @@ if (mount) {
         modal: null,
     };
 
-    const voiceHoldMinimumDuration = 220;
     let voiceHoldActive = false;
-    let voiceHoldStartedAt = 0;
-    let voiceHoldOriginalDraft = '';
-    let voiceFallbackSubmitOnEnd = '';
-    let voiceRestoreDraftOnEnd = null;
     let voiceSubmitOnEnd = false;
     let suppressNextSendClick = false;
 
@@ -365,7 +360,8 @@ if (mount) {
                 </div>
                 <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''}" data-action="chat">
                     <textarea name="message" placeholder="${state.voiceListening ? 'Listening… release to send' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
-                    <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-send-button" type="${state.busy ? 'button' : 'submit'}" ${state.busy ? 'data-stop-chat' : 'data-chat-send'} aria-label="${state.busy ? 'Stop' : 'Send, or hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
+                    <button class="hb-button-secondary hb-chat-text-send-button" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send message">${icons.send}</button>
+                    <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-voice-button" type="button" ${state.busy ? 'disabled' : 'data-voice-hold'} aria-label="${state.busy ? 'Bean is working' : 'Hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
                 </form>
             </section>`;
     }
@@ -1102,11 +1098,11 @@ if (mount) {
             chatInput.addEventListener('keydown', handleChatKeydown);
             resizeChatInput(chatInput);
         }
-        mount.querySelectorAll('[data-chat-send]').forEach((button) => {
-            button.addEventListener('pointerdown', handleSendPointerDown);
-            button.addEventListener('pointerup', handleSendPointerUp);
-            button.addEventListener('pointercancel', handleSendPointerCancel);
-            button.addEventListener('click', handleSendClick);
+        mount.querySelectorAll('[data-voice-hold]').forEach((button) => {
+            button.addEventListener('pointerdown', handleVoicePointerDown);
+            button.addEventListener('pointerup', handleVoicePointerUp);
+            button.addEventListener('pointercancel', handleVoicePointerCancel);
+            button.addEventListener('click', handleVoiceClick);
         });
         mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
         mount.querySelector('[data-refresh-activity]')?.addEventListener('click', refreshOnly);
@@ -1374,58 +1370,29 @@ if (mount) {
         textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
     }
 
-    function handleSendPointerDown(event) {
+    function handleVoicePointerDown(event) {
         if (state.busy || (typeof event.button === 'number' && event.button !== 0)) return;
-        voiceHoldActive = false;
-        voiceHoldStartedAt = performance.now();
-        voiceHoldOriginalDraft = mount.querySelector('textarea[name="message"]')?.value || '';
-        voiceFallbackSubmitOnEnd = '';
-        voiceRestoreDraftOnEnd = null;
         voiceHoldActive = startVoiceHoldInput();
-        if (!voiceHoldActive) {
-            if (voiceHoldOriginalDraft.trim()) {
-                voiceFallbackSubmitOnEnd = voiceHoldOriginalDraft.trim();
-                suppressNextSendClick = true;
-                event.preventDefault();
-            }
-            return;
-        }
         suppressNextSendClick = true;
         event.preventDefault();
         event.currentTarget.setPointerCapture?.(event.pointerId);
     }
 
-    function handleSendPointerUp(event) {
-        if (!voiceHoldActive && !state.voiceListening) {
-            const fallback = voiceFallbackSubmitOnEnd;
-            voiceFallbackSubmitOnEnd = '';
-            if (fallback && !state.busy) {
-                event.preventDefault();
-                sendChatContent(fallback);
-            }
-            return;
-        }
+    function handleVoicePointerUp(event) {
+        if (!voiceHoldActive && !state.voiceListening) return;
         event.preventDefault();
         suppressNextSendClick = true;
-        const heldLongEnough = performance.now() - voiceHoldStartedAt >= voiceHoldMinimumDuration;
-        if (heldLongEnough) {
-            finishVoiceHoldInput(true);
-            return;
-        }
-        voiceFallbackSubmitOnEnd = voiceHoldOriginalDraft.trim();
-        voiceRestoreDraftOnEnd = voiceHoldOriginalDraft;
-        finishVoiceHoldInput(false);
+        finishVoiceHoldInput(true);
     }
 
-    function handleSendPointerCancel() {
+    function handleVoicePointerCancel() {
         if (voiceHoldActive || state.voiceListening) {
-            voiceRestoreDraftOnEnd = voiceHoldOriginalDraft;
             finishVoiceHoldInput(false);
             suppressNextSendClick = true;
         }
     }
 
-    function handleSendClick(event) {
+    function handleVoiceClick(event) {
         if (!suppressNextSendClick) return;
         event.preventDefault();
         event.stopPropagation();
@@ -1503,21 +1470,10 @@ if (mount) {
         recognition.onend = () => {
             const shouldSubmit = voiceSubmitOnEnd;
             const content = state.voiceDraft.trim();
-            const fallback = voiceFallbackSubmitOnEnd;
-            const restoreDraft = voiceRestoreDraftOnEnd;
             state.voiceListening = false;
             state.voiceRecognition = null;
             voiceHoldActive = false;
             voiceSubmitOnEnd = false;
-            voiceFallbackSubmitOnEnd = '';
-            voiceRestoreDraftOnEnd = null;
-            if (restoreDraft !== null) {
-                state.voiceDraft = restoreDraft;
-            }
-            if (fallback && !state.busy) {
-                sendChatContent(fallback);
-                return;
-            }
             if (shouldSubmit && content && !state.busy) {
                 sendChatContent(content);
                 return;
