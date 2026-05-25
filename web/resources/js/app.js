@@ -1682,6 +1682,7 @@ if (mount) {
         voiceHoldPressed = false;
         state.voiceStatus = '';
         state.voiceStatusTone = '';
+        clearVoiceDraft();
 
         if (recognition) {
             recognition.onend = null;
