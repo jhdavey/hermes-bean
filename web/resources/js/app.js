@@ -278,6 +278,7 @@ if (mount) {
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
                 ${bottomMenuMarkup()}
+                ${state.chatExpanded && state.selected !== 'bean' ? desktopChatMarkup({ expanded: true }) : ''}
             </div>`;
     }
 
@@ -295,7 +296,7 @@ if (mount) {
                 <div class="hb-primary-column">${primary}</div>
                 <aside class="hb-side-column">
                     ${todayTasksMarkup()}
-                    ${desktopChatMarkup()}
+                    ${state.chatExpanded ? '' : desktopChatMarkup()}
                 </aside>
             </div>`;
     }
@@ -367,9 +368,9 @@ if (mount) {
             </section>`;
     }
 
-    function desktopChatMarkup() {
+    function desktopChatMarkup(options = {}) {
         return `
-            <section class="hb-desktop-chat ${state.chatExpanded ? 'hb-desktop-chat-expanded' : ''}" aria-label="Bean chat">
+            <section class="hb-desktop-chat ${options.expanded ? 'hb-desktop-chat-expanded' : ''}" aria-label="Bean chat">
                 ${chatMarkup({ expandable: true })}
             </section>`;
     }
