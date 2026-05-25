@@ -5,6 +5,8 @@ if (mount) {
     const initialMode = mount.dataset.authMode || 'login';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
+    const calendarInitialWindowDays = 56;
+    const calendarWindowChunkDays = 28;
 
     const icons = {
         add: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -31,6 +33,9 @@ if (mount) {
         phase: 'loading',
         selected: 'today',
         selectedDay: dateOnly(new Date()),
+        calendarWindowStart: initialCalendarWindowStart(new Date()),
+        calendarWindowDayCount: calendarInitialWindowDays,
+        timelineScrollRestore: null,
         calendarVisibleDayCount: calendarVisibleDayCount(),
         showMonth: false,
         user: null,
@@ -1130,6 +1135,7 @@ if (mount) {
         mount.querySelector('[data-today]')?.addEventListener('click', () => {
             state.selected = 'today';
             state.selectedDay = dateOnly(new Date());
+            resetCalendarWindow(new Date());
             state.showMonth = false;
             render();
         });
@@ -2243,9 +2249,43 @@ if (mount) {
     }
 
     function visibleCalendarDays(start) {
-        const selected = parseLocalDate(start);
-        const firstVisible = addDays(weekDays(selected)[0], -7);
-        return Array.from({ length: 28 }, (_, index) => addDays(firstVisible, index));
+        ensureCalendarWindowCovers(start);
+        const firstVisible = parseLocalDate(state.calendarWindowStart);
+        const dayCount = Math.max(calendarInitialWindowDays, Number(state.calendarWindowDayCount || calendarInitialWindowDays));
+        return Array.from({ length: dayCount }, (_, index) => addDays(firstVisible, index));
+    }
+
+    function initialCalendarWindowStart(date) {
+        return dateOnly(addDays(weekDays(parseLocalDate(date))[0], -14));
+    }
+
+    function resetCalendarWindow(date) {
+        state.calendarWindowStart = initialCalendarWindowStart(date);
+        state.calendarWindowDayCount = calendarInitialWindowDays;
+        state.timelineScrollRestore = null;
+    }
+
+    function ensureCalendarWindowCovers(date) {
+        const selected = parseLocalDate(date);
+        let start = state.calendarWindowStart ? parseLocalDate(state.calendarWindowStart) : parseLocalDate(initialCalendarWindowStart(selected));
+        let dayCount = Math.max(calendarInitialWindowDays, Number(state.calendarWindowDayCount || calendarInitialWindowDays));
+        let changed = false;
+
+        while (selected < addDays(start, 14)) {
+            start = addDays(start, -calendarWindowChunkDays);
+            dayCount += calendarWindowChunkDays;
+            changed = true;
+        }
+
+        while (selected > addDays(start, dayCount - 15)) {
+            dayCount += calendarWindowChunkDays;
+            changed = true;
+        }
+
+        if (!state.calendarWindowStart || changed) {
+            state.calendarWindowStart = dateOnly(start);
+            state.calendarWindowDayCount = dayCount;
+        }
     }
 
     function calendarVisibleDayCount() {
@@ -2433,7 +2473,17 @@ if (mount) {
         requestAnimationFrame(() => {
             const timeline = mount.querySelector('.hb-timeline');
             const selected = mount.querySelector('.hb-timeline-day-head-active');
-            if (!timeline || !selected) return;
+            if (!timeline) return;
+            const restore = state.timelineScrollRestore;
+            if (restore) {
+                state.timelineScrollRestore = null;
+                const maxScrollLeft = Math.max(0, timeline.scrollWidth - timeline.clientWidth);
+                const maxScrollTop = Math.max(0, timeline.scrollHeight - timeline.clientHeight);
+                timeline.scrollLeft = Math.min(Math.max(restore.left || 0, 0), maxScrollLeft);
+                timeline.scrollTop = Math.min(Math.max(restore.top || 0, 0), maxScrollTop);
+                return;
+            }
+            if (!selected) return;
             timeline.scrollLeft = Math.max(0, selected.offsetLeft - 74);
             scrollTimelineToCurrentTime(timeline);
         });
@@ -2457,6 +2507,7 @@ if (mount) {
         timeline.addEventListener('pointerup', handleTimelinePointerEnd);
         timeline.addEventListener('pointercancel', handleTimelinePointerEnd);
         timeline.addEventListener('click', handleTimelineClick, true);
+        timeline.addEventListener('scroll', handleTimelineScroll, { passive: true });
         timeline.addEventListener('wheel', handleTimelineWheel, { passive: false });
     }
 
@@ -2490,14 +2541,17 @@ if (mount) {
         event.preventDefault();
         const maxScrollLeft = Math.max(0, timelineDrag.timeline.scrollWidth - timelineDrag.timeline.clientWidth);
         timelineDrag.timeline.scrollLeft = Math.min(Math.max(timelineDrag.scrollLeft - deltaX, 0), maxScrollLeft);
+        maybeExtendTimelineWindow(timelineDrag.timeline);
     }
 
     function handleTimelinePointerEnd(event) {
         if (!timelineDrag || timelineDrag.pointerId !== event.pointerId) return;
         const wasDragging = timelineDrag.active;
-        timelineDrag.timeline.classList.remove('hb-timeline-dragging');
-        timelineDrag.timeline.releasePointerCapture?.(event.pointerId);
+        const timeline = timelineDrag.timeline;
+        timeline.classList.remove('hb-timeline-dragging');
+        timeline.releasePointerCapture?.(event.pointerId);
         timelineDrag = null;
+        maybeExtendTimelineWindow(timeline);
         if (!wasDragging) return;
         timelineSuppressClick = true;
         window.setTimeout(() => { timelineSuppressClick = false; }, 0);
@@ -2517,13 +2571,51 @@ if (mount) {
         if (!horizontalDelta || Math.abs(horizontalDelta) <= Math.abs(event.deltaY) && !event.shiftKey) return;
         const maxScrollLeft = Math.max(0, timeline.scrollWidth - timeline.clientWidth);
         const nextScrollLeft = Math.min(Math.max(timeline.scrollLeft + horizontalDelta, 0), maxScrollLeft);
-        if (nextScrollLeft === timeline.scrollLeft) return;
+        if (nextScrollLeft === timeline.scrollLeft) {
+            maybeExtendTimelineWindow(timeline, horizontalDelta < 0 ? 'previous' : 'next');
+            return;
+        }
         event.preventDefault();
         timeline.scrollLeft = nextScrollLeft;
+        maybeExtendTimelineWindow(timeline);
     }
 
     function timelineCanScrollHorizontally(timeline) {
         return timeline.scrollWidth - timeline.clientWidth > 2;
+    }
+
+    function handleTimelineScroll(event) {
+        maybeExtendTimelineWindow(event.currentTarget);
+    }
+
+    function maybeExtendTimelineWindow(timeline, direction = 'auto') {
+        if (state.selected !== 'today' || state.showMonth || !timelineCanScrollHorizontally(timeline)) return false;
+        if (direction === 'auto' && timelineDrag?.active) return false;
+        const maxScrollLeft = Math.max(0, timeline.scrollWidth - timeline.clientWidth);
+        const dayWidth = timelineDayWidth(timeline);
+        const edgePadding = Math.max(dayWidth * 2, Math.round(timeline.clientWidth * .35));
+        const shouldPrepend = direction === 'previous' || (direction === 'auto' && timeline.scrollLeft <= edgePadding);
+        const shouldAppend = direction === 'next' || (direction === 'auto' && timeline.scrollLeft >= maxScrollLeft - edgePadding);
+        if (!shouldPrepend && !shouldAppend) return false;
+
+        const start = state.calendarWindowStart ? parseLocalDate(state.calendarWindowStart) : parseLocalDate(initialCalendarWindowStart(state.selectedDay));
+        state.calendarWindowStart = shouldPrepend ? dateOnly(addDays(start, -calendarWindowChunkDays)) : dateOnly(start);
+        state.calendarWindowDayCount = Math.max(calendarInitialWindowDays, Number(state.calendarWindowDayCount || calendarInitialWindowDays))
+            + (shouldPrepend ? calendarWindowChunkDays : 0)
+            + (shouldAppend ? calendarWindowChunkDays : 0);
+        state.timelineScrollRestore = {
+            left: timeline.scrollLeft + (shouldPrepend ? dayWidth * calendarWindowChunkDays : 0),
+            top: timeline.scrollTop,
+        };
+        render();
+        return true;
+    }
+
+    function timelineDayWidth(timeline) {
+        const cssWidth = Number.parseFloat(getComputedStyle(timeline).getPropertyValue('--hb-day-min-width'));
+        if (Number.isFinite(cssWidth) && cssWidth > 0) return cssWidth;
+        const dayHead = timeline.querySelector('.hb-timeline-day-head');
+        return dayHead?.getBoundingClientRect().width || 150;
     }
 
     function updateCurrentTimeMarker() {
