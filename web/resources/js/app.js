@@ -63,6 +63,8 @@ if (mount) {
     };
 
     let voiceHoldActive = false;
+    let voiceHoldPressed = false;
+    let voiceStartPending = false;
     let voiceSubmitOnEnd = false;
     let suppressNextSendClick = false;
     let timelineDrag = null;
@@ -1427,13 +1429,34 @@ if (mount) {
 
     function handleVoicePointerDown(event) {
         if (state.busy || (typeof event.button === 'number' && event.button !== 0)) return;
-        voiceHoldActive = startVoiceHoldInput();
+        voiceHoldPressed = true;
+        voiceStartPending = true;
+        startVoiceHoldInput().then((started) => {
+            voiceStartPending = false;
+            voiceHoldActive = started;
+            if (started && !voiceHoldPressed) {
+                finishVoiceHoldInput(false);
+            }
+        }).catch(() => {
+            voiceStartPending = false;
+            voiceHoldActive = false;
+            voiceHoldPressed = false;
+            state.voiceStatus = 'Chrome could not start voice input. Check microphone permissions and try again.';
+            state.voiceStatusTone = 'error';
+            render();
+        });
         suppressNextSendClick = true;
         event.preventDefault();
         event.currentTarget.setPointerCapture?.(event.pointerId);
     }
 
     function handleVoicePointerUp(event) {
+        voiceHoldPressed = false;
+        if (voiceStartPending && !state.voiceListening) {
+            event.preventDefault();
+            suppressNextSendClick = true;
+            return;
+        }
         if (!voiceHoldActive && !state.voiceListening) return;
         event.preventDefault();
         suppressNextSendClick = true;
@@ -1441,6 +1464,7 @@ if (mount) {
     }
 
     function handleVoicePointerCancel() {
+        voiceHoldPressed = false;
         if (voiceHoldActive || state.voiceListening) {
             finishVoiceHoldInput(false);
             suppressNextSendClick = true;
@@ -1497,7 +1521,7 @@ if (mount) {
         }
     }
 
-    function startVoiceHoldInput() {
+    async function startVoiceHoldInput() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!window.isSecureContext) {
             state.voiceStatus = 'Voice input needs HTTPS, localhost, or another secure browser context in Chrome.';
@@ -1513,6 +1537,10 @@ if (mount) {
         }
         if (state.voiceListening && state.voiceRecognition) {
             return true;
+        }
+        const hasMicrophoneAccess = await requestMicrophoneAccess();
+        if (!hasMicrophoneAccess || !voiceHoldPressed) {
+            return false;
         }
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
@@ -1544,6 +1572,7 @@ if (mount) {
             state.voiceListening = false;
             state.voiceRecognition = null;
             voiceHoldActive = false;
+            voiceHoldPressed = false;
             voiceSubmitOnEnd = false;
             if (shouldSubmit && content && !state.busy) {
                 state.voiceStatus = '';
@@ -1561,6 +1590,7 @@ if (mount) {
             state.voiceListening = false;
             state.voiceRecognition = null;
             voiceHoldActive = false;
+            voiceHoldPressed = false;
             voiceSubmitOnEnd = false;
             state.voiceStatus = voiceErrorMessage(event.error);
             state.voiceStatusTone = 'error';
@@ -1585,11 +1615,34 @@ if (mount) {
         return true;
     }
 
+    async function requestMicrophoneAccess() {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setVoiceStatus('This browser cannot request microphone access for the web app.', 'error');
+            return false;
+        }
+
+        setVoiceStatus('Chrome should ask for microphone access now…', '');
+        let stream = null;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            setVoiceStatus('Microphone permission granted. Starting speech recognition…', '');
+            return true;
+        } catch (error) {
+            state.voiceStatus = microphoneAccessErrorMessage(error);
+            state.voiceStatusTone = 'error';
+            render();
+            return false;
+        } finally {
+            stream?.getTracks().forEach((track) => track.stop());
+        }
+    }
+
     function finishVoiceHoldInput(shouldSubmit) {
         voiceSubmitOnEnd = shouldSubmit;
         if (!state.voiceRecognition) {
             state.voiceListening = false;
             voiceHoldActive = false;
+            voiceHoldPressed = false;
             voiceSubmitOnEnd = false;
             if (!shouldSubmit) render();
             return;
@@ -1600,6 +1653,7 @@ if (mount) {
             state.voiceListening = false;
             state.voiceRecognition = null;
             voiceHoldActive = false;
+            voiceHoldPressed = false;
             voiceSubmitOnEnd = false;
             state.voiceStatus = 'Voice input stopped. Hold the Bean button to try again.';
             state.voiceStatusTone = 'error';
@@ -1638,7 +1692,7 @@ if (mount) {
 
     function voiceErrorMessage(error) {
         if (error === 'not-allowed' || error === 'service-not-allowed') {
-            return 'Chrome blocked microphone access. Click the lock icon in the address bar, allow Microphone, then try again.';
+            return 'Speech recognition was not allowed after microphone access. Check Chrome site settings for Microphone and try again.';
         }
         if (error === 'no-speech') {
             return 'I did not hear speech. Hold the Bean button, speak clearly, then release.';
@@ -1650,6 +1704,19 @@ if (mount) {
             return 'Chrome could not reach speech recognition. Check your connection and try again.';
         }
         return 'Voice input stopped. You can still type to Bean.';
+    }
+
+    function microphoneAccessErrorMessage(error) {
+        if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
+            return 'Chrome did not grant microphone access. Click the lock icon in the address bar, set Microphone to Allow, then try again.';
+        }
+        if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') {
+            return 'Chrome could not find a microphone. Check your input device and system privacy settings.';
+        }
+        if (error?.name === 'NotReadableError' || error?.name === 'TrackStartError') {
+            return 'Chrome could not start the microphone. Another app may be using it, or system privacy settings may be blocking it.';
+        }
+        return 'Chrome could not request microphone access. Check browser and system microphone permissions.';
     }
 
     function replaceLocalUserMessage(message) {
