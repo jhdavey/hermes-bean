@@ -1106,8 +1106,15 @@
     border-color: rgba(22, 163, 74, .34);
 }
 
+.hb-month-cell-head {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+}
+
 .hb-month-date {
-    width: 100%;
     min-width: 0;
     display: flex;
     align-items: center;
@@ -1134,6 +1141,43 @@
 .hb-month-cell-active .hb-month-date strong {
     background: var(--hb-accent);
     color: #fff;
+}
+
+.hb-month-all-day-list {
+    min-width: 0;
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+}
+
+.hb-month-all-day-list::-webkit-scrollbar {
+    display: none;
+}
+
+.hb-month-all-day-event {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    flex: 0 1 auto;
+    border: 1px solid var(--hb-border);
+    border-radius: 8px;
+    background: rgba(22, 163, 74, .10);
+    color: var(--hb-text);
+    padding: 4px 6px;
+    font-size: 11px;
+    font-weight: 850;
+    line-height: 1.1;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.hb-month-all-day-event:hover {
+    border-color: var(--hb-border-strong);
+    background: rgba(255, 255, 255, .72);
 }
 
 .hb-month-event-list {

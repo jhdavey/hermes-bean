@@ -794,16 +794,29 @@ if (mount) {
 
     function monthCellMarkup(day, dayNumber) {
         const events = eventsForDay(day);
+        const allDayEvents = events.filter((event) => eventAllDay(event));
+        const timedEvents = events.filter((event) => !eventAllDay(event));
         const today = new Date();
         return `
             <div class="hb-month-cell ${sameDate(day, today) ? 'hb-month-cell-active' : ''}">
-                <button class="hb-month-date" type="button" data-select-day="${dateOnly(day)}" aria-label="${escapeAttr(dayLabel(day))}">
-                    <strong>${dayNumber}</strong>
-                </button>
-                <div class="hb-month-event-list ${events.length >= 3 ? 'hb-month-event-list-scroll' : ''}">
-                    ${events.map((event) => monthEventMarkup(event)).join('')}
+                <div class="hb-month-cell-head">
+                    <button class="hb-month-date" type="button" data-select-day="${dateOnly(day)}" aria-label="${escapeAttr(dayLabel(day))}">
+                        <strong>${dayNumber}</strong>
+                    </button>
+                    ${allDayEvents.length ? `<div class="hb-month-all-day-list">${allDayEvents.map((event) => monthAllDayEventMarkup(event)).join('')}</div>` : ''}
+                </div>
+                <div class="hb-month-event-list ${timedEvents.length >= 3 ? 'hb-month-event-list-scroll' : ''}">
+                    ${timedEvents.map((event) => monthEventMarkup(event)).join('')}
                 </div>
             </div>`;
+    }
+
+    function monthAllDayEventMarkup(event) {
+        const color = safeColor(event.color);
+        return `
+            <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+                ${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}
+            </button>`;
     }
 
     function monthEventMarkup(event) {
