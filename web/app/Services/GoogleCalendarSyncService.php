@@ -302,14 +302,43 @@ class GoogleCalendarSyncService
             array_unique($calendarIds),
             fn (string $calendarId): bool => $this->calendarCanWrite($connection, $calendarId)
         ));
-        if ($calendarIds === []) {
-            return $event;
-        }
-
-        $token = $this->validAccessToken($connection);
-        $payload = $this->eventPayload($event);
         $metadata = $event->metadata ?? [];
         $exports = is_array($metadata['google_event_exports'] ?? null) ? $metadata['google_event_exports'] : [];
+        if ($event->google_calendar_id && $event->google_event_id) {
+            $exports[$event->google_calendar_id] ??= ['event_id' => $event->google_event_id];
+        }
+        $token = $this->validAccessToken($connection);
+        foreach (array_diff(array_keys($exports), $calendarIds) as $removedCalendarId) {
+            $removedExport = $exports[$removedCalendarId] ?? null;
+            $removedGoogleEventId = is_array($removedExport) ? ($removedExport['event_id'] ?? null) : null;
+            if ($removedGoogleEventId && $this->calendarCanWrite($connection, (string) $removedCalendarId)) {
+                $response = Http::withToken($token)->delete(
+                    $this->calendarEventsUrl((string) $removedCalendarId).'/'.rawurlencode((string) $removedGoogleEventId)
+                );
+                if (! $response->successful() && ! in_array($response->status(), [404, 410], true)) {
+                    $this->markFailed($connection, 'Calendar event delete failed.');
+                    throw new RuntimeException('Calendar event delete failed.');
+                }
+            }
+            unset($exports[$removedCalendarId]);
+        }
+
+        if ($calendarIds === []) {
+            $metadata['source'] = $metadata['source'] ?? 'heybean';
+            $metadata['google_event_exports'] = $exports;
+            $metadata['google_calendar_ids'] = [];
+            unset($metadata['google_calendar_id'], $metadata['google_calendar_summary'], $metadata['google_html_link']);
+            $event->forceFill([
+                'google_event_id' => null,
+                'google_calendar_id' => null,
+                'google_updated_at' => null,
+                'metadata' => $metadata,
+            ])->save();
+
+            return $event->refresh();
+        }
+
+        $payload = $this->eventPayload($event);
         $primaryGoogleEvent = null;
         $primaryCalendarId = null;
 

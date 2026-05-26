@@ -576,6 +576,13 @@
     accent-color: var(--hb-accent-strong);
 }
 
+.hb-all-day-toggle {
+    justify-self: start;
+    width: max-content;
+    max-width: 100%;
+    padding-right: 12px;
+}
+
 .hb-button,
 .hb-button-secondary,
 .hb-button-danger,
@@ -952,6 +959,7 @@
 }
 
 .hb-glance-event {
+    appearance: none;
     min-width: 0;
     display: grid;
     grid-template-columns: 62px minmax(0, 1fr);
@@ -960,6 +968,13 @@
     border: 1px solid var(--hb-border);
     border-radius: 12px;
     padding: 7px 8px;
+    color: var(--hb-text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.hb-glance-event:hover {
+    border-color: var(--hb-border-strong);
 }
 
 .hb-glance-event .hb-event-time {
@@ -1279,6 +1294,7 @@
 }
 
 .hb-event {
+    appearance: none;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
@@ -1287,6 +1303,14 @@
     border-radius: 12px;
     border: 1px solid rgba(22, 163, 74, .24);
     background: rgba(22, 163, 74, .10);
+    color: var(--hb-text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.hb-event:hover {
+    border-color: var(--hb-border-strong);
+    background: rgba(255, 255, 255, .72);
 }
 
 .hb-event-time {
@@ -2036,6 +2060,56 @@
     margin-bottom: 12px;
 }
 
+.hb-inline-category-shell {
+    display: grid;
+    justify-items: start;
+    gap: 10px;
+}
+
+.hb-inline-category-manager {
+    width: 100%;
+    display: grid;
+    gap: 10px;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .60);
+    padding: 12px;
+}
+
+.hb-inline-category-manager[hidden] {
+    display: none;
+}
+
+.hb-inline-category-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--hb-text);
+    font-size: 13px;
+}
+
+.hb-inline-category-head strong {
+    font-weight: 900;
+}
+
+.hb-inline-category-head span {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.hb-inline-category-head .hb-inline-category-message-error {
+    color: var(--hb-destructive);
+}
+
+.hb-inline-category-create {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: end;
+    gap: 8px;
+}
+
 .hb-event-connections {
     display: grid;
     gap: 12px;
@@ -2437,6 +2511,7 @@
     }
 
     .hb-field-row,
+    .hb-inline-category-create,
     .hb-day-strip,
     .hb-month-grid {
         grid-template-columns: 1fr;

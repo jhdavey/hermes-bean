@@ -205,7 +205,7 @@ class RecurringCalendarEventService
         $metadata = $event->metadata ?? [];
 
         if ($recurrence === 'specific_days') {
-            $days = collect($metadata['days'] ?? [])
+            $days = collect($metadata['days'] ?? $metadata['specific_days'] ?? $metadata['specificDays'] ?? [])
                 ->map(fn ($day): string => strtolower(substr(trim((string) $day), 0, 3)))
                 ->filter()
                 ->unique()
@@ -246,7 +246,7 @@ class RecurringCalendarEventService
     private function addInterval(CarbonImmutable $from, array $metadata): CarbonImmutable
     {
         $interval = max(1, (int) ($metadata['interval'] ?? 1));
-        $unit = strtolower((string) ($metadata['unit'] ?? 'days'));
+        $unit = strtolower((string) ($metadata['unit'] ?? $metadata['interval_unit'] ?? $metadata['intervalUnit'] ?? 'days'));
 
         return match ($unit) {
             'weeks', 'week' => $from->addWeeks($interval),

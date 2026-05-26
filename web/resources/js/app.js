@@ -640,10 +640,10 @@ if (mount) {
     function glanceEventMarkup(event) {
         const color = safeColor(event.color);
         return `
-            <article class="hb-glance-event" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+            <button class="hb-glance-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
-                <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
-            </article>`;
+                <div class="hb-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+            </button>`;
     }
 
     function workspaceMembersMarkup(workspace) {
@@ -908,10 +908,10 @@ if (mount) {
     function eventMarkup(event) {
         const color = safeColor(event.color);
         return `
-            <article class="hb-event" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+            <button class="hb-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
-                <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
-            </article>`;
+                <div class="hb-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+            </button>`;
     }
 
     function timedEventMarkup(event, day, startHour, endHour) {
@@ -920,10 +920,10 @@ if (mount) {
         if (!style) return '';
         const color = safeColor(event.color);
         return `
-            <article class="hb-event hb-timed-event" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
+            <button class="hb-event hb-timed-event" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
-                <button class="hb-event-title" type="button" data-edit-event="${event.id}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>
-            </article>`;
+                <div class="hb-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+            </button>`;
     }
 
     function allDayEventMarkup(event) {
@@ -1023,8 +1023,12 @@ if (mount) {
         const editing = Boolean(item);
         const isReminder = kind === 'reminder';
         const isEvent = kind === 'event';
-        const when = item ? toDatetimeLocal(item.due_at || item.dueAt || item.remind_at || item.starts_at || item.startsAt) : '';
-        const end = item ? toDatetimeLocal(item.ends_at || item.endsAt) : '';
+        const eventStart = isEvent ? (item?.starts_at || item?.startsAt || defaultEventStart()) : null;
+        const eventEnd = isEvent ? (item?.ends_at || item?.endsAt || defaultEventEnd(eventStart)) : null;
+        const when = isEvent
+            ? toDatetimeLocal(eventStart)
+            : item ? toDatetimeLocal(item.due_at || item.dueAt || item.remind_at) : '';
+        const end = isEvent ? toDatetimeLocal(eventEnd) : '';
         const workspaceId = item?.workspace_id || item?.workspaceId || currentWorkspaceId();
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
@@ -1039,7 +1043,7 @@ if (mount) {
                         ${categorySelectMarkup(item)}
                         ${labelInput('Color', 'color', 'color', safeColor(item?.color || categoryColor(item?.category)))}
                     </div>
-                    <button class="hb-button-ghost" type="button" data-open-categories>Manage categories</button>
+                    ${categoryManagerToggleMarkup()}
                     ${!isReminder ? `<label class="hb-checkbox-row"><input type="checkbox" name="critical" ${item?.is_critical || item?.isCritical ? 'checked' : ''}> Critical</label>` : ''}
                     ${workspaceConnectionsMarkup(kind, item, workspaceId, editing)}
                     ${isEvent ? recurrenceFieldsMarkup(item) : ''}
@@ -1067,7 +1071,8 @@ if (mount) {
 
     function eventTimeFieldsMarkup(item = null, when = '', end = '') {
         const allDay = eventAllDay(item);
-        const startDate = allDay ? storedDateOnly(item?.starts_at || item?.startsAt || new Date()) : dateOnly(item?.starts_at || item?.startsAt || new Date());
+        const startSource = item?.starts_at || item?.startsAt || when || defaultEventStart();
+        const startDate = allDay ? storedDateOnly(startSource) : dateOnly(startSource);
         const endDate = allDayEndDateInputValue(item, startDate);
         return `
             <label class="hb-checkbox-row hb-all-day-toggle"><input type="checkbox" name="allDay" data-all-day-toggle ${allDay ? 'checked' : ''}> All day</label>
@@ -1091,43 +1096,101 @@ if (mount) {
             </select></label>`;
     }
 
+    function categoryManagerToggleMarkup() {
+        return `
+            <div class="hb-inline-category-shell">
+                <button class="hb-button-ghost" type="button" data-open-categories aria-expanded="false">Manage categories</button>
+                <div class="hb-inline-category-manager" data-category-manager hidden>
+                    <div class="hb-inline-category-head">
+                        <strong>Categories</strong>
+                        <span data-inline-category-message></span>
+                    </div>
+                    <div class="hb-inline-category-create">
+                        <label class="hb-label">New category<input class="hb-input" type="text" data-inline-category-name placeholder="Category name"></label>
+                        <label class="hb-label">Color<input class="hb-input hb-color-input" type="color" data-inline-category-color value="#16A34A"></label>
+                        <button class="hb-button-secondary" type="button" data-inline-category-create>Add</button>
+                    </div>
+                    <div class="hb-list hb-category-list" data-inline-category-list>${inlineCategoryRowsMarkup()}</div>
+                </div>
+            </div>`;
+    }
+
+    function inlineCategoryRowsMarkup() {
+        return state.categories.map((category) => `
+            <div class="hb-compact-item" data-inline-category-row="${category.id}">
+                <span class="hb-color-swatch" style="background:${escapeAttr(safeColor(category.color))}"></span>
+                <input class="hb-input" data-inline-category-row-name value="${escapeAttr(category.name)}" aria-label="Category name">
+                <div class="hb-row-actions">
+                    <input class="hb-input hb-color-input" type="color" data-inline-category-row-color value="${escapeAttr(safeColor(category.color))}" aria-label="Category color">
+                    <button class="hb-button-secondary" type="button" data-inline-category-save="${category.id}">Save</button>
+                    <button class="hb-button-danger" type="button" data-inline-category-delete="${category.id}">Delete</button>
+                </div>
+            </div>`).join('') || '<div class="hb-empty">No categories yet.</div>';
+    }
+
     function workspaceConnectionsMarkup(kind, item, workspaceId, editing) {
         const linked = new Set(normalizeList(item?.linked_workspace_ids || item?.linkedWorkspaceIds).map(String));
         const sourceWorkspaceId = String(workspaceId || currentWorkspaceId() || '');
         const allWorkspaces = workspaces();
-        const otherWorkspaces = allWorkspaces.filter((workspace) => String(workspace.id) !== sourceWorkspaceId);
         const sourceWorkspace = allWorkspaces.find((workspace) => String(workspace.id) === sourceWorkspaceId);
         const title = kind === 'event' ? 'Connections' : 'Workspaces';
         return `
-            <div class="hb-surface-soft hb-card-pad hb-event-connections hb-workspace-picker">
+            <div class="hb-surface-soft hb-card-pad hb-event-connections hb-workspace-picker" data-workspace-picker>
                 <strong>${title}</strong>
                 <label class="hb-label">Primary workspace
-                    <select class="hb-select" name="workspaceId" ${editing ? 'disabled' : ''}>
+                    <select class="hb-select" name="workspaceId" data-primary-workspace-select ${editing ? 'disabled' : ''}>
                         ${allWorkspaces.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === sourceWorkspaceId ? 'selected' : ''}>${escapeHtml(workspace.name || 'Workspace')}</option>`).join('')}
                     </select>
                 </label>
                 ${editing ? `<input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}"><p class="hb-item-meta">Saved in ${escapeHtml(sourceWorkspace?.name || 'this workspace')}.</p>` : ''}
-                ${otherWorkspaces.length ? `<div class="hb-label">Also assign to
-                    <div class="hb-option-list">
-                        ${otherWorkspaces.map((workspace) => `<label class="hb-switch-row"><input type="checkbox" name="syncWorkspaceIds" value="${escapeAttr(workspace.id)}" ${linked.has(String(workspace.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(workspace.name || 'Workspace')}</strong><small>${escapeHtml(workspace.type || workspace.kind || 'workspace')}</small></span></label>`).join('')}
-                    </div>
-                </div>` : '<p class="hb-item-meta">No other workspaces connected to this account.</p>'}
-                ${kind === 'event' ? googleEventConnectionMarkup(item, sourceWorkspace) : ''}
+                <div data-sync-workspace-options>${workspaceSyncOptionsMarkup(sourceWorkspaceId, linked)}</div>
+                ${kind === 'event' ? `<div data-google-export-options>${googleEventConnectionMarkup(item, sourceWorkspace)}</div>` : ''}
             </div>`;
     }
 
+    function workspaceSyncOptionsMarkup(sourceWorkspaceId, linked = new Set()) {
+        const otherWorkspaces = workspaces().filter((workspace) => String(workspace.id) !== String(sourceWorkspaceId));
+        return otherWorkspaces.length ? `<div class="hb-label">Also assign to
+            <div class="hb-option-list">
+                ${otherWorkspaces.map((workspace) => `<label class="hb-switch-row"><input type="checkbox" name="syncWorkspaceIds" value="${escapeAttr(workspace.id)}" ${linked.has(String(workspace.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(workspace.name || 'Workspace')}</strong><small>${escapeHtml(workspace.type || workspace.kind || 'workspace')}</small></span></label>`).join('')}
+            </div>
+        </div>` : '<p class="hb-item-meta">No other workspaces connected to this account.</p>';
+    }
+
     function googleEventConnectionMarkup(item, workspace) {
-        const googleCalendarId = item?.google_calendar_id || item?.googleCalendarId || item?.metadata?.google_calendar_id || item?.metadata?.googleCalendarId || '';
-        const googleSummary = item?.metadata?.google_calendar_summary || item?.metadata?.googleCalendarSummary || googleCalendarId;
+        if (state.googleStatus?.connected !== true) {
+            return '<p class="hb-item-meta">Google Calendar is not connected.</p>';
+        }
+        const calendars = writableGoogleCalendars();
+        if (!calendars.length) {
+            return '<p class="hb-item-meta">No writable Google calendars are available.</p>';
+        }
+        const selected = new Set(defaultGoogleCalendarExportIds(item, workspace));
+        return `
+            <div class="hb-label">Export to Google Calendar
+                <div class="hb-option-list">
+                    ${calendars.map((calendar) => `<label class="hb-switch-row"><input type="checkbox" name="googleCalendarIds" value="${escapeAttr(calendar.id)}" ${selected.has(String(calendar.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(calendar.summary || calendar.name || calendar.id)}</strong><small>${escapeHtml(calendar.access_role || calendar.accessRole || 'writer')}</small></span></label>`).join('')}
+                </div>
+            </div>`;
+    }
+
+    function writableGoogleCalendars() {
+        return normalizeList(state.googleStatus?.calendars).filter((calendar) => ['owner', 'writer'].includes(String(calendar.access_role || calendar.accessRole || 'reader')));
+    }
+
+    function defaultGoogleCalendarExportIds(item = null, workspace = null) {
+        const metadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
+        const existingIds = normalizeList(metadata.google_calendar_ids || metadata.googleCalendarIds);
+        if (existingIds.length) return existingIds.map(String);
+        const existingSingle = item?.google_calendar_id || item?.googleCalendarId || metadata.google_calendar_id || metadata.googleCalendarId;
+        if (existingSingle) return [String(existingSingle)];
+
         const mappings = normalizeList(workspace?.google_calendar_mappings || workspace?.googleCalendarMappings);
-        const defaultMapping = mappings.find((mapping) => mapping.is_default_export || mapping.isDefaultExport) || mappings[0];
-        if (googleCalendarId) {
-            return `<p class="hb-item-meta">Google Calendar: ${escapeHtml(googleSummary || googleCalendarId)}</p>`;
-        }
-        if (defaultMapping) {
-            return `<p class="hb-item-meta">Google export: ${escapeHtml(defaultMapping.google_calendar_id || defaultMapping.googleCalendarId || 'default calendar')}</p>`;
-        }
-        return state.googleStatus?.connected ? '<p class="hb-item-meta">Google Calendar is connected. Pick workspace calendars in Settings.</p>' : '<p class="hb-item-meta">Google Calendar is not connected.</p>';
+        const defaultMapping = mappings.find((mapping) => mapping.is_default_export || mapping.isDefaultExport);
+        if (defaultMapping) return [String(defaultMapping.google_calendar_id || defaultMapping.googleCalendarId)];
+        if (mappings.length) return mappings.map((mapping) => String(mapping.google_calendar_id || mapping.googleCalendarId)).filter(Boolean);
+        const fallback = state.googleStatus?.default_calendar_id || state.googleStatus?.calendar_id;
+        return fallback ? [String(fallback)] : [];
     }
 
     function profileModalMarkup() {
@@ -1178,18 +1241,19 @@ if (mount) {
     function recurrenceFieldsMarkup(item) {
         const recurrence = item?.recurrence || item?.metadata?.recurrence || 'none';
         const days = recurrenceDays(item?.metadata);
+        const unit = item?.metadata?.unit || item?.metadata?.interval_unit || item?.metadata?.intervalUnit || 'days';
         return `
             <label class="hb-label">Event recurrence
-                <select class="hb-select" name="recurrence">
+                <select class="hb-select" name="recurrence" data-recurrence-select>
                     ${recurrenceOptions().map((value) => `<option value="${value}" ${value === recurrence ? 'selected' : ''}>${recurrenceLabel(value)}</option>`).join('')}
                 </select>
             </label>
-            <div class="hb-tabs">
+            <div class="hb-tabs" data-recurrence-days ${recurrence === 'specific_days' ? '' : 'hidden'}>
                 ${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => `<label class="hb-chip"><input type="checkbox" name="specificDays" value="${day}" ${days.has(day) ? 'checked' : ''}> ${day.toUpperCase()}</label>`).join('')}
             </div>
-            <div class="hb-field-row">
+            <div class="hb-field-row" data-recurrence-interval ${recurrence === 'interval' ? '' : 'hidden'}>
                 ${labelInput('Repeat interval', 'interval', 'number', item?.metadata?.interval || '', 'min="1"')}
-                <label class="hb-label">Interval unit<select class="hb-select" name="intervalUnit"><option value="days">Days</option><option value="weeks" ${item?.metadata?.interval_unit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${item?.metadata?.interval_unit === 'months' ? 'selected' : ''}>Months</option></select></label>
+                <label class="hb-label">Interval unit<select class="hb-select" name="intervalUnit"><option value="days">Days</option><option value="weeks" ${unit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${unit === 'months' ? 'selected' : ''}>Months</option></select></label>
             </div>`;
     }
 
@@ -1430,10 +1494,19 @@ if (mount) {
         }));
         mount.querySelectorAll('[data-modal-delete]').forEach((button) => button.addEventListener('click', deleteModalItem));
         mount.querySelector('[data-modal-form]')?.addEventListener('submit', submitModal);
-        mount.querySelector('[data-open-categories]')?.addEventListener('click', () => openModal('categories'));
+        mount.querySelector('[data-open-categories]')?.addEventListener('click', toggleInlineCategoryManager);
+        mount.querySelectorAll('[data-inline-category-create]').forEach((button) => button.addEventListener('click', createInlineCategory));
+        mount.querySelectorAll('[data-inline-category-save]').forEach((button) => button.addEventListener('click', saveInlineCategory));
+        mount.querySelectorAll('[data-inline-category-delete]').forEach((button) => button.addEventListener('click', deleteInlineCategory));
         mount.querySelectorAll('[data-category-row]').forEach((form) => form.addEventListener('submit', saveCategoryRow));
         mount.querySelectorAll('[data-delete-category]').forEach((button) => button.addEventListener('click', () => deleteCategory(button.dataset.deleteCategory)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
+        mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventTimeInputs);
+        mount.querySelectorAll('[data-primary-workspace-select]').forEach((select) => select.addEventListener('change', handlePrimaryWorkspaceChange));
+        mount.querySelectorAll('[data-recurrence-select]').forEach((select) => {
+            select.addEventListener('change', () => toggleRecurrenceFields(select.closest('form')));
+            toggleRecurrenceFields(select.closest('form'));
+        });
         mount.querySelectorAll('[data-all-day-toggle]').forEach((checkbox) => {
             checkbox.addEventListener('change', () => toggleAllDayFields(checkbox));
             toggleAllDayFields(checkbox);
@@ -1444,6 +1517,173 @@ if (mount) {
                 render();
             }
         });
+    }
+
+    function handlePrimaryWorkspaceChange(event) {
+        const select = event.currentTarget;
+        const picker = select.closest('[data-workspace-picker]');
+        if (!picker) return;
+        const sourceWorkspaceId = String(select.value || '');
+        const checkedSyncIds = new Set(Array.from(picker.querySelectorAll('input[name="syncWorkspaceIds"]:checked')).map((input) => String(input.value)).filter((id) => id !== sourceWorkspaceId));
+        const syncContainer = picker.querySelector('[data-sync-workspace-options]');
+        if (syncContainer) syncContainer.innerHTML = workspaceSyncOptionsMarkup(sourceWorkspaceId, checkedSyncIds);
+
+        const workspace = findWorkspace(sourceWorkspaceId);
+        const googleContainer = picker.querySelector('[data-google-export-options]');
+        if (googleContainer) googleContainer.innerHTML = googleEventConnectionMarkup(null, workspace);
+    }
+
+    function toggleRecurrenceFields(form) {
+        if (!form) return;
+        const recurrence = form.querySelector('[data-recurrence-select]')?.value || 'none';
+        setFieldGroupState(form.querySelector('[data-recurrence-days]'), recurrence === 'specific_days');
+        setFieldGroupState(form.querySelector('[data-recurrence-interval]'), recurrence === 'interval');
+    }
+
+    function toggleInlineCategoryManager(event) {
+        const button = event.currentTarget;
+        const panel = button.closest('.hb-inline-category-shell')?.querySelector('[data-category-manager]');
+        if (!panel) return;
+        const opening = panel.hidden;
+        panel.hidden = !opening;
+        button.setAttribute('aria-expanded', String(opening));
+    }
+
+    async function createInlineCategory(event) {
+        const button = event.currentTarget;
+        const panel = button.closest('[data-category-manager]');
+        const nameInput = panel?.querySelector('[data-inline-category-name]');
+        const colorInput = panel?.querySelector('[data-inline-category-color]');
+        const name = String(nameInput?.value || '').trim();
+        const color = safeColor(colorInput?.value || '#16A34A');
+        if (!panel || !name) {
+            setInlineCategoryMessage(panel, 'Add a category name.', 'error');
+            return;
+        }
+        await withInlineCategoryBusy(button, async () => {
+            await api('/event-categories', { method: 'POST', body: { name, color } });
+            await refreshOnly(false);
+            nameInput.value = '';
+            colorInput.value = '#16A34A';
+            refreshInlineCategoryControls(panel, name, color);
+            setInlineCategoryMessage(panel, 'Added.', '');
+        });
+    }
+
+    async function saveInlineCategory(event) {
+        const button = event.currentTarget;
+        const row = button.closest('[data-inline-category-row]');
+        const panel = button.closest('[data-category-manager]');
+        const name = String(row?.querySelector('[data-inline-category-row-name]')?.value || '').trim();
+        const color = safeColor(row?.querySelector('[data-inline-category-row-color]')?.value || '#16A34A');
+        if (!row || !name) {
+            setInlineCategoryMessage(panel, 'Category name is required.', 'error');
+            return;
+        }
+        await withInlineCategoryBusy(button, async () => {
+            await api(`/event-categories/${row.dataset.inlineCategoryRow}`, { method: 'PATCH', body: { name, color } });
+            await refreshOnly(false);
+            refreshInlineCategoryControls(panel, name, color);
+            setInlineCategoryMessage(panel, 'Saved.', '');
+        });
+    }
+
+    async function deleteInlineCategory(event) {
+        const button = event.currentTarget;
+        const panel = button.closest('[data-category-manager]');
+        if (!confirm('Delete this category from items?')) return;
+        await withInlineCategoryBusy(button, async () => {
+            await api(`/event-categories/${button.dataset.inlineCategoryDelete}`, { method: 'DELETE' });
+            await refreshOnly(false);
+            refreshInlineCategoryControls(panel, '');
+            setInlineCategoryMessage(panel, 'Deleted.', '');
+        });
+    }
+
+    async function withInlineCategoryBusy(button, callback) {
+        try {
+            button.disabled = true;
+            await callback();
+        } catch (error) {
+            setInlineCategoryMessage(button.closest('[data-category-manager]'), friendlyError(error, 'update categories'), 'error');
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function refreshInlineCategoryControls(panel, selectedName = null, selectedColor = '') {
+        if (!panel) return;
+        const form = panel.closest('form');
+        const select = form?.querySelector('select[name="category"]');
+        const colorInput = form?.querySelector('input[name="color"]');
+        const current = selectedName === null ? select?.value || '' : selectedName;
+        if (select) {
+            select.innerHTML = categoryOptions(current)
+                .map((category) => `<option value="${escapeAttr(category.name)}" data-category-color="${escapeAttr(safeColor(category.color))}" ${category.name === current ? 'selected' : ''}>${escapeHtml(category.name)}</option>`)
+                .join('');
+            select.insertAdjacentHTML('afterbegin', `<option value="" data-category-color="" ${current ? '' : 'selected'}>None</option>`);
+            select.value = current;
+        }
+        if (colorInput && current) {
+            colorInput.value = safeColor(selectedColor || categoryColor(current));
+        }
+        const list = panel.querySelector('[data-inline-category-list]');
+        if (list) list.innerHTML = inlineCategoryRowsMarkup();
+        bindInlineCategoryActions(panel);
+    }
+
+    function bindInlineCategoryActions(panel) {
+        panel?.querySelectorAll('[data-inline-category-save]').forEach((button) => button.addEventListener('click', saveInlineCategory));
+        panel?.querySelectorAll('[data-inline-category-delete]').forEach((button) => button.addEventListener('click', deleteInlineCategory));
+    }
+
+    function setInlineCategoryMessage(panel, message, tone = '') {
+        const target = panel?.querySelector('[data-inline-category-message]');
+        if (!target) return;
+        target.textContent = message;
+        target.classList.toggle('hb-inline-category-message-error', tone === 'error');
+    }
+
+    function bindEventTimeInputs(form) {
+        const startInput = form.querySelector('input[name="time"]');
+        const endInput = form.querySelector('input[name="endsAt"]');
+        const allDayStart = form.querySelector('input[name="allDayStart"]');
+        const allDayEnd = form.querySelector('input[name="allDayEnd"]');
+        if (startInput) {
+            startInput.dataset.previousValue = startInput.value;
+            startInput.addEventListener('change', () => syncEventEndWithStart(form));
+        }
+        if (endInput) {
+            endInput.addEventListener('change', () => {
+                endInput.dataset.userEdited = 'true';
+                if (startInput?.value && endInput.value && new Date(endInput.value) <= new Date(startInput.value)) {
+                    endInput.value = toDatetimeLocal(defaultEventEnd(startInput.value));
+                }
+            });
+        }
+        allDayStart?.addEventListener('change', () => {
+            if (allDayEnd && (!allDayEnd.value || allDayEnd.value < allDayStart.value)) allDayEnd.value = allDayStart.value;
+        });
+    }
+
+    function syncEventEndWithStart(form, force = false) {
+        const startInput = form.querySelector('input[name="time"]');
+        const endInput = form.querySelector('input[name="endsAt"]');
+        if (!startInput?.value || !endInput) return;
+        const previousStart = startInput.dataset.previousValue;
+        const previousEnd = endInput.value;
+        const shouldSync = force
+            || !previousEnd
+            || endInput.dataset.userEdited !== 'true'
+            || new Date(previousEnd) <= new Date(startInput.value);
+        if (shouldSync) {
+            const duration = previousStart && previousEnd
+                ? Math.max(15, Math.round((new Date(previousEnd) - new Date(previousStart)) / 60000))
+                : 60;
+            endInput.value = toDatetimeLocal(addMinutes(startInput.value, Number.isFinite(duration) ? duration : 60));
+            endInput.dataset.userEdited = 'false';
+        }
+        startInput.dataset.previousValue = startInput.value;
     }
 
     async function submitModal(event) {
@@ -1542,6 +1782,11 @@ if (mount) {
             const syncTo = selectedSyncWorkspaceIds(form);
             const allDay = form.elements.allDay?.checked || false;
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
+            const recurrence = data.recurrence || 'none';
+            const specificDays = recurrence === 'specific_days'
+                ? Array.from(form.querySelectorAll('input[name="specificDays"]:checked')).map((input) => input.value)
+                : [];
+            const intervalUnit = recurrence === 'interval' ? data.intervalUnit || 'days' : null;
             const body = {
                 title: data.title,
                 description: data.description || null,
@@ -1551,15 +1796,18 @@ if (mount) {
                 category: data.category || null,
                 color,
                 is_critical: form.elements.critical?.checked || false,
-                recurrence: data.recurrence || 'none',
+                recurrence,
                 status: data.status || 'confirmed',
                 sync_to_workspace_ids: syncTo,
                 metadata: {
                     ...existingMetadata,
-                    recurrence: data.recurrence || 'none',
-                    specific_days: Array.from(form.querySelectorAll('input[name="specificDays"]:checked')).map((input) => input.value),
-                    interval: data.interval ? Number(data.interval) : null,
-                    interval_unit: data.intervalUnit || null,
+                    recurrence,
+                    specific_days: specificDays,
+                    days: specificDays,
+                    interval: recurrence === 'interval' && data.interval ? Number(data.interval) : null,
+                    interval_unit: intervalUnit,
+                    unit: intervalUnit,
+                    google_calendar_ids: selectedGoogleCalendarIds(form),
                     all_day: allDay,
                 },
             };
@@ -1571,6 +1819,13 @@ if (mount) {
     function selectedSyncWorkspaceIds(form) {
         return Array.from(form.querySelectorAll('input[name="syncWorkspaceIds"]:checked'))
             .map((input) => Number(input.value))
+            .filter(Boolean);
+    }
+
+    function selectedGoogleCalendarIds(form) {
+        if (state.googleStatus?.connected !== true) return [];
+        return Array.from(form.querySelectorAll('input[name="googleCalendarIds"]:checked'))
+            .map((input) => String(input.value))
             .filter(Boolean);
     }
 
@@ -1644,6 +1899,25 @@ if (mount) {
         const form = checkbox.closest('form');
         if (!form) return;
         const allDay = checkbox.checked;
+        if (allDay) {
+            const startInput = form.querySelector('input[name="time"]');
+            const allDayStart = form.querySelector('input[name="allDayStart"]');
+            const allDayEnd = form.querySelector('input[name="allDayEnd"]');
+            if (startInput?.value && allDayStart) {
+                allDayStart.value = dateOnly(startInput.value);
+                if (allDayEnd && (!allDayEnd.value || allDayEnd.value < allDayStart.value)) allDayEnd.value = allDayStart.value;
+            }
+        } else {
+            const startInput = form.querySelector('input[name="time"]');
+            const endInput = form.querySelector('input[name="endsAt"]');
+            const allDayStart = form.querySelector('input[name="allDayStart"]');
+            if (allDayStart?.value && startInput && endInput && !startInput.value) {
+                const start = parseLocalDate(allDayStart.value);
+                start.setHours(9, 0, 0, 0);
+                startInput.value = toDatetimeLocal(start);
+                endInput.value = toDatetimeLocal(defaultEventEnd(start));
+            }
+        }
         const timedFields = form.querySelector('[data-timed-fields]');
         const allDayFields = form.querySelector('[data-all-day-fields]');
         setFieldGroupState(timedFields, !allDay);
@@ -2556,6 +2830,28 @@ if (mount) {
         if (width >= 1280) return 7;
         if (width >= 820) return 4;
         return 2;
+    }
+
+    function defaultEventStart() {
+        const selected = parseLocalDate(state.selectedDay || new Date());
+        const now = new Date();
+        const start = new Date(selected);
+        if (sameDate(selected, now)) {
+            start.setHours(Math.min(Math.max(now.getHours() + 1, 8), 21), 0, 0, 0);
+        } else {
+            start.setHours(9, 0, 0, 0);
+        }
+        return start;
+    }
+
+    function defaultEventEnd(start) {
+        return addMinutes(start || defaultEventStart(), 60);
+    }
+
+    function addMinutes(value, amount) {
+        const date = new Date(parseLocalDate(value));
+        date.setMinutes(date.getMinutes() + amount);
+        return date;
     }
 
     function addDays(date, amount) {
