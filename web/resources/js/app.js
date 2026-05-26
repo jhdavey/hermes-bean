@@ -606,14 +606,18 @@ if (mount) {
         const events = eventsForDay(day);
         return `
             <div class="hb-glance-day">
-                <div class="hb-glance-day-label">
-                    <strong>${escapeHtml(dayLabel(day))}</strong>
-                    <span>${escapeHtml(monthDayLabel(day))}</span>
-                </div>
+                <div class="hb-glance-day-label">${escapeHtml(glanceDayLabel(day))}</div>
                 <div class="hb-glance-events">
                     ${events.length ? events.map((event) => glanceEventMarkup(event)).join('') : '<div class="hb-empty hb-glance-empty">No events</div>'}
                 </div>
             </div>`;
+    }
+
+    function glanceDayLabel(day) {
+        const parsed = parseLocalDate(day);
+        if (sameDate(parsed, new Date())) return `Today ${monthDayLabel(parsed)}`;
+        if (sameDate(parsed, addDays(new Date(), 1))) return `Tomorrow ${monthDayLabel(parsed)}`;
+        return `${weekdayShort(parsed)} ${monthDayLabel(parsed)}`;
     }
 
     function glanceEventMarkup(event) {
@@ -805,7 +809,7 @@ if (mount) {
         const color = safeColor(event.color);
         return `
             <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <span class="hb-month-event-time">${escapeHtml(eventTime(event))}</span>
+                <span class="hb-month-event-time">${escapeHtml(eventStartTime(event))}</span>
                 <span class="hb-month-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
             </button>`;
     }
@@ -2397,6 +2401,12 @@ if (mount) {
         if (!start) return 'All day';
         const startLabel = formatTime(start);
         return end ? `${startLabel} – ${formatTime(end)}` : startLabel;
+    }
+
+    function eventStartTime(event) {
+        if (eventAllDay(event)) return 'All day';
+        const start = event.starts_at || event.startsAt;
+        return start ? formatTime(start) : 'All day';
     }
 
     function timelineEventStyle(event, day, startHour, endHour) {

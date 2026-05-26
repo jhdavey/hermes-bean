@@ -884,8 +884,8 @@
 
 .hb-glance-day {
     display: grid;
-    grid-template-columns: 86px minmax(0, 1fr);
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
     padding: 9px 10px;
     border: 1px solid var(--hb-border);
     background: rgba(246, 250, 244, .76);
@@ -893,12 +893,6 @@
 
 .hb-glance-day-label {
     min-width: 0;
-    display: grid;
-    align-content: start;
-    gap: 2px;
-}
-
-.hb-glance-day-label strong {
     overflow: hidden;
     color: var(--hb-text);
     font-size: 13px;
@@ -906,12 +900,6 @@
     line-height: 1.15;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.hb-glance-day-label span {
-    color: var(--hb-muted);
-    font-size: 11px;
-    font-weight: 800;
 }
 
 .hb-glance-events {
