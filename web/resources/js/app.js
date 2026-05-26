@@ -786,16 +786,17 @@ if (mount) {
                         const dayNumber = index - leading + 1;
                         if (dayNumber < 1 || dayNumber > daysInMonth) return '<div class="hb-month-cell hb-month-cell-empty"></div>';
                         const day = new Date(selected.getFullYear(), selected.getMonth(), dayNumber);
-                        return monthCellMarkup(day, dayNumber, selected);
+                        return monthCellMarkup(day, dayNumber);
                     }).join('')}
                 </div>
             </div>`;
     }
 
-    function monthCellMarkup(day, dayNumber, selected) {
+    function monthCellMarkup(day, dayNumber) {
         const events = eventsForDay(day);
+        const today = new Date();
         return `
-            <div class="hb-month-cell ${sameDate(day, selected) ? 'hb-month-cell-active' : ''}">
+            <div class="hb-month-cell ${sameDate(day, today) ? 'hb-month-cell-active' : ''}">
                 <button class="hb-month-date" type="button" data-select-day="${dateOnly(day)}" aria-label="${escapeAttr(dayLabel(day))}">
                     <strong>${dayNumber}</strong>
                 </button>
