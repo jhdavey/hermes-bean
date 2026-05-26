@@ -2282,7 +2282,6 @@
     }
 
     .hb-top-nav {
-        order: 1;
         min-width: 0;
         max-width: min(560px, 42vw);
         display: flex;
@@ -2318,42 +2317,6 @@
     .hb-top-nav .hb-nav-item svg {
         width: 17px;
         height: 17px;
-    }
-
-    .hb-topbar > .hb-month-nav {
-        order: 3;
-    }
-
-    .hb-month-pill {
-        order: 5;
-    }
-
-    .hb-topbar > .hb-spacer {
-        order: 2;
-    }
-
-    .hb-top-workspace-switcher {
-        order: 3;
-    }
-
-    .hb-topbar > [data-today] {
-        order: 4;
-    }
-
-    .hb-critical {
-        order: 6;
-    }
-
-    .hb-topbar > [data-open-create] {
-        order: 7;
-    }
-
-    .hb-topbar > [data-refresh-calendar] {
-        order: 8;
-    }
-
-    .hb-profile-menu {
-        order: 9;
     }
 
     .hb-main {

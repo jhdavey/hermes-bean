@@ -340,12 +340,12 @@ if (mount) {
         return `
             <div class="hb-app">
                 <header class="hb-topbar">
-                    ${topNavMarkup()}
-                    ${topWorkspaceSwitcherMarkup()}
-                    <span class="hb-spacer"></span>
-                    ${state.selected === 'today' && state.showMonth ? monthSwitcherMarkup(parseLocalDate(state.selectedDay)) : ''}
                     <button class="hb-header-pill" data-today type="button">${escapeHtml(topbarTodayLabel(new Date()))}</button>
                     <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(new Date()))}</span></button>
+                    ${state.selected === 'today' && state.showMonth ? monthSwitcherMarkup(parseLocalDate(state.selectedDay)) : ''}
+                    ${topWorkspaceSwitcherMarkup()}
+                    <span class="hb-spacer"></span>
+                    ${topNavMarkup()}
                     <button class="hb-critical" type="button" title="${critical} critical items">${critical}</button>
                     ${showAdd ? `<button class="hb-icon-button" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
                     ${showCalendarRefresh ? `<button class="hb-icon-button" type="button" data-refresh-calendar aria-label="Refresh calendar" title="Refresh calendar" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
