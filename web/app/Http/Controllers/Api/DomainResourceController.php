@@ -34,16 +34,21 @@ class DomainResourceController extends Controller
 
     public function listTasks(Request $request): JsonResponse
     {
-        return $this->listed(
-            $this->scoped(Task::query(), $request)
-                ->where(function ($query): void {
-                    $query->whereNull('status')
-                        ->orWhereNotIn('status', ['completed', 'complete', 'done', 'COMPLETED', 'Complete', 'Done']);
-                })
-                ->orderBy('due_at')
-                ->orderBy('id')
-                ->get()
-        );
+        $tasks = $this->scoped(Task::query(), $request)
+            ->where(function ($query): void {
+                $query->whereNull('status')
+                    ->orWhereNotIn('status', ['completed', 'complete', 'done', 'COMPLETED', 'Complete', 'Done']);
+            })
+            ->orderBy('due_at')
+            ->orderBy('id')
+            ->get();
+
+        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
+        $tasks->each(function (Task $task) use ($accessibleWorkspaceIds): void {
+            $task->setAttribute('linked_workspace_ids', $this->linkedItemWorkspaceIds($task, 'tasks', $accessibleWorkspaceIds));
+        });
+
+        return $this->listed($tasks);
     }
 
     public function listPastTasks(Request $request): JsonResponse
@@ -64,7 +69,13 @@ class DomainResourceController extends Controller
 
     public function listReminders(Request $request): JsonResponse
     {
-        return $this->listed($this->scoped(Reminder::query(), $request)->orderBy('remind_at')->orderBy('id')->get());
+        $reminders = $this->scoped(Reminder::query(), $request)->orderBy('remind_at')->orderBy('id')->get();
+        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
+        $reminders->each(function (Reminder $reminder) use ($accessibleWorkspaceIds): void {
+            $reminder->setAttribute('linked_workspace_ids', $this->linkedItemWorkspaceIds($reminder, 'reminders', $accessibleWorkspaceIds));
+        });
+
+        return $this->listed($reminders);
     }
 
     public function listCalendarEvents(Request $request): JsonResponse
@@ -78,11 +89,7 @@ class DomainResourceController extends Controller
         $this->scopeVisibleGoogleCalendars($query, $request, $workspace);
 
         $events = $query->orderBy('starts_at')->orderBy('id')->get();
-        $accessibleWorkspaceIds = app(WorkspaceService::class)
-            ->accessibleWorkspaces($request->user())
-            ->pluck('id')
-            ->map(fn ($id): int => (int) $id)
-            ->all();
+        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
 
         $events->each(function (CalendarEvent $event) use ($accessibleWorkspaceIds): void {
             $event->setAttribute('linked_workspace_ids', $this->linkedCalendarEventWorkspaceIds($event, $accessibleWorkspaceIds));
@@ -93,14 +100,10 @@ class DomainResourceController extends Controller
 
     public function listEventCategories(Request $request): JsonResponse
     {
-        if ($request->filled('workspace_id')) {
-            return $this->listed($this->scoped(EventCategory::query(), $request)->orderBy('name')->orderBy('id')->get());
-        }
-
-        $workspaceIds = app(WorkspaceService::class)->accessibleWorkspaces($request->user())->pluck('id')->all();
-
-        return $this->listed(
-            EventCategory::query()
+        $workspaceIds = $this->accessibleWorkspaceIds($request);
+        $categories = $request->filled('workspace_id')
+            ? $this->scoped(EventCategory::query(), $request)->orderBy('name')->orderBy('id')->get()
+            : EventCategory::query()
                 ->where('user_id', $request->user()->id)
                 ->where(function ($query) use ($workspaceIds): void {
                     $query->whereIn('workspace_id', $workspaceIds)
@@ -108,8 +111,20 @@ class DomainResourceController extends Controller
                 })
                 ->orderBy('name')
                 ->orderBy('id')
-                ->get()
-        );
+                ->get();
+
+        $linkedWorkspaceIdsByName = EventCategory::query()
+            ->where('user_id', $request->user()->id)
+            ->whereIn('workspace_id', $workspaceIds)
+            ->get()
+            ->groupBy('name')
+            ->map(fn ($items) => $items->pluck('workspace_id')->map(fn ($id): int => (int) $id)->unique()->values()->all());
+
+        $categories->each(function (EventCategory $category) use ($linkedWorkspaceIdsByName): void {
+            $category->setAttribute('linked_workspace_ids', $linkedWorkspaceIdsByName->get($category->name, []));
+        });
+
+        return $this->listed($categories);
     }
 
     public function listApprovals(Request $request): JsonResponse
@@ -200,7 +215,9 @@ class DomainResourceController extends Controller
 
     public function destroyTask(Request $request, string $task): JsonResponse
     {
-        return $this->destroyed($this->scoped(Task::query(), $request, false)->findOrFail($task));
+        $model = $this->scoped(Task::query(), $request, false)->findOrFail($task);
+
+        return $this->destroyLinkedItems($request, $model, 'tasks');
     }
 
     public function storeReminder(Request $request): JsonResponse
@@ -258,7 +275,9 @@ class DomainResourceController extends Controller
 
     public function destroyReminder(Request $request, string $reminder): JsonResponse
     {
-        return $this->destroyed($this->scoped(Reminder::query(), $request, false)->findOrFail($reminder));
+        $model = $this->scoped(Reminder::query(), $request, false)->findOrFail($reminder);
+
+        return $this->destroyLinkedItems($request, $model, 'reminders');
     }
 
     public function storeCalendarEvent(Request $request): JsonResponse
@@ -397,17 +416,47 @@ class DomainResourceController extends Controller
     public function destroyEventCategory(Request $request, string $eventCategory): JsonResponse
     {
         $model = $this->scoped(EventCategory::query(), $request, false)->findOrFail($eventCategory);
-        CalendarEvent::where('workspace_id', $model->workspace_id)
+        $validated = $request->validate([
+            'delete_from_workspace_ids' => ['nullable', 'array'],
+            'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+
+        $workspaceIds = array_values(array_unique(array_map(
+            'intval',
+            $validated['delete_from_workspace_ids'] ?? [$model->workspace_id]
+        )));
+        if ($workspaceIds === []) {
+            $workspaceIds = [(int) $model->workspace_id];
+        }
+
+        $workspaceService = app(WorkspaceService::class);
+        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
+        foreach ($workspaceIds as $workspaceId) {
+            if (! in_array($workspaceId, $accessibleWorkspaceIds, true)) {
+                $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
+            }
+        }
+
+        CalendarEvent::whereIn('workspace_id', $workspaceIds)
+            ->where('user_id', $request->user()->id)
             ->where('category', $model->name)
             ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
-        Task::where('workspace_id', $model->workspace_id)
+        Task::whereIn('workspace_id', $workspaceIds)
+            ->where('user_id', $request->user()->id)
             ->where('category', $model->name)
             ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
-        Reminder::where('workspace_id', $model->workspace_id)
+        Reminder::whereIn('workspace_id', $workspaceIds)
+            ->where('user_id', $request->user()->id)
             ->where('category', $model->name)
             ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
 
-        return $this->destroyed($model);
+        EventCategory::query()
+            ->where('user_id', $request->user()->id)
+            ->where('name', $model->name)
+            ->whereIn('workspace_id', $workspaceIds)
+            ->delete();
+
+        return response()->json(status: 204);
     }
 
     public function storeApproval(Request $request): JsonResponse
@@ -629,6 +678,117 @@ class DomainResourceController extends Controller
             $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
         }
         app(WorkspaceItemSyncService::class)->syncToWorkspaceIds($model, $workspaceIds, $request->user());
+    }
+
+    private function accessibleWorkspaceIds(Request $request): array
+    {
+        return app(WorkspaceService::class)
+            ->accessibleWorkspaces($request->user())
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    private function destroyLinkedItems(Request $request, Model $model, string $type): JsonResponse
+    {
+        $validated = $request->validate([
+            'delete_from_workspace_ids' => ['nullable', 'array'],
+            'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+
+        $workspaceIds = array_values(array_unique(array_map(
+            'intval',
+            $validated['delete_from_workspace_ids'] ?? [$model->workspace_id]
+        )));
+        if ($workspaceIds === []) {
+            $workspaceIds = [(int) $model->workspace_id];
+        }
+
+        $workspaceService = app(WorkspaceService::class);
+        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
+        foreach ($workspaceIds as $workspaceId) {
+            if (! in_array($workspaceId, $accessibleWorkspaceIds, true)) {
+                $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
+            }
+        }
+
+        $itemsToDelete = $this->linkedItemsByWorkspace($model, $type, $accessibleWorkspaceIds)->only($workspaceIds)->values();
+        if ($itemsToDelete->isEmpty() && in_array((int) $model->workspace_id, $workspaceIds, true)) {
+            $itemsToDelete = collect([$model]);
+        }
+
+        $ids = $itemsToDelete->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        if ($ids !== []) {
+            $model::query()->whereIn('id', $ids)->delete();
+            $this->deleteWorkspaceItemLinksFor($type, $ids);
+        }
+
+        return response()->json(status: 204);
+    }
+
+    private function linkedItemsByWorkspace(Model $model, string $type, array $accessibleWorkspaceIds)
+    {
+        $relatedIds = collect([(int) $model->id]);
+        $links = $this->itemLinksFor($model, $type);
+        $sourcePairs = collect();
+
+        foreach ($links as $link) {
+            $relatedIds->push((int) $link->source_id, (int) $link->target_id);
+            $sourcePairs->push([(int) $link->source_workspace_id, (int) $link->source_id]);
+        }
+
+        $sourcePairs = $sourcePairs->unique(fn (array $pair): string => $pair[0].':'.$pair[1])->values();
+        if ($sourcePairs->isNotEmpty()) {
+            WorkspaceItemLink::query()
+                ->where('source_type', $type)
+                ->where('target_type', $type)
+                ->where('link_type', 'copy')
+                ->where(function ($query) use ($sourcePairs): void {
+                    foreach ($sourcePairs as [$workspaceId, $sourceId]) {
+                        $query->orWhere(function ($query) use ($workspaceId, $sourceId): void {
+                            $query->where('source_workspace_id', $workspaceId)
+                                ->where('source_id', $sourceId);
+                        });
+                    }
+                })
+                ->get()
+                ->each(function (WorkspaceItemLink $link) use ($relatedIds): void {
+                    $relatedIds->push((int) $link->source_id, (int) $link->target_id);
+                });
+        }
+
+        return $model::query()
+            ->whereIn('id', $relatedIds->unique()->values()->all())
+            ->whereIn('workspace_id', $accessibleWorkspaceIds)
+            ->get()
+            ->keyBy(fn (Model $item): int => (int) $item->workspace_id);
+    }
+
+    private function linkedItemWorkspaceIds(Model $model, string $type, array $accessibleWorkspaceIds): array
+    {
+        return $this->linkedItemsByWorkspace($model, $type, $accessibleWorkspaceIds)
+            ->keys()
+            ->map(fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+    }
+
+    private function itemLinksFor(Model $model, string $type)
+    {
+        return WorkspaceItemLink::query()
+            ->where('source_type', $type)
+            ->where('target_type', $type)
+            ->where('link_type', 'copy')
+            ->where(function ($query) use ($model): void {
+                $query->where(function ($query) use ($model): void {
+                    $query->where('source_workspace_id', $model->workspace_id)
+                        ->where('source_id', $model->id);
+                })->orWhere(function ($query) use ($model): void {
+                    $query->where('target_workspace_id', $model->workspace_id)
+                        ->where('target_id', $model->id);
+                });
+            })
+            ->get();
     }
 
     /**

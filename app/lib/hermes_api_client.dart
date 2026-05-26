@@ -7,6 +7,16 @@ const String hermesApiBaseUrl = String.fromEnvironment(
   defaultValue: 'https://heybean.org/api',
 );
 
+Uri normalizeHermesApiBaseUrlForPlatform(Uri baseUrl, {bool? isAndroid}) {
+  final runningOnAndroid = isAndroid ?? Platform.isAndroid;
+  if (!runningOnAndroid) return baseUrl;
+
+  final host = baseUrl.host.toLowerCase();
+  if (host != 'localhost' && host != '127.0.0.1') return baseUrl;
+
+  return baseUrl.replace(host: '10.0.2.2');
+}
+
 const Duration _standardApiResponseTimeout = Duration(seconds: 30);
 const Duration _assistantApiResponseTimeout = Duration(seconds: 120);
 
@@ -18,7 +28,11 @@ class HermesApiClient {
     Uri? baseUrl,
     HermesApiTransport? transport,
     this.bearerToken,
-  }) : baseUrl = _validateBaseUrl(baseUrl ?? Uri.parse(hermesApiBaseUrl)),
+  }) : baseUrl = _validateBaseUrl(
+         normalizeHermesApiBaseUrlForPlatform(
+           baseUrl ?? Uri.parse(hermesApiBaseUrl),
+         ),
+       ),
        _transport = transport ?? _defaultTransport;
 
   static Uri _validateBaseUrl(Uri baseUrl) {
@@ -331,8 +345,18 @@ class HermesApiClient {
     return HermesTask.fromJson(_expectMap(data['data']));
   }
 
-  Future<void> deleteTask(int taskId) async {
-    await _sendJson('DELETE', '/tasks/$taskId');
+  Future<void> deleteTask(
+    int taskId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
+    await _sendJson(
+      'DELETE',
+      '/tasks/$taskId',
+      body: {
+        if (deleteFromWorkspaceIds.isNotEmpty)
+          'delete_from_workspace_ids': deleteFromWorkspaceIds,
+      },
+    );
   }
 
   Future<HermesTask> completeTask(int taskId) async {
@@ -419,8 +443,18 @@ class HermesApiClient {
     return HermesReminder.fromJson(_expectMap(data['data']));
   }
 
-  Future<void> deleteReminder(int reminderId) async {
-    await _sendJson('DELETE', '/reminders/$reminderId');
+  Future<void> deleteReminder(
+    int reminderId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
+    await _sendJson(
+      'DELETE',
+      '/reminders/$reminderId',
+      body: {
+        if (deleteFromWorkspaceIds.isNotEmpty)
+          'delete_from_workspace_ids': deleteFromWorkspaceIds,
+      },
+    );
   }
 
   Future<List<HermesCalendarEvent>> listCalendarEvents() async {
@@ -529,8 +563,18 @@ class HermesApiClient {
     return HermesEventCategory.fromJson(_expectMap(data['data']));
   }
 
-  Future<void> deleteEventCategory(int categoryId) async {
-    await _sendJson('DELETE', '/event-categories/$categoryId');
+  Future<void> deleteEventCategory(
+    int categoryId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
+    await _sendJson(
+      'DELETE',
+      '/event-categories/$categoryId',
+      body: {
+        if (deleteFromWorkspaceIds.isNotEmpty)
+          'delete_from_workspace_ids': deleteFromWorkspaceIds,
+      },
+    );
   }
 
   Future<void> deleteCalendarEvent(
@@ -1355,6 +1399,8 @@ class HermesTask {
     this.isCritical = false,
     this.completedAt,
     this.metadata,
+    this.workspaceId,
+    this.linkedWorkspaceIds = const [],
   });
 
   final int id;
@@ -1367,6 +1413,8 @@ class HermesTask {
   final bool isCritical;
   final String? completedAt;
   final Map<String, Object?>? metadata;
+  final int? workspaceId;
+  final List<int> linkedWorkspaceIds;
 
   List<String> get googleCalendarIds =>
       _googleCalendarIdsFromMetadata(metadata);
@@ -1402,6 +1450,10 @@ class HermesTask {
       ),
       completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
       metadata: metadata,
+      workspaceId: _readIntOrNull(json['workspace_id']),
+      linkedWorkspaceIds: _expectList(
+        json['linked_workspace_ids'] ?? const [],
+      ).map(_readIntOrNull).whereType<int>().toList(),
     );
   }
 
@@ -1446,6 +1498,8 @@ class HermesReminder {
     this.completedAt,
     this.calendarEventId,
     this.metadata,
+    this.workspaceId,
+    this.linkedWorkspaceIds = const [],
   });
 
   final int id;
@@ -1458,6 +1512,8 @@ class HermesReminder {
   final String? completedAt;
   final int? calendarEventId;
   final Map<String, Object?>? metadata;
+  final int? workspaceId;
+  final List<int> linkedWorkspaceIds;
 
   List<String> get googleCalendarIds =>
       _googleCalendarIdsFromMetadata(metadata);
@@ -1483,6 +1539,10 @@ class HermesReminder {
           ? null
           : _expectInt(json['calendar_event_id']),
       metadata: metadata,
+      workspaceId: _readIntOrNull(json['workspace_id']),
+      linkedWorkspaceIds: _expectList(
+        json['linked_workspace_ids'] ?? const [],
+      ).map(_readIntOrNull).whereType<int>().toList(),
     );
   }
 
@@ -1496,6 +1556,8 @@ class HermesReminder {
     String? completedAt,
     int? calendarEventId,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<int>? linkedWorkspaceIds,
     bool clearDueAt = false,
     bool clearCategory = false,
     bool clearColor = false,
@@ -1510,6 +1572,8 @@ class HermesReminder {
     completedAt: completedAt ?? this.completedAt,
     calendarEventId: calendarEventId ?? this.calendarEventId,
     metadata: metadata ?? this.metadata,
+    workspaceId: workspaceId ?? this.workspaceId,
+    linkedWorkspaceIds: linkedWorkspaceIds ?? this.linkedWorkspaceIds,
   );
 }
 
@@ -1518,25 +1582,39 @@ class HermesEventCategory {
     required this.id,
     required this.name,
     required this.color,
+    this.workspaceId,
+    this.linkedWorkspaceIds = const [],
   });
 
   final int id;
   final String name;
   final String color;
+  final int? workspaceId;
+  final List<int> linkedWorkspaceIds;
 
   factory HermesEventCategory.fromJson(Map<String, Object?> json) =>
       HermesEventCategory(
         id: _expectInt(json['id']),
         name: _expectString(json['name']),
         color: (json['color'] as String?) ?? '#34C759',
+        workspaceId: _readIntOrNull(json['workspace_id']),
+        linkedWorkspaceIds: _expectList(
+          json['linked_workspace_ids'] ?? const [],
+        ).map(_readIntOrNull).whereType<int>().toList(),
       );
 
-  HermesEventCategory copyWith({String? name, String? color}) =>
-      HermesEventCategory(
-        id: id,
-        name: name ?? this.name,
-        color: color ?? this.color,
-      );
+  HermesEventCategory copyWith({
+    String? name,
+    String? color,
+    int? workspaceId,
+    List<int>? linkedWorkspaceIds,
+  }) => HermesEventCategory(
+    id: id,
+    name: name ?? this.name,
+    color: color ?? this.color,
+    workspaceId: workspaceId ?? this.workspaceId,
+    linkedWorkspaceIds: linkedWorkspaceIds ?? this.linkedWorkspaceIds,
+  );
 }
 
 class HermesCalendarEvent {

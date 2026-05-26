@@ -9,6 +9,30 @@ void main() {
     expect(HermesApiClient().baseUrl, Uri.parse('https://heybean.org/api'));
   });
 
+  test('maps Android emulator localhost API base to host loopback', () {
+    expect(
+      normalizeHermesApiBaseUrlForPlatform(
+        Uri.parse('http://127.0.0.1:8000/api'),
+        isAndroid: true,
+      ),
+      Uri.parse('http://10.0.2.2:8000/api'),
+    );
+    expect(
+      normalizeHermesApiBaseUrlForPlatform(
+        Uri.parse('http://localhost:8000/api'),
+        isAndroid: true,
+      ),
+      Uri.parse('http://10.0.2.2:8000/api'),
+    );
+    expect(
+      normalizeHermesApiBaseUrlForPlatform(
+        Uri.parse('https://heybean.org/api'),
+        isAndroid: true,
+      ),
+      Uri.parse('https://heybean.org/api'),
+    );
+  });
+
   test('requests a password reset link without authenticating', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
@@ -1153,6 +1177,28 @@ void main() {
               }),
             );
           }
+          if (request.path == '/tasks/1' && request.method == 'DELETE') {
+            expect(
+              request.body,
+              containsPair('delete_from_workspace_ids', [1, 2, 3]),
+            );
+            return const HermesApiResponse(204, '');
+          }
+          if (request.path == '/reminders/2' && request.method == 'DELETE') {
+            expect(
+              request.body,
+              containsPair('delete_from_workspace_ids', [1, 3]),
+            );
+            return const HermesApiResponse(204, '');
+          }
+          if (request.path == '/event-categories/4' &&
+              request.method == 'DELETE') {
+            expect(
+              request.body,
+              containsPair('delete_from_workspace_ids', [2, 3]),
+            );
+            return const HermesApiResponse(204, '');
+          }
           if (request.path == '/calendar-events/3' &&
               request.method == 'DELETE') {
             expect(
@@ -1198,6 +1244,9 @@ void main() {
         startsAt: '2026-05-20T10:00:00Z',
         syncToWorkspaceIds: [2, 3],
       );
+      await client.deleteTask(1, deleteFromWorkspaceIds: [1, 2, 3]);
+      await client.deleteReminder(2, deleteFromWorkspaceIds: [1, 3]);
+      await client.deleteEventCategory(4, deleteFromWorkspaceIds: [2, 3]);
       await client.deleteCalendarEvent(
         3,
         deleteFromWorkspaceIds: [1, 2],
@@ -1205,7 +1254,7 @@ void main() {
         recurringOccurrenceDate: '2026-05-27',
       );
 
-      expect(requests, hasLength(7));
+      expect(requests, hasLength(10));
     },
   );
 

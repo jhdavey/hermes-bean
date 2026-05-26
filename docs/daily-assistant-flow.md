@@ -97,6 +97,8 @@ flutter pub get
 flutter run --dart-define=HERMES_API_BASE_URL=http://127.0.0.1:8000/api
 ```
 
+For Android emulator runs, the app rewrites `localhost`/`127.0.0.1` to `10.0.2.2` so the emulator can reach the Mac-hosted Laravel server. For a physical phone, start Laravel with `php artisan serve --host=0.0.0.0 --port=8000` and use the Mac's LAN IP in `HERMES_API_BASE_URL`.
+
 Sign in with the account above. The app starts a Today session, loads live Today/chat/task/reminder/calendar/activity surfaces, keeps the approval card visible, and refreshes surfaces after sending a planning prompt.
 
 ## Test commands
