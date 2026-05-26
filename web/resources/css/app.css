@@ -988,8 +988,8 @@
 
 .hb-month-view {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 10px;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
     min-height: 0;
 }
 
@@ -997,11 +997,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 6px;
-    border: 1px solid var(--hb-border);
-    border-radius: 16px;
-    background: rgba(246, 250, 244, .78);
+    gap: 5px;
+    padding: 0;
 }
 
 .hb-month-arrow {
@@ -1011,7 +1008,7 @@
 }
 
 .hb-month-current {
-    min-height: 38px;
+    min-height: 34px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1019,8 +1016,8 @@
     border-radius: 999px;
     background: rgba(22, 163, 74, .12);
     color: var(--hb-accent-strong);
-    padding: 8px 18px;
-    font-size: 14px;
+    padding: 7px 14px;
+    font-size: 13px;
     font-weight: 950;
     line-height: 1;
     white-space: nowrap;
@@ -2100,8 +2097,12 @@
         height: 17px;
     }
 
-    .hb-month-pill {
+    .hb-topbar > .hb-month-nav {
         order: 3;
+    }
+
+    .hb-month-pill {
+        order: 5;
     }
 
     .hb-topbar > .hb-spacer {
@@ -2113,19 +2114,19 @@
     }
 
     .hb-critical {
-        order: 5;
-    }
-
-    .hb-topbar > [data-open-create] {
         order: 6;
     }
 
-    .hb-topbar > [data-refresh-calendar] {
+    .hb-topbar > [data-open-create] {
         order: 7;
     }
 
-    .hb-profile-menu {
+    .hb-topbar > [data-refresh-calendar] {
         order: 8;
+    }
+
+    .hb-profile-menu {
+        order: 9;
     }
 
     .hb-main {
@@ -2173,7 +2174,7 @@
     }
 
     .hb-calendar-card .hb-month-grid {
-        height: calc(100dvh - 128px);
+        height: calc(100dvh - 74px);
         overflow: hidden;
     }
 

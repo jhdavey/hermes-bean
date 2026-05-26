@@ -340,9 +340,10 @@ if (mount) {
             <div class="hb-app">
                 <header class="hb-topbar">
                     ${topNavMarkup()}
-                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(new Date()))}</span></button>
                     <span class="hb-spacer"></span>
-                    <button class="hb-header-pill" data-today type="button">${dayLabel(new Date())}</button>
+                    ${state.selected === 'today' && state.showMonth ? monthSwitcherMarkup(parseLocalDate(state.selectedDay)) : ''}
+                    <button class="hb-header-pill" data-today type="button">${escapeHtml(topbarTodayLabel(new Date()))}</button>
+                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(new Date()))}</span></button>
                     <button class="hb-critical" type="button" title="${critical} critical items">${critical}</button>
                     ${showAdd ? `<button class="hb-icon-button" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
                     ${showCalendarRefresh ? `<button class="hb-icon-button" type="button" data-refresh-calendar aria-label="Refresh calendar" title="Refresh calendar" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
@@ -779,7 +780,6 @@ if (mount) {
         const weekCount = totalCells / 7;
         return `
             <div class="hb-month-view">
-                ${monthScrollerMarkup(selected)}
                 <div class="hb-month-grid" style="--hb-month-week-count:${weekCount}">
                     ${Array.from({ length: 7 }, (_, index) => `<div class="hb-month-weekday">${weekdayShort(new Date(2026, 1, index + 1))}</div>`).join('')}
                     ${Array.from({ length: totalCells }, (_, index) => {
@@ -814,7 +814,7 @@ if (mount) {
             </button>`;
     }
 
-    function monthScrollerMarkup(selected) {
+    function monthSwitcherMarkup(selected) {
         const selectedMonth = new Date(selected.getFullYear(), selected.getMonth(), 1);
         return `
             <div class="hb-month-nav" aria-label="Month navigation">
@@ -2570,6 +2570,10 @@ if (mount) {
         if (sameDate(parsed, new Date())) return 'Today';
         if (sameDate(parsed, addDays(new Date(), 1))) return 'Tomorrow';
         return parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    function topbarTodayLabel(date) {
+        return parseLocalDate(date).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric' });
     }
 
     function timelineDayHeaderLabel(date) {
