@@ -1364,7 +1364,7 @@
 }
 
 .hb-timeline {
-    --hb-hour-height: 64px;
+    --hb-hour-height: 70.4px;
     display: grid;
     gap: 0;
     border: 1px solid var(--hb-border);

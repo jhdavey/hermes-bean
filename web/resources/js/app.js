@@ -2858,7 +2858,7 @@ if (mount) {
         if (visibleEnd <= dayStart || visibleStart >= dayEnd || visibleEnd <= visibleStart) return null;
         const minutesFromStart = Math.max(0, (visibleStart - dayStart) / 60000);
         const durationMinutes = Math.max(15, (visibleEnd - visibleStart) / 60000);
-        const hourHeight = 64;
+        const hourHeight = 70.4;
         return {
             minutes: Math.round(durationMinutes),
             css: `top:${(minutesFromStart / 60) * hourHeight}px;height:${(durationMinutes / 60) * hourHeight}px`,
