@@ -1776,14 +1776,14 @@
 
 .hb-bean-button {
     position: fixed;
-    left: 50%;
+    right: 24px;
     bottom: 20px;
     z-index: 44;
     width: 72px;
     height: 72px;
     display: grid;
     place-items: center;
-    transform: translateX(-50%);
+    transform: none;
     border: 1px solid rgba(22, 163, 74, .52);
     border-radius: 999px;
     background: linear-gradient(145deg, #fff 0%, #fbfffc 48%, #effaf2 100%);
@@ -1809,7 +1809,7 @@
 }
 
 .hb-bean-button:hover {
-    transform: translateX(-50%) translateY(-2px);
+    transform: translateY(-2px);
     border-color: rgba(22, 163, 74, .68);
     box-shadow: 0 14px 32px rgba(15, 23, 42, .13), inset 0 1px 0 rgba(255, 255, 255, .96);
 }
@@ -1824,7 +1824,7 @@
 }
 
 .hb-bean-button:active {
-    transform: translateX(-50%) translateY(-1px) scale(.985);
+    transform: translateY(-1px) scale(.985);
 }
 
 .hb-bean-button-active {
