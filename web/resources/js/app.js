@@ -340,7 +340,7 @@ if (mount) {
             <div class="hb-app">
                 <header class="hb-topbar">
                     ${topNavMarkup()}
-                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">‹ ${monthLabel(new Date())} ${icons.calendar}</button>
+                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(new Date()))}</span></button>
                     <span class="hb-spacer"></span>
                     <button class="hb-header-pill" data-today type="button">${dayLabel(new Date())}</button>
                     <button class="hb-critical" type="button" title="${critical} critical items">${critical}</button>
@@ -816,17 +816,10 @@ if (mount) {
 
     function monthScrollerMarkup(selected) {
         const selectedMonth = new Date(selected.getFullYear(), selected.getMonth(), 1);
-        const months = Array.from({ length: 13 }, (_, index) => {
-            const month = new Date(selectedMonth);
-            month.setMonth(selectedMonth.getMonth() + index - 6);
-            return month;
-        });
         return `
             <div class="hb-month-nav" aria-label="Month navigation">
                 <button class="hb-icon-button hb-month-arrow" type="button" data-shift-month="-1" aria-label="Previous month">${icons.chevronLeft}</button>
-                <div class="hb-month-scroller">
-                    ${months.map((month) => `<button class="hb-month-chip ${sameMonth(month, selected) ? 'hb-month-chip-active' : ''}" type="button" data-select-month="${dateOnly(month)}" aria-pressed="${sameMonth(month, selected)}"><strong>${month.toLocaleDateString(undefined, { month: 'short' })}</strong><span>${month.getFullYear()}</span></button>`).join('')}
-                </div>
+                <button class="hb-month-current" type="button" data-select-month="${dateOnly(selectedMonth)}" aria-pressed="true">${escapeHtml(monthLabel(selectedMonth))}</button>
                 <button class="hb-icon-button hb-month-arrow" type="button" data-shift-month="1" aria-label="Next month">${icons.chevronRight}</button>
             </div>`;
     }
@@ -1297,7 +1290,10 @@ if (mount) {
             render();
         });
         mount.querySelector('[data-calendar-month]')?.addEventListener('click', () => {
+            const today = new Date();
             state.selected = 'today';
+            state.selectedDay = dateOnly(today);
+            resetCalendarWindow(today);
             state.showMonth = true;
             render();
         });

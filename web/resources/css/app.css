@@ -994,10 +994,10 @@
 }
 
 .hb-month-nav {
-    display: grid;
-    grid-template-columns: 38px minmax(0, 1fr) 38px;
+    display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    gap: 6px;
     padding: 6px;
     border: 1px solid var(--hb-border);
     border-radius: 16px;
@@ -1008,6 +1008,23 @@
     width: 34px;
     height: 34px;
     border-radius: 12px;
+}
+
+.hb-month-current {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(22, 163, 74, .34);
+    border-radius: 999px;
+    background: rgba(22, 163, 74, .12);
+    color: var(--hb-accent-strong);
+    padding: 8px 18px;
+    font-size: 14px;
+    font-weight: 950;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
 }
 
 .hb-month-scroller {
