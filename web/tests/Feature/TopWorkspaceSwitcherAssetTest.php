@@ -16,4 +16,15 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
         $this->assertStringContainsString('topWorkspaceSwitcherMarkup()', $appJs);
         $this->assertStringContainsString('.hb-top-workspace-switcher', $appCss);
     }
+
+    public function test_web_resource_editors_include_workspace_picker_for_tasks_reminders_and_events(): void
+    {
+        $appJs = file_get_contents(resource_path('js/app.js'));
+
+        $this->assertStringContainsString('workspaceConnectionsMarkup(kind, item, workspaceId, editing)', $appJs);
+        $this->assertStringContainsString('sync_to_workspace_ids: syncTo', $appJs);
+        $this->assertStringContainsString("if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);", $appJs);
+        $this->assertStringContainsString("name=\"syncWorkspaceIds\"", $appJs);
+        $this->assertStringContainsString('Also assign to', $appJs);
+    }
 }

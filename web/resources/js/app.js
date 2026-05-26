@@ -1041,7 +1041,7 @@ if (mount) {
                     </div>
                     <button class="hb-button-ghost" type="button" data-open-categories>Manage categories</button>
                     ${!isReminder ? `<label class="hb-checkbox-row"><input type="checkbox" name="critical" ${item?.is_critical || item?.isCritical ? 'checked' : ''}> Critical</label>` : ''}
-                    ${isEvent ? eventConnectionsMarkup(item, workspaceId, editing) : ''}
+                    ${workspaceConnectionsMarkup(kind, item, workspaceId, editing)}
                     ${isEvent ? recurrenceFieldsMarkup(item) : ''}
                     ${isReminder ? reminderRecurrenceFieldsMarkup(item) : ''}
                     ${kind === 'task' && editing && !taskParentId(item) ? `<button class="hb-button-ghost" type="button" data-create-subtask="${item.id}">Add sub-task</button>` : ''}
@@ -1091,26 +1091,28 @@ if (mount) {
             </select></label>`;
     }
 
-    function eventConnectionsMarkup(item, workspaceId, editing) {
+    function workspaceConnectionsMarkup(kind, item, workspaceId, editing) {
         const linked = new Set(normalizeList(item?.linked_workspace_ids || item?.linkedWorkspaceIds).map(String));
         const sourceWorkspaceId = String(workspaceId || currentWorkspaceId() || '');
-        const otherWorkspaces = workspaces().filter((workspace) => String(workspace.id) !== sourceWorkspaceId);
-        const sourceWorkspace = workspaces().find((workspace) => String(workspace.id) === sourceWorkspaceId);
+        const allWorkspaces = workspaces();
+        const otherWorkspaces = allWorkspaces.filter((workspace) => String(workspace.id) !== sourceWorkspaceId);
+        const sourceWorkspace = allWorkspaces.find((workspace) => String(workspace.id) === sourceWorkspaceId);
+        const title = kind === 'event' ? 'Connections' : 'Workspaces';
         return `
-            <div class="hb-surface-soft hb-card-pad hb-event-connections">
-                <strong>Connections</strong>
-                <label class="hb-label">Workspace
+            <div class="hb-surface-soft hb-card-pad hb-event-connections hb-workspace-picker">
+                <strong>${title}</strong>
+                <label class="hb-label">Primary workspace
                     <select class="hb-select" name="workspaceId" ${editing ? 'disabled' : ''}>
-                        ${workspaces().map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === sourceWorkspaceId ? 'selected' : ''}>${escapeHtml(workspace.name || 'Workspace')}</option>`).join('')}
+                        ${allWorkspaces.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === sourceWorkspaceId ? 'selected' : ''}>${escapeHtml(workspace.name || 'Workspace')}</option>`).join('')}
                     </select>
                 </label>
                 ${editing ? `<input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}"><p class="hb-item-meta">Saved in ${escapeHtml(sourceWorkspace?.name || 'this workspace')}.</p>` : ''}
-                ${otherWorkspaces.length ? `<div class="hb-label">Connected workspaces
+                ${otherWorkspaces.length ? `<div class="hb-label">Also assign to
                     <div class="hb-option-list">
                         ${otherWorkspaces.map((workspace) => `<label class="hb-switch-row"><input type="checkbox" name="syncWorkspaceIds" value="${escapeAttr(workspace.id)}" ${linked.has(String(workspace.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(workspace.name || 'Workspace')}</strong><small>${escapeHtml(workspace.type || workspace.kind || 'workspace')}</small></span></label>`).join('')}
                     </div>
                 </div>` : '<p class="hb-item-meta">No other workspaces connected to this account.</p>'}
-                ${googleEventConnectionMarkup(item, sourceWorkspace)}
+                ${kind === 'event' ? googleEventConnectionMarkup(item, sourceWorkspace) : ''}
             </div>`;
     }
 
@@ -1497,6 +1499,7 @@ if (mount) {
     async function saveItem(kind, item, data, form) {
         const color = data.color || '#34C759';
         if (kind === 'task') {
+            const syncTo = selectedSyncWorkspaceIds(form);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const parentTaskId = data.parentTaskId || taskParentId(item);
             const body = {
@@ -1511,9 +1514,12 @@ if (mount) {
                     ...existingMetadata,
                     ...(parentTaskId ? { parent_task_id: Number(parentTaskId) } : {}),
                 },
+                sync_to_workspace_ids: syncTo,
             };
+            if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
             item ? await api(`/tasks/${item.id}`, { method: 'PATCH', body }) : await api('/tasks', { method: 'POST', body });
         } else if (kind === 'reminder') {
+            const syncTo = selectedSyncWorkspaceIds(form);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const body = {
                 title: data.title,
@@ -1528,10 +1534,12 @@ if (mount) {
                     interval: data.reminderInterval ? Number(data.reminderInterval) : null,
                     interval_unit: data.reminderIntervalUnit || null,
                 },
+                sync_to_workspace_ids: syncTo,
             };
+            if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
             item ? await api(`/reminders/${item.id}`, { method: 'PATCH', body }) : await api('/reminders', { method: 'POST', body });
         } else if (kind === 'event') {
-            const syncTo = Array.from(form.querySelectorAll('input[name="syncWorkspaceIds"]:checked')).map((input) => Number(input.value)).filter(Boolean);
+            const syncTo = selectedSyncWorkspaceIds(form);
             const allDay = form.elements.allDay?.checked || false;
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const body = {
@@ -1558,6 +1566,12 @@ if (mount) {
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
             item ? await api(`/calendar-events/${item.id}`, { method: 'PATCH', body }) : await api('/calendar-events', { method: 'POST', body });
         }
+    }
+
+    function selectedSyncWorkspaceIds(form) {
+        return Array.from(form.querySelectorAll('input[name="syncWorkspaceIds"]:checked'))
+            .map((input) => Number(input.value))
+            .filter(Boolean);
     }
 
     function syncSelectedCategoryColor(event) {
