@@ -1145,6 +1145,13 @@
     scrollbar-width: thin;
 }
 
+.hb-month-event-list-scroll {
+    max-height: 62px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+}
+
 .hb-month-event {
     min-width: 0;
     display: grid;

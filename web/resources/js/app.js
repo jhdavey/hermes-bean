@@ -800,7 +800,7 @@ if (mount) {
                 <button class="hb-month-date" type="button" data-select-day="${dateOnly(day)}" aria-label="${escapeAttr(dayLabel(day))}">
                     <strong>${dayNumber}</strong>
                 </button>
-                <div class="hb-month-event-list">
+                <div class="hb-month-event-list ${events.length >= 3 ? 'hb-month-event-list-scroll' : ''}">
                     ${events.map((event) => monthEventMarkup(event)).join('')}
                 </div>
             </div>`;
