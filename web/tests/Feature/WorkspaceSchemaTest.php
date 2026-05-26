@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
 use App\Models\EventCategory;
+use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\WorkspaceItemLink;
@@ -371,5 +372,92 @@ class WorkspaceSchemaTest extends TestCase
 
         $this->assertDatabaseMissing('calendar_events', ['id' => $copiedId]);
         $this->assertSame(0, WorkspaceItemLink::where('source_type', 'calendar_events')->count());
+    }
+
+    public function test_task_update_can_replace_selected_linked_workspaces(): void
+    {
+        $token = $this->apiToken('update-linked-task@example.com');
+        $user = User::where('email', 'update-linked-task@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+        $work = app(WorkspaceService::class)->createHousehold($user, 'Work');
+
+        $taskId = $this->withToken($token)->postJson('/api/tasks', [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'Buy snacks',
+            'type' => 'todo',
+            'sync_to_workspace_ids' => [$family->id],
+        ])->assertCreated()->json('data.id');
+        $familyCopyId = Task::where('workspace_id', $family->id)->value('id');
+
+        $this->withToken($token)->patchJson('/api/tasks/'.$taskId, [
+            'title' => 'Buy snacks and drinks',
+            'sync_to_workspace_ids' => [$work->id],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('tasks', ['id' => $taskId, 'workspace_id' => $personalWorkspaceId, 'title' => 'Buy snacks and drinks']);
+        $this->assertDatabaseMissing('tasks', ['id' => $familyCopyId]);
+        $this->assertDatabaseHas('tasks', ['workspace_id' => $work->id, 'title' => 'Buy snacks and drinks']);
+        $this->withToken($token)->getJson('/api/tasks?workspace_id='.$personalWorkspaceId)
+            ->assertOk()
+            ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $work->id]);
+    }
+
+    public function test_reminder_update_can_replace_selected_linked_workspaces(): void
+    {
+        $token = $this->apiToken('update-linked-reminder@example.com');
+        $user = User::where('email', 'update-linked-reminder@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+        $work = app(WorkspaceService::class)->createHousehold($user, 'Work');
+
+        $reminderId = $this->withToken($token)->postJson('/api/reminders', [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'Pack lunch',
+            'remind_at' => '2026-05-21T14:00:00Z',
+            'sync_to_workspace_ids' => [$family->id],
+        ])->assertCreated()->json('data.id');
+        $familyCopyId = Reminder::where('workspace_id', $family->id)->value('id');
+
+        $this->withToken($token)->patchJson('/api/reminders/'.$reminderId, [
+            'title' => 'Pack lunchbox',
+            'sync_to_workspace_ids' => [$work->id],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('reminders', ['id' => $reminderId, 'workspace_id' => $personalWorkspaceId, 'title' => 'Pack lunchbox']);
+        $this->assertDatabaseMissing('reminders', ['id' => $familyCopyId]);
+        $this->assertDatabaseHas('reminders', ['workspace_id' => $work->id, 'title' => 'Pack lunchbox']);
+        $this->withToken($token)->getJson('/api/reminders?workspace_id='.$personalWorkspaceId)
+            ->assertOk()
+            ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $work->id]);
+    }
+
+    public function test_calendar_event_update_can_replace_selected_linked_workspaces(): void
+    {
+        $token = $this->apiToken('update-linked-calendar@example.com');
+        $user = User::where('email', 'update-linked-calendar@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+        $work = app(WorkspaceService::class)->createHousehold($user, 'Work');
+
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'School meeting',
+            'starts_at' => '2026-05-21T14:00:00Z',
+            'sync_to_workspace_ids' => [$family->id],
+        ])->assertCreated()->json('data.id');
+        $familyCopyId = CalendarEvent::where('workspace_id', $family->id)->value('id');
+
+        $this->withToken($token)->patchJson('/api/calendar-events/'.$eventId, [
+            'title' => 'School meeting moved',
+            'sync_to_workspace_ids' => [$work->id],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('calendar_events', ['id' => $eventId, 'workspace_id' => $personalWorkspaceId, 'title' => 'School meeting moved']);
+        $this->assertDatabaseMissing('calendar_events', ['id' => $familyCopyId]);
+        $this->assertDatabaseHas('calendar_events', ['workspace_id' => $work->id, 'title' => 'School meeting moved']);
+        $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$personalWorkspaceId)
+            ->assertOk()
+            ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $work->id]);
     }
 }

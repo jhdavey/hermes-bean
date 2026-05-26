@@ -323,7 +323,7 @@ class HermesApiClient {
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
-    List<Object> syncToWorkspaceIds = const [],
+    List<Object>? syncToWorkspaceIds,
     bool clearCategory = false,
     bool clearColor = false,
     bool clearNotes = false,
@@ -338,7 +338,7 @@ class HermesApiClient {
       if (color != null || clearColor) 'color': color,
       if (isCritical != null) 'is_critical': isCritical,
       if (metadata != null) 'metadata': metadata,
-      if (syncToWorkspaceIds.isNotEmpty)
+      if (syncToWorkspaceIds != null)
         'sync_to_workspace_ids': syncToWorkspaceIds,
     };
     final data = await _sendJson('PATCH', '/tasks/$taskId', body: body);
@@ -423,7 +423,7 @@ class HermesApiClient {
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
-    List<Object> syncToWorkspaceIds = const [],
+    List<Object>? syncToWorkspaceIds,
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -436,7 +436,7 @@ class HermesApiClient {
       if (color != null || clearColor) 'color': color,
       if (isCritical != null) 'is_critical': isCritical,
       if (metadata != null) 'metadata': metadata,
-      if (syncToWorkspaceIds.isNotEmpty)
+      if (syncToWorkspaceIds != null)
         'sync_to_workspace_ids': syncToWorkspaceIds,
     };
     final data = await _sendJson('PATCH', '/reminders/$reminderId', body: body);
@@ -607,7 +607,7 @@ class HermesApiClient {
     bool? isCritical,
     String? recurrence,
     Map<String, Object?>? metadata,
-    List<Object> syncToWorkspaceIds = const [],
+    List<Object>? syncToWorkspaceIds,
   }) async {
     final data = await _sendJson(
       'PATCH',
@@ -621,7 +621,7 @@ class HermesApiClient {
         'recurrence': recurrence,
         if (isCritical != null) 'is_critical': isCritical,
         if (metadata != null) 'metadata': metadata,
-        if (syncToWorkspaceIds.isNotEmpty)
+        if (syncToWorkspaceIds != null)
           'sync_to_workspace_ids': syncToWorkspaceIds,
       },
     );

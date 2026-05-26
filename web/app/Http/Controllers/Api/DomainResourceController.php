@@ -12,6 +12,7 @@ use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\RecurringCalendarEventService;
 use App\Services\StructuredHermesActionService;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
@@ -30,6 +31,7 @@ class DomainResourceController extends Controller
     public function __construct(
         private readonly StructuredHermesActionService $actions,
         private readonly GoogleCalendarSyncService $googleCalendar,
+        private readonly RecurringCalendarEventService $recurringCalendarEvents,
     ) {}
 
     public function listTasks(Request $request): JsonResponse
@@ -205,10 +207,13 @@ class DomainResourceController extends Controller
             }
         }
 
+        $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
-        $this->syncTo($request, $model->refresh(), $syncTo);
+        if ($syncToProvided) {
+            $this->replaceSyncTo($request, $model->refresh(), 'tasks', $syncTo);
+        }
 
         return response()->json(['data' => $model->refresh()]);
     }
@@ -265,10 +270,13 @@ class DomainResourceController extends Controller
         ]);
         $this->normalizeDateFields($validated, ['remind_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
+        $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
-        $this->syncTo($request, $model->refresh(), $syncTo);
+        if ($syncToProvided) {
+            $this->replaceSyncTo($request, $model->refresh(), 'reminders', $syncTo);
+        }
 
         return response()->json(['data' => $model->refresh()]);
     }
@@ -305,6 +313,7 @@ class DomainResourceController extends Controller
         unset($validated['sync_to_workspace_ids']);
         $event = CalendarEvent::create($this->owned($request, $validated));
         $this->syncTo($request, $event, $syncTo);
+        $this->refreshRecurringCalendarEvents($request, $event->refresh());
 
         return $this->created($this->googleCalendar->exportEvent($event->refresh()));
     }
@@ -329,10 +338,14 @@ class DomainResourceController extends Controller
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
+        $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
-        $this->syncTo($request, $model->refresh(), $syncTo);
+        if ($syncToProvided) {
+            $this->replaceSyncTo($request, $model->refresh(), 'calendar_events', $syncTo);
+        }
+        $this->refreshRecurringCalendarEvents($request, $model->refresh());
 
         return response()->json(['data' => $this->googleCalendar->exportEvent($model->refresh())]);
     }
@@ -376,11 +389,22 @@ class DomainResourceController extends Controller
             && $recurringOccurrenceDate
             && $this->calendarEventIsRecurring($event)
         ) {
-            $eventsToDelete->each(fn (CalendarEvent $event): CalendarEvent => $this->applyRecurringCalendarDelete($event, $recurringDeleteMode, $recurringOccurrenceDate));
+            $eventsToDelete->each(function (CalendarEvent $event) use ($recurringDeleteMode, $recurringOccurrenceDate): void {
+                if ($recurringDeleteMode === 'single') {
+                    $this->recurringCalendarEvents->deleteGeneratedOccurrence($event, $recurringOccurrenceDate);
+                }
+                if ($recurringDeleteMode === 'future') {
+                    $this->recurringCalendarEvents->deleteGeneratedOccurrencesFrom($event, $recurringOccurrenceDate);
+                }
+                $this->applyRecurringCalendarDelete($event, $recurringDeleteMode, $recurringOccurrenceDate);
+            });
 
             return response()->json(status: 204);
         }
 
+        foreach ($eventsToDelete as $eventToDelete) {
+            $this->recurringCalendarEvents->deleteGeneratedOccurrences($eventToDelete);
+        }
         $eventIds = $eventsToDelete->pluck('id')->map(fn ($id): int => (int) $id)->all();
         foreach ($eventsToDelete as $eventToDelete) {
             $this->googleCalendar->deleteExportedEvent($eventToDelete);
@@ -678,6 +702,56 @@ class DomainResourceController extends Controller
             $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
         }
         app(WorkspaceItemSyncService::class)->syncToWorkspaceIds($model, $workspaceIds, $request->user());
+    }
+
+    private function replaceSyncTo(Request $request, Model $model, string $type, array $workspaceIds): void
+    {
+        $workspaceIds = array_values(array_unique(array_map('intval', $workspaceIds)));
+        $workspaceService = app(WorkspaceService::class);
+        foreach ($workspaceIds as $workspaceId) {
+            if ($workspaceId > 0) {
+                $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
+            }
+        }
+
+        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
+        $desiredWorkspaceIds = collect([(int) $model->workspace_id])
+            ->merge($workspaceIds)
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $linkedItems = $model instanceof CalendarEvent
+            ? $this->linkedCalendarEventsByWorkspace($model, $accessibleWorkspaceIds)
+            : $this->linkedItemsByWorkspace($model, $type, $accessibleWorkspaceIds);
+
+        $itemsToRemove = $linkedItems
+            ->reject(fn (Model $item): bool => in_array((int) $item->workspace_id, $desiredWorkspaceIds, true))
+            ->values();
+
+        if ($itemsToRemove->isNotEmpty()) {
+            if ($model instanceof CalendarEvent) {
+                $itemsToRemove->each(function (CalendarEvent $event): void {
+                    $this->recurringCalendarEvents->deleteGeneratedOccurrences($event);
+                    $this->googleCalendar->deleteExportedEvent($event);
+                });
+            }
+            $idsToRemove = $itemsToRemove->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            $model::query()->whereIn('id', $idsToRemove)->delete();
+            $this->deleteWorkspaceItemLinksFor($type, $idsToRemove);
+        }
+
+        $this->syncTo($request, $model, $workspaceIds);
+    }
+
+    private function refreshRecurringCalendarEvents(Request $request, CalendarEvent $event): void
+    {
+        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
+        $this->linkedCalendarEventsByWorkspace($event, $accessibleWorkspaceIds)
+            ->values()
+            ->each(fn (CalendarEvent $calendarEvent): int => $this->recurringCalendarEvents->refreshMaterializedOccurrences($calendarEvent));
     }
 
     private function accessibleWorkspaceIds(Request $request): array

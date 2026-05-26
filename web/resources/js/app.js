@@ -340,6 +340,7 @@ if (mount) {
             <div class="hb-app">
                 <header class="hb-topbar">
                     ${topNavMarkup()}
+                    ${topWorkspaceSwitcherMarkup()}
                     <span class="hb-spacer"></span>
                     ${state.selected === 'today' && state.showMonth ? monthSwitcherMarkup(parseLocalDate(state.selectedDay)) : ''}
                     <button class="hb-header-pill" data-today type="button">${escapeHtml(topbarTodayLabel(new Date()))}</button>
@@ -556,6 +557,21 @@ if (mount) {
                 </label>
                 <p class="hb-item-meta">Using ${escapeHtml(workspaceDisplayName(activeWorkspace))}.</p>
             </div>`;
+    }
+
+    function topWorkspaceSwitcherMarkup() {
+        const workspaceItems = workspaces();
+        if (!workspaceItems.length) return '';
+        const activeWorkspaceId = String(currentWorkspaceId() || '');
+        const activeWorkspace = workspaceItems.find((workspace) => String(workspace.id) === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault) || workspaceItems[0];
+        return `
+            <label class="hb-top-workspace-switcher" title="Switch workspace">
+                <span class="hb-top-workspace-icon" aria-hidden="true">${icons.settings}</span>
+                <span class="hb-top-workspace-label">Workspace</span>
+                <select data-top-workspace-select ${workspaceItems.length < 2 ? 'disabled' : ''} aria-label="Switch workspace">
+                    ${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}
+                </select>
+            </label>`;
     }
 
     function topProfileMenuMarkup() {
@@ -1356,6 +1372,7 @@ if (mount) {
         mount.querySelectorAll('[data-member-role]').forEach((select) => select.addEventListener('change', () => updateMemberRole(select.dataset.workspaceId, select.dataset.memberRole, select.value)));
         mount.querySelectorAll('[data-set-workspace]').forEach((button) => button.addEventListener('click', () => setWorkspace(button.dataset.setWorkspace)));
         mount.querySelector('[data-workspace-select]')?.addEventListener('change', (event) => setWorkspace(event.currentTarget.value));
+        mount.querySelector('[data-top-workspace-select]')?.addEventListener('change', (event) => setWorkspace(event.currentTarget.value));
         mount.querySelectorAll('[data-pref]').forEach((input) => input.addEventListener('change', updateNotificationPrefs));
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));

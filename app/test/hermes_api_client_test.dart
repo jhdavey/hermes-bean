@@ -1258,6 +1258,59 @@ void main() {
     },
   );
 
+  test(
+    'sends empty sync workspace arrays on updates so assignments can be cleared',
+    () async {
+      final requests = <HermesApiRequest>[];
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        bearerToken: 'token-123',
+        transport: (request) async {
+          requests.add(request);
+          if (request.path == '/tasks/1' && request.method == 'PATCH') {
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {'id': 1, 'title': 'Task'},
+              }),
+            );
+          }
+          if (request.path == '/reminders/2' && request.method == 'PATCH') {
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {'id': 2, 'title': 'Reminder'},
+              }),
+            );
+          }
+          if (request.path == '/calendar-events/3' &&
+              request.method == 'PATCH') {
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {'id': 3, 'title': 'Event'},
+              }),
+            );
+          }
+          fail('Unexpected request: ${request.method} ${request.path}');
+        },
+      );
+
+      await client.updateTask(1, syncToWorkspaceIds: const []);
+      await client.updateReminder(2, syncToWorkspaceIds: const []);
+      await client.updateCalendarEvent(
+        3,
+        title: 'Event',
+        startsAt: '2026-05-20T10:00:00Z',
+        syncToWorkspaceIds: const [],
+      );
+
+      expect(requests[0].body, containsPair('sync_to_workspace_ids', const []));
+      expect(requests[1].body, containsPair('sync_to_workspace_ids', const []));
+      expect(requests[2].body, containsPair('sync_to_workspace_ids', const []));
+    },
+  );
+
   test('throws useful error for non-success API responses', () async {
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),

@@ -21,4 +21,5 @@ Artisan::command('tasks:purge-completed', function () {
 })->purpose('Delete completed tasks 10 days after completion');
 
 Schedule::command('tasks:purge-completed')->daily();
+Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();

@@ -297,6 +297,44 @@ void main() {
     },
   );
 
+  testWidgets('top app bar workspace dropdown switches active workspace', (
+    WidgetTester tester,
+  ) async {
+    final api = _WorkspaceFakeHermesApiClient()
+      ..workspaces = const [
+        HermesWorkspace(
+          id: '1',
+          name: 'Personal',
+          type: 'personal',
+          role: 'owner',
+          active: true,
+          isDefault: true,
+        ),
+        HermesWorkspace(
+          id: '2',
+          name: 'Family',
+          type: 'household',
+          role: 'owner',
+        ),
+      ];
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('top-workspace-switcher')), findsOneWidget);
+    expect(find.text('Personal'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('top-workspace-switcher')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('top-workspace-option-2')));
+    await tester.pumpAndSettle();
+
+    expect(api.defaultWorkspaceSetTo, 2);
+    expect(find.text('Family'), findsWidgets);
+  });
+
   testWidgets('inviting a household member shows a copyable invite link', (
     WidgetTester tester,
   ) async {
@@ -1051,11 +1089,15 @@ void main() {
 
       await tester.tap(find.byKey(const Key('nav-settings')));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const Key('open-bean-preferences')));
+      await tester.ensureVisible(
+        find.byKey(const Key('open-bean-preferences')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('open-bean-preferences')));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const Key('agent-personality-coach')));
+      await tester.ensureVisible(
+        find.byKey(const Key('agent-personality-coach')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('agent-personality-coach')));
       await tester.tap(find.byKey(const Key('onboarding-priority-Family')));
@@ -1076,11 +1118,15 @@ void main() {
       expect(find.textContaining('Coach'), findsOneWidget);
       expect(find.textContaining('Family'), findsOneWidget);
 
-      await tester.ensureVisible(find.byKey(const Key('open-bean-preferences')));
+      await tester.ensureVisible(
+        find.byKey(const Key('open-bean-preferences')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('open-bean-preferences')));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const Key('agent-personality-coach')));
+      await tester.ensureVisible(
+        find.byKey(const Key('agent-personality-coach')),
+      );
       await tester.pumpAndSettle();
       expect(
         tester
@@ -4938,7 +4984,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
-    List<Object> syncToWorkspaceIds = const [],
+    List<Object>? syncToWorkspaceIds,
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -5265,7 +5311,7 @@ class _EditableReminderFakeHermesApiClient
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
-    List<Object> syncToWorkspaceIds = const [],
+    List<Object>? syncToWorkspaceIds,
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -5405,7 +5451,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
-    List<Object> syncToWorkspaceIds = const [],
+    List<Object>? syncToWorkspaceIds,
     bool clearCategory = false,
     bool clearColor = false,
     bool clearNotes = false,
@@ -5439,7 +5485,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     String? color,
     bool? isCritical,
     Map<String, Object?>? metadata,
-    List<Object> syncToWorkspaceIds = const [],
+    List<Object>? syncToWorkspaceIds,
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
@@ -5794,7 +5840,7 @@ class _EditableCalendarFakeHermesApiClient
     String? recurrence,
     bool? isCritical,
     Map<String, Object?>? metadata,
-    List<Object> syncToWorkspaceIds = const [],
+    List<Object>? syncToWorkspaceIds,
   }) async {
     updatedEvent = HermesCalendarEvent(
       id: eventId,

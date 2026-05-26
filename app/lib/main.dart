@@ -610,6 +610,22 @@ Future<bool> _confirmDestructiveAction(
   return confirmed == true;
 }
 
+List<Object> _initialSyncWorkspaceIds({
+  required List<int> linkedWorkspaceIds,
+  required int? workspaceId,
+  required String? activeWorkspaceId,
+}) {
+  final activeNumericId = activeWorkspaceId == null
+      ? null
+      : int.tryParse(activeWorkspaceId);
+  final currentWorkspaceId = activeNumericId ?? workspaceId;
+
+  return linkedWorkspaceIds
+      .where((id) => id != currentWorkspaceId)
+      .map<Object>((id) => id)
+      .toList();
+}
+
 Future<List<Object>?> _confirmWorkspaceDeleteSelection(
   BuildContext context, {
   required String itemTitle,
@@ -632,21 +648,24 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
     for (final workspace in workspaces)
       if (workspace.numericId != null) workspace.numericId!: workspace,
   };
-  final choices = linkedIds
-      .map(
-        (id) =>
-            workspaceById[id] ??
-            HermesWorkspace(
-              id: id.toString(),
-              name: id == workspaceId ? 'Current workspace' : 'Workspace $id',
-            ),
-      )
-      .toList()
-    ..sort((a, b) {
-      if (a.numericId == workspaceId) return -1;
-      if (b.numericId == workspaceId) return 1;
-      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-    });
+  final choices =
+      linkedIds
+          .map(
+            (id) =>
+                workspaceById[id] ??
+                HermesWorkspace(
+                  id: id.toString(),
+                  name: id == workspaceId
+                      ? 'Current workspace'
+                      : 'Workspace $id',
+                ),
+          )
+          .toList()
+        ..sort((a, b) {
+          if (a.numericId == workspaceId) return -1;
+          if (b.numericId == workspaceId) return 1;
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        });
 
   if (choices.isEmpty) {
     final confirmed = await _confirmDestructiveAction(
@@ -658,7 +677,9 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
     return confirmed ? const [] : null;
   }
 
-  final selectedIds = choices.map((workspace) => workspace.numericId ?? workspace.id).toSet();
+  final selectedIds = choices
+      .map((workspace) => workspace.numericId ?? workspace.id)
+      .toSet();
   return showDialog<List<Object>>(
     context: context,
     builder: (context) => StatefulBuilder(
@@ -670,13 +691,17 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('"$itemTitle" is linked across workspaces. Choose where to remove it.'),
+                Text(
+                  '"$itemTitle" is linked across workspaces. Choose where to remove it.',
+                ),
                 const SizedBox(height: 10),
                 for (final workspace in choices)
                   CheckboxListTile(
                     key: Key('$itemType-delete-workspace-${workspace.id}'),
                     contentPadding: EdgeInsets.zero,
-                    value: selectedIds.contains(workspace.numericId ?? workspace.id),
+                    value: selectedIds.contains(
+                      workspace.numericId ?? workspace.id,
+                    ),
                     onChanged: (value) => setDialogState(() {
                       final id = workspace.numericId ?? workspace.id;
                       if (value ?? false) {
@@ -685,8 +710,12 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
                         selectedIds.remove(id);
                       }
                     }),
-                    title: Text(workspace.isPersonal ? 'Personal' : workspace.name),
-                    subtitle: workspace.numericId == workspaceId ? const Text('Current copy') : null,
+                    title: Text(
+                      workspace.isPersonal ? 'Personal' : workspace.name,
+                    ),
+                    subtitle: workspace.numericId == workspaceId
+                        ? const Text('Current copy')
+                        : null,
                   ),
               ],
             ),
@@ -699,7 +728,9 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
             FilledButton(
               key: Key('$itemType-delete-selected-workspaces-action'),
               style: _destructiveFilledButtonStyle(),
-              onPressed: canDelete ? () => Navigator.of(context).pop(selectedIds.toList()) : null,
+              onPressed: canDelete
+                  ? () => Navigator.of(context).pop(selectedIds.toList())
+                  : null,
               child: Text('Delete $itemType'),
             ),
           ],
@@ -2700,6 +2731,127 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
+  String _workspaceDisplayName(HermesWorkspace workspace) =>
+      workspace.isPersonal ? 'Personal' : workspace.name;
+
+  Future<void> _switchWorkspaceFromTopBar(HermesWorkspace workspace) async {
+    final workspaceId = workspace.numericId;
+    if (workspaceId == null || _busy) return;
+    if ((_user?.activeWorkspace?.id ?? '').toString() == workspace.id ||
+        _user?.activeWorkspace?.numericId == workspaceId) {
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.apiClient.setDefaultWorkspace(workspaceId);
+      if (!mounted) return;
+      await _loadSignedIn(
+        loadingStatusText: 'Switching to ${_workspaceDisplayName(workspace)}…',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _error = beanFriendlyErrorMessage(
+          error,
+          action: 'switch workspaces',
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _topWorkspaceSwitcher() {
+    final user = _user;
+    final workspaces = user?.workspaces ?? const <HermesWorkspace>[];
+    if (_phase != _AuthPhase.signedIn || workspaces.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final activeWorkspace =
+        user?.activeWorkspace ??
+        workspaces.firstWhere(
+          (workspace) => workspace.active || workspace.isDefault,
+          orElse: () => workspaces.first,
+        );
+    final activeLabel = _workspaceDisplayName(activeWorkspace);
+
+    return PopupMenuButton<int>(
+      key: const Key('top-workspace-switcher'),
+      tooltip: 'Switch workspace',
+      enabled: !_busy && workspaces.length > 1,
+      onSelected: (workspaceId) {
+        final workspace = workspaces.firstWhere(
+          (candidate) => candidate.numericId == workspaceId,
+          orElse: () => activeWorkspace,
+        );
+        unawaited(_switchWorkspaceFromTopBar(workspace));
+      },
+      itemBuilder: (context) => [
+        for (final workspace in workspaces)
+          PopupMenuItem<int>(
+            key: Key('top-workspace-option-${workspace.id}'),
+            value: workspace.numericId,
+            enabled: workspace.numericId != null,
+            child: Row(
+              children: [
+                Icon(
+                  workspace.id == activeWorkspace.id
+                      ? Icons.check_circle_rounded
+                      : Icons.home_work_outlined,
+                  size: 18,
+                  color: workspace.id == activeWorkspace.id
+                      ? HeyBeanTheme.accentStrong
+                      : HeyBeanTheme.muted,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    _workspaceDisplayName(workspace),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface.withValues(alpha: .76),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: HeyBeanTheme.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.home_work_outlined,
+              size: 16,
+              color: HeyBeanTheme.accentStrong,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                activeLabel,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 2),
+            const Icon(Icons.keyboard_arrow_down_rounded, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final criticalItemCount = _criticalItemCountForToday();
@@ -2752,6 +2904,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                     : null,
                 actions: [
                   if (_phase == _AuthPhase.signedIn) ...[
+                    _topWorkspaceSwitcher(),
+                    const SizedBox(width: 8),
                     _CalendarHeaderButton(
                       key: const Key('calendar-today-button'),
                       label: _calendarHeaderDayLabel(DateTime.now()),
@@ -3961,7 +4115,11 @@ class _CommandCenterContent extends StatelessWidget {
     List<String> googleCalendarIds,
   })
   onTaskSaved;
-  final Future<void> Function(HermesTask task, {List<Object> deleteFromWorkspaceIds}) onTaskDeleted;
+  final Future<void> Function(
+    HermesTask task, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onTaskDeleted;
   final Future<void> Function(
     HermesReminder? reminder, {
     required String title,
@@ -3975,7 +4133,11 @@ class _CommandCenterContent extends StatelessWidget {
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
-  final Future<void> Function(HermesReminder reminder, {List<Object> deleteFromWorkspaceIds}) onReminderDeleted;
+  final Future<void> Function(
+    HermesReminder reminder, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onReminderDeleted;
   final Future<void> Function({
     required String title,
     required String startsAt,
@@ -4022,7 +4184,10 @@ class _CommandCenterContent extends StatelessWidget {
     required String color,
   })
   onEventCategorySaved;
-  final Future<void> Function(HermesEventCategory category, {List<Object> deleteFromWorkspaceIds})
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
   onEventCategoryDeleted;
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
@@ -4139,6 +4304,8 @@ class _CommandCenterContent extends StatelessWidget {
                 calendar: calendar,
                 eventCategories: eventCategories,
                 googleCalendarStatus: googleCalendarStatus,
+                workspaces: user.workspaces,
+                activeWorkspaceId: user.activeWorkspace?.id,
                 onEventTap: onCalendarEventEdited,
                 onEventCategorySaved: onEventCategorySaved,
                 onEventCategoryDeleted: onEventCategoryDeleted,
@@ -5178,7 +5345,11 @@ class _TodayHomeView extends StatelessWidget {
     List<String> googleCalendarIds,
   })
   onTaskSaved;
-  final Future<void> Function(HermesTask task, {List<Object> deleteFromWorkspaceIds}) onTaskDeleted;
+  final Future<void> Function(
+    HermesTask task, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onTaskDeleted;
   final Future<void> Function({
     required String title,
     required String startsAt,
@@ -5225,7 +5396,10 @@ class _TodayHomeView extends StatelessWidget {
     required String color,
   })
   onEventCategorySaved;
-  final Future<void> Function(HermesEventCategory category, {List<Object> deleteFromWorkspaceIds})
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
   onEventCategoryDeleted;
 
   @override
@@ -5254,6 +5428,8 @@ class _TodayHomeView extends StatelessWidget {
                 calendar: calendar,
                 eventCategories: eventCategories,
                 googleCalendarStatus: googleCalendarStatus,
+                workspaces: user.workspaces,
+                activeWorkspaceId: user.activeWorkspace?.id,
                 selectedDay: selectedDay,
                 startHour: startHour,
                 endHour: endHour,
@@ -5342,6 +5518,13 @@ class _TodayHomeView extends StatelessWidget {
       activeWorkspaceId: user.activeWorkspace?.id,
       googleCalendarStatus: googleCalendarStatus,
       initialGoogleCalendarIds: task?.googleCalendarIds ?? const [],
+      initialSyncWorkspaceIds: task == null
+          ? const []
+          : _initialSyncWorkspaceIds(
+              linkedWorkspaceIds: task.linkedWorkspaceIds,
+              workspaceId: task.workspaceId,
+              activeWorkspaceId: user.activeWorkspace?.id,
+            ),
     );
     if (result == null || !context.mounted) return;
     if (result['delete'] == true && task != null) {
@@ -5520,6 +5703,8 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     required this.calendar,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
     required this.selectedDay,
     required this.startHour,
     required this.endHour,
@@ -5533,6 +5718,8 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
   final DateTime selectedDay;
   final int startHour;
   final int endHour;
@@ -5566,7 +5753,10 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     required String color,
   })
   onEventCategorySaved;
-  final Future<void> Function(HermesEventCategory category, {List<Object> deleteFromWorkspaceIds})
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
   onEventCategoryDeleted;
 
   @override
@@ -5763,6 +5953,8 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                               calendar: widget.calendar,
                               eventCategories: widget.eventCategories,
                               googleCalendarStatus: widget.googleCalendarStatus,
+                              workspaces: widget.workspaces,
+                              activeWorkspaceId: widget.activeWorkspaceId,
                               selectedDay: _dateForPage(page),
                               today: today,
                               startHour: visibleHours.first,
@@ -5843,6 +6035,8 @@ class _TwoDayTimelinePage extends StatelessWidget {
     required this.calendar,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
     required this.selectedDay,
     required this.today,
     required this.startHour,
@@ -5858,6 +6052,8 @@ class _TwoDayTimelinePage extends StatelessWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
   final DateTime selectedDay;
   final DateTime today;
   final int startHour;
@@ -5893,7 +6089,10 @@ class _TwoDayTimelinePage extends StatelessWidget {
     required String color,
   })
   onEventCategorySaved;
-  final Future<void> Function(HermesEventCategory category, {List<Object> deleteFromWorkspaceIds})
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
   onEventCategoryDeleted;
 
   @override
@@ -5965,6 +6164,8 @@ class _TwoDayTimelinePage extends StatelessWidget {
                   events: selectedAllDayEvents,
                   eventCategories: eventCategories,
                   googleCalendarStatus: googleCalendarStatus,
+                  workspaces: workspaces,
+                  activeWorkspaceId: activeWorkspaceId,
                   onEventTap: onEventTap,
                   onEventDeleted: onEventDeleted,
                   onEventCategorySaved: onEventCategorySaved,
@@ -5980,6 +6181,8 @@ class _TwoDayTimelinePage extends StatelessWidget {
                   events: nextAllDayEvents,
                   eventCategories: eventCategories,
                   googleCalendarStatus: googleCalendarStatus,
+                  workspaces: workspaces,
+                  activeWorkspaceId: activeWorkspaceId,
                   onEventTap: onEventTap,
                   onEventDeleted: onEventDeleted,
                   onEventCategorySaved: onEventCategorySaved,
@@ -6012,6 +6215,8 @@ class _TwoDayTimelinePage extends StatelessWidget {
                     timelineWidth: constraints.maxWidth,
                     eventCategories: eventCategories,
                     googleCalendarStatus: googleCalendarStatus,
+                    workspaces: workspaces,
+                    activeWorkspaceId: activeWorkspaceId,
                     onTap: onEventTap,
                     onDelete: onEventDeleted,
                     onEventCategorySaved: onEventCategorySaved,
@@ -6029,6 +6234,8 @@ class _TwoDayTimelinePage extends StatelessWidget {
                     timelineWidth: constraints.maxWidth,
                     eventCategories: eventCategories,
                     googleCalendarStatus: googleCalendarStatus,
+                    workspaces: workspaces,
+                    activeWorkspaceId: activeWorkspaceId,
                     onTap: onEventTap,
                     onDelete: onEventDeleted,
                     onEventCategorySaved: onEventCategorySaved,
@@ -6367,6 +6574,8 @@ class _AllDayEventRow extends StatelessWidget {
     required this.events,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
     required this.onEventTap,
     required this.onEventDeleted,
     required this.onEventCategorySaved,
@@ -6377,6 +6586,8 @@ class _AllDayEventRow extends StatelessWidget {
   final List<HermesCalendarEvent> events;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -6406,7 +6617,10 @@ class _AllDayEventRow extends StatelessWidget {
     required String color,
   })
   onEventCategorySaved;
-  final Future<void> Function(HermesEventCategory category, {List<Object> deleteFromWorkspaceIds})
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
   onEventCategoryDeleted;
 
   @override
@@ -6436,6 +6650,8 @@ class _AllDayEventRow extends StatelessWidget {
                 : null,
             eventCategories: eventCategories,
             googleCalendarStatus: googleCalendarStatus,
+            workspaces: workspaces,
+            activeWorkspaceId: activeWorkspaceId,
             onSave:
                 (
                   savedEvent, {
@@ -6468,6 +6684,7 @@ class _AllDayEventRow extends StatelessWidget {
                   reminderSpecificDays: reminderSpecificDays,
                   reminderInterval: reminderInterval,
                   reminderIntervalUnit: reminderIntervalUnit,
+                  syncToWorkspaceIds: syncToWorkspaceIds,
                 ),
             onCriticalChanged: (savedEvent, isCritical) => onEventTap(
               savedEvent,
@@ -6538,6 +6755,8 @@ class _TimelineEventBlock extends StatelessWidget {
     required this.timelineWidth,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
     required this.onTap,
     required this.onDelete,
     required this.onEventCategorySaved,
@@ -6554,6 +6773,8 @@ class _TimelineEventBlock extends StatelessWidget {
   final double timelineWidth;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -6583,7 +6804,10 @@ class _TimelineEventBlock extends StatelessWidget {
     required String color,
   })
   onEventCategorySaved;
-  final Future<void> Function(HermesEventCategory category, {List<Object> deleteFromWorkspaceIds})
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
   onEventCategoryDeleted;
 
   @override
@@ -6634,6 +6858,8 @@ class _TimelineEventBlock extends StatelessWidget {
               : null,
           eventCategories: eventCategories,
           googleCalendarStatus: googleCalendarStatus,
+          workspaces: workspaces,
+          activeWorkspaceId: activeWorkspaceId,
           onSave:
               (
                 savedEvent, {
@@ -6887,7 +7113,10 @@ class _CalendarEventDetailPage extends StatefulWidget {
     required String color,
   })
   onEventCategorySaved;
-  final Future<void> Function(HermesEventCategory category, {List<Object> deleteFromWorkspaceIds})
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
   onEventCategoryDeleted;
   final Future<void> Function(HermesCalendarEvent event, bool isCritical)?
   onCriticalChanged;
@@ -6996,6 +7225,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         widget.googleCalendarStatus?.writableCalendars ??
         const <GoogleCalendarInfo>[];
     _googleCalendarIds.addAll(event.googleCalendarIds);
+    _syncWorkspaceIds.addAll(
+      _initialSyncWorkspaceIds(
+        linkedWorkspaceIds: event.linkedWorkspaceIds,
+        workspaceId: event.workspaceId,
+        activeWorkspaceId: widget.activeWorkspaceId,
+      ),
+    );
     if (_googleCalendarIds.isEmpty &&
         widget.googleCalendarStatus?.defaultCalendarId != null) {
       _googleCalendarIds.add(widget.googleCalendarStatus!.defaultCalendarId!);
@@ -9837,6 +10073,8 @@ class _CalendarAgenda extends StatelessWidget {
     required this.calendar,
     required this.eventCategories,
     this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
     this.onEventTap,
     this.onEventCategorySaved,
     this.onEventCategoryDeleted,
@@ -9845,6 +10083,8 @@ class _CalendarAgenda extends StatelessWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -9904,6 +10144,8 @@ class _CalendarAgenda extends StatelessWidget {
                     event,
                     eventCategories: eventCategories,
                     googleCalendarStatus: googleCalendarStatus,
+                    workspaces: workspaces,
+                    activeWorkspaceId: activeWorkspaceId,
                     onSave:
                         (
                           savedEvent, {
@@ -10329,6 +10571,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   String? activeWorkspaceId,
   GoogleCalendarSyncStatus? googleCalendarStatus,
   List<String> initialGoogleCalendarIds = const [],
+  List<Object> initialSyncWorkspaceIds = const [],
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
@@ -10348,7 +10591,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   var recurrenceIntervalUnit = _recurrenceIntervalUnitFromMetadata(
     initialMetadata,
   );
-  final syncWorkspaceIds = <Object>{};
+  final syncWorkspaceIds = <Object>{...initialSyncWorkspaceIds};
   final googleCalendarIds = <String>{...initialGoogleCalendarIds};
   final writableGoogleCalendars =
       googleCalendarStatus?.writableCalendars ?? const <GoogleCalendarInfo>[];
@@ -11078,7 +11321,11 @@ class _TaskListCard extends StatefulWidget {
     List<String> googleCalendarIds,
   })
   onTaskSaved;
-  final Future<void> Function(HermesTask task, {List<Object> deleteFromWorkspaceIds}) onTaskDeleted;
+  final Future<void> Function(
+    HermesTask task, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onTaskDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -11190,6 +11437,13 @@ class _TaskListCardState extends State<_TaskListCard> {
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
       initialGoogleCalendarIds: task?.googleCalendarIds ?? const [],
+      initialSyncWorkspaceIds: task == null
+          ? const []
+          : _initialSyncWorkspaceIds(
+              linkedWorkspaceIds: task.linkedWorkspaceIds,
+              workspaceId: task.workspaceId,
+              activeWorkspaceId: widget.activeWorkspaceId,
+            ),
     );
     if (result == null || !context.mounted) return;
     if (result['delete'] == true && task != null) {
@@ -11262,7 +11516,11 @@ class _ReminderListCard extends StatefulWidget {
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
-  final Future<void> Function(HermesReminder reminder, {List<Object> deleteFromWorkspaceIds}) onReminderDeleted;
+  final Future<void> Function(
+    HermesReminder reminder, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onReminderDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -11355,6 +11613,13 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
       initialGoogleCalendarIds: reminder?.googleCalendarIds ?? const [],
+      initialSyncWorkspaceIds: reminder == null
+          ? const []
+          : _initialSyncWorkspaceIds(
+              linkedWorkspaceIds: reminder.linkedWorkspaceIds,
+              workspaceId: reminder.workspaceId,
+              activeWorkspaceId: widget.activeWorkspaceId,
+            ),
     );
     if (result == null || !context.mounted) return;
     if (result['delete'] == true && reminder != null) {
