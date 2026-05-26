@@ -990,7 +990,7 @@
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 10px;
-    min-height: calc(100vh - 64px);
+    min-height: 0;
 }
 
 .hb-month-nav {
@@ -1784,22 +1784,51 @@
     display: grid;
     place-items: center;
     transform: translateX(-50%);
-    border: 4px solid #e2e8f0;
+    border: 1px solid rgba(22, 163, 74, .52);
     border-radius: 999px;
-    background: linear-gradient(135deg, #22c55e, #16a34a, #15803d);
-    box-shadow: 0 10px 24px rgba(22, 163, 74, .24);
+    background: linear-gradient(145deg, #fff 0%, #fbfffc 48%, #effaf2 100%);
+    box-shadow: 0 10px 26px rgba(15, 23, 42, .10), inset 0 1px 0 rgba(255, 255, 255, .92);
     cursor: pointer;
+    isolation: isolate;
+    overflow: visible;
     pointer-events: auto;
-    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
+}
+
+.hb-bean-button::before {
+    content: "";
+    position: absolute;
+    inset: -13px;
+    z-index: -1;
+    border-radius: inherit;
+    background: radial-gradient(circle, rgba(22, 163, 74, .18), rgba(22, 163, 74, .07) 48%, transparent 72%);
+    filter: blur(4px);
+    opacity: .72;
+    transform: scale(.94);
+    transition: opacity .16s ease, transform .16s ease;
 }
 
 .hb-bean-button:hover {
     transform: translateX(-50%) translateY(-2px);
-    box-shadow: 0 14px 30px rgba(22, 163, 74, .30);
+    border-color: rgba(22, 163, 74, .68);
+    box-shadow: 0 14px 32px rgba(15, 23, 42, .13), inset 0 1px 0 rgba(255, 255, 255, .96);
+}
+
+.hb-bean-button:hover::before {
+    opacity: .9;
+    transform: scale(1);
+}
+
+.hb-bean-button:active::before {
+    animation: hb-bean-glow-pulse .42s ease-out;
+}
+
+.hb-bean-button:active {
+    transform: translateX(-50%) translateY(-1px) scale(.985);
 }
 
 .hb-bean-button-active {
-    border-color: #fff;
+    border-color: rgba(22, 163, 74, .76);
 }
 
 .hb-bean-button img {
@@ -1807,6 +1836,23 @@
     height: 42px;
     border-radius: 999px;
     object-fit: cover;
+}
+
+@keyframes hb-bean-glow-pulse {
+    0% {
+        opacity: .76;
+        transform: scale(.94);
+    }
+
+    45% {
+        opacity: 1;
+        transform: scale(1.16);
+    }
+
+    100% {
+        opacity: .72;
+        transform: scale(.98);
+    }
 }
 
 .hb-settings-grid {
@@ -2070,7 +2116,10 @@
     }
 
     .hb-main-today {
+        height: calc(100dvh - 58px);
+        min-height: 0;
         padding-bottom: 0;
+        overflow: hidden;
     }
 
     .hb-calendar-card .hb-timeline {
@@ -2080,7 +2129,9 @@
     .hb-dashboard-grid {
         grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
         align-items: start;
-        height: calc(100vh - 58px);
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
     }
 
     .hb-primary-column,
@@ -2088,6 +2139,25 @@
         display: grid;
         min-height: 0;
         gap: 3px;
+        overflow: hidden;
+    }
+
+    .hb-primary-column {
+        grid-template-rows: minmax(0, 1fr);
+        height: 100%;
+    }
+
+    .hb-primary-column .hb-calendar-card,
+    .hb-calendar-card .hb-calendar,
+    .hb-calendar-card .hb-month-view {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .hb-calendar-card .hb-month-grid {
+        height: calc(100dvh - 128px);
+        overflow: hidden;
     }
 
     .hb-bottom-menu {
@@ -2101,7 +2171,7 @@
     .hb-side-column {
         position: sticky;
         top: 58px;
-        height: calc(100vh - 58px);
+        height: 100%;
         grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     }
 
