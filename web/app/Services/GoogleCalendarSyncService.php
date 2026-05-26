@@ -21,13 +21,13 @@ class GoogleCalendarSyncService
 
     private const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
 
-    public function status(User $user): array
+    public function status(User $user, bool $refreshCalendars = true): array
     {
         $connection = $user->googleCalendarConnection()->first();
         $calendars = [];
         if ($connection?->status === 'connected') {
             try {
-                $calendars = $this->calendarList($connection);
+                $calendars = $refreshCalendars ? $this->calendarList($connection) : $this->storedCalendars($connection);
             } catch (RuntimeException) {
                 $calendars = $this->storedCalendars($connection);
             }

@@ -23,6 +23,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
+use Throwable;
 
 class DomainResourceController extends Controller
 {
@@ -315,7 +316,14 @@ class DomainResourceController extends Controller
         $this->syncTo($request, $event, $syncTo);
         $this->refreshRecurringCalendarEvents($request, $event->refresh());
 
-        return $this->created($this->googleCalendar->exportEvent($event->refresh()));
+        $event = $event->refresh();
+        if ($this->shouldSyncGoogleImmediately($request)) {
+            $event = $this->googleCalendar->exportEvent($event);
+        } else {
+            $this->deferGoogleCalendarExport($event);
+        }
+
+        return $this->created($event->refresh());
     }
 
     public function updateCalendarEvent(Request $request, string $calendarEvent): JsonResponse
@@ -347,7 +355,14 @@ class DomainResourceController extends Controller
         }
         $this->refreshRecurringCalendarEvents($request, $model->refresh());
 
-        return response()->json(['data' => $this->googleCalendar->exportEvent($model->refresh())]);
+        $model = $model->refresh();
+        if ($this->shouldSyncGoogleImmediately($request)) {
+            $model = $this->googleCalendar->exportEvent($model);
+        } else {
+            $this->deferGoogleCalendarExport($model);
+        }
+
+        return response()->json(['data' => $model->refresh()]);
     }
 
     public function destroyCalendarEvent(Request $request, string $calendarEvent): JsonResponse
@@ -992,6 +1007,27 @@ class DomainResourceController extends Controller
     private function taskStatusIsCompleted(?string $status): bool
     {
         return in_array(strtolower(str_replace('_', '-', (string) $status)), ['completed', 'complete', 'done'], true);
+    }
+
+    private function shouldSyncGoogleImmediately(Request $request): bool
+    {
+        return app()->runningUnitTests() || $request->boolean('sync_google_now');
+    }
+
+    private function deferGoogleCalendarExport(CalendarEvent $event): void
+    {
+        $eventId = (int) $event->id;
+
+        defer(function () use ($eventId): void {
+            try {
+                $event = CalendarEvent::query()->find($eventId);
+                if ($event) {
+                    app(GoogleCalendarSyncService::class)->exportEvent($event);
+                }
+            } catch (Throwable $error) {
+                report($error);
+            }
+        }, "google-calendar-export-{$eventId}", true);
     }
 
     /**

@@ -1507,6 +1507,27 @@
     pointer-events: auto;
 }
 
+.hb-timed-event-short {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-content: center;
+    align-items: center;
+    gap: 5px;
+    min-height: 20px;
+    padding: 3px 6px;
+    border-radius: 9px;
+}
+
+.hb-timed-event-short .hb-event-time {
+    font-size: 9px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.hb-timed-event-short .hb-event-title {
+    font-size: 10px;
+    line-height: 1;
+}
+
 .hb-now-marker {
     position: absolute;
     top: var(--hb-now-top);

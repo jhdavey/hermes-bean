@@ -16,7 +16,7 @@ class GoogleCalendarController extends Controller
 
     public function status(Request $request): JsonResponse
     {
-        return response()->json(['data' => $this->sync->status($request->user())]);
+        return response()->json(['data' => $this->sync->status($request->user(), ! $request->boolean('cached'))]);
     }
 
     public function authUrl(Request $request): JsonResponse

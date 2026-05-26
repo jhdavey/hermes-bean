@@ -163,9 +163,9 @@ if (mount) {
                 api('/tasks'),
                 api('/tasks/past'),
                 api('/reminders'),
-                api('/calendar-events'),
+                api('/calendar-events?skip_google_sync=1'),
                 api('/event-categories'),
-                api('/google-calendar/status').catch(() => null),
+                api('/google-calendar/status?cached=1').catch(() => null),
             ]);
             state.user = mergeUser(user, summary?.user, summary);
             state.summary = summary;
@@ -188,6 +188,7 @@ if (mount) {
             if (state.session?.id) {
                 resumeSession(state.session.id);
             }
+            refreshCalendarInBackground();
         } catch (error) {
             clearToken();
             state.phase = 'signedOut';
@@ -919,9 +920,10 @@ if (mount) {
         const style = timelineEventStyle(event, day, startHour, endHour);
         if (!style) return '';
         const color = safeColor(event.color);
+        const shortClass = style.minutes < 30 ? ' hb-timed-event-short' : '';
         return `
-            <button class="hb-event hb-timed-event" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
-                <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
+            <button class="hb-event hb-timed-event${shortClass}" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
+                <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
                 <div class="hb-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</div>
             </button>`;
     }
@@ -1724,11 +1726,13 @@ if (mount) {
                 render();
                 return;
             } else {
-                await saveItem(kind, state.modal?.item, data, form);
+                const saved = await saveItem(kind, state.modal?.item, data, form);
+                cacheSavedItem(kind, saved);
             }
             state.modal = null;
             state.notice = 'Saved.';
-            await refreshOnly();
+            render();
+            refreshOnlyInBackground({ skipCalendarSync: true });
         } catch (error) {
             state.error = friendlyError(error, 'save that change');
             state.modal = null;
@@ -1757,7 +1761,7 @@ if (mount) {
                 sync_to_workspace_ids: syncTo,
             };
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
-            item ? await api(`/tasks/${item.id}`, { method: 'PATCH', body }) : await api('/tasks', { method: 'POST', body });
+            return item ? await api(`/tasks/${item.id}`, { method: 'PATCH', body }) : await api('/tasks', { method: 'POST', body });
         } else if (kind === 'reminder') {
             const syncTo = selectedSyncWorkspaceIds(form);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
@@ -1777,7 +1781,7 @@ if (mount) {
                 sync_to_workspace_ids: syncTo,
             };
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
-            item ? await api(`/reminders/${item.id}`, { method: 'PATCH', body }) : await api('/reminders', { method: 'POST', body });
+            return item ? await api(`/reminders/${item.id}`, { method: 'PATCH', body }) : await api('/reminders', { method: 'POST', body });
         } else if (kind === 'event') {
             const syncTo = selectedSyncWorkspaceIds(form);
             const allDay = form.elements.allDay?.checked || false;
@@ -1812,8 +1816,15 @@ if (mount) {
                 },
             };
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
-            item ? await api(`/calendar-events/${item.id}`, { method: 'PATCH', body }) : await api('/calendar-events', { method: 'POST', body });
+            const saved = item ? await api(`/calendar-events/${item.id}`, { method: 'PATCH', body }) : await api('/calendar-events', { method: 'POST', body });
+            return saved ? {
+                ...saved,
+                linked_workspace_ids: normalizeList(saved.linked_workspace_ids || saved.linkedWorkspaceIds).length
+                    ? normalizeList(saved.linked_workspace_ids || saved.linkedWorkspaceIds)
+                    : [saved.workspace_id || saved.workspaceId, ...syncTo].filter(Boolean),
+            } : saved;
         }
+        return null;
     }
 
     function selectedSyncWorkspaceIds(form) {
@@ -1867,6 +1878,22 @@ if (mount) {
         if (kind === 'task') state.tasks = snapshot;
         if (kind === 'reminder') state.reminders = snapshot;
         if (kind === 'event') state.calendar = snapshot;
+    }
+
+    function cacheSavedItem(kind, item) {
+        if (!item) return;
+        if (kind === 'task') state.tasks = upsertById(state.tasks, item);
+        if (kind === 'reminder') state.reminders = upsertById(state.reminders, item);
+        if (kind === 'event') state.calendar = upsertById(state.calendar, item);
+    }
+
+    function upsertById(items, nextItem) {
+        const nextId = String(nextItem?.id ?? '');
+        if (!nextId) return normalizeList(items);
+        const list = normalizeList(items);
+        const index = list.findIndex((item) => String(item.id) === nextId);
+        if (index < 0) return [...list, nextItem];
+        return list.map((item, itemIndex) => (itemIndex === index ? { ...item, ...nextItem } : item));
     }
 
     function removeCachedItem(kind, id) {
@@ -2348,7 +2375,7 @@ if (mount) {
 
     async function refreshOnly(shouldRender = true, options = {}) {
         try {
-            const calendarPath = options.skipCalendarSync ? '/calendar-events?skip_google_sync=1' : '/calendar-events';
+            const calendarPath = options.skipCalendarSync === false ? '/calendar-events' : '/calendar-events?skip_google_sync=1';
             const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
                 api('/today'),
                 api('/tasks'),
@@ -2356,7 +2383,7 @@ if (mount) {
                 api('/reminders'),
                 api(calendarPath),
                 api('/event-categories'),
-                api('/google-calendar/status').catch(() => state.googleStatus),
+                api('/google-calendar/status?cached=1').catch(() => state.googleStatus),
             ]);
             state.summary = summary;
             state.tasks = mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks));
@@ -2373,6 +2400,21 @@ if (mount) {
             state.error = friendlyError(error, 'refresh the app');
             if (shouldRender) render();
         }
+    }
+
+    function refreshOnlyInBackground(options = {}) {
+        refreshOnly(true, options);
+    }
+
+    function refreshCalendarInBackground() {
+        api('/calendar-events')
+            .then((calendar) => {
+                state.calendar = normalizeList(calendar);
+                render();
+            })
+            .catch(() => {
+                // Manual refresh surfaces Google sync failures; background import should not interrupt local edits.
+            });
     }
 
     async function refreshCalendar() {
