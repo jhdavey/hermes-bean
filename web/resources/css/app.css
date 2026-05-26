@@ -1000,7 +1000,9 @@
 
 .hb-month-view {
     display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 10px;
+    min-height: calc(100vh - 64px);
 }
 
 .hb-month-nav {
@@ -1064,8 +1066,10 @@
 }
 
 .hb-month-grid {
+    min-height: 0;
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-rows: auto repeat(var(--hb-month-week-count, 6), minmax(0, 1fr));
     gap: 7px;
 }
 
@@ -1077,17 +1081,17 @@
 }
 
 .hb-month-cell {
-    min-height: 76px;
+    min-height: 0;
     display: grid;
-    align-content: start;
-    gap: 5px;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 7px;
     border: 1px solid var(--hb-border);
     border-radius: 16px;
     background: rgba(255, 255, 255, .72);
     color: var(--hb-text);
-    padding: 9px;
+    padding: 8px;
     text-align: left;
-    cursor: pointer;
+    overflow: hidden;
 }
 
 .hb-month-cell-empty {
@@ -1100,10 +1104,82 @@
     border-color: rgba(22, 163, 74, .34);
 }
 
-.hb-month-cell span {
+.hb-month-date {
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    border: 0;
+    background: transparent;
+    color: var(--hb-text);
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+}
+
+.hb-month-date strong {
+    min-width: 24px;
+    height: 24px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 950;
+    line-height: 1;
+}
+
+.hb-month-cell-active .hb-month-date strong {
+    background: var(--hb-accent);
+    color: #fff;
+}
+
+.hb-month-event-list {
+    min-height: 0;
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    overflow: auto;
+    scrollbar-width: thin;
+}
+
+.hb-month-event {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--hb-border);
+    border-radius: 8px;
+    background: rgba(22, 163, 74, .10);
+    color: var(--hb-text);
+    padding: 4px 6px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.hb-month-event:hover {
+    border-color: var(--hb-border-strong);
+    background: rgba(255, 255, 255, .72);
+}
+
+.hb-month-event-time {
     color: var(--hb-muted);
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+
+.hb-month-event-title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--hb-text);
     font-size: 11px;
-    font-weight: 800;
+    font-weight: 850;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .hb-agenda {

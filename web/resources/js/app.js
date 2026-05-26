@@ -772,20 +772,42 @@ if (mount) {
         const leading = first.getDay();
         const daysInMonth = new Date(selected.getFullYear(), selected.getMonth() + 1, 0).getDate();
         const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
+        const weekCount = totalCells / 7;
         return `
             <div class="hb-month-view">
                 ${monthScrollerMarkup(selected)}
-                <div class="hb-month-grid">
+                <div class="hb-month-grid" style="--hb-month-week-count:${weekCount}">
                     ${Array.from({ length: 7 }, (_, index) => `<div class="hb-month-weekday">${weekdayShort(new Date(2026, 1, index + 1))}</div>`).join('')}
                     ${Array.from({ length: totalCells }, (_, index) => {
                         const dayNumber = index - leading + 1;
                         if (dayNumber < 1 || dayNumber > daysInMonth) return '<div class="hb-month-cell hb-month-cell-empty"></div>';
                         const day = new Date(selected.getFullYear(), selected.getMonth(), dayNumber);
-                        const count = eventsForDay(day).length;
-                        return `<button class="hb-month-cell ${sameDate(day, selected) ? 'hb-month-cell-active' : ''}" type="button" data-select-day="${dateOnly(day)}"><strong>${dayNumber}</strong><span>${count ? `${count} event${count === 1 ? '' : 's'}` : ''}</span></button>`;
+                        return monthCellMarkup(day, dayNumber, selected);
                     }).join('')}
                 </div>
             </div>`;
+    }
+
+    function monthCellMarkup(day, dayNumber, selected) {
+        const events = eventsForDay(day);
+        return `
+            <div class="hb-month-cell ${sameDate(day, selected) ? 'hb-month-cell-active' : ''}">
+                <button class="hb-month-date" type="button" data-select-day="${dateOnly(day)}" aria-label="${escapeAttr(dayLabel(day))}">
+                    <strong>${dayNumber}</strong>
+                </button>
+                <div class="hb-month-event-list">
+                    ${events.map((event) => monthEventMarkup(event)).join('')}
+                </div>
+            </div>`;
+    }
+
+    function monthEventMarkup(event) {
+        const color = safeColor(event.color);
+        return `
+            <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+                <span class="hb-month-event-time">${escapeHtml(eventTime(event))}</span>
+                <span class="hb-month-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+            </button>`;
     }
 
     function monthScrollerMarkup(selected) {
