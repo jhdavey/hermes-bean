@@ -166,17 +166,31 @@
 }
 
 .hb-top-workspace-switcher {
+    position: relative;
     min-height: 36px;
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    max-width: 188px;
+    max-width: min(280px, 34vw);
     border: 1px solid var(--hb-border);
     border-radius: 999px;
     background: rgba(255, 255, 255, .76);
     color: var(--hb-text);
-    padding: 0 10px;
+    padding: 0 34px 0 10px;
     box-shadow: 0 8px 18px rgba(15, 23, 42, .05);
+}
+
+.hb-top-workspace-switcher::after {
+    content: "";
+    position: absolute;
+    right: 13px;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid var(--hb-muted);
+    border-bottom: 2px solid var(--hb-muted);
+    pointer-events: none;
+    transform: translateY(-65%) rotate(45deg);
 }
 
 .hb-top-workspace-icon svg {
@@ -194,13 +208,20 @@
 }
 
 .hb-top-workspace-switcher select {
+    appearance: none;
+    flex: 1 1 auto;
+    width: auto;
     min-width: 0;
-    max-width: 105px;
+    max-width: 150px;
     border: 0;
     background: transparent;
     color: var(--hb-text);
     font-size: 13px;
     font-weight: 850;
+    overflow: hidden;
+    padding: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     outline: 0;
 }
 
@@ -901,6 +922,12 @@
     margin-bottom: 0;
 }
 
+.hb-glance-card > .hb-section-action-row .hb-section-title h2,
+.hb-today-tasks-card > .hb-section-action-row .hb-section-title h2 {
+    font-size: 13px;
+    line-height: 1.05;
+}
+
 .hb-calendar-card .hb-calendar {
     gap: 0;
 }
@@ -1501,7 +1528,8 @@
     left: 7px;
     right: 7px;
     z-index: 2;
-    min-height: 34px;
+    box-sizing: border-box;
+    min-height: 0;
     align-content: start;
     overflow: hidden;
     pointer-events: auto;
@@ -1512,9 +1540,9 @@
     align-content: center;
     align-items: center;
     gap: 5px;
-    min-height: 20px;
-    padding: 3px 6px;
-    border-radius: 9px;
+    min-height: 0;
+    padding: 1px 6px;
+    border-radius: 8px;
 }
 
 .hb-timed-event-short .hb-event-time {
@@ -2139,6 +2167,17 @@
 .hb-event-connections > strong {
     font-size: 14px;
     font-weight: 900;
+}
+
+.hb-recurring-delete-options {
+    display: grid;
+    gap: 8px;
+}
+
+.hb-recurring-delete-options .hb-button-secondary,
+.hb-recurring-delete-options .hb-button-danger {
+    justify-content: flex-start;
+    width: 100%;
 }
 
 .hb-option-list {

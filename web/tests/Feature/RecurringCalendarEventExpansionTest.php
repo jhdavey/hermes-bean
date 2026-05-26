@@ -106,4 +106,135 @@ class RecurringCalendarEventExpansionTest extends TestCase
 
         CarbonImmutable::setTestNow();
     }
+
+    public function test_deleting_a_generated_occurrence_can_remove_only_that_event(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
+        $token = $this->apiToken('recurring-delete-single@example.com');
+        $user = User::where('email', 'recurring-delete-single@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+
+        $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspaceId,
+            'title' => 'Weekly lesson',
+            'starts_at' => '2026-05-26T14:00:00Z',
+            'ends_at' => '2026-05-26T15:00:00Z',
+            'recurrence' => 'weekly',
+        ])->assertCreated()->json('data.id');
+
+        $occurrence = CalendarEvent::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('starts_at', '2026-06-02 14:00:00')
+            ->firstOrFail();
+
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$occurrence->id, [
+            'recurring_delete_mode' => 'single',
+            'recurring_occurrence_date' => '2026-06-02',
+        ])->assertNoContent();
+
+        $this->assertDatabaseHas('calendar_events', ['id' => $sourceId]);
+        $this->assertDatabaseMissing('calendar_events', ['id' => $occurrence->id]);
+        $this->assertSame(['2026-06-02'], CalendarEvent::findOrFail($sourceId)->metadata['recurring_exception_dates']);
+
+        CarbonImmutable::setTestNow();
+    }
+
+    public function test_deleting_generated_occurrence_future_removes_that_and_following_events(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
+        $token = $this->apiToken('recurring-delete-future@example.com');
+        $user = User::where('email', 'recurring-delete-future@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+
+        $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspaceId,
+            'title' => 'Weekly club',
+            'starts_at' => '2026-05-26T14:00:00Z',
+            'ends_at' => '2026-05-26T15:00:00Z',
+            'recurrence' => 'weekly',
+        ])->assertCreated()->json('data.id');
+
+        $occurrence = CalendarEvent::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('starts_at', '2026-06-09 14:00:00')
+            ->firstOrFail();
+
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$occurrence->id, [
+            'recurring_delete_mode' => 'future',
+            'recurring_occurrence_date' => '2026-06-09',
+        ])->assertNoContent();
+
+        $this->assertDatabaseHas('calendar_events', [
+            'workspace_id' => $workspaceId,
+            'title' => 'Weekly club',
+            'starts_at' => '2026-06-02 14:00:00',
+        ]);
+        $this->assertDatabaseMissing('calendar_events', ['id' => $occurrence->id]);
+        $this->assertSame('2026-06-09', CalendarEvent::findOrFail($sourceId)->metadata['recurrence_until']);
+
+        CarbonImmutable::setTestNow();
+    }
+
+    public function test_deleting_generated_occurrence_all_removes_the_series(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
+        $token = $this->apiToken('recurring-delete-all@example.com');
+        $user = User::where('email', 'recurring-delete-all@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+
+        $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspaceId,
+            'title' => 'Weekly series',
+            'starts_at' => '2026-05-26T14:00:00Z',
+            'ends_at' => '2026-05-26T15:00:00Z',
+            'recurrence' => 'weekly',
+        ])->assertCreated()->json('data.id');
+
+        $occurrence = CalendarEvent::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('starts_at', '2026-06-02 14:00:00')
+            ->firstOrFail();
+
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$occurrence->id, [
+            'recurring_delete_mode' => 'all',
+            'recurring_occurrence_date' => '2026-06-02',
+        ])->assertNoContent();
+
+        $this->assertDatabaseMissing('calendar_events', ['id' => $sourceId]);
+        $this->assertSame(0, CalendarEvent::where('workspace_id', $workspaceId)->where('title', 'Weekly series')->count());
+
+        CarbonImmutable::setTestNow();
+    }
+
+    public function test_deleting_source_single_hides_only_the_original_occurrence(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
+        $token = $this->apiToken('recurring-delete-source-single@example.com');
+        $user = User::where('email', 'recurring-delete-source-single@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+
+        $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspaceId,
+            'title' => 'Original hidden series',
+            'starts_at' => '2026-05-26T14:00:00Z',
+            'ends_at' => '2026-05-26T15:00:00Z',
+            'recurrence' => 'weekly',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$sourceId, [
+            'recurring_delete_mode' => 'single',
+            'recurring_occurrence_date' => '2026-05-26',
+        ])->assertNoContent();
+
+        $source = CalendarEvent::findOrFail($sourceId);
+        $this->assertTrue($source->metadata['recurrence_source_hidden']);
+        $listed = $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$workspaceId.'&skip_google_sync=1')
+            ->assertOk()
+            ->json('data');
+
+        $this->assertFalse(collect($listed)->contains(fn (array $event): bool => (int) $event['id'] === (int) $sourceId));
+        $this->assertTrue(collect($listed)->contains(fn (array $event): bool => $event['title'] === 'Original hidden series'));
+
+        CarbonImmutable::setTestNow();
+    }
 }

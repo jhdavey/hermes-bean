@@ -159,7 +159,31 @@ class RecurringCalendarEventService
         return $recurrence !== '' && $recurrence !== 'none' && ! $this->isGeneratedOccurrence($event);
     }
 
-    private function isGeneratedOccurrence(CalendarEvent $event): bool
+    public function isRecurringSeriesEvent(CalendarEvent $event): bool
+    {
+        return $this->isRecurringSource($event) || $this->isGeneratedOccurrence($event);
+    }
+
+    public function sourceEventFor(CalendarEvent $event): CalendarEvent
+    {
+        if (! $this->isGeneratedOccurrence($event)) {
+            return $event;
+        }
+
+        $metadata = $event->metadata ?? [];
+        $parentId = $metadata[self::PARENT_METADATA_KEY] ?? null;
+        if (! $parentId) {
+            return $event;
+        }
+
+        return CalendarEvent::query()
+            ->where('id', $parentId)
+            ->where('user_id', $event->user_id)
+            ->where('workspace_id', $event->workspace_id)
+            ->first() ?? $event;
+    }
+
+    public function isGeneratedOccurrence(CalendarEvent $event): bool
     {
         $metadata = $event->metadata ?? [];
 
@@ -185,7 +209,7 @@ class RecurringCalendarEventService
             ->values();
     }
 
-    private function occurrenceDate(CalendarEvent $event): ?string
+    public function occurrenceDate(CalendarEvent $event): ?string
     {
         $metadata = $event->metadata ?? [];
         $date = $metadata[self::OCCURRENCE_DATE_METADATA_KEY] ?? null;

@@ -920,7 +920,7 @@ if (mount) {
         const style = timelineEventStyle(event, day, startHour, endHour);
         if (!style) return '';
         const color = safeColor(event.color);
-        const shortClass = style.minutes < 30 ? ' hb-timed-event-short' : '';
+        const shortClass = style.minutes <= 30 ? ' hb-timed-event-short' : '';
         return `
             <button class="hb-event hb-timed-event${shortClass}" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
                 <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
@@ -1018,6 +1018,7 @@ if (mount) {
         if (modal.type === 'agent') return agentModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
         if (modal.type === 'categories') return categoriesModalMarkup();
+        if (modal.type === 'recurring-delete') return recurringDeleteModalMarkup(modal.item);
         return itemModalMarkup(modal.type, modal.item, modal.parentTask);
     }
 
@@ -1057,6 +1058,25 @@ if (mount) {
                         <button class="hb-button" type="submit">${editing ? 'Save' : 'Create'}</button>
                     </div>
                 </form>
+            </div>`;
+    }
+
+    function recurringDeleteModalMarkup(item = null) {
+        const title = item?.title || item?.name || 'this event';
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Delete recurring event">
+                <div class="hb-card hb-modal hb-form">
+                    ${sectionTitle(icons.calendar, 'Delete recurring event', title)}
+                    <p class="hb-item-meta">Choose how much of this series to remove.</p>
+                    <div class="hb-recurring-delete-options">
+                        <button class="hb-button-secondary" type="button" data-recurring-delete-mode="single">Only this event</button>
+                        <button class="hb-button-secondary" type="button" data-recurring-delete-mode="future">This and following events</button>
+                        <button class="hb-button-danger" type="button" data-recurring-delete-mode="all">All events in the series</button>
+                    </div>
+                    <div class="hb-modal-actions">
+                        <button class="hb-button-secondary" type="button" data-close-modal>Cancel</button>
+                    </div>
+                </div>
             </div>`;
     }
 
@@ -1495,6 +1515,7 @@ if (mount) {
             render();
         }));
         mount.querySelectorAll('[data-modal-delete]').forEach((button) => button.addEventListener('click', deleteModalItem));
+        mount.querySelectorAll('[data-recurring-delete-mode]').forEach((button) => button.addEventListener('click', confirmRecurringDelete));
         mount.querySelector('[data-modal-form]')?.addEventListener('submit', submitModal);
         mount.querySelector('[data-open-categories]')?.addEventListener('click', toggleInlineCategoryManager);
         mount.querySelectorAll('[data-inline-category-create]').forEach((button) => button.addEventListener('click', createInlineCategory));
@@ -1850,6 +1871,11 @@ if (mount) {
     async function deleteModalItem(event) {
         const kind = event.currentTarget.dataset.modalDelete;
         const id = event.currentTarget.dataset.id;
+        if (kind === 'event' && eventIsRecurring(state.modal?.item)) {
+            state.modal = { type: 'recurring-delete', item: state.modal.item };
+            render();
+            return;
+        }
         if (!confirm(`Delete this ${kind}?`)) return;
         const path = kind === 'task' ? `/tasks/${id}` : kind === 'reminder' ? `/reminders/${id}` : `/calendar-events/${id}`;
         const body = kind === 'event' ? deleteEventPayload(state.modal?.item) : null;
@@ -1863,6 +1889,27 @@ if (mount) {
         } catch (error) {
             restoreSnapshot(kind, snapshot);
             state.error = friendlyError(error, `delete that ${kind}`);
+            render();
+        }
+    }
+
+    async function confirmRecurringDelete(event) {
+        const mode = event.currentTarget.dataset.recurringDeleteMode;
+        const item = state.modal?.item;
+        if (!item || !mode) return;
+        const snapshot = snapshotLists('event');
+        state.modal = null;
+        removeCachedRecurringEvents(item, mode);
+        render();
+        try {
+            await api(`/calendar-events/${item.id}`, {
+                method: 'DELETE',
+                body: deleteEventPayload(item, mode),
+            });
+            await refreshOnly(true, { skipCalendarSync: true });
+        } catch (error) {
+            restoreSnapshot('event', snapshot);
+            state.error = friendlyError(error, 'delete that recurring event');
             render();
         }
     }
@@ -1903,7 +1950,20 @@ if (mount) {
         if (kind === 'event') state.calendar = state.calendar.filter((item) => !matches(item));
     }
 
-    function deleteEventPayload(event = null) {
+    function removeCachedRecurringEvents(event, mode) {
+        const sourceId = recurringSourceId(event);
+        const selectedDate = recurringOccurrenceDate(event);
+        state.calendar = state.calendar.filter((candidate) => {
+            if (recurringSourceId(candidate) !== sourceId) return true;
+            if (mode === 'all') return false;
+            const candidateDate = recurringOccurrenceDate(candidate);
+            if (mode === 'single') return candidateDate !== selectedDate;
+            if (mode === 'future') return candidateDate < selectedDate;
+            return true;
+        });
+    }
+
+    function deleteEventPayload(event = null, recurringMode = null) {
         if (!event) return {};
         const workspaceIds = normalizeList(event.linked_workspace_ids || event.linkedWorkspaceIds)
             .concat([event.workspace_id || event.workspaceId])
@@ -1912,14 +1972,29 @@ if (mount) {
         const uniqueWorkspaceIds = Array.from(new Set(workspaceIds));
         return {
             delete_from_workspace_ids: uniqueWorkspaceIds,
-            recurring_delete_mode: eventIsRecurring(event) ? 'all' : undefined,
-            recurring_occurrence_date: eventAllDay(event) ? storedDateOnly(event.starts_at || event.startsAt || new Date()) : dateOnly(event.starts_at || event.startsAt || new Date()),
+            recurring_delete_mode: recurringMode || (eventIsRecurring(event) ? 'all' : undefined),
+            recurring_occurrence_date: recurringOccurrenceDate(event),
         };
     }
 
     function eventIsRecurring(event = null) {
-        const recurrence = event?.recurrence || event?.metadata?.recurrence || 'none';
-        return recurrence && recurrence !== 'none';
+        const metadata = typeof event?.metadata === 'object' && event?.metadata ? event.metadata : {};
+        const recurrence = event?.recurrence || metadata.recurrence || 'none';
+        return (recurrence && recurrence !== 'none')
+            || metadata.recurrence_generated === true
+            || metadata.recurrence_generated === 1
+            || metadata.recurrence_generated === 'true'
+            || Boolean(metadata.recurrence_parent_event_id);
+    }
+
+    function recurringSourceId(event = null) {
+        const metadata = typeof event?.metadata === 'object' && event?.metadata ? event.metadata : {};
+        return String(metadata.recurrence_parent_event_id || event?.id || '');
+    }
+
+    function recurringOccurrenceDate(event = null) {
+        const metadata = typeof event?.metadata === 'object' && event?.metadata ? event.metadata : {};
+        return String(metadata.recurrence_occurrence_date || (eventAllDay(event) ? storedDateOnly(event?.starts_at || event?.startsAt || new Date()) : dateOnly(event?.starts_at || event?.startsAt || new Date())));
     }
 
     function toggleAllDayFields(checkbox) {

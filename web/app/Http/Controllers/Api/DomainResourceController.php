@@ -91,7 +91,9 @@ class DomainResourceController extends Controller
         $query = $this->scoped(CalendarEvent::query(), $request);
         $this->scopeVisibleGoogleCalendars($query, $request, $workspace);
 
-        $events = $query->orderBy('starts_at')->orderBy('id')->get();
+        $events = $query->orderBy('starts_at')->orderBy('id')->get()
+            ->reject(fn (CalendarEvent $event): bool => (bool) (($event->metadata ?? [])['recurrence_source_hidden'] ?? false))
+            ->values();
         $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
 
         $events->each(function (CalendarEvent $event) use ($accessibleWorkspaceIds): void {
@@ -399,22 +401,33 @@ class DomainResourceController extends Controller
 
         $recurringDeleteMode = $validated['recurring_delete_mode'] ?? 'all';
         $recurringOccurrenceDate = $validated['recurring_occurrence_date'] ?? null;
+        if ($this->recurringCalendarEvents->isRecurringSeriesEvent($event)) {
+            $recurringOccurrenceDate ??= $this->recurringCalendarEvents->occurrenceDate($event);
+        }
         if (
-            $recurringDeleteMode !== 'all'
-            && $recurringOccurrenceDate
-            && $this->calendarEventIsRecurring($event)
+            $recurringOccurrenceDate
+            && $recurringDeleteMode !== 'all'
+            && $this->recurringCalendarEvents->isRecurringSeriesEvent($event)
         ) {
             $eventsToDelete->each(function (CalendarEvent $event) use ($recurringDeleteMode, $recurringOccurrenceDate): void {
+                $sourceEvent = $this->recurringCalendarEvents->sourceEventFor($event);
                 if ($recurringDeleteMode === 'single') {
-                    $this->recurringCalendarEvents->deleteGeneratedOccurrence($event, $recurringOccurrenceDate);
+                    $this->recurringCalendarEvents->deleteGeneratedOccurrence($sourceEvent, $recurringOccurrenceDate);
                 }
                 if ($recurringDeleteMode === 'future') {
-                    $this->recurringCalendarEvents->deleteGeneratedOccurrencesFrom($event, $recurringOccurrenceDate);
+                    $this->recurringCalendarEvents->deleteGeneratedOccurrencesFrom($sourceEvent, $recurringOccurrenceDate);
                 }
-                $this->applyRecurringCalendarDelete($event, $recurringDeleteMode, $recurringOccurrenceDate);
+                $this->applyRecurringCalendarDelete($sourceEvent, $recurringDeleteMode, $recurringOccurrenceDate);
             });
 
             return response()->json(status: 204);
+        }
+
+        if ($recurringDeleteMode === 'all' && $this->recurringCalendarEvents->isRecurringSeriesEvent($event)) {
+            $eventsToDelete = $eventsToDelete
+                ->map(fn (CalendarEvent $event): CalendarEvent => $this->recurringCalendarEvents->sourceEventFor($event))
+                ->unique(fn (CalendarEvent $event): int => (int) $event->id)
+                ->values();
         }
 
         foreach ($eventsToDelete as $eventToDelete) {
@@ -946,6 +959,11 @@ class DomainResourceController extends Controller
 
         if ($mode === 'future') {
             $metadata['recurrence_until'] = $occurrenceDate;
+        }
+
+        $sourceDate = $event->starts_at ? $event->starts_at->copy()->utc()->toDateString() : null;
+        if ($sourceDate && $occurrenceDate <= $sourceDate) {
+            $metadata['recurrence_source_hidden'] = true;
         }
 
         $event->forceFill(['metadata' => $metadata])->save();
