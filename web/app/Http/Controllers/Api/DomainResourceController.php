@@ -25,6 +25,8 @@ use InvalidArgumentException;
 
 class DomainResourceController extends Controller
 {
+    private const DEFAULT_CATEGORY_COLOR = '#34C759';
+
     public function __construct(
         private readonly StructuredHermesActionService $actions,
         private readonly GoogleCalendarSyncService $googleCalendar,
@@ -140,6 +142,7 @@ class DomainResourceController extends Controller
         ]);
 
         $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
+        $validated = $this->withDefaultUncategorizedColor($validated, true);
 
         if ($this->taskStatusIsCompleted($validated['status'] ?? null) && empty($validated['completed_at'])) {
             $validated['completed_at'] = now();
@@ -172,6 +175,7 @@ class DomainResourceController extends Controller
         ]);
 
         $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
+        $validated = $this->withDefaultUncategorizedColor($validated);
 
         if (array_key_exists('status', $validated)) {
             $willBeCompleted = $this->taskStatusIsCompleted($validated['status']);
@@ -217,6 +221,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
         $this->normalizeDateFields($validated, ['remind_at']);
+        $validated = $this->withDefaultUncategorizedColor($validated, true);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $reminder = Reminder::create($this->owned($request, $validated));
@@ -242,6 +247,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
         $this->normalizeDateFields($validated, ['remind_at']);
+        $validated = $this->withDefaultUncategorizedColor($validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
@@ -275,6 +281,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
+        $validated = $this->withDefaultUncategorizedColor($validated, true);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $event = CalendarEvent::create($this->owned($request, $validated));
@@ -302,6 +309,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
+        $validated = $this->withDefaultUncategorizedColor($validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
@@ -391,13 +399,13 @@ class DomainResourceController extends Controller
         $model = $this->scoped(EventCategory::query(), $request, false)->findOrFail($eventCategory);
         CalendarEvent::where('workspace_id', $model->workspace_id)
             ->where('category', $model->name)
-            ->update(['category' => null, 'color' => null]);
+            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
         Task::where('workspace_id', $model->workspace_id)
             ->where('category', $model->name)
-            ->update(['category' => null, 'color' => null]);
+            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
         Reminder::where('workspace_id', $model->workspace_id)
             ->where('category', $model->name)
-            ->update(['category' => null, 'color' => null]);
+            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
 
         return $this->destroyed($model);
     }
@@ -536,6 +544,21 @@ class DomainResourceController extends Controller
         }
 
         return $owned;
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function withDefaultUncategorizedColor(array $attributes, bool $missingCategoryIsUncategorized = false): array
+    {
+        $hasCategory = array_key_exists('category', $attributes);
+        if (($missingCategoryIsUncategorized && ! $hasCategory) || ($hasCategory && blank($attributes['category']))) {
+            $attributes['category'] = null;
+            $attributes['color'] = self::DEFAULT_CATEGORY_COLOR;
+        }
+
+        return $attributes;
     }
 
     private function workspace(Request $request)

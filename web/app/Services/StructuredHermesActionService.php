@@ -20,6 +20,8 @@ use InvalidArgumentException;
 
 class StructuredHermesActionService
 {
+    private const DEFAULT_CATEGORY_COLOR = '#34C759';
+
     public function __construct(private readonly GoogleCalendarSyncService $googleCalendar) {}
 
     /**
@@ -306,8 +308,8 @@ class StructuredHermesActionService
             'type' => $this->stringParameter($parameters, 'type', 'todo'),
             'status' => $this->stringParameter($parameters, 'status', 'open'),
             'notes' => $parameters['notes'] ?? null,
-            'category' => $parameters['category'] ?? null,
-            'color' => $parameters['color'] ?? null,
+            'category' => $this->resourceCategory($parameters),
+            'color' => $this->resourceColor($parameters),
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
             'due_at' => isset($parameters['due_at']) ? $this->parseDashboardDateTime($session, $parameters['due_at']) : null,
             'metadata' => array_merge(
@@ -332,8 +334,8 @@ class StructuredHermesActionService
             'calendar_event_id' => $parameters['calendar_event_id'] ?? null,
             'title' => $this->stringParameter($parameters, 'title', 'Untitled reminder'),
             'notes' => $parameters['notes'] ?? null,
-            'category' => $parameters['category'] ?? null,
-            'color' => $parameters['color'] ?? null,
+            'category' => $this->resourceCategory($parameters),
+            'color' => $this->resourceColor($parameters),
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
             'remind_at' => $this->parseDashboardDateTime($session, $parameters['remind_at'] ?? now()->addDay()->toIso8601String()),
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
@@ -365,8 +367,8 @@ class StructuredHermesActionService
             'title' => $this->stringParameter($parameters, 'title', 'Untitled event'),
             'description' => $parameters['description'] ?? null,
             'location' => $parameters['location'] ?? null,
-            'category' => $parameters['category'] ?? null,
-            'color' => $parameters['color'] ?? null,
+            'category' => $this->resourceCategory($parameters),
+            'color' => $this->resourceColor($parameters),
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
             'recurrence' => $parameters['recurrence'] ?? null,
             'starts_at' => $startsAt,
@@ -391,6 +393,7 @@ class StructuredHermesActionService
     {
         $task = $this->ownedModel(Task::class, $session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'metadata']);
+        $updates = $this->withDefaultUncategorizedColor($updates);
         if (array_key_exists('due_at', $parameters)) {
             $updates['due_at'] = $parameters['due_at'] ? $this->parseDashboardDateTime($session, $parameters['due_at']) : null;
         }
@@ -403,6 +406,7 @@ class StructuredHermesActionService
     {
         $reminder = $this->ownedModel(Reminder::class, $session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'notes', 'status', 'category', 'color', 'is_critical', 'metadata']);
+        $updates = $this->withDefaultUncategorizedColor($updates);
         if (array_key_exists('remind_at', $parameters)) {
             $updates['remind_at'] = $this->parseDashboardDateTime($session, $parameters['remind_at']);
         }
@@ -415,6 +419,7 @@ class StructuredHermesActionService
     {
         $calendarEvent = $this->calendarEventForUpdate($session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'status', 'metadata']);
+        $updates = $this->withDefaultUncategorizedColor($updates);
         if (array_key_exists('starts_at', $parameters)) {
             $updates['starts_at'] = $this->parseDashboardDateTime($session, $parameters['starts_at']);
         }
@@ -454,7 +459,7 @@ class StructuredHermesActionService
                 'name' => $this->stringParameter($parameters, 'name', 'Personal'),
             ],
             [
-                'color' => $this->stringParameter($parameters, 'color', '#34C759'),
+                'color' => $this->stringParameter($parameters, 'color', self::DEFAULT_CATEGORY_COLOR),
                 'metadata' => array_merge(
                     ['created_by' => 'structured_hermes_action'],
                     is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []
@@ -486,7 +491,15 @@ class StructuredHermesActionService
         CalendarEvent::where('user_id', $session->user_id)
             ->where('workspace_id', $session->workspace_id)
             ->where('category', $category->name)
-            ->update(['category' => null]);
+            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
+        Task::where('user_id', $session->user_id)
+            ->where('workspace_id', $session->workspace_id)
+            ->where('category', $category->name)
+            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
+        Reminder::where('user_id', $session->user_id)
+            ->where('workspace_id', $session->workspace_id)
+            ->where('category', $category->name)
+            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
         $id = $category->id;
         $name = $category->name;
         $category->delete();
@@ -782,6 +795,37 @@ class StructuredHermesActionService
             if (array_key_exists($key, $parameters)) {
                 $updates[$key] = $parameters[$key];
             }
+        }
+
+        return $updates;
+    }
+
+    private function resourceCategory(array $parameters): ?string
+    {
+        $category = $parameters['category'] ?? null;
+        if (! is_scalar($category) || trim((string) $category) === '') {
+            return null;
+        }
+
+        return trim((string) $category);
+    }
+
+    private function resourceColor(array $parameters): ?string
+    {
+        if ($this->resourceCategory($parameters) === null) {
+            return self::DEFAULT_CATEGORY_COLOR;
+        }
+
+        $color = $parameters['color'] ?? null;
+
+        return is_scalar($color) ? (string) $color : null;
+    }
+
+    private function withDefaultUncategorizedColor(array $updates): array
+    {
+        if (array_key_exists('category', $updates) && blank($updates['category'])) {
+            $updates['category'] = null;
+            $updates['color'] = self::DEFAULT_CATEGORY_COLOR;
         }
 
         return $updates;

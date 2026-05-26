@@ -131,6 +131,49 @@ class AssistantDomainApiTest extends TestCase
         $this->assertSame('2026-05-18T21:00:00+00:00', $event->ends_at->utc()->toIso8601String());
     }
 
+    public function test_uncategorized_resources_default_to_bean_green(): void
+    {
+        $token = $this->apiToken();
+
+        $taskId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'No category task',
+            'type' => 'todo',
+        ])->assertCreated()
+            ->assertJsonPath('data.category', null)
+            ->assertJsonPath('data.color', '#34C759')
+            ->json('data.id');
+
+        $reminderId = $this->withToken($token)->postJson('/api/reminders', [
+            'title' => 'No category reminder',
+            'remind_at' => '2026-05-18T14:30:00Z',
+        ])->assertCreated()
+            ->assertJsonPath('data.category', null)
+            ->assertJsonPath('data.color', '#34C759')
+            ->json('data.id');
+
+        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'No category event',
+            'starts_at' => '2026-05-18T13:45:00Z',
+            'ends_at' => '2026-05-18T14:45:00Z',
+        ])->assertCreated()
+            ->assertJsonPath('data.category', null)
+            ->assertJsonPath('data.color', '#34C759')
+            ->json('data.id');
+
+        $this->withToken($token)->patchJson("/api/tasks/{$taskId}", [
+            'category' => null,
+        ])->assertOk()
+            ->assertJsonPath('data.color', '#34C759');
+        $this->withToken($token)->patchJson("/api/reminders/{$reminderId}", [
+            'category' => null,
+        ])->assertOk()
+            ->assertJsonPath('data.color', '#34C759');
+        $this->withToken($token)->patchJson("/api/calendar-events/{$eventId}", [
+            'category' => null,
+        ])->assertOk()
+            ->assertJsonPath('data.color', '#34C759');
+    }
+
     public function test_created_tasks_are_immediately_visible_from_database_task_list(): void
     {
         $token = $this->apiToken();
@@ -279,9 +322,9 @@ class AssistantDomainApiTest extends TestCase
 
         $this->withToken($token)->deleteJson("/api/event-categories/{$categoryId}")->assertNoContent();
         $this->assertDatabaseMissing('event_categories', ['id' => $categoryId]);
-        $this->assertDatabaseHas('calendar_events', ['id' => $eventId, 'category' => null, 'color' => null]);
-        $this->assertDatabaseHas('tasks', ['id' => $taskId, 'category' => null, 'color' => null]);
-        $this->assertDatabaseHas('reminders', ['calendar_event_id' => $eventId, 'category' => null, 'color' => null]);
+        $this->assertDatabaseHas('calendar_events', ['id' => $eventId, 'category' => null, 'color' => '#34C759']);
+        $this->assertDatabaseHas('tasks', ['id' => $taskId, 'category' => null, 'color' => '#34C759']);
+        $this->assertDatabaseHas('reminders', ['calendar_event_id' => $eventId, 'category' => null, 'color' => '#34C759']);
     }
 
     public function test_agent_can_update_calendar_event_metadata_and_create_event_reminder(): void
