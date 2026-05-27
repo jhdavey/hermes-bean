@@ -37,8 +37,8 @@ class TextToSpeechController extends Controller
         }
 
         $response = Http::withToken($apiKey)
-            ->accept('audio/mpeg')
             ->asJson()
+            ->accept('audio/mpeg')
             ->timeout(25)
             ->post('https://api.openai.com/v1/audio/speech', [
                 'model' => 'gpt-4o-mini-tts',

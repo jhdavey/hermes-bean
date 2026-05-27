@@ -129,7 +129,7 @@ class AuthController extends Controller
             'onboarding_priorities.*' => ['string', 'max:80'],
             'onboarding_context' => ['sometimes', 'nullable', 'string', 'max:500'],
             'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
-            'tts_openai_api_key' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'tts_openai_api_key' => ['sometimes', 'nullable', 'string', 'max:1000'],
             'tts_clear_openai_key' => ['sometimes', 'boolean'],
             'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
             'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],

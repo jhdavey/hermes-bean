@@ -103,6 +103,9 @@ if (mount) {
     let kioskHeardTimer = 0;
     let kioskConversationTimer = 0;
     let kioskMicrophoneReady = false;
+    let chatRequestCounter = 0;
+    let activeChatRequestId = 0;
+    const cancelledChatRequestIds = new Set();
 
     boot();
     bindResponsiveCalendar();
@@ -274,12 +277,17 @@ if (mount) {
     }
 
     function currentAgentProfile() {
-        return state.user?.active_workspace_agent_profile
-            || state.user?.activeWorkspaceAgentProfile
-            || state.user?.agent_profile
-            || state.user?.agentProfile
+        return currentAgentProfileFromUser(state.user)
             || state.summary?.agent_profile
             || {};
+    }
+
+    function currentAgentProfileFromUser(user) {
+        return user?.active_workspace_agent_profile
+            || user?.activeWorkspaceAgentProfile
+            || user?.agent_profile
+            || user?.agentProfile
+            || null;
     }
 
     function profileSettings(profile = currentAgentProfile()) {
@@ -684,7 +692,7 @@ if (mount) {
                 <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''}" data-action="chat">
                     <textarea name="message" placeholder="${state.voiceListening ? 'Listening… release to send' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
                     <button class="hb-button-secondary hb-chat-text-send-button" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send message">${icons.send}</button>
-                    <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-voice-button" type="button" ${state.busy ? 'disabled' : 'data-voice-hold'} aria-label="${state.busy ? 'Bean is working' : 'Hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
+                    <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-voice-button" type="button" ${state.busy ? 'data-cancel-turn' : 'data-voice-hold'} aria-label="${state.busy ? 'Stop Bean' : 'Hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
                 </form>
             </section>`;
     }
@@ -1888,6 +1896,7 @@ if (mount) {
             button.addEventListener('click', handleVoiceClick);
             button.addEventListener('contextmenu', handleVoiceContextMenu);
         });
+        mount.querySelectorAll('[data-cancel-turn]').forEach((button) => button.addEventListener('click', cancelBeanTurn));
         bindTimelineHorizontalScroll();
         mount.querySelectorAll('[data-new-session]').forEach((button) => button.addEventListener('click', newSession));
         scrollTimelineToSelected();
@@ -2142,6 +2151,9 @@ if (mount) {
                         tts_openai_instructions: data.ttsOpenAiInstructions || null,
                     },
                 });
+                if (state.summary) {
+                    state.summary.agent_profile = currentAgentProfileFromUser(state.user);
+                }
             } else if (kind === 'workspace-create') {
                 await api('/workspaces', { method: 'POST', body: { name: data.name } });
                 await loadSignedIn();
@@ -2604,7 +2616,37 @@ if (mount) {
         await sendChatContent(content);
     }
 
+    async function cancelBeanTurn(event = null) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        if (activeChatRequestId) {
+            cancelledChatRequestIds.add(activeChatRequestId);
+        }
+        state.busy = false;
+        state.chatRunState = 'Ready';
+        state.voiceStatus = '';
+        state.voiceStatusTone = '';
+        kioskConversationActive = false;
+        kioskCommandText = '';
+        window.speechSynthesis?.cancel();
+        setKioskVoiceStatus(state.kioskVoiceEnabled ? 'armed' : 'idle', state.kioskVoiceEnabled ? 'say hey bean' : '');
+        render();
+        scrollChatToBottom();
+        if (state.kioskVoiceEnabled) {
+            restartKioskVoiceListeningSoon(700);
+        }
+
+        if (!state.session?.id) return;
+        try {
+            state.session = await api(`/assistant/sessions/${state.session.id}/cancel`, { method: 'POST' });
+        } catch (error) {
+            // A completed turn can race the cancel request; the UI has already been released.
+        }
+    }
+
     async function sendChatContent(content, options = {}) {
+        const requestId = ++chatRequestCounter;
+        activeChatRequestId = requestId;
         const wasOnboarding = needsBeanOnboarding();
         let result = null;
         let assistantContent = '';
@@ -2631,6 +2673,13 @@ if (mount) {
                 method: 'POST',
                 body: { content },
             });
+            if (cancelledChatRequestIds.has(requestId)) {
+                state.session = result.session || state.session;
+                state.activity = normalizeList(result.events).length ? result.events : state.activity;
+                state.chatRunState = 'Ready';
+                await refreshOnly(false);
+                return { result, assistantContent: '' };
+            }
             state.session = result.session || state.session;
             state.activity = normalizeList(result.events).length ? result.events : state.activity;
             if (result.user_message) replaceLocalUserMessage(result.user_message);
@@ -2644,11 +2693,17 @@ if (mount) {
                 state.onboardingJustCompleted = true;
             }
         } catch (error) {
-            assistantContent = friendlyError(error, 'send that message');
-            state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: assistantContent });
-            state.chatRunState = 'Failed';
+            if (!cancelledChatRequestIds.has(requestId)) {
+                assistantContent = friendlyError(error, 'send that message');
+                state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: assistantContent });
+                state.chatRunState = 'Failed';
+            }
         } finally {
-            state.busy = false;
+            cancelledChatRequestIds.delete(requestId);
+            if (activeChatRequestId === requestId) {
+                activeChatRequestId = 0;
+                state.busy = false;
+            }
             render();
             scrollChatToBottom();
             if (options.autoCloseChatMs) {
@@ -2926,6 +2981,10 @@ if (mount) {
         recognition.onresult = (event) => {
             const transcript = speechTranscript(event);
             if (!transcript) return;
+            if (kioskCancelRequested(transcript)) {
+                cancelKioskVoiceCapture();
+                return;
+            }
             if (!kioskConversationActive) {
                 const command = commandAfterWakePhrase(transcript);
                 if (command === null) {
@@ -3114,6 +3173,20 @@ if (mount) {
         setKioskVoiceStatus('armed', message || 'say hey bean');
     }
 
+    function cancelKioskVoiceCapture() {
+        pauseKioskVoiceListening();
+        endKioskConversation('cancelled');
+        if (state.busy) {
+            cancelBeanTurn();
+            return;
+        }
+        restartKioskVoiceListeningSoon(650);
+    }
+
+    function kioskCancelRequested(transcript) {
+        return /\b(?:never\s*mind|nevermind|cancel that|forget it)\b/i.test(transcript);
+    }
+
     function conversationEndRequested(transcript) {
         return /\b(?:thanks|thank you|that'?s all|stop listening|cancel)\s+(?:bean|been|beam|being)\b/i.test(transcript)
             || /\b(?:thanks|thank you),?\s*(?:that'?s all|we'?re done)\b/i.test(transcript);
@@ -3189,7 +3262,12 @@ if (mount) {
     function speakKioskResponse(content) {
         const text = speechTextFromAssistant(content);
         if (openAiTtsEnabled()) {
-            return playOpenAiTts(text).then((played) => played || speakBrowserTts(text));
+            return playOpenAiTts(text).then(async (played) => {
+                if (played) return true;
+                setKioskVoiceStatus('responding', 'browser voice');
+                await sleep(350);
+                return speakBrowserTts(text);
+            });
         }
         return speakBrowserTts(text);
     }
@@ -3212,7 +3290,10 @@ if (mount) {
                 },
                 body: JSON.stringify({ text, voice: profileTtsVoice() }),
             });
-            if (!response.ok) return false;
+            if (!response.ok) {
+                await response.json().catch(() => null);
+                return false;
+            }
             const blob = await response.blob();
             url = URL.createObjectURL(blob);
             const audio = new Audio(url);
