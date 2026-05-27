@@ -2671,7 +2671,7 @@ if (mount) {
             }
             result = await api(`/assistant/sessions/${state.session.id}/messages`, {
                 method: 'POST',
-                body: { content },
+                body: { content, metadata: { client_context: clientContextPayload() } },
             });
             if (cancelledChatRequestIds.has(requestId)) {
                 state.session = result.session || state.session;
@@ -3235,15 +3235,54 @@ if (mount) {
         }
 
         setKioskVoiceStatus('working', 'working');
-        const response = await sendChatContent(content);
-        const spoken = await speakKioskResponse(response.assistantContent);
-        if (!spoken) {
-            setKioskVoiceStatus('responding', 'responded');
-            await sleep(900);
+        try {
+            const response = await sendChatContent(content);
+            const assistantContent = response?.assistantContent || '';
+            if (!assistantContent) {
+                setKioskVoiceStatus('error', 'no response');
+                await sleep(1200);
+            } else {
+                const spoken = await speakKioskResponse(assistantContent);
+                if (!spoken) {
+                    setKioskVoiceStatus('responding', 'responded');
+                    await sleep(900);
+                }
+            }
+        } catch (error) {
+            setKioskVoiceStatus('error', friendlyError(error, 'send that message'));
+            await sleep(1800);
         }
         setKioskVoiceStatus('listening', 'listening');
         armKioskConversationTimeout();
         restartKioskVoiceListeningSoon(1200);
+    }
+
+    function clientContextPayload() {
+        const now = new Date();
+        const offsetMinutes = -now.getTimezoneOffset();
+        const sign = offsetMinutes >= 0 ? '+' : '-';
+        const absolute = Math.abs(offsetMinutes);
+        const hours = String(Math.floor(absolute / 60)).padStart(2, '0');
+        const minutes = String(absolute % 60).padStart(2, '0');
+        const offset = `${sign}${hours}:${minutes}`;
+
+        return {
+            current_local_time: localIsoWithOffset(now, offset),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+            timezone_offset: offset,
+            timezone_offset_minutes: offsetMinutes,
+        };
+    }
+
+    function localIsoWithOffset(date, offset) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hour = String(date.getHours()).padStart(2, '0');
+        const minute = String(date.getMinutes()).padStart(2, '0');
+        const second = String(date.getSeconds()).padStart(2, '0');
+
+        return `${year}-${month}-${day}T${hour}:${minute}:${second}${offset}`;
     }
 
     function setKioskVoiceStatus(phase, message) {

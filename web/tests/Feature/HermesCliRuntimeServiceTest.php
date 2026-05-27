@@ -692,6 +692,56 @@ PHP);
         ]);
     }
 
+    public function test_structured_create_actions_accept_common_time_field_aliases(): void
+    {
+        $script = $this->writeExecutable('aliased-calendar-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'visible_response' => 'Workout is on your calendar from 6:00 PM to 7:00 PM.',
+    'actions' => [[
+        'type' => 'calendar_event.create',
+        'risk' => 'low',
+        'parameters' => [
+            'summary' => 'Workout',
+            'date' => '2026-05-27',
+            'start_time' => '6:00 PM',
+            'end_time' => '7:00 PM',
+        ],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('aliased-calendar-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Schedule workout on my calendar today from 6 to 7pm',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-05-27T12:00:00-04:00',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Workout is on your calendar from 6:00 PM to 7:00 PM.')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $this->assertDatabaseHas('calendar_events', [
+            'conversation_session_id' => $sessionId,
+            'title' => 'Workout',
+        ]);
+        $event = \App\Models\CalendarEvent::where('conversation_session_id', $sessionId)->firstOrFail();
+        $this->assertSame('2026-05-27T22:00:00+00:00', $event->starts_at->toIso8601String());
+        $this->assertSame('2026-05-27T23:00:00+00:00', $event->ends_at->toIso8601String());
+    }
+
     public function test_clear_calendar_create_prompt_discourages_unnecessary_followups(): void
     {
         $script = $this->writeExecutable('prompt-capture-hermes.php', <<<'PHP'

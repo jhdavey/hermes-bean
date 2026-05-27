@@ -44,6 +44,8 @@ class StructuredHermesActionService
 
             try {
                 $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+                $parameters = $this->normalizeActionParameters($action, $parameters);
+                $action['parameters'] = $parameters;
                 $this->validateActionContract($action, $parameters);
                 $actionSession = $this->sessionForAction($session, $parameters);
             } catch (\Throwable $exception) {
@@ -203,20 +205,121 @@ class StructuredHermesActionService
         };
     }
 
+    private function normalizeActionParameters(array $action, array $parameters): array
+    {
+        $type = (string) ($action['type'] ?? '');
+
+        if (! $this->hasParameterValue($parameters, 'title')) {
+            $this->copyFirstParameter($parameters, 'title', ['summary', 'name', 'label', 'text']);
+        }
+
+        if (in_array($type, ['calendar_event.create', 'calendar.create', 'calendar_event.update', 'calendar.update'], true)) {
+            $this->copyFirstParameter($parameters, 'starts_at', ['startsAt', 'start_at', 'startAt', 'start', 'begin_at', 'begins_at']);
+            $this->copyFirstParameter($parameters, 'ends_at', ['endsAt', 'end_at', 'endAt', 'end', 'finish_at']);
+
+            if (! $this->hasParameterValue($parameters, 'starts_at')) {
+                $this->combineDateAndTimeParameter($parameters, 'starts_at', ['start_time', 'startTime', 'time']);
+            }
+            if (! $this->hasParameterValue($parameters, 'ends_at')) {
+                $this->combineDateAndTimeParameter($parameters, 'ends_at', ['end_time', 'endTime']);
+            }
+        }
+
+        if (in_array($type, ['reminder.create', 'reminder.update'], true)) {
+            $this->copyFirstParameter($parameters, 'remind_at', ['remindAt', 'reminder_at', 'reminderAt', 'reminder_time', 'reminderTime', 'alert_at', 'alertAt', 'time']);
+            if (! $this->hasParameterValue($parameters, 'remind_at')) {
+                $this->combineDateAndTimeParameter($parameters, 'remind_at', ['reminder_time', 'reminderTime', 'time']);
+            }
+        }
+
+        if (in_array($type, ['task.create', 'task.update'], true)) {
+            $this->copyFirstParameter($parameters, 'due_at', ['dueAt', 'due_date', 'dueDate', 'deadline_at', 'deadlineAt']);
+            if (! $this->hasParameterValue($parameters, 'due_at')) {
+                $this->combineDateAndTimeParameter($parameters, 'due_at', ['due_time', 'dueTime', 'time']);
+            }
+        }
+
+        return $parameters;
+    }
+
+    /**
+     * @param  array<int, string>  $sourceKeys
+     */
+    private function copyFirstParameter(array &$parameters, string $targetKey, array $sourceKeys): void
+    {
+        if ($this->hasParameterValue($parameters, $targetKey)) {
+            return;
+        }
+
+        foreach ($sourceKeys as $sourceKey) {
+            if ($this->hasParameterValue($parameters, $sourceKey)) {
+                $parameters[$targetKey] = $parameters[$sourceKey];
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $timeKeys
+     */
+    private function combineDateAndTimeParameter(array &$parameters, string $targetKey, array $timeKeys): void
+    {
+        if (! $this->hasParameterValue($parameters, 'date')) {
+            return;
+        }
+
+        foreach ($timeKeys as $timeKey) {
+            if ($this->hasParameterValue($parameters, $timeKey)) {
+                $parameters[$targetKey] = $this->combineDateAndWallClockTime($parameters['date'], $parameters[$timeKey]);
+
+                return;
+            }
+        }
+    }
+
+    private function combineDateAndWallClockTime(mixed $date, mixed $time): string
+    {
+        $dateText = trim((string) $date);
+        $timeText = trim((string) $time);
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateText) === 1
+            && preg_match('/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i', $timeText, $matches) === 1) {
+            $hour = (int) $matches[1];
+            $minute = (int) ($matches[2] ?? 0);
+            $meridiem = strtolower((string) ($matches[3] ?? ''));
+
+            if ($meridiem === 'pm' && $hour < 12) {
+                $hour += 12;
+            } elseif ($meridiem === 'am' && $hour === 12) {
+                $hour = 0;
+            }
+
+            if ($hour >= 0 && $hour <= 23 && $minute >= 0 && $minute <= 59) {
+                return sprintf('%sT%02d:%02d:00', $dateText, $hour, $minute);
+            }
+        }
+
+        return $dateText.' '.$timeText;
+    }
+
+    private function hasParameterValue(array $parameters, string $key): bool
+    {
+        if (! array_key_exists($key, $parameters)) {
+            return false;
+        }
+
+        $value = $parameters[$key];
+
+        return is_scalar($value) ? trim((string) $value) !== '' : $value !== null;
+    }
+
     private function requireCalendarCreateFields(string $type, array $parameters): void
     {
         $this->requireActionFields($type, $parameters, ['title']);
 
         $hasStart = collect(['starts_at', 'start_at'])
-            ->contains(function (string $field) use ($parameters): bool {
-                if (! array_key_exists($field, $parameters)) {
-                    return false;
-                }
-
-                $value = $parameters[$field];
-
-                return is_scalar($value) ? trim((string) $value) !== '' : $value !== null;
-            });
+            ->contains(fn (string $field): bool => $this->hasParameterValue($parameters, $field));
 
         if (! $hasStart) {
             throw new InvalidArgumentException(sprintf('Structured action %s is missing required field: starts_at.', $type));
@@ -229,15 +332,7 @@ class StructuredHermesActionService
     private function requireActionFields(string $type, array $parameters, array $fields): void
     {
         $missing = collect($fields)
-            ->reject(function (string $field) use ($parameters): bool {
-                if (! array_key_exists($field, $parameters)) {
-                    return false;
-                }
-
-                $value = $parameters[$field];
-
-                return is_scalar($value) ? trim((string) $value) !== '' : $value !== null;
-            })
+            ->reject(fn (string $field): bool => $this->hasParameterValue($parameters, $field))
             ->values()
             ->all();
 
