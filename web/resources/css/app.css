@@ -2341,16 +2341,19 @@
 }
 
 .hb-kiosk-voice-pill-armed::before,
+.hb-kiosk-voice-pill-heard::before,
 .hb-kiosk-voice-pill-listening::before {
     animation: hb-kiosk-listening-pulse 1.15s ease-in-out infinite;
 }
 
-.hb-kiosk-voice-pill-sending {
+.hb-kiosk-voice-pill-sending,
+.hb-kiosk-voice-pill-working {
     color: var(--hb-muted);
     border-color: rgba(100, 116, 139, .22);
 }
 
-.hb-kiosk-voice-pill-speaking {
+.hb-kiosk-voice-pill-speaking,
+.hb-kiosk-voice-pill-responding {
     color: var(--hb-accent-strong);
     background: rgba(240, 253, 244, .96);
 }

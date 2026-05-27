@@ -96,6 +96,7 @@ if (mount) {
     let kioskRecognitionActive = false;
     let kioskRecognitionShouldRestart = false;
     let kioskCommandText = '';
+    let kioskConversationActive = false;
     let kioskCommandTimer = 0;
     let kioskRestartTimer = 0;
     let kioskAutoCloseTimer = 0;
@@ -2870,44 +2871,45 @@ if (mount) {
 
         recognition.onstart = () => {
             kioskRecognitionActive = true;
-            setKioskVoiceStatus('armed', 'say hey bean');
+            setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'say hey bean');
         };
         recognition.onresult = (event) => {
             const transcript = speechTranscript(event);
             if (!transcript) return;
-            if (state.kioskVoicePhase !== 'listening') {
+            if (!kioskConversationActive) {
                 const command = commandAfterWakePhrase(transcript);
                 if (command === null) {
                     showKioskHeardTranscript(transcript);
                     return;
                 }
                 kioskCommandText = command;
+                kioskConversationActive = true;
                 window.speechSynthesis?.cancel();
-                openKioskChat();
                 setKioskVoiceStatus('listening', 'listening');
                 if (kioskCommandText.trim()) {
+                    showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
                     armKioskCommandSubmit();
                 }
                 return;
             }
-            if (state.kioskVoicePhase !== 'listening') return;
+            if (!['listening', 'heard'].includes(state.kioskVoicePhase)) return;
             const command = commandAfterWakePhrase(transcript);
             kioskCommandText = (command === null ? transcript : command).trim();
             if (kioskCommandText) {
-                setKioskVoiceStatus('listening', 'listening');
+                showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
                 armKioskCommandSubmit();
             }
         };
         recognition.onend = () => {
             kioskRecognitionActive = false;
             kioskRecognition = null;
-            if (state.kioskVoicePhase === 'listening' && kioskCommandText.trim()) {
+            if (['listening', 'heard'].includes(state.kioskVoicePhase) && kioskCommandText.trim()) {
                 finishKioskVoiceCommand();
                 return;
             }
-            if (state.kioskVoicePhase === 'listening') {
+            if (['listening', 'heard'].includes(state.kioskVoicePhase)) {
                 kioskCommandText = '';
-                setKioskVoiceStatus('idle', '');
+                setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'idle', kioskConversationActive ? 'listening' : '');
             }
             if (kioskRecognitionShouldRestart) {
                 restartKioskVoiceListeningSoon(700);
@@ -2998,6 +3000,7 @@ if (mount) {
         kioskAutoCloseTimer = 0;
         kioskHeardTimer = 0;
         kioskCommandText = '';
+        kioskConversationActive = false;
         state.kioskVoicePhase = 'idle';
         state.kioskVoiceMessage = '';
         window.speechSynthesis?.cancel();
@@ -3026,15 +3029,16 @@ if (mount) {
         return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
     }
 
-    function showKioskHeardTranscript(transcript) {
-        if (!transcript || state.kioskVoicePhase === 'sending' || state.kioskVoicePhase === 'speaking') return;
-        const preview = transcript.length > 32 ? `${transcript.slice(0, 29)}...` : transcript;
-        setKioskVoiceStatus('armed', `heard: ${preview}`);
+    function showKioskHeardTranscript(transcript, options = {}) {
+        if (!transcript || ['working', 'responding'].includes(state.kioskVoicePhase)) return;
+        const preview = transcript.length > 44 ? `${transcript.slice(0, 41)}...` : transcript;
+        const phase = options.phase || (kioskConversationActive ? 'heard' : 'armed');
+        setKioskVoiceStatus(phase, `heard "${preview}"`);
         window.clearTimeout(kioskHeardTimer);
         kioskHeardTimer = window.setTimeout(() => {
             kioskHeardTimer = 0;
-            if (state.kioskVoiceEnabled && kioskRecognitionActive && state.kioskVoicePhase === 'armed') {
-                setKioskVoiceStatus('armed', 'say hey bean');
+            if (state.kioskVoiceEnabled && kioskRecognitionActive && ['armed', 'heard'].includes(state.kioskVoicePhase)) {
+                setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'say hey bean');
             }
         }, 1600);
     }
@@ -3051,18 +3055,19 @@ if (mount) {
         kioskCommandText = '';
         pauseKioskVoiceListening();
         if (!content || state.busy) {
-            setKioskVoiceStatus('idle', '');
+            setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'idle', kioskConversationActive ? 'listening' : '');
             restartKioskVoiceListeningSoon(900);
             return;
         }
 
-        setKioskVoiceStatus('sending', 'sending...');
-        const response = await sendChatContent(content, { autoOpenChat: true, autoCloseChatMs: 10000 });
+        setKioskVoiceStatus('working', 'working');
+        const response = await sendChatContent(content);
         const spoken = await speakKioskResponse(response.assistantContent);
         if (!spoken) {
-            scheduleKioskChatAutoClose(10000);
+            setKioskVoiceStatus('responding', 'responded');
+            await sleep(900);
         }
-        setKioskVoiceStatus('idle', '');
+        setKioskVoiceStatus('listening', 'listening');
         restartKioskVoiceListeningSoon(1200);
     }
 
@@ -3097,7 +3102,7 @@ if (mount) {
         }
         return new Promise((resolve) => {
             window.speechSynthesis.cancel();
-            setKioskVoiceStatus('speaking', 'speaking');
+            setKioskVoiceStatus('responding', 'responding');
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.rate = 1;
             utterance.pitch = 1;
@@ -3128,6 +3133,7 @@ if (mount) {
         state.kioskVoiceEnabled = !state.kioskVoiceEnabled;
         if (state.kioskVoiceEnabled) {
             localStorage.setItem(kioskVoiceKey, 'true');
+            kioskConversationActive = false;
             state.kioskVoicePhase = 'idle';
             state.kioskVoiceMessage = '';
             render();
