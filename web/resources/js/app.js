@@ -99,6 +99,7 @@ if (mount) {
     let kioskCommandTimer = 0;
     let kioskRestartTimer = 0;
     let kioskAutoCloseTimer = 0;
+    let kioskHeardTimer = 0;
     let kioskMicrophoneReady = false;
 
     boot();
@@ -2869,13 +2870,17 @@ if (mount) {
 
         recognition.onstart = () => {
             kioskRecognitionActive = true;
+            setKioskVoiceStatus('armed', 'say hey bean');
         };
         recognition.onresult = (event) => {
             const transcript = speechTranscript(event);
             if (!transcript) return;
-            if (state.kioskVoicePhase === 'idle') {
+            if (state.kioskVoicePhase !== 'listening') {
                 const command = commandAfterWakePhrase(transcript);
-                if (command === null) return;
+                if (command === null) {
+                    showKioskHeardTranscript(transcript);
+                    return;
+                }
                 kioskCommandText = command;
                 window.speechSynthesis?.cancel();
                 openKioskChat();
@@ -2972,8 +2977,10 @@ if (mount) {
         kioskRecognitionShouldRestart = false;
         window.clearTimeout(kioskRestartTimer);
         window.clearTimeout(kioskCommandTimer);
+        window.clearTimeout(kioskHeardTimer);
         kioskRestartTimer = 0;
         kioskCommandTimer = 0;
+        kioskHeardTimer = 0;
         if (kioskRecognition) {
             const recognition = kioskRecognition;
             kioskRecognition = null;
@@ -2987,7 +2994,9 @@ if (mount) {
     function stopKioskVoiceMode() {
         pauseKioskVoiceListening();
         window.clearTimeout(kioskAutoCloseTimer);
+        window.clearTimeout(kioskHeardTimer);
         kioskAutoCloseTimer = 0;
+        kioskHeardTimer = 0;
         kioskCommandText = '';
         state.kioskVoicePhase = 'idle';
         state.kioskVoiceMessage = '';
@@ -3012,9 +3021,22 @@ if (mount) {
     }
 
     function commandAfterWakePhrase(transcript) {
-        const match = transcript.match(/(?:^|\s)(?:hey|hay)\s+(?:bean|been)\b[\s,.:;!?-]*/i);
+        const match = transcript.match(/(?:^|\s)(?:hey|hay|hi|okay|ok)\s+(?:bean|been|beam|being)\b[\s,.:;!?-]*/i);
         if (!match) return null;
         return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
+    }
+
+    function showKioskHeardTranscript(transcript) {
+        if (!transcript || state.kioskVoicePhase === 'sending' || state.kioskVoicePhase === 'speaking') return;
+        const preview = transcript.length > 32 ? `${transcript.slice(0, 29)}...` : transcript;
+        setKioskVoiceStatus('armed', `heard: ${preview}`);
+        window.clearTimeout(kioskHeardTimer);
+        kioskHeardTimer = window.setTimeout(() => {
+            kioskHeardTimer = 0;
+            if (state.kioskVoiceEnabled && kioskRecognitionActive && state.kioskVoicePhase === 'armed') {
+                setKioskVoiceStatus('armed', 'say hey bean');
+            }
+        }, 1600);
     }
 
     function armKioskCommandSubmit() {

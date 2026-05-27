@@ -2340,6 +2340,7 @@
     box-shadow: 0 0 0 4px rgba(22, 163, 74, .10);
 }
 
+.hb-kiosk-voice-pill-armed::before,
 .hb-kiosk-voice-pill-listening::before {
     animation: hb-kiosk-listening-pulse 1.15s ease-in-out infinite;
 }
