@@ -39,7 +39,7 @@ if (mount) {
         calendarWindowDayCount: calendarInitialWindowDays,
         timelineScrollRestore: null,
         calendarVisibleDayCount: calendarVisibleDayCount(),
-        showMonth: false,
+        showMonth: true,
         user: null,
         summary: null,
         tasks: [],
