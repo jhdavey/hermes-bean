@@ -946,6 +946,7 @@
     display: grid;
     gap: 3px;
     padding: 8px 2px;
+    text-align: left;
     cursor: pointer;
 }
 
@@ -959,10 +960,12 @@
 .hb-item-title {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 4px;
     min-width: 0;
     color: var(--hb-text);
     font-weight: 900;
+    text-align: left;
 }
 
 .hb-item-task .hb-item-title {
@@ -998,6 +1001,7 @@
     color: var(--hb-muted);
     font-size: 12px;
     font-weight: 600;
+    text-align: left;
 }
 
 .hb-item-task .hb-item-meta {
