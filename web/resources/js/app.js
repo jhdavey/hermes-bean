@@ -101,6 +101,7 @@ if (mount) {
     let kioskRestartTimer = 0;
     let kioskAutoCloseTimer = 0;
     let kioskHeardTimer = 0;
+    let kioskConversationTimer = 0;
     let kioskMicrophoneReady = false;
 
     boot();
@@ -2883,7 +2884,7 @@ if (mount) {
                     return;
                 }
                 kioskCommandText = command;
-                kioskConversationActive = true;
+                beginKioskConversation();
                 window.speechSynthesis?.cancel();
                 setKioskVoiceStatus('listening', 'listening');
                 if (kioskCommandText.trim()) {
@@ -2896,6 +2897,11 @@ if (mount) {
             const command = commandAfterWakePhrase(transcript);
             kioskCommandText = (command === null ? transcript : command).trim();
             if (kioskCommandText) {
+                window.clearTimeout(kioskConversationTimer);
+                if (conversationEndRequested(kioskCommandText)) {
+                    endKioskConversation('done');
+                    return;
+                }
                 showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
                 armKioskCommandSubmit();
             }
@@ -2980,9 +2986,11 @@ if (mount) {
         window.clearTimeout(kioskRestartTimer);
         window.clearTimeout(kioskCommandTimer);
         window.clearTimeout(kioskHeardTimer);
+        window.clearTimeout(kioskConversationTimer);
         kioskRestartTimer = 0;
         kioskCommandTimer = 0;
         kioskHeardTimer = 0;
+        kioskConversationTimer = 0;
         if (kioskRecognition) {
             const recognition = kioskRecognition;
             kioskRecognition = null;
@@ -2997,8 +3005,10 @@ if (mount) {
         pauseKioskVoiceListening();
         window.clearTimeout(kioskAutoCloseTimer);
         window.clearTimeout(kioskHeardTimer);
+        window.clearTimeout(kioskConversationTimer);
         kioskAutoCloseTimer = 0;
         kioskHeardTimer = 0;
+        kioskConversationTimer = 0;
         kioskCommandText = '';
         kioskConversationActive = false;
         state.kioskVoicePhase = 'idle';
@@ -3027,6 +3037,37 @@ if (mount) {
         const match = transcript.match(/(?:^|\s)(?:hey|hay|hi|okay|ok)\s+(?:bean|been|beam|being)\b[\s,.:;!?-]*/i);
         if (!match) return null;
         return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
+    }
+
+    function beginKioskConversation() {
+        kioskConversationActive = true;
+        window.clearTimeout(kioskConversationTimer);
+    }
+
+    function armKioskConversationTimeout() {
+        window.clearTimeout(kioskConversationTimer);
+        if (!kioskConversationActive || !state.kioskVoiceEnabled) return;
+        kioskConversationTimer = window.setTimeout(() => {
+            kioskConversationTimer = 0;
+            endKioskConversation();
+        }, 15000);
+    }
+
+    function endKioskConversation(message = '') {
+        window.clearTimeout(kioskConversationTimer);
+        window.clearTimeout(kioskCommandTimer);
+        window.clearTimeout(kioskHeardTimer);
+        kioskConversationTimer = 0;
+        kioskCommandTimer = 0;
+        kioskHeardTimer = 0;
+        kioskConversationActive = false;
+        kioskCommandText = '';
+        setKioskVoiceStatus('armed', message || 'say hey bean');
+    }
+
+    function conversationEndRequested(transcript) {
+        return /\b(?:thanks|thank you|that'?s all|stop listening|cancel)\s+(?:bean|been|beam|being)\b/i.test(transcript)
+            || /\b(?:thanks|thank you),?\s*(?:that'?s all|we'?re done)\b/i.test(transcript);
     }
 
     function showKioskHeardTranscript(transcript, options = {}) {
@@ -3068,6 +3109,7 @@ if (mount) {
             await sleep(900);
         }
         setKioskVoiceStatus('listening', 'listening');
+        armKioskConversationTimeout();
         restartKioskVoiceListeningSoon(1200);
     }
 
