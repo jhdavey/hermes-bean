@@ -497,6 +497,11 @@
     margin: 0 auto;
 }
 
+.hb-main-today .hb-shell {
+    width: 100%;
+    max-width: none;
+}
+
 .hb-dashboard-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
