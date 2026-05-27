@@ -233,9 +233,14 @@ class StructuredHermesActionService
         }
 
         if (in_array($type, ['task.create', 'task.update'], true)) {
+            $this->copyFirstParameter($parameters, 'id', ['task_id', 'taskId']);
+            $this->copyFirstParameter($parameters, 'match_title', ['task_title', 'taskTitle', 'lookup_title', 'lookupTitle', 'name']);
             $this->copyFirstParameter($parameters, 'due_at', ['dueAt', 'due_date', 'dueDate', 'deadline_at', 'deadlineAt']);
             if (! $this->hasParameterValue($parameters, 'due_at')) {
                 $this->combineDateAndTimeParameter($parameters, 'due_at', ['due_time', 'dueTime', 'time']);
+            }
+            if (isset($parameters['status']) && is_scalar($parameters['status'])) {
+                $parameters['status'] = $this->normalizeTaskStatus((string) $parameters['status']);
             }
         }
 
@@ -312,6 +317,17 @@ class StructuredHermesActionService
         $value = $parameters[$key];
 
         return is_scalar($value) ? trim((string) $value) !== '' : $value !== null;
+    }
+
+    private function normalizeTaskStatus(string $status): string
+    {
+        $normalized = mb_strtolower(trim($status));
+
+        return match ($normalized) {
+            'complete', 'completed', 'done', 'finished', 'finish', 'closed' => 'completed',
+            'todo', 'to do', 'pending', 'open', 'incomplete', 'not done' => 'open',
+            default => $status,
+        };
     }
 
     private function requireCalendarCreateFields(string $type, array $parameters): void
@@ -547,7 +563,7 @@ class StructuredHermesActionService
 
     private function updateTask(ConversationSession $session, array $parameters): ActivityEvent
     {
-        $task = $this->ownedModel(Task::class, $session, $parameters);
+        $task = $this->taskForUpdate($session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'metadata']);
         $updates = $this->withDefaultUncategorizedColor($updates);
         if (array_key_exists('due_at', $parameters)) {
@@ -556,6 +572,47 @@ class StructuredHermesActionService
         $task->update($updates);
 
         return $this->recordEvent($session, 'assistant.task.updated', ['task_id' => $task->id, 'title' => $task->title], 'tasks.update', 'succeeded');
+    }
+
+    private function taskForUpdate(ConversationSession $session, array $parameters): Task
+    {
+        if (! empty($parameters['id'])) {
+            return $this->ownedModel(Task::class, $session, $parameters);
+        }
+
+        $title = trim((string) ($parameters['match_title'] ?? $parameters['title'] ?? ''));
+        if ($title === '') {
+            throw new InvalidArgumentException('Structured task update is missing required resource id or title.');
+        }
+
+        $query = Task::query()
+            ->where('user_id', $session->user_id)
+            ->where('title', 'like', '%'.addcslashes($title, '%_\\').'%');
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+
+        $matches = $query
+            ->orderByRaw('case when lower(title) = ? then 0 else 1 end', [mb_strtolower($title)])
+            ->latest('updated_at')
+            ->limit(5)
+            ->get();
+
+        if ($matches->count() === 1) {
+            return $matches->first();
+        }
+
+        $exactMatches = $matches
+            ->filter(fn (Task $task): bool => mb_strtolower($task->title) === mb_strtolower($title))
+            ->values();
+        if ($exactMatches->count() === 1) {
+            return $exactMatches->first();
+        }
+
+        throw new InvalidArgumentException($matches->isEmpty()
+            ? 'Bean could not find a matching task to update.'
+            : 'Bean found multiple matching tasks. Please include the exact task.'
+        );
     }
 
     private function updateReminder(ConversationSession $session, array $parameters): ActivityEvent

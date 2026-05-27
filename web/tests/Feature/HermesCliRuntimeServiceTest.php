@@ -692,6 +692,58 @@ PHP);
         ]);
     }
 
+    public function test_empty_structured_message_falls_back_and_task_update_can_match_title(): void
+    {
+        $script = $this->writeExecutable('empty-message-task-update-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => '',
+    'actions' => [[
+        'type' => 'task.update',
+        'risk' => 'low',
+        'parameters' => [
+            'task_title' => 'Litter Box',
+            'status' => 'complete',
+        ],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('task-title-update-cli@example.com');
+        $user = User::where('email', 'task-title-update-cli@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $task = Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'title' => 'Litter Box',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now(),
+        ]);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'workspace_id' => $workspaceId,
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Mark litter box complete',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I updated that task.')
+            ->assertJsonFragment(['event_type' => 'assistant.task.updated']);
+
+        $this->assertDatabaseHas('tasks', [
+            'id' => $task->id,
+            'title' => 'Litter Box',
+            'status' => 'completed',
+        ]);
+    }
+
     public function test_structured_create_actions_accept_common_time_field_aliases(): void
     {
         $script = $this->writeExecutable('aliased-calendar-hermes.php', <<<'PHP'

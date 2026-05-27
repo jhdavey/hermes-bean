@@ -782,7 +782,7 @@ PROMPT.$this->payloadFor($session, $message, $modelRoute);
 
         if (is_array($decoded)) {
             foreach ($this->assistantContentKeys() as $key) {
-                if (isset($decoded[$key]) && is_string($decoded[$key])) {
+                if (isset($decoded[$key]) && is_string($decoded[$key]) && trim($decoded[$key]) !== '') {
                     return $this->normalizeAssistantContent($decoded[$key]);
                 }
             }
@@ -846,6 +846,7 @@ PROMPT.$this->payloadFor($session, $message, $modelRoute);
             return match ((string) ($action['type'] ?? '')) {
                 'calendar_event.create', 'calendar.create' => $title !== '' ? "I added {$title} to your calendar." : 'I added that to your calendar.',
                 'task.create' => $title !== '' ? "I added {$title} to your tasks." : 'I added that to your tasks.',
+                'task.update' => $title !== '' ? "I updated {$title}." : 'I updated that task.',
                 'reminder.create' => $title !== '' ? "I set the reminder: {$title}." : 'I set that reminder.',
                 'event_category.create' => $name !== '' ? "I created {$name}." : 'I created that.',
                 default => 'Done.',
