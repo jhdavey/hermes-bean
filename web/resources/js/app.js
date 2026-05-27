@@ -2984,7 +2984,7 @@ if (mount) {
                 return;
             }
             if (!kioskConversationActive) {
-                const wakeTranscript = speechTranscript(event, { finalOnly: true, fromResultIndex: true });
+                const wakeTranscript = speechTranscript(event);
                 if (!wakeTranscript) return;
                 const command = commandAfterWakePhrase(wakeTranscript);
                 if (command === null) {
@@ -3152,7 +3152,7 @@ if (mount) {
     }
 
     function commandAfterWakePhrase(transcript) {
-        const match = transcript.match(/(?:^|\s)hey\s+(?:bean|been)\b[\s,.:;!?-]*/i);
+        const match = transcript.match(/(?:^|\s)(?:hey|hay)\s+(?:bean|been|beam|being)\b[\s,.:;!?-]*/i);
         if (!match) return null;
         return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
     }
