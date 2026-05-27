@@ -933,13 +933,9 @@ if (mount) {
 
     function dayBoardMarkup(items, kind, emptyText) {
         const days = itemBoardDays(items, kind);
-        const overflowItems = items
-            .filter((item) => !days.includes(itemDateOnly(item, kind)))
-            .sort(itemSortFunction(kind));
         return `
             <div class="hb-day-board" aria-label="${escapeAttr(kind === 'task' ? 'Tasks by day' : 'Reminders by day')}">
                 ${days.map((day) => dayBoardColumnMarkup(day, itemsForItemDay(items, kind, day), kind, emptyText)).join('')}
-                ${overflowItems.length ? dayBoardOverflowMarkup(overflowItems, kind) : ''}
             </div>`;
     }
 
@@ -957,33 +953,19 @@ if (mount) {
             </section>`;
     }
 
-    function dayBoardOverflowMarkup(items, kind) {
-        const hasDated = items.some((item) => itemDateOnly(item, kind));
-        const hasUndated = items.some((item) => !itemDateOnly(item, kind));
-        const label = hasDated && hasUndated ? 'Later / No date' : hasDated ? 'Later' : 'No date';
-        return `
-            <section class="hb-day-board-overflow" aria-label="${escapeAttr(kind === 'task' ? 'Other tasks' : 'Other reminders')}">
-                <div class="hb-day-board-head">
-                    <strong>${escapeHtml(label)}</strong>
-                    <span>${escapeHtml(itemCountLabel(items.length, kind))}</span>
-                </div>
-                <div class="hb-list hb-day-board-list">
-                    ${items.map((item) => itemMarkup(item, kind)).join('')}
-                </div>
-            </section>`;
-    }
-
     function itemMarkup(item, kind) {
         const completed = kind === 'task' ? taskCompleted(item) : reminderCompleted(item);
         const color = safeColor(item.color);
-        const subtitle = kind === 'task' ? taskSubtitle(item) : reminderSubtitle(item);
-        const critical = item.is_critical || item.isCritical;
+        const overdue = itemOverdue(item, kind);
+        const baseSubtitle = kind === 'task' ? taskSubtitle(item) : reminderSubtitle(item);
+        const subtitle = overdue ? ['overdue', baseSubtitle].filter(Boolean).join(' · ') : baseSubtitle;
+        const critical = item.is_critical || item.isCritical || overdue;
         const taskNotes = kind === 'task' ? taskNotesText(item) : '';
         const subtasks = kind === 'task' ? subtasksFor(item) : [];
         const expanded = kind === 'task' && state.expandedTaskIds.has(String(item.id));
         const expandable = kind === 'task' && (taskNotes || subtasks.length || (!completed && !taskParentId(item)));
         return `
-            <article class="hb-item hb-item-${kind} ${completed ? 'hb-item-complete' : ''}" style="${completed ? '' : `background:${hexAlpha(color, .14)};border-color:${hexAlpha(color, .34)}`}">
+            <article class="hb-item hb-item-${kind} ${completed ? 'hb-item-complete' : ''} ${overdue ? 'hb-item-overdue' : ''}" style="${completed ? '' : `background:${hexAlpha(color, .14)};border-color:${hexAlpha(color, .34)}`}">
                 ${kind === 'task' && critical ? `<span class="hb-star hb-item-critical-star" style="color:${escapeAttr(color)}">★</span>` : ''}
                 <label class="hb-check"><input type="checkbox" data-toggle-${kind}="${item.id}" ${completed ? 'checked' : ''}></label>
                 <button class="hb-item-main" type="button" data-edit-${kind}="${item.id}">
@@ -2874,6 +2856,8 @@ if (mount) {
     }
 
     function compareTasks(a, b) {
+        const overdueOrder = compareOverdueItems(a, b, 'task');
+        if (overdueOrder !== 0) return overdueOrder;
         const aDue = parseLocalDate(a?.due_at || a?.dueAt || '');
         const bDue = parseLocalDate(b?.due_at || b?.dueAt || '');
         const aHasDue = Boolean(a?.due_at || a?.dueAt);
@@ -2884,6 +2868,8 @@ if (mount) {
     }
 
     function compareReminders(a, b) {
+        const overdueOrder = compareOverdueItems(a, b, 'reminder');
+        if (overdueOrder !== 0) return overdueOrder;
         const aDateValue = reminderDateValue(a);
         const bDateValue = reminderDateValue(b);
         const aDate = parseLocalDate(aDateValue || '');
@@ -2905,15 +2891,40 @@ if (mount) {
 
     function itemsForItemDay(items, kind, day) {
         return items
-            .filter((item) => itemDateOnly(item, kind) === day)
+            .filter((item) => itemBoardDateOnly(item, kind) === day)
             .sort(itemSortFunction(kind));
     }
 
+    function itemBoardDateOnly(item, kind) {
+        if (itemOverdue(item, kind)) return dateOnly(new Date());
+        return itemDateOnly(item, kind);
+    }
+
     function itemDateOnly(item, kind) {
-        const value = kind === 'task' ? (item?.due_at || item?.dueAt) : reminderDateValue(item);
+        const value = itemDateValue(item, kind);
         if (!value) return '';
         const parsed = parseLocalDate(value);
         return Number.isNaN(parsed.getTime()) ? '' : dateOnly(parsed);
+    }
+
+    function itemDateValue(item, kind) {
+        return kind === 'task' ? (item?.due_at || item?.dueAt || '') : reminderDateValue(item);
+    }
+
+    function itemOverdue(item, kind) {
+        const completed = kind === 'task' ? taskCompleted(item) : reminderCompleted(item);
+        if (completed) return false;
+        const value = itemDateValue(item, kind);
+        if (!value) return false;
+        const parsed = parseLocalDate(value);
+        return !Number.isNaN(parsed.getTime()) && parsed < new Date();
+    }
+
+    function compareOverdueItems(a, b, kind) {
+        const aOverdue = itemOverdue(a, kind);
+        const bOverdue = itemOverdue(b, kind);
+        if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+        return 0;
     }
 
     function reminderDateValue(reminder) {
