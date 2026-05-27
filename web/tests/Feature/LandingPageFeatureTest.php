@@ -11,6 +11,8 @@ class LandingPageFeatureTest extends TestCase
 
     public function test_homepage_is_the_heybean_beta_landing_page(): void
     {
+        $this->assertFileExists(public_path('images/bean-logo.png'));
+
         $response = $this->get('/');
 
         $response->assertOk()

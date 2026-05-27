@@ -48,6 +48,24 @@ Artisan::command('admin:user {email} {--password=} {--name=Hey Bean Admin}', fun
     return self::SUCCESS;
 })->purpose('Create or update an admin user without committing credentials');
 
+Artisan::command('admin:grant {email}', function (string $email): int {
+    $user = User::where('email', strtolower(trim($email)))->first();
+    if (! $user) {
+        $this->error('No user found for '.$email.'.');
+
+        return self::FAILURE;
+    }
+
+    $user->forceFill([
+        'is_admin' => true,
+        'subscription_tier' => 'pro',
+    ])->save();
+
+    $this->info("Admin permissions granted: {$user->email}");
+
+    return self::SUCCESS;
+})->purpose('Grant admin permissions to an existing user without changing their password');
+
 Schedule::command('tasks:purge-completed')->daily();
 Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();

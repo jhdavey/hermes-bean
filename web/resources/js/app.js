@@ -397,7 +397,14 @@ if (mount) {
             return `<div class="hb-shell">${settingsMarkup()}</div>`;
         }
         if (state.selected === 'admin' && !userIsAdmin()) {
-            return `<div class="hb-shell"><section class="hb-card hb-card-pad"><div class="hb-error">Admin access required.</div></section></div>`;
+            return `<div class="hb-shell"><section class="hb-card hb-card-pad hb-admin-access-card">
+                ${sectionTitle(icons.activity, 'Admin access required', 'Sign in with an admin account or grant admin permissions to your current account.')}
+                <div class="hb-error">The current signed-in account does not have admin access.</div>
+                <div class="hb-account-actions">
+                    <button class="hb-button" type="button" data-admin-login>Sign in as admin</button>
+                    <button class="hb-button-secondary" type="button" data-nav="settings">Account settings</button>
+                </div>
+            </section></div>`;
         }
         if (state.selected === 'admin' && userIsAdmin()) {
             return `<div class="hb-shell">${adminMarkup()}</div>`;
@@ -1628,7 +1635,7 @@ if (mount) {
             const result = await api(`/auth/${action}`, { method: 'POST', body: payload });
             persistToken(result.token, action === 'login' && data.remember === 'on');
             state.busy = false;
-            history.pushState({}, '', '/app');
+            history.pushState({}, '', initialSelectedView() === 'admin' ? '/admin' : '/app');
             await loadSignedIn();
         } catch (error) {
             state.busy = false;
@@ -1667,6 +1674,17 @@ if (mount) {
             state.onboardingJustCompleted = false;
             state.error = '';
             state.notice = '';
+            render();
+        });
+        mount.querySelector('[data-admin-login]')?.addEventListener('click', () => {
+            clearToken();
+            state.phase = 'signedOut';
+            state.authMode = 'login';
+            state.user = null;
+            state.summary = null;
+            state.error = '';
+            state.notice = 'Sign in with an admin account.';
+            history.pushState({}, '', '/admin');
             render();
         });
         mount.querySelector('[data-today]')?.addEventListener('click', () => {
