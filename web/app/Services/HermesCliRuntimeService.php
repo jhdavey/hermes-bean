@@ -25,6 +25,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
         private readonly StructuredHermesActionService $actionService,
         private readonly AgentProfileService $agentProfileService,
         private readonly WorkspaceService $workspaceService,
+        private readonly AiUsageService $usageService,
     ) {}
 
     public function startSession(array $attributes = []): ConversationSession
@@ -106,7 +107,13 @@ class HermesCliRuntimeService implements HermesRuntimeService
         }
 
         $modelRoute = $this->modelRouteFor($userMessage);
-        $command = $this->commandFor($cliPath, $session, $userMessage, $modelRoute['model']);
+        $prompt = $this->promptFor($session, $userMessage, $modelRoute);
+        $budget = $this->usageService->preflight($session, $userMessage, $modelRoute, $prompt);
+        if (! $budget['allowed']) {
+            return $this->budgetBlocked($session, $userMessage, collect([$received]), (string) $budget['reason'], $modelRoute, $budget);
+        }
+
+        $command = $this->commandFor($cliPath, $modelRoute['model'], $prompt);
         $profile = config('services.hermes_runtime.profile');
 
         $started = $this->recordEvent($session, 'runtime.hermes_cli_started', [
@@ -161,7 +168,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
             ]);
         }
 
-        return DB::transaction(function () use ($session, $userMessage, $received, $started, $process, $modelRoute): array {
+        return DB::transaction(function () use ($session, $userMessage, $received, $started, $process, $modelRoute, $prompt): array {
             $structuredOutput = $this->structuredOutputFrom($process->getOutput());
             $assistantContent = $this->assistantContentFrom($process->getOutput(), $structuredOutput);
 
@@ -191,6 +198,16 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 'message_id' => $assistantMessage->id,
             ]);
 
+            $usageLog = $this->usageService->recordCompletion(
+                $session,
+                $userMessage,
+                $assistantMessage,
+                $modelRoute,
+                $prompt,
+                $process->getOutput(),
+                $domainEvents
+            );
+
             $session->update(['status' => 'active', 'last_activity_at' => now()]);
 
             return [
@@ -199,6 +216,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
                 'events' => collect([$received, $started, $completed])->concat($domainEvents)->push($messageCompleted),
+                'usage' => $usageLog,
                 'blocker' => null,
             ];
         });
@@ -228,7 +246,51 @@ class HermesCliRuntimeService implements HermesRuntimeService
         });
     }
 
-    private function commandFor(string $cliPath, ConversationSession $session, ConversationMessage $message, ?string $model = null): array
+    private function budgetBlocked(ConversationSession $session, ConversationMessage $userMessage, Collection $events, string $reason, array $modelRoute, array $budget): array
+    {
+        return DB::transaction(function () use ($session, $userMessage, $events, $reason, $modelRoute, $budget): array {
+            $blocked = $this->recordEvent($session, 'runtime.usage_budget_blocked', [
+                'message_id' => $userMessage->id,
+                'reason' => $reason,
+                'model_route' => $modelRoute,
+                'input_tokens' => $budget['input_tokens'] ?? null,
+                'reserved_output_tokens' => $budget['reserved_output_tokens'] ?? null,
+                'estimated_cost_usd' => $budget['estimated_cost_usd'] ?? null,
+            ], 'ai.usage_budget', 'blocked');
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $reason.' I paused this Bean request before calling the AI model so usage stays within budget. Try again after the limit resets, or upgrade once plans are enabled.',
+                'metadata' => [
+                    'runtime' => 'usage_budget',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $modelRoute['model'],
+                    'model_route' => $modelRoute,
+                ],
+            ]);
+
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+            ]);
+
+            $usageLog = $this->usageService->recordBlocked($session, $userMessage, $modelRoute, $budget, $reason);
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => $events->push($blocked)->push($messageCompleted),
+                'usage' => $usageLog,
+                'blocker' => null,
+            ];
+        });
+    }
+
+    private function commandFor(string $cliPath, ?string $model, string $prompt): array
     {
         $command = [$cliPath];
         $profile = config('services.hermes_runtime.profile');
@@ -239,7 +301,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
 
         $command[] = 'chat';
         $command[] = '-q';
-        $command[] = $this->promptFor($session, $message);
+        $command[] = $prompt;
         $command[] = '-Q';
 
         $provider = config('services.hermes_runtime.default_provider');
@@ -269,6 +331,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 'mode' => $mode,
                 'tier' => 'fixed',
                 'model' => $defaultModel,
+                'context_mode' => 'focused',
                 'reason' => 'Fixed router mode uses the configured default model.',
             ];
         }
@@ -282,6 +345,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
             'mode' => $mode,
             'tier' => $tier,
             'model' => $this->modelForTier($tier, $defaultModel),
+            'context_mode' => $this->contextModeForTier($tier),
             'reason' => match ($tier) {
                 'simple' => 'Greeting, thanks, or small-talk response with no app mutation requested.',
                 'standard' => 'Straightforward dashboard CRUD request for an internal Bean resource.',
@@ -296,6 +360,15 @@ class HermesCliRuntimeService implements HermesRuntimeService
             'simple' => (string) config('services.hermes_runtime.simple_model', 'gpt-5.4-mini'),
             'standard' => (string) config('services.hermes_runtime.standard_model', 'gpt-5.4'),
             default => (string) config('services.hermes_runtime.complex_model', $defaultModel),
+        };
+    }
+
+    private function contextModeForTier(string $tier): string
+    {
+        return match ($tier) {
+            'simple' => 'minimal',
+            'standard' => 'compact',
+            default => 'focused',
         };
     }
 
@@ -361,7 +434,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
         return $environment;
     }
 
-    private function promptFor(ConversationSession $session, ConversationMessage $message): string
+    private function promptFor(ConversationSession $session, ConversationMessage $message, array $modelRoute): string
     {
         return <<<'PROMPT'
 You are the server-hosted Hermes runtime for Hey Bean. Respond only as strict JSON, with no markdown or prose outside the JSON object.
@@ -383,7 +456,7 @@ Schema:
 Rules:
 - You are allowed to complete complex multi-step app-control requests by emitting multiple ordered actions in one response.
 - Low-risk internal dashboard CRUD/control actions may be emitted with risk "low": tasks, reminders, calendar events, event categories, approvals, blockers, agent profile settings, conversation session metadata, and activity events.
-- Existing dashboard resources are listed in dashboard_state; use their numeric id when updating, deleting, approving, denying, or resolving them.
+- Existing dashboard resources are listed in compact dashboard_state; use their numeric id when updating, deleting, approving, denying, or resolving them. If the compact state does not include enough matching context, ask a short follow-up instead of guessing.
 - When the user explicitly asks to create/update/delete an item in another accessible workspace, include `parameters.workspace_id` or `parameters.target_workspace_id` with that workspace id from `accessible_sync_targets`; otherwise actions apply to the current session workspace.
 - Use `workspace_memory.note` only when the user clearly asks you to remember a durable fact for a named accessible workspace. Include `parameters.workspace_id`/`target_workspace_id` and `parameters.note`.
 - Risky external, destructive outside the dashboard, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
@@ -403,10 +476,10 @@ Rules:
 - If the user asks for a named event on multiple weekdays without explicitly saying recurring, weekly, every week, repeats, or recurrence: create one-off calendar events for the next matching days in the current week, then ask a follow-up about whether it should recur. Only set recurrence metadata when the user explicitly requests recurrence.
 
 Runtime payload:
-PROMPT.$this->payloadFor($session, $message);
+PROMPT.$this->payloadFor($session, $message, $modelRoute);
     }
 
-    private function payloadFor(ConversationSession $session, ConversationMessage $message): string
+    private function payloadFor(ConversationSession $session, ConversationMessage $message, array $modelRoute): string
     {
         $user = User::find($session->user_id);
         $workspace = $this->workspaceForSession($session, $user);
@@ -423,6 +496,7 @@ PROMPT.$this->payloadFor($session, $message);
                 'role' => $workspace->getAttribute('role'),
             ])->values()
             : collect();
+        $profileSettings = $profile->settings ?? [];
 
         return json_encode([
             'session' => [
@@ -445,9 +519,15 @@ PROMPT.$this->payloadFor($session, $message);
                 'provider' => $profile->provider,
                 'model' => $profile->model,
                 'runtime_home' => $profile->runtime_home,
-                'tool_policy' => $profile->tool_policy,
-                'approval_policy' => $profile->approval_policy,
-                'settings' => $profile->settings,
+                'settings' => [
+                    'timezone' => data_get($profileSettings, 'timezone'),
+                    'personality_type' => data_get($profileSettings, 'personality_type'),
+                    'personality_prompt' => data_get($profileSettings, 'personality_prompt'),
+                    'onboarding' => data_get($profileSettings, 'onboarding'),
+                    'memory' => [
+                        'user_preferences' => data_get($profileSettings, 'memory.user_preferences'),
+                    ],
+                ],
             ] : null,
             'workspace' => $workspace ? [
                 'id' => $workspace->id,
@@ -464,14 +544,12 @@ PROMPT.$this->payloadFor($session, $message);
                     ? data_get($message->metadata ?? [], 'client_context')
                     : null,
             ],
-            'dashboard_state' => [
-                'tasks' => $this->workspaceScopedQuery(Task::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'due_at', 'metadata']),
-                'reminders' => $this->workspaceScopedQuery(Reminder::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'notes', 'status', 'category', 'color', 'is_critical', 'remind_at', 'metadata']),
-                'calendar_events' => $this->workspaceScopedQuery(CalendarEvent::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'description', 'location', 'category', 'color', 'recurrence', 'status', 'starts_at', 'ends_at', 'metadata']),
-                'event_categories' => $this->workspaceScopedQuery(EventCategory::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'name', 'color', 'metadata']),
-                'approvals' => $this->workspaceScopedQuery(Approval::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'title', 'status', 'description', 'payload']),
-                'blockers' => $this->workspaceScopedQuery(Blocker::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(50)->get(['id', 'workspace_id', 'reason', 'status', 'context']),
+            'context_policy' => [
+                'mode' => $modelRoute['context_mode'] ?? 'focused',
+                'route_tier' => $modelRoute['tier'] ?? null,
+                'compact' => true,
             ],
+            'dashboard_state' => $this->compactDashboardState($session, $message, $workspaceId, (string) ($modelRoute['context_mode'] ?? 'focused')),
             'allowed_action_schema' => [
                 'low_risk' => [
                     'task.create', 'task.update', 'task.delete',
@@ -517,6 +595,131 @@ PROMPT.$this->payloadFor($session, $message);
     private function workspaceScopedQuery(mixed $query, ?int $workspaceId): mixed
     {
         return $workspaceId ? $query->where('workspace_id', $workspaceId) : $query;
+    }
+
+    private function compactDashboardState(ConversationSession $session, ConversationMessage $message, ?int $workspaceId, string $mode): array
+    {
+        $countQuery = fn (mixed $query) => $this->workspaceScopedQuery($query->where('user_id', $session->user_id), $workspaceId);
+        $counts = [
+            'tasks' => (clone $countQuery(Task::query()))->count(),
+            'reminders' => (clone $countQuery(Reminder::query()))->count(),
+            'calendar_events' => (clone $countQuery(CalendarEvent::query()))->count(),
+            'event_categories' => (clone $countQuery(EventCategory::query()))->count(),
+            'approvals' => (clone $countQuery(Approval::query()))->count(),
+            'blockers' => (clone $countQuery(Blocker::query()))->count(),
+        ];
+
+        if ($mode === 'minimal') {
+            return ['counts' => $counts, 'items' => []];
+        }
+
+        $windowDays = $mode === 'compact' ? 14 : 30;
+        $limit = $mode === 'compact' ? 20 : 35;
+        $from = now()->subDay();
+        $to = now()->addDays($windowDays);
+        $terms = $this->searchTermsFor($message);
+
+        $tasks = $this->workspaceScopedQuery(Task::query()->where('user_id', $session->user_id), $workspaceId)
+            ->where(function ($query) use ($from, $to, $terms): void {
+                $query->whereBetween('due_at', [$from, $to])
+                    ->orWhereNull('due_at')
+                    ->orWhere('status', 'open');
+                $this->orWhereTitleMatches($query, $terms);
+            })
+            ->latest('is_critical')
+            ->latest('updated_at')
+            ->limit($limit)
+            ->get(['id', 'title', 'type', 'status', 'category', 'color', 'is_critical', 'due_at', 'metadata'])
+            ->map(fn (Task $task): array => [
+                'id' => $task->id,
+                'title' => $task->title,
+                'type' => $task->type,
+                'status' => $task->status,
+                'category' => $task->category,
+                'color' => $task->color,
+                'is_critical' => (bool) $task->is_critical,
+                'due_at' => $task->due_at?->toIso8601String(),
+                'recurrence' => data_get($task->metadata ?? [], 'recurrence'),
+            ])->values();
+
+        $reminders = $this->workspaceScopedQuery(Reminder::query()->where('user_id', $session->user_id), $workspaceId)
+            ->where(function ($query) use ($from, $to, $terms): void {
+                $query->whereBetween('remind_at', [$from, $to])
+                    ->orWhere('status', 'scheduled');
+                $this->orWhereTitleMatches($query, $terms);
+            })
+            ->latest('is_critical')
+            ->orderBy('remind_at')
+            ->limit($limit)
+            ->get(['id', 'title', 'status', 'category', 'color', 'is_critical', 'remind_at', 'metadata'])
+            ->map(fn (Reminder $reminder): array => [
+                'id' => $reminder->id,
+                'title' => $reminder->title,
+                'status' => $reminder->status,
+                'category' => $reminder->category,
+                'color' => $reminder->color,
+                'is_critical' => (bool) $reminder->is_critical,
+                'remind_at' => $reminder->remind_at?->toIso8601String(),
+                'recurrence' => data_get($reminder->metadata ?? [], 'recurrence'),
+            ])->values();
+
+        $events = $this->workspaceScopedQuery(CalendarEvent::query()->where('user_id', $session->user_id), $workspaceId)
+            ->where(function ($query) use ($from, $to, $terms): void {
+                $query->whereBetween('starts_at', [$from, $to])
+                    ->orWhereBetween('ends_at', [$from, $to])
+                    ->orWhere(function ($query) use ($from, $to): void {
+                        $query->where('starts_at', '<=', $from)->where('ends_at', '>=', $to);
+                    });
+                $this->orWhereTitleMatches($query, $terms);
+            })
+            ->orderBy('starts_at')
+            ->limit($limit)
+            ->get(['id', 'title', 'category', 'color', 'is_critical', 'recurrence', 'status', 'starts_at', 'ends_at'])
+            ->map(fn (CalendarEvent $event): array => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'category' => $event->category,
+                'color' => $event->color,
+                'is_critical' => (bool) $event->is_critical,
+                'recurrence' => $event->recurrence,
+                'status' => $event->status,
+                'starts_at' => $event->starts_at?->toIso8601String(),
+                'ends_at' => $event->ends_at?->toIso8601String(),
+            ])->values();
+
+        return [
+            'counts' => $counts,
+            'window' => ['from' => $from->toDateString(), 'to' => $to->toDateString()],
+            'items' => [
+                'tasks' => $tasks,
+                'reminders' => $reminders,
+                'calendar_events' => $events,
+                'event_categories' => $this->workspaceScopedQuery(EventCategory::query()->where('user_id', $session->user_id), $workspaceId)->latest('updated_at')->limit(25)->get(['id', 'name', 'color'])->values(),
+                'approvals' => $this->workspaceScopedQuery(Approval::query()->where('user_id', $session->user_id), $workspaceId)->where('status', 'pending')->latest('updated_at')->limit(10)->get(['id', 'title', 'status'])->values(),
+                'blockers' => $this->workspaceScopedQuery(Blocker::query()->where('user_id', $session->user_id), $workspaceId)->where('status', 'open')->latest('updated_at')->limit(10)->get(['id', 'reason', 'status'])->values(),
+            ],
+        ];
+    }
+
+    private function searchTermsFor(ConversationMessage $message): array
+    {
+        $stopWords = ['about', 'after', 'before', 'bean', 'calendar', 'create', 'delete', 'event', 'from', 'into', 'move', 'reminder', 'task', 'that', 'this', 'today', 'tomorrow', 'with'];
+        preg_match_all('/[\pL\pN][\pL\pN\'-]{3,}/u', mb_strtolower($message->content), $matches);
+
+        return collect($matches[0] ?? [])
+            ->map(fn (string $term): string => trim($term, "'-"))
+            ->reject(fn (string $term): bool => in_array($term, $stopWords, true))
+            ->unique()
+            ->take(5)
+            ->values()
+            ->all();
+    }
+
+    private function orWhereTitleMatches(mixed $query, array $terms): void
+    {
+        foreach ($terms as $term) {
+            $query->orWhere('title', 'like', '%'.$term.'%');
+        }
     }
 
     private function structuredOutputFrom(string $stdout): ?array

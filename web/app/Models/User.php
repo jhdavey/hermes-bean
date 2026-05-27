@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'onboard_complete', 'default_workspace_id', 'notification_preferences'])]
+#[Fillable(['name', 'email', 'password', 'onboard_complete', 'is_admin', 'subscription_tier', 'default_workspace_id', 'notification_preferences'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -25,8 +25,19 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'onboard_complete' => 'boolean',
+            'is_admin' => 'boolean',
             'notification_preferences' => 'array',
         ];
+    }
+
+    public function isAdmin(): bool
+    {
+        return (bool) $this->is_admin;
+    }
+
+    public function subscriptionTier(): string
+    {
+        return (string) ($this->subscription_tier ?: 'free');
     }
 
     public function tokens(): HasMany
@@ -72,6 +83,16 @@ class User extends Authenticatable
     public function activityEvents(): HasMany
     {
         return $this->hasMany(ActivityEvent::class);
+    }
+
+    public function aiUsageLogs(): HasMany
+    {
+        return $this->hasMany(AiUsageLog::class);
+    }
+
+    public function aiUsageAlerts(): HasMany
+    {
+        return $this->hasMany(AiUsageAlert::class);
     }
 
     public function tasks(): HasMany

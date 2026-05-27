@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityEventController;
+use App\Http\Controllers\Api\AdminUsageController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ConversationMessageController;
 use App\Http\Controllers\Api\ConversationSessionController;
@@ -76,5 +77,11 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/blockers', [DomainResourceController::class, 'storeBlocker']);
         Route::patch('/blockers/{blocker}', [DomainResourceController::class, 'updateBlocker']);
         Route::delete('/blockers/{blocker}', [DomainResourceController::class, 'destroyBlocker']);
+
+        Route::middleware('admin')->prefix('admin')->group(function (): void {
+            Route::get('/usage/summary', [AdminUsageController::class, 'summary']);
+            Route::get('/usage/logs', [AdminUsageController::class, 'logs']);
+            Route::get('/usage/alerts', [AdminUsageController::class, 'alerts']);
+        });
     });
 });

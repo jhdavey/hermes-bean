@@ -52,6 +52,55 @@ return [
         'environment' => [],
     ],
 
+    'ai_usage' => [
+        'reserve_output_tokens' => (int) env('AI_USAGE_RESERVE_OUTPUT_TOKENS', 1200),
+        'spike_multiplier' => (float) env('AI_USAGE_SPIKE_MULTIPLIER', 3),
+        'spike_min_daily_cost_usd' => (float) env('AI_USAGE_SPIKE_MIN_DAILY_COST_USD', 1.00),
+        'pricing_per_million' => [
+            'gpt-5.5' => ['input' => 5.00, 'output' => 30.00],
+            'gpt-5.4' => ['input' => 2.50, 'output' => 15.00],
+            'gpt-5.4-mini' => ['input' => 0.75, 'output' => 4.50],
+        ],
+        'budgets' => [
+            'free' => [
+                'monthly_ai_actions' => (int) env('AI_FREE_MONTHLY_ACTIONS', 50),
+                'monthly_tokens' => (int) env('AI_FREE_MONTHLY_TOKENS', 1_000_000),
+                'monthly_cost_usd' => (float) env('AI_FREE_MONTHLY_COST_USD', 5.00),
+                'daily_soft_tokens' => (int) env('AI_FREE_DAILY_SOFT_TOKENS', 60_000),
+                'daily_hard_tokens' => (int) env('AI_FREE_DAILY_HARD_TOKENS', 180_000),
+                'daily_soft_cost_usd' => (float) env('AI_FREE_DAILY_SOFT_COST_USD', 0.35),
+                'daily_hard_cost_usd' => (float) env('AI_FREE_DAILY_HARD_COST_USD', 1.00),
+            ],
+            'mid' => [
+                'monthly_ai_actions' => (int) env('AI_MID_MONTHLY_ACTIONS', 1_000),
+                'monthly_tokens' => (int) env('AI_MID_MONTHLY_TOKENS', 12_000_000),
+                'monthly_cost_usd' => (float) env('AI_MID_MONTHLY_COST_USD', 25.00),
+                'daily_soft_tokens' => (int) env('AI_MID_DAILY_SOFT_TOKENS', 400_000),
+                'daily_hard_tokens' => (int) env('AI_MID_DAILY_HARD_TOKENS', 1_000_000),
+                'daily_soft_cost_usd' => (float) env('AI_MID_DAILY_SOFT_COST_USD', 2.00),
+                'daily_hard_cost_usd' => (float) env('AI_MID_DAILY_HARD_COST_USD', 5.00),
+            ],
+            'pro' => [
+                'monthly_ai_actions' => (int) env('AI_PRO_MONTHLY_ACTIONS', 5_000),
+                'monthly_tokens' => (int) env('AI_PRO_MONTHLY_TOKENS', 60_000_000),
+                'monthly_cost_usd' => (float) env('AI_PRO_MONTHLY_COST_USD', 100.00),
+                'daily_soft_tokens' => (int) env('AI_PRO_DAILY_SOFT_TOKENS', 1_500_000),
+                'daily_hard_tokens' => (int) env('AI_PRO_DAILY_HARD_TOKENS', 4_000_000),
+                'daily_soft_cost_usd' => (float) env('AI_PRO_DAILY_SOFT_COST_USD', 8.00),
+                'daily_hard_cost_usd' => (float) env('AI_PRO_DAILY_HARD_COST_USD', 20.00),
+            ],
+            'admin' => [
+                'monthly_ai_actions' => (int) env('AI_ADMIN_MONTHLY_ACTIONS', 50_000),
+                'monthly_tokens' => (int) env('AI_ADMIN_MONTHLY_TOKENS', 500_000_000),
+                'monthly_cost_usd' => (float) env('AI_ADMIN_MONTHLY_COST_USD', 1_000.00),
+                'daily_soft_tokens' => (int) env('AI_ADMIN_DAILY_SOFT_TOKENS', 10_000_000),
+                'daily_hard_tokens' => (int) env('AI_ADMIN_DAILY_HARD_TOKENS', 30_000_000),
+                'daily_soft_cost_usd' => (float) env('AI_ADMIN_DAILY_SOFT_COST_USD', 50.00),
+                'daily_hard_cost_usd' => (float) env('AI_ADMIN_DAILY_HARD_COST_USD', 150.00),
+            ],
+        ],
+    ],
+
     'google_calendar' => [
         'client_id' => env('GOOGLE_CALENDAR_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CALENDAR_CLIENT_SECRET'),

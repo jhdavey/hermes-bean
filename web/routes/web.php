@@ -21,6 +21,7 @@ Route::view('/register', 'app')->name('register');
 Route::view('/forgot-password', 'app')->name('password.request');
 Route::view('/app', 'app')->name('app');
 Route::view('/dashboard', 'app')->name('dashboard');
+Route::view('/admin', 'app')->name('admin');
 
 Route::view('/privacy', 'legal.privacy')->name('privacy');
 Route::view('/terms', 'legal.terms')->name('terms');

@@ -3,6 +3,7 @@
 use App\Http\Middleware\ApiRateLimit;
 use App\Http\Middleware\ApiSecurityHeaders;
 use App\Http\Middleware\AuthenticateBearerToken;
+use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\HandleApiCors;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -23,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'auth.bearer' => AuthenticateBearerToken::class,
+            'admin' => EnsureAdmin::class,
             'api.rate_limit' => ApiRateLimit::class,
         ]);
     })

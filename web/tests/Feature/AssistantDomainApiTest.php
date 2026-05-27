@@ -743,6 +743,10 @@ echo json_encode([
 PHP);
 
         config()->set('security.rate_limits.api_per_minute', 500);
+        config()->set('services.ai_usage.budgets.free.monthly_ai_actions', 200);
+        config()->set('services.ai_usage.budgets.free.monthly_tokens', 5_000_000);
+        config()->set('services.ai_usage.budgets.free.daily_hard_tokens', 5_000_000);
+        config()->set('services.ai_usage.budgets.free.daily_hard_cost_usd', 100);
 
         $token = $this->apiToken('complex-sweep@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [

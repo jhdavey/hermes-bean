@@ -2312,6 +2312,162 @@
     gap: 10px;
 }
 
+.hb-main-admin {
+    min-height: calc(100vh - 58px);
+}
+
+.hb-admin-panel {
+    display: grid;
+    gap: 14px;
+}
+
+.hb-admin-metrics {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.hb-admin-metric {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    padding: 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+    background: var(--hb-surface2);
+}
+
+.hb-admin-metric span,
+.hb-admin-metric small,
+.hb-admin-row small,
+.hb-admin-log-row small {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.hb-admin-metric strong {
+    min-width: 0;
+    color: var(--hb-text);
+    font-size: 24px;
+    line-height: 1;
+    font-weight: 950;
+    overflow-wrap: anywhere;
+}
+
+.hb-admin-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.hb-admin-list-block {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    gap: 10px;
+}
+
+.hb-admin-list {
+    display: grid;
+    gap: 8px;
+}
+
+.hb-admin-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid rgba(12, 23, 45, .08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .64);
+}
+
+.hb-admin-row strong,
+.hb-admin-row small {
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-admin-row > span {
+    color: var(--hb-text);
+    font-size: 12px;
+    font-weight: 850;
+    white-space: nowrap;
+}
+
+.hb-admin-alert-critical {
+    border-color: rgba(239, 68, 68, .34);
+    background: rgba(254, 226, 226, .78);
+}
+
+.hb-admin-log-card {
+    display: grid;
+    gap: 10px;
+    padding-top: 4px;
+}
+
+.hb-admin-log-table {
+    overflow-x: auto;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+}
+
+.hb-admin-log-head,
+.hb-admin-log-row {
+    min-width: 920px;
+    display: grid;
+    grid-template-columns: 150px minmax(170px, 1fr) minmax(150px, 1fr) minmax(160px, 1fr) 90px 90px 92px;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+}
+
+.hb-admin-log-head {
+    background: var(--hb-surface2);
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.hb-admin-log-row {
+    border-top: 1px solid var(--hb-border);
+    color: var(--hb-text);
+    font-size: 13px;
+    font-weight: 760;
+}
+
+.hb-admin-log-row > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-admin-log-row small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hb-admin-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(22, 163, 74, .12);
+    color: var(--hb-accent);
+    font-size: 12px;
+    font-weight: 900;
+}
+
 .hb-workspace-block {
     display: grid;
     gap: 8px;
@@ -2871,6 +3027,15 @@
 
     .hb-member-row {
         grid-template-columns: 1fr;
+    }
+
+    .hb-admin-metrics,
+    .hb-admin-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .hb-admin-metric strong {
+        font-size: 20px;
     }
 
     .hb-approval-sheet {

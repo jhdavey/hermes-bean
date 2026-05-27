@@ -33,7 +33,7 @@ if (mount) {
         token: readToken(),
         remember: localStorage.getItem(rememberKey) === 'true',
         phase: 'loading',
-        selected: 'today',
+        selected: initialSelectedView(),
         selectedDay: dateOnly(new Date()),
         calendarWindowStart: initialCalendarWindowStart(new Date()),
         calendarWindowDayCount: calendarInitialWindowDays,
@@ -49,6 +49,8 @@ if (mount) {
         approvals: [],
         blockers: [],
         activity: [],
+        adminUsage: null,
+        adminUsageLoading: false,
         googleStatus: null,
         googleAuthUrl: '',
         messages: [],
@@ -135,6 +137,14 @@ if (mount) {
         state.token = '';
     }
 
+    function initialSelectedView() {
+        return window.location.pathname === '/admin' ? 'admin' : 'today';
+    }
+
+    function pathForView(view) {
+        return view === 'admin' ? '/admin' : '/app';
+    }
+
     async function api(path, options = {}) {
         const headers = {
             Accept: 'application/json',
@@ -189,6 +199,9 @@ if (mount) {
                 state.selected = 'bean';
                 state.chatExpanded = false;
                 state.chatRunState = 'Onboarding';
+            }
+            if (state.selected === 'admin') {
+                loadAdminUsage();
             }
             if (state.session?.id) {
                 resumeSession(state.session.id);
@@ -258,6 +271,10 @@ if (mount) {
 
     function onboardingIntroMessage() {
         return 'Hey, I’m Bean. This is a quick onboarding interview so I can learn your preferred style, top priorities, and any important schedule or reminder context. Start by telling me who you are and what you want Bean to help with most.';
+    }
+
+    function userIsAdmin() {
+        return state.user?.is_admin === true || state.user?.isAdmin === true;
     }
 
     function normalizeList(value) {
@@ -350,7 +367,7 @@ if (mount) {
         const criticalEvents = criticalEventsForToday();
         const addTitle = state.selected === 'tasks' ? 'Add task' : state.selected === 'reminders' ? 'Add reminder' : 'Create event';
         const showAdd = ['today', 'tasks', 'reminders'].includes(state.selected);
-        const showRefresh = ['today', 'tasks', 'reminders'].includes(state.selected);
+        const showRefresh = ['today', 'tasks', 'reminders', 'admin'].includes(state.selected);
         return `
             <div class="hb-app">
                 <header class="hb-topbar">
@@ -365,7 +382,7 @@ if (mount) {
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
                 </header>
-                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''}">
+                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
@@ -378,6 +395,12 @@ if (mount) {
     function appPanelMarkup() {
         if (state.selected === 'settings') {
             return `<div class="hb-shell">${settingsMarkup()}</div>`;
+        }
+        if (state.selected === 'admin' && !userIsAdmin()) {
+            return `<div class="hb-shell"><section class="hb-card hb-card-pad"><div class="hb-error">Admin access required.</div></section></div>`;
+        }
+        if (state.selected === 'admin' && userIsAdmin()) {
+            return `<div class="hb-shell">${adminMarkup()}</div>`;
         }
         const showSideColumn = state.selected === 'today';
         const primary = state.selected === 'today'
@@ -435,6 +458,118 @@ if (mount) {
                 </div>
                 ${dayBoardMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No pending reminders')}
             </section>`;
+    }
+
+    function adminMarkup() {
+        const usage = state.adminUsage || {};
+        const totals = usage.totals || {};
+        const alerts = normalizeList(usage.alerts);
+        const recentLogs = normalizeList(usage.recent_logs || usage.recentLogs);
+        const byModel = normalizeList(usage.by_model || usage.byModel);
+        const byRoute = normalizeList(usage.by_route_tier || usage.byRouteTier);
+        const topUsers = normalizeList(usage.top_users || usage.topUsers);
+        const topWorkspaces = normalizeList(usage.top_workspaces || usage.topWorkspaces);
+        return `
+            <section class="hb-card hb-card-pad hb-admin-panel">
+                <div class="hb-section-action-row">
+                    ${sectionTitle(icons.activity, 'Admin monitor', 'AI cost, usage limits, and user activity')}
+                    <button class="hb-button-secondary" type="button" data-refresh-admin ${state.adminUsageLoading ? 'disabled' : ''}>${state.adminUsageLoading ? 'Refreshing...' : 'Refresh'}</button>
+                </div>
+                ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
+                ${state.adminUsageLoading && !state.adminUsage ? '<div class="hb-empty hb-surface-soft">Loading AI usage metrics...</div>' : ''}
+                <div class="hb-admin-metrics">
+                    ${adminMetricMarkup('Users', totals.users, 'Total accounts')}
+                    ${adminMetricMarkup('Workspaces', totals.workspaces, 'Total spaces')}
+                    ${adminMetricMarkup('Actions today', totals.ai_actions_today, `${formatTokens(totals.tokens_today)} tokens`)}
+                    ${adminMetricMarkup('Month cost', formatCurrency(totals.cost_month), `${formatTokens(totals.tokens_month)} tokens`)}
+                    ${adminMetricMarkup('Today cost', formatCurrency(totals.cost_today), `${totals.ai_actions_month || 0} actions this month`)}
+                    ${adminMetricMarkup('Open alerts', totals.open_alerts, 'Warnings and hard caps')}
+                </div>
+                <div class="hb-admin-grid">
+                    ${adminListBlockMarkup('Budget and spike alerts', alerts, adminAlertRowMarkup, 'No alerts yet.')}
+                    ${adminListBlockMarkup('Model mix this month', byModel, adminAggregateRowMarkup, 'No model usage yet.')}
+                    ${adminListBlockMarkup('Route tiers this month', byRoute, adminAggregateRowMarkup, 'No routed usage yet.')}
+                    ${adminListBlockMarkup('Top users this month', topUsers, adminOwnerRowMarkup, 'No user usage yet.')}
+                    ${adminListBlockMarkup('Top workspaces this month', topWorkspaces, adminWorkspaceRowMarkup, 'No workspace usage yet.')}
+                </div>
+                <div class="hb-admin-log-card">
+                    <div class="hb-section-action-row">
+                        <strong>Recent AI usage logs</strong>
+                        <span class="hb-item-meta">${recentLogs.length} latest</span>
+                    </div>
+                    <div class="hb-admin-log-table">
+                        <div class="hb-admin-log-head"><span>When</span><span>User</span><span>Workspace</span><span>Model</span><span>Tokens</span><span>Cost</span><span>Status</span></div>
+                        ${recentLogs.map(adminLogRowMarkup).join('') || '<div class="hb-empty">No AI usage logs yet.</div>'}
+                    </div>
+                </div>
+            </section>`;
+    }
+
+    function adminMetricMarkup(label, value, meta) {
+        return `
+            <div class="hb-admin-metric">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value ?? 0)}</strong>
+                <small>${escapeHtml(meta || '')}</small>
+            </div>`;
+    }
+
+    function adminListBlockMarkup(title, items, rowRenderer, emptyText) {
+        return `
+            <div class="hb-surface-soft hb-card-pad hb-admin-list-block">
+                <strong>${escapeHtml(title)}</strong>
+                <div class="hb-admin-list">
+                    ${items.length ? items.map(rowRenderer).join('') : `<div class="hb-empty">${escapeHtml(emptyText)}</div>`}
+                </div>
+            </div>`;
+    }
+
+    function adminAlertRowMarkup(alert) {
+        const severity = String(alert.severity || 'warning').toLowerCase();
+        return `
+            <div class="hb-admin-row hb-admin-alert-row hb-admin-alert-${escapeAttr(severity)}">
+                <div><strong>${escapeHtml(alert.alert_type || alert.alertType || 'Alert')}</strong><small>${escapeHtml(alert.message || '')}</small></div>
+                <span>${escapeHtml(formatDateTime(alert.created_at || alert.createdAt))}</span>
+            </div>`;
+    }
+
+    function adminAggregateRowMarkup(row) {
+        return `
+            <div class="hb-admin-row">
+                <div><strong>${escapeHtml(row.key || 'Unknown')}</strong><small>${escapeHtml(`${row.actions || 0} actions · ${formatTokens(row.tokens)}`)}</small></div>
+                <span>${escapeHtml(formatCurrency(row.cost))}</span>
+            </div>`;
+    }
+
+    function adminOwnerRowMarkup(row) {
+        return `
+            <div class="hb-admin-row">
+                <div><strong>${escapeHtml(row.name || row.email || 'User')}</strong><small>${escapeHtml(`${row.email || ''} · ${row.subscription_tier || row.subscriptionTier || 'free'}`)}</small></div>
+                <span>${escapeHtml(formatCurrency(row.cost))}</span>
+            </div>`;
+    }
+
+    function adminWorkspaceRowMarkup(row) {
+        return `
+            <div class="hb-admin-row">
+                <div><strong>${escapeHtml(row.name || 'Workspace')}</strong><small>${escapeHtml(`${row.type || 'workspace'} · ${row.actions || 0} actions · ${formatTokens(row.tokens)}`)}</small></div>
+                <span>${escapeHtml(formatCurrency(row.cost))}</span>
+            </div>`;
+    }
+
+    function adminLogRowMarkup(log) {
+        const user = log.user || {};
+        const workspace = log.workspace || {};
+        return `
+            <div class="hb-admin-log-row">
+                <span>${escapeHtml(formatDateTime(log.created_at || log.createdAt))}</span>
+                <span>${escapeHtml(user.name || user.email || `#${log.user_id || log.userId || ''}`)}</span>
+                <span>${escapeHtml(workspace.name || (log.workspace_id || log.workspaceId ? `#${log.workspace_id || log.workspaceId}` : 'None'))}</span>
+                <span>${escapeHtml(log.model || 'unknown')}<small>${escapeHtml(log.route_tier || log.routeTier || '')}</small></span>
+                <span>${escapeHtml(formatTokens(log.total_tokens || log.totalTokens))}</span>
+                <span>${escapeHtml(formatCurrency(log.estimated_cost_usd || log.estimatedCostUsd))}</span>
+                <span><mark class="hb-admin-status">${escapeHtml(log.status || 'logged')}</mark></span>
+            </div>`;
     }
 
     function chatMarkup(options = {}) {
@@ -627,6 +762,7 @@ if (mount) {
                     <span class="hb-profile-copy"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(email)}</small></span>
                 </summary>
                 <div class="hb-profile-popover">
+                    ${userIsAdmin() ? `<button class="hb-profile-action" type="button" data-nav="admin">${icons.activity}<span>Admin monitor</span></button>` : ''}
                     <button class="hb-profile-action" type="button" data-nav="settings">${icons.settings}<span>Settings</span></button>
                     <button class="hb-profile-action" type="button" data-logout>${icons.user}<span>Sign out</span></button>
                 </div>
@@ -737,6 +873,7 @@ if (mount) {
             ['reminders', 'Reminders', icons.reminders],
             ['settings', 'Settings', icons.settings],
         ];
+        if (userIsAdmin()) nav.splice(3, 0, ['admin', 'Admin', icons.activity]);
         return `
             <nav class="hb-bottom-menu" aria-label="App navigation">
                 <div class="hb-bottom-bar">
@@ -753,6 +890,7 @@ if (mount) {
             ['tasks', 'Tasks', icons.tasks],
             ['reminders', 'Reminders', icons.reminders],
         ];
+        if (userIsAdmin()) nav.push(['admin', 'Admin', icons.activity]);
         return `
             <nav class="hb-top-nav" aria-label="App navigation">
                 ${nav.map(navButton).join('')}
@@ -1513,7 +1651,9 @@ if (mount) {
             if (state.selected !== 'bean') state.chatExpanded = false;
             state.error = '';
             state.notice = '';
+            history.pushState({}, '', pathForView(state.selected));
             render();
+            if (state.selected === 'admin') loadAdminUsage();
             scrollChatToBottom();
         }));
         mount.querySelectorAll('[data-toggle-chat-expand]').forEach((button) => button.addEventListener('click', () => {
@@ -1534,6 +1674,7 @@ if (mount) {
             state.selectedDay = dateOnly(new Date());
             resetCalendarWindow(new Date());
             state.showMonth = false;
+            history.pushState({}, '', '/app');
             render();
         });
         mount.querySelector('[data-calendar-month]')?.addEventListener('click', () => {
@@ -1542,6 +1683,7 @@ if (mount) {
             state.selectedDay = dateOnly(today);
             resetCalendarWindow(today);
             state.showMonth = true;
+            history.pushState({}, '', '/app');
             render();
         });
         mount.querySelectorAll('[data-select-day]').forEach((button) => button.addEventListener('click', () => {
@@ -1556,6 +1698,7 @@ if (mount) {
             shiftMonth(Number(button.dataset.shiftMonth || 0));
         }));
         mount.querySelector('[data-refresh-app]')?.addEventListener('click', refreshCurrentView);
+        mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
         mount.querySelectorAll('[data-edit-task]').forEach((button) => button.addEventListener('click', () => openModal('task', findById(state.tasks, button.dataset.editTask))));
         mount.querySelectorAll('[data-edit-reminder]').forEach((button) => button.addEventListener('click', () => openModal('reminder', findById(state.reminders, button.dataset.editReminder))));
@@ -2677,6 +2820,21 @@ if (mount) {
             });
     }
 
+    async function loadAdminUsage(force = false) {
+        if (!userIsAdmin() || (state.adminUsage && !force)) return;
+        state.adminUsageLoading = true;
+        state.error = '';
+        render();
+        try {
+            state.adminUsage = await api('/admin/usage/summary');
+        } catch (error) {
+            state.error = friendlyError(error, 'load admin metrics');
+        } finally {
+            state.adminUsageLoading = false;
+            render();
+        }
+    }
+
     async function refreshCalendar() {
         if (state.calendarRefreshing) return;
         state.calendarRefreshing = true;
@@ -2699,6 +2857,10 @@ if (mount) {
     }
 
     async function refreshCurrentView() {
+        if (state.selected === 'admin') {
+            await loadAdminUsage(true);
+            return;
+        }
         if (state.selected === 'today') {
             await refreshCalendar();
             return;
@@ -3470,6 +3632,18 @@ if (mount) {
     function formatDateTime(value) {
         if (!value) return '';
         return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+
+    function formatCurrency(value) {
+        const amount = Number(value || 0);
+        return amount.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: amount >= 1 ? 2 : 4, maximumFractionDigits: amount >= 1 ? 2 : 4 });
+    }
+
+    function formatTokens(value) {
+        const tokens = Number(value || 0);
+        if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(tokens >= 10000000 ? 0 : 1)}M`;
+        if (tokens >= 1000) return `${(tokens / 1000).toFixed(tokens >= 10000 ? 0 : 1)}K`;
+        return tokens.toLocaleString();
     }
 
     function formatTime(value) {
