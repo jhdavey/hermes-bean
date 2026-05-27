@@ -3237,6 +3237,19 @@ if (mount) {
 
         setKioskVoiceStatus('working', 'working');
         try {
+            const quickResponse = await handleKioskQuickCommand(content);
+            if (quickResponse) {
+                const spoken = await speakKioskResponse(quickResponse);
+                if (!spoken) {
+                    setKioskVoiceStatus('responding', 'responded');
+                    await sleep(900);
+                }
+                setKioskVoiceStatus('listening', 'listening');
+                armKioskConversationTimeout();
+                restartKioskVoiceListeningSoon(1200);
+                return;
+            }
+
             const response = await sendChatContent(content);
             const assistantContent = response?.assistantContent || '';
             if (!assistantContent) {
@@ -3256,6 +3269,78 @@ if (mount) {
         setKioskVoiceStatus('listening', 'listening');
         armKioskConversationTimeout();
         restartKioskVoiceListeningSoon(1200);
+    }
+
+    async function handleKioskQuickCommand(content) {
+        const taskTitle = taskCompletionTitleFromCommand(content);
+        if (!taskTitle) return '';
+
+        const matches = matchingActiveTasksByTitle(taskTitle);
+        if (matches.length === 0) return '';
+        if (matches.length > 1) {
+            return `I found multiple tasks matching ${taskTitle}. Please say the exact task name.`;
+        }
+
+        const task = matches[0];
+        await api(`/tasks/${task.id}`, {
+            method: 'PATCH',
+            body: {
+                status: 'completed',
+                completed_at: new Date().toISOString(),
+            },
+        });
+        await refreshOnly(false);
+
+        return `Marked ${task.title || task.name || taskTitle} complete.`;
+    }
+
+    function taskCompletionTitleFromCommand(content) {
+        const text = String(content || '').trim();
+        const patterns = [
+            /^(?:mark|set)\s+(.+?)\s+(?:as\s+)?(?:complete|completed|done|finished)$/i,
+            /^(?:complete|finish)\s+(.+)$/i,
+            /^(.+?)\s+(?:is\s+)?(?:complete|completed|done|finished)$/i,
+        ];
+
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match?.[1]) {
+                return cleanupTaskTitle(match[1]);
+            }
+        }
+
+        return '';
+    }
+
+    function matchingActiveTasksByTitle(title) {
+        const target = normalizeTaskMatchText(title);
+        if (!target) return [];
+
+        const candidates = activeTasks();
+        const exact = candidates.filter((task) => normalizeTaskMatchText(task.title || task.name || '') === target);
+        if (exact.length) return exact;
+
+        return candidates.filter((task) => {
+            const normalized = normalizeTaskMatchText(task.title || task.name || '');
+            return normalized.includes(target) || target.includes(normalized);
+        });
+    }
+
+    function cleanupTaskTitle(value) {
+        return String(value || '')
+            .replace(/\b(?:the|my|a|an)\s+task\b/gi, ' ')
+            .replace(/\btask\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function normalizeTaskMatchText(value) {
+        return cleanupTaskTitle(value)
+            .toLowerCase()
+            .replace(/&/g, ' and ')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
     }
 
     function clientContextPayload() {
