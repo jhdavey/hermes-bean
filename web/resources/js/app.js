@@ -1143,8 +1143,7 @@ if (mount) {
                     ${categoryManagerToggleMarkup()}
                     ${!isReminder ? `<label class="hb-checkbox-row"><input type="checkbox" name="critical" ${item?.is_critical || item?.isCritical ? 'checked' : ''}> Critical</label>` : ''}
                     ${workspaceConnectionsMarkup(kind, item, workspaceId, editing)}
-                    ${isEvent ? recurrenceFieldsMarkup(item) : ''}
-                    ${isReminder ? reminderRecurrenceFieldsMarkup(item) : ''}
+                    ${recurrenceFieldsMarkup(kind, item)}
                     ${kind === 'task' && editing && !taskParentId(item) ? `<button class="hb-button-ghost" type="button" data-create-subtask="${item.id}">Add sub-task</button>` : ''}
                     <div class="hb-modal-actions">
                         ${editing ? `<button class="hb-button-danger" type="button" data-modal-delete="${kind}" data-id="${item.id}">Delete</button>` : ''}
@@ -1354,12 +1353,12 @@ if (mount) {
             </div>`;
     }
 
-    function recurrenceFieldsMarkup(item) {
-        const recurrence = item?.recurrence || item?.metadata?.recurrence || 'none';
+    function recurrenceFieldsMarkup(kind, item) {
+        const recurrence = itemRecurrenceValue(item);
         const days = recurrenceDays(item?.metadata);
         const unit = item?.metadata?.unit || item?.metadata?.interval_unit || item?.metadata?.intervalUnit || 'days';
         return `
-            <label class="hb-label">Event recurrence
+            <label class="hb-label">${capitalize(kind)} recurrence
                 <select class="hb-select" name="recurrence" data-recurrence-select>
                     ${recurrenceOptions().map((value) => `<option value="${value}" ${value === recurrence ? 'selected' : ''}>${recurrenceLabel(value)}</option>`).join('')}
                 </select>
@@ -1373,28 +1372,12 @@ if (mount) {
             </div>`;
     }
 
-    function reminderRecurrenceFieldsMarkup(item) {
-        const metadata = item?.metadata || {};
-        const recurrence = metadata.recurrence || 'none';
-        const days = recurrenceDays(metadata);
-        const intervalUnit = metadata.interval_unit || metadata.intervalUnit || metadata.unit || 'days';
-        return `
-            <label class="hb-label">Reminder repeats
-                <select class="hb-select" name="reminderRecurrence">
-                    ${recurrenceOptions().map((value) => `<option value="${value}" ${value === recurrence ? 'selected' : ''}>${recurrenceLabel(value)}</option>`).join('')}
-                </select>
-            </label>
-            <div class="hb-tabs">
-                ${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => `<label class="hb-chip"><input type="checkbox" name="reminderSpecificDays" value="${day}" ${days.has(day) ? 'checked' : ''}> ${day.toUpperCase()}</label>`).join('')}
-            </div>
-            <div class="hb-field-row">
-                ${labelInput('Repeat interval', 'reminderInterval', 'number', metadata.interval || '', 'min="1"')}
-                <label class="hb-label">Interval unit<select class="hb-select" name="reminderIntervalUnit"><option value="days">Days</option><option value="weeks" ${intervalUnit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${intervalUnit === 'months' ? 'selected' : ''}>Months</option></select></label>
-            </div>`;
-    }
-
     function recurrenceOptions() {
         return ['none', 'daily', 'weekly', 'monthly', 'specific_days', 'interval'];
+    }
+
+    function itemRecurrenceValue(item = null) {
+        return item?.recurrence || item?.metadata?.recurrence || 'none';
     }
 
     function recurrenceDays(metadata = {}) {
@@ -1861,6 +1844,7 @@ if (mount) {
             const syncTo = selectedSyncWorkspaceIds(form);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const parentTaskId = data.parentTaskId || taskParentId(item);
+            const recurrence = recurrenceFormData(form, data);
             const body = {
                 title: data.title,
                 type: 'todo',
@@ -1872,6 +1856,7 @@ if (mount) {
                 metadata: {
                     ...existingMetadata,
                     ...(parentTaskId ? { parent_task_id: Number(parentTaskId) } : {}),
+                    ...recurrence.metadata,
                 },
                 sync_to_workspace_ids: syncTo,
             };
@@ -1880,6 +1865,7 @@ if (mount) {
         } else if (kind === 'reminder') {
             const syncTo = selectedSyncWorkspaceIds(form);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
+            const recurrence = recurrenceFormData(form, data);
             const body = {
                 title: data.title,
                 remind_at: fromDatetimeLocal(data.time),
@@ -1888,10 +1874,7 @@ if (mount) {
                 color,
                 metadata: {
                     ...existingMetadata,
-                    recurrence: data.reminderRecurrence || 'none',
-                    specific_days: Array.from(form.querySelectorAll('input[name="reminderSpecificDays"]:checked')).map((input) => input.value),
-                    interval: data.reminderInterval ? Number(data.reminderInterval) : null,
-                    interval_unit: data.reminderIntervalUnit || null,
+                    ...recurrence.metadata,
                 },
                 sync_to_workspace_ids: syncTo,
             };
@@ -1901,11 +1884,7 @@ if (mount) {
             const syncTo = selectedSyncWorkspaceIds(form);
             const allDay = form.elements.allDay?.checked || false;
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
-            const recurrence = data.recurrence || 'none';
-            const specificDays = recurrence === 'specific_days'
-                ? Array.from(form.querySelectorAll('input[name="specificDays"]:checked')).map((input) => input.value)
-                : [];
-            const intervalUnit = recurrence === 'interval' ? data.intervalUnit || 'days' : null;
+            const recurrence = recurrenceFormData(form, data);
             const body = {
                 title: data.title,
                 description: data.description || null,
@@ -1915,17 +1894,12 @@ if (mount) {
                 category: data.category || null,
                 color,
                 is_critical: form.elements.critical?.checked || false,
-                recurrence,
+                recurrence: recurrence.value,
                 status: data.status || 'confirmed',
                 sync_to_workspace_ids: syncTo,
                 metadata: {
                     ...existingMetadata,
-                    recurrence,
-                    specific_days: specificDays,
-                    days: specificDays,
-                    interval: recurrence === 'interval' && data.interval ? Number(data.interval) : null,
-                    interval_unit: intervalUnit,
-                    unit: intervalUnit,
+                    ...recurrence.metadata,
                     google_calendar_ids: selectedGoogleCalendarIds(form),
                     all_day: allDay,
                 },
@@ -1940,6 +1914,25 @@ if (mount) {
             } : saved;
         }
         return null;
+    }
+
+    function recurrenceFormData(form, data = {}) {
+        const recurrence = data.recurrence || 'none';
+        const specificDays = recurrence === 'specific_days'
+            ? Array.from(form.querySelectorAll('input[name="specificDays"]:checked')).map((input) => input.value)
+            : [];
+        const intervalUnit = recurrence === 'interval' ? data.intervalUnit || 'days' : null;
+        return {
+            value: recurrence,
+            metadata: {
+                recurrence,
+                specific_days: specificDays,
+                days: specificDays,
+                interval: recurrence === 'interval' && data.interval ? Number(data.interval) : null,
+                interval_unit: intervalUnit,
+                unit: intervalUnit,
+            },
+        };
     }
 
     function selectedSyncWorkspaceIds(form) {
@@ -2982,7 +2975,7 @@ if (mount) {
         if (task.category) parts.push(task.category);
         if (itemOverdue(task, 'task')) parts.push('overdue');
         if (dueLabel) parts.push(`Due ${dueLabel}`);
-        if (taskIsRecurring(task)) parts.push('Recurring');
+        if (taskIsRecurring(task)) parts.push(recurrenceSummary(task));
         return parts.join(' · ');
     }
 
@@ -2992,6 +2985,7 @@ if (mount) {
         if (reminder.category) parts.push(reminder.category);
         if (itemOverdue(reminder, 'reminder')) parts.push('overdue');
         if (dateLabel) parts.push(dateLabel);
+        if (itemIsRecurring(reminder)) parts.push(recurrenceSummary(reminder));
         return parts.join(' · ') || 'No reminder time';
     }
 
@@ -2999,14 +2993,23 @@ if (mount) {
         const parts = [];
         if (event.starts_at || event.startsAt || event.ends_at || event.endsAt) parts.push(eventTime(event));
         if (event.category) parts.push(event.category);
-        const recurrence = event.recurrence || event?.metadata?.recurrence || '';
-        if (recurrence && recurrence !== 'none') parts.push(recurrence);
+        const recurrence = itemRecurrenceValue(event);
+        if (recurrence && recurrence !== 'none') parts.push(recurrenceLabel(recurrence));
         return parts.join(' · ') || 'Unscheduled';
     }
 
     function taskIsRecurring(task) {
-        const recurrence = task?.recurrence || task?.metadata?.recurrence || 'none';
+        return itemIsRecurring(task);
+    }
+
+    function itemIsRecurring(item) {
+        const recurrence = itemRecurrenceValue(item);
         return recurrence && recurrence !== 'none';
+    }
+
+    function recurrenceSummary(item) {
+        const recurrence = itemRecurrenceValue(item);
+        return recurrence && recurrence !== 'none' ? recurrenceLabel(recurrence) : '';
     }
 
     function workspaces() {
@@ -3082,13 +3085,17 @@ if (mount) {
     }
 
     function taskSubtitle(task) {
-        return task.due_at || task.dueAt ? formatDateTime(task.due_at || task.dueAt) : '';
+        return [
+            task.due_at || task.dueAt ? formatDateTime(task.due_at || task.dueAt) : '',
+            recurrenceSummary(task),
+        ].filter(Boolean).join(' · ');
     }
 
     function reminderSubtitle(reminder) {
         const bits = [];
         if (reminder.category) bits.push(reminder.category);
         if (reminder.remind_at || reminder.due_at || reminder.dueAt) bits.push(formatDateTime(reminder.remind_at || reminder.due_at || reminder.dueAt));
+        if (itemIsRecurring(reminder)) bits.push(recurrenceSummary(reminder));
         return bits.join(' · ') || 'No reminder time';
     }
 
