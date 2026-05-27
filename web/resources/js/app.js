@@ -403,13 +403,13 @@ if (mount) {
             ? state.tasks.filter((task) => taskCompleted(task))
             : activeTopLevelTasks();
         return `
-            <section class="hb-card hb-card-pad">
+            <section class="hb-card hb-card-pad hb-board-card">
                 ${sectionTitle(icons.tasks, 'Tasks', completed ? 'Completed tasks' : 'Active tasks')}
                 <div class="hb-tabs">
                     <button class="hb-chip" type="button" data-task-filter="active" aria-pressed="${!completed}">Active</button>
                     <button class="hb-chip" type="button" data-task-filter="done" aria-pressed="${completed}">Done</button>
                 </div>
-                ${itemListMarkup(items, 'task', completed ? 'No completed tasks' : 'No active tasks')}
+                ${dayBoardMarkup(items, 'task', completed ? 'No completed tasks' : 'No active tasks')}
             </section>`;
     }
 
@@ -417,13 +417,13 @@ if (mount) {
         const completed = state.reminderFilter === 'completed';
         const items = state.reminders.filter((reminder) => reminderCompleted(reminder) === completed);
         return `
-            <section class="hb-card hb-card-pad">
+            <section class="hb-card hb-card-pad hb-board-card">
                 ${sectionTitle(icons.reminders, 'Reminders', completed ? 'Completed reminders' : 'Pending reminders')}
                 <div class="hb-tabs">
                     <button class="hb-chip" type="button" data-reminder-filter="pending" aria-pressed="${!completed}">Pending</button>
                     <button class="hb-chip" type="button" data-reminder-filter="completed" aria-pressed="${completed}">Completed</button>
                 </div>
-                ${itemListMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No pending reminders')}
+                ${dayBoardMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No pending reminders')}
             </section>`;
     }
 
@@ -902,6 +902,32 @@ if (mount) {
 
     function itemListMarkup(items, kind, emptyText) {
         return `<div class="hb-list">${items.length ? items.map((item) => itemMarkup(item, kind)).join('') : `<div class="hb-empty hb-surface-soft">${emptyText}</div>`}</div>`;
+    }
+
+    function dayBoardMarkup(items, kind, emptyText) {
+        const days = itemBoardDays(items, kind);
+        const unscheduled = items
+            .filter((item) => !itemDateOnly(item, kind))
+            .sort(itemSortFunction(kind));
+        return `
+            <div class="hb-day-board" aria-label="${escapeAttr(kind === 'task' ? 'Tasks by day' : 'Reminders by day')}">
+                ${days.map((day) => dayBoardColumnMarkup(day, itemsForItemDay(items, kind, day), kind, emptyText)).join('')}
+                ${unscheduled.length ? dayBoardColumnMarkup('', unscheduled, kind, kind === 'task' ? 'No unscheduled tasks' : 'No unscheduled reminders') : ''}
+            </div>`;
+    }
+
+    function dayBoardColumnMarkup(day, items, kind, emptyText) {
+        const label = day ? glanceDayLabel(parseLocalDate(day)) : 'No date';
+        return `
+            <section class="hb-day-board-column ${day ? '' : 'hb-day-board-column-unscheduled'}" aria-label="${escapeAttr(label)}">
+                <div class="hb-day-board-head">
+                    <strong>${escapeHtml(label)}</strong>
+                    <span>${escapeHtml(itemCountLabel(items.length, kind))}</span>
+                </div>
+                <div class="hb-list hb-day-board-list">
+                    ${items.length ? items.map((item) => itemMarkup(item, kind)).join('') : `<div class="hb-empty hb-surface-soft">${escapeHtml(emptyText)}</div>`}
+                </div>
+            </section>`;
     }
 
     function itemMarkup(item, kind) {
@@ -2802,6 +2828,51 @@ if (mount) {
         if (aHasDue && bHasDue && aDue.getTime() !== bDue.getTime()) return aDue - bDue;
         if (aHasDue !== bHasDue) return aHasDue ? -1 : 1;
         return Number(a?.id || 0) - Number(b?.id || 0);
+    }
+
+    function compareReminders(a, b) {
+        const aDateValue = reminderDateValue(a);
+        const bDateValue = reminderDateValue(b);
+        const aDate = parseLocalDate(aDateValue || '');
+        const bDate = parseLocalDate(bDateValue || '');
+        const aHasDate = Boolean(aDateValue);
+        const bHasDate = Boolean(bDateValue);
+        if (aHasDate && bHasDate && aDate.getTime() !== bDate.getTime()) return aDate - bDate;
+        if (aHasDate !== bHasDate) return aHasDate ? -1 : 1;
+        return Number(a?.id || 0) - Number(b?.id || 0);
+    }
+
+    function itemSortFunction(kind) {
+        return kind === 'task' ? compareTasks : compareReminders;
+    }
+
+    function itemBoardDays(items, kind) {
+        const anchorDays = [new Date(), addDays(new Date(), 1), addDays(new Date(), 2)].map(dateOnly);
+        const itemDays = items.map((item) => itemDateOnly(item, kind)).filter(Boolean);
+        return Array.from(new Set([...anchorDays, ...itemDays]))
+            .sort((a, b) => parseLocalDate(a) - parseLocalDate(b));
+    }
+
+    function itemsForItemDay(items, kind, day) {
+        return items
+            .filter((item) => itemDateOnly(item, kind) === day)
+            .sort(itemSortFunction(kind));
+    }
+
+    function itemDateOnly(item, kind) {
+        const value = kind === 'task' ? (item?.due_at || item?.dueAt) : reminderDateValue(item);
+        if (!value) return '';
+        const parsed = parseLocalDate(value);
+        return Number.isNaN(parsed.getTime()) ? '' : dateOnly(parsed);
+    }
+
+    function reminderDateValue(reminder) {
+        return reminder?.remind_at || reminder?.remindAt || reminder?.due_at || reminder?.dueAt || '';
+    }
+
+    function itemCountLabel(count, kind) {
+        const noun = kind === 'task' ? 'task' : 'reminder';
+        return `${count} ${noun}${count === 1 ? '' : 's'}`;
     }
 
     function pendingReminders() {

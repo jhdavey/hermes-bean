@@ -815,6 +815,67 @@
     gap: 10px;
 }
 
+.hb-board-card {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.hb-day-board {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 12px;
+}
+
+.hb-day-board-column {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .58);
+    padding: 10px;
+}
+
+.hb-day-board-column-unscheduled {
+    background: var(--hb-surface2);
+}
+
+.hb-day-board-head {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 1px;
+}
+
+.hb-day-board-head strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--hb-text);
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-day-board-head span {
+    flex: 0 0 auto;
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.hb-day-board-list {
+    min-height: 0;
+}
+
 .hb-item {
     position: relative;
     display: grid;
@@ -2481,6 +2542,11 @@
         padding-right: 2px;
     }
 
+    .hb-board-card .hb-day-board {
+        overflow: auto;
+        padding-right: 2px;
+    }
+
     .hb-desktop-chat {
         min-height: 0;
         display: block;
@@ -2574,6 +2640,18 @@
 
     .hb-desktop-chat-expanded .hb-chat-dock {
         border-color: var(--hb-border-strong);
+    }
+}
+
+@media (min-width: 720px) {
+    .hb-day-board {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1180px) {
+    .hb-day-board {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 }
 
