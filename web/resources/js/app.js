@@ -813,10 +813,10 @@ if (mount) {
         const dayEvents = days.map((day) => multiDayTimedEventsForDay(day));
         if (!dayEvents.some((events) => events.length)) return '';
         return `
-            <div class="hb-multi-day-row">
+            <div class="hb-multi-day-row hb-multi-day-row-collapsed" data-multi-day-row aria-hidden="true">
                 <div class="hb-timeline-hour">Multi-Day</div>
                 ${dayEvents.map((events, index) => `
-                    <div class="hb-multi-day-cell">
+                    <div class="hb-multi-day-cell" data-multi-day-cell data-has-multi-day="${events.length ? 'true' : 'false'}">
                         ${events.map((event) => multiDayEventMarkup(event, days[index])).join('')}
                     </div>
                 `).join('')}
@@ -3484,11 +3484,13 @@ if (mount) {
                 const maxScrollTop = Math.max(0, timeline.scrollHeight - timeline.clientHeight);
                 timeline.scrollLeft = Math.min(Math.max(restore.left || 0, 0), maxScrollLeft);
                 timeline.scrollTop = Math.min(Math.max(restore.top || 0, 0), maxScrollTop);
+                updateMultiDayRowVisibility(timeline);
                 return;
             }
             if (!selected) return;
             timeline.scrollLeft = Math.max(0, selected.offsetLeft - 74);
             scrollTimelineToCurrentTime(timeline);
+            updateMultiDayRowVisibility(timeline);
         });
     }
 
@@ -3512,6 +3514,7 @@ if (mount) {
         timeline.addEventListener('click', handleTimelineClick, true);
         timeline.addEventListener('scroll', handleTimelineScroll, { passive: true });
         timeline.addEventListener('wheel', handleTimelineWheel, { passive: false });
+        requestAnimationFrame(() => updateMultiDayRowVisibility(timeline));
     }
 
     function handleTimelinePointerDown(event) {
@@ -3544,6 +3547,7 @@ if (mount) {
         event.preventDefault();
         const maxScrollLeft = Math.max(0, timelineDrag.timeline.scrollWidth - timelineDrag.timeline.clientWidth);
         timelineDrag.timeline.scrollLeft = Math.min(Math.max(timelineDrag.scrollLeft - deltaX, 0), maxScrollLeft);
+        updateMultiDayRowVisibility(timelineDrag.timeline);
         maybeExtendTimelineWindow(timelineDrag.timeline);
     }
 
@@ -3580,6 +3584,7 @@ if (mount) {
         }
         event.preventDefault();
         timeline.scrollLeft = nextScrollLeft;
+        updateMultiDayRowVisibility(timeline);
         maybeExtendTimelineWindow(timeline);
     }
 
@@ -3588,6 +3593,7 @@ if (mount) {
     }
 
     function handleTimelineScroll(event) {
+        updateMultiDayRowVisibility(event.currentTarget);
         maybeExtendTimelineWindow(event.currentTarget);
     }
 
@@ -3619,6 +3625,28 @@ if (mount) {
         if (Number.isFinite(cssWidth) && cssWidth > 0) return cssWidth;
         const dayHead = timeline.querySelector('.hb-timeline-day-head');
         return dayHead?.getBoundingClientRect().width || 150;
+    }
+
+    function updateMultiDayRowVisibility(timeline) {
+        const row = timeline?.querySelector('[data-multi-day-row]');
+        if (!timeline || !row) return;
+        const cells = Array.from(row.querySelectorAll('[data-multi-day-cell]'));
+        if (!cells.length) return;
+
+        const firstDayHead = timeline.querySelector('.hb-timeline-day-head');
+        const dayWidth = firstDayHead?.getBoundingClientRect().width || timelineDayWidth(timeline);
+        const firstDayOffset = Number.isFinite(firstDayHead?.offsetLeft) ? firstDayHead.offsetLeft : 74;
+        const visibleStart = timeline.scrollLeft + firstDayOffset;
+        const visibleEnd = timeline.scrollLeft + timeline.clientWidth;
+        const hasVisibleMultiDayEvent = cells.some((cell, index) => {
+            if (cell.dataset.hasMultiDay !== 'true') return false;
+            const dayStart = firstDayOffset + (index * dayWidth);
+            const dayEnd = dayStart + dayWidth;
+            return dayEnd > visibleStart + 1 && dayStart < visibleEnd - 1;
+        });
+
+        row.classList.toggle('hb-multi-day-row-collapsed', !hasVisibleMultiDayEvent);
+        row.setAttribute('aria-hidden', hasVisibleMultiDayEvent ? 'false' : 'true');
     }
 
     function updateCurrentTimeMarker() {
