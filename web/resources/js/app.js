@@ -62,6 +62,8 @@ if (mount) {
         taskFilter: 'active',
         reminderFilter: 'pending',
         expandedTaskIds: new Set(),
+        pendingCalendarUpserts: new Map(),
+        pendingCalendarDeletes: new Set(),
         busy: false,
         error: '',
         notice: '',
@@ -171,7 +173,7 @@ if (mount) {
             state.summary = summary;
             state.tasks = mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks));
             state.reminders = normalizeList(reminders.length ? reminders : summary?.reminders);
-            state.calendar = normalizeList(calendar.length ? calendar : summary?.calendar_events);
+            state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
             state.categories = normalizeList(categories);
             state.approvals = normalizeList(summary?.approvals);
             state.blockers = normalizeList(summary?.blockers);
@@ -1924,14 +1926,39 @@ if (mount) {
     function restoreSnapshot(kind, snapshot) {
         if (kind === 'task') state.tasks = snapshot;
         if (kind === 'reminder') state.reminders = snapshot;
-        if (kind === 'event') state.calendar = snapshot;
+        if (kind === 'event') {
+            state.calendar = snapshot;
+            snapshot.forEach((item) => state.pendingCalendarDeletes.delete(String(item.id)));
+        }
     }
 
     function cacheSavedItem(kind, item) {
         if (!item) return;
         if (kind === 'task') state.tasks = upsertById(state.tasks, item);
         if (kind === 'reminder') state.reminders = upsertById(state.reminders, item);
-        if (kind === 'event') state.calendar = upsertById(state.calendar, item);
+        if (kind === 'event') {
+            state.pendingCalendarDeletes.delete(String(item.id));
+            state.pendingCalendarUpserts.set(String(item.id), item);
+            state.calendar = upsertById(state.calendar, item);
+        }
+    }
+
+    function reconcileCalendarRefresh(items) {
+        const list = normalizeList(items)
+            .filter((item) => !state.pendingCalendarDeletes.has(String(item.id)));
+        const seenIds = new Set(list.map((item) => String(item.id)));
+        state.pendingCalendarUpserts.forEach((item, id) => {
+            if (state.pendingCalendarDeletes.has(id)) {
+                state.pendingCalendarUpserts.delete(id);
+                return;
+            }
+            if (seenIds.has(id)) {
+                state.pendingCalendarUpserts.delete(id);
+                return;
+            }
+            list.push(item);
+        });
+        return list;
     }
 
     function upsertById(items, nextItem) {
@@ -1947,7 +1974,11 @@ if (mount) {
         const matches = (item) => String(item.id) === String(id);
         if (kind === 'task') state.tasks = state.tasks.filter((item) => !matches(item));
         if (kind === 'reminder') state.reminders = state.reminders.filter((item) => !matches(item));
-        if (kind === 'event') state.calendar = state.calendar.filter((item) => !matches(item));
+        if (kind === 'event') {
+            state.pendingCalendarDeletes.add(String(id));
+            state.pendingCalendarUpserts.delete(String(id));
+            state.calendar = state.calendar.filter((item) => !matches(item));
+        }
     }
 
     function removeCachedRecurringEvents(event, mode) {
@@ -1955,8 +1986,15 @@ if (mount) {
         const selectedDate = recurringOccurrenceDate(event);
         state.calendar = state.calendar.filter((candidate) => {
             if (recurringSourceId(candidate) !== sourceId) return true;
-            if (mode === 'all') return false;
             const candidateDate = recurringOccurrenceDate(candidate);
+            const remove = mode === 'all'
+                || (mode === 'single' && candidateDate === selectedDate)
+                || (mode === 'future' && candidateDate >= selectedDate);
+            if (remove) {
+                state.pendingCalendarDeletes.add(String(candidate.id));
+                state.pendingCalendarUpserts.delete(String(candidate.id));
+            }
+            if (mode === 'all') return false;
             if (mode === 'single') return candidateDate !== selectedDate;
             if (mode === 'future') return candidateDate < selectedDate;
             return true;
@@ -2463,7 +2501,7 @@ if (mount) {
             state.summary = summary;
             state.tasks = mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks));
             state.reminders = normalizeList(reminders.length ? reminders : summary?.reminders);
-            state.calendar = normalizeList(calendar.length ? calendar : summary?.calendar_events);
+            state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
             state.categories = normalizeList(categories);
             state.approvals = normalizeList(summary?.approvals);
             state.blockers = normalizeList(summary?.blockers);
@@ -2484,7 +2522,7 @@ if (mount) {
     function refreshCalendarInBackground() {
         api('/calendar-events')
             .then((calendar) => {
-                state.calendar = normalizeList(calendar);
+                state.calendar = reconcileCalendarRefresh(calendar);
                 render();
             })
             .catch(() => {
@@ -2502,7 +2540,7 @@ if (mount) {
                 api('/calendar-events'),
                 api('/google-calendar/status').catch(() => state.googleStatus),
             ]);
-            state.calendar = normalizeList(calendar);
+            state.calendar = reconcileCalendarRefresh(calendar);
             state.googleStatus = googleStatus;
             state.notice = 'Calendar refreshed.';
         } catch (error) {
