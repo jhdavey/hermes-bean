@@ -728,7 +728,7 @@ if (mount) {
         const startHour = Number(localStorage.getItem('heybean.calendar.startHour') || 6);
         const endHour = Number(localStorage.getItem('heybean.calendar.endHour') || 22);
         const hours = Array.from({ length: Math.max(1, endHour - startHour + 1) }, (_, index) => startHour + index);
-        const minDayWidth = days.length >= 7 ? 150 : days.length >= 4 ? 180 : 220;
+        const minDayWidth = timelineDayMinWidth();
         const currentTimeMarker = currentTimeMarkerMarkup(days, startHour, endHour);
         return `
             <div class="hb-timeline hb-timeline-multi-day" data-timeline-start-hour="${startHour}" data-timeline-end-hour="${endHour}" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${74 + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
@@ -2982,9 +2982,17 @@ if (mount) {
 
     function calendarVisibleDayCount() {
         const width = window.innerWidth || 0;
-        if (width >= 1280) return 7;
+        if (width >= 1280) return 5;
         if (width >= 820) return 4;
         return 2;
+    }
+
+    function timelineDayMinWidth() {
+        const width = window.innerWidth || 0;
+        const visibleDayCount = Math.max(1, state.calendarVisibleDayCount || calendarVisibleDayCount());
+        const reservedWidth = width >= 900 ? 340 : 32;
+        const estimatedTimelineWidth = Math.max(360, width - reservedWidth);
+        return Math.max(150, Math.floor((estimatedTimelineWidth - 74) / visibleDayCount));
     }
 
     function defaultEventStart() {
