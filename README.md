@@ -37,7 +37,6 @@ Deferred until after MVP:
 
 - `app/` — Flutter mobile app / consumer command center
 - `web/` — Laravel API + web dashboard + Hermes runtime bridge
-- `docs/` — product, architecture, and launch planning
 
 ## Runtime architecture decision
 

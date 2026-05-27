@@ -260,8 +260,8 @@ class AgentProfileService
         }
 
         $profile = $this->ensureForWorkspace($workspace, $actor);
-        $path = rtrim($profile->runtime_home, '/').'/MEMORY.md';
-        File::ensureDirectoryExists($profile->runtime_home);
+        $path = $this->memoryPath($profile, 'MEMORY.md');
+        File::ensureDirectoryExists(dirname($path));
         if (! File::exists($path)) {
             $this->writeRuntimeMarkdownMemory($profile->refresh());
         }
@@ -294,11 +294,13 @@ class AgentProfileService
             return;
         }
 
-        File::ensureDirectoryExists($profile->runtime_home);
+        File::ensureDirectoryExists($this->memoriesDirectory($profile));
         $jsonPath = rtrim($profile->runtime_home, '/').'/bean-preferences-memory.json';
         if (File::exists($jsonPath)) {
             File::delete($jsonPath);
         }
+
+        $this->deleteLegacyRootMemoryFiles($profile);
 
         $this->writeRuntimeMarkdownMemory($profile->refresh(), $memory);
     }
@@ -327,7 +329,8 @@ class AgentProfileService
             return;
         }
 
-        File::ensureDirectoryExists($profile->runtime_home);
+        File::ensureDirectoryExists($this->memoriesDirectory($profile));
+        $this->deleteLegacyRootMemoryFiles($profile);
 
         $workspace = $profile->workspace ?: ($profile->workspace_id ? Workspace::find($profile->workspace_id) : null);
         $user = $profile->user ?: ($profile->user_id ? User::find($profile->user_id) : null);
@@ -343,7 +346,7 @@ class AgentProfileService
         $updatedAt = now()->toISOString();
 
         $this->putManagedMarkdown(
-            rtrim($profile->runtime_home, '/').'/USER.md',
+            $this->memoryPath($profile, 'USER.md'),
             '# User Memory'.PHP_EOL.PHP_EOL,
             implode(PHP_EOL, array_filter([
                 '## Managed identity context',
@@ -360,7 +363,7 @@ class AgentProfileService
         );
 
         $this->putManagedMarkdown(
-            rtrim($profile->runtime_home, '/').'/MEMORY.md',
+            $this->memoryPath($profile, 'MEMORY.md'),
             '# Workspace Memory'.PHP_EOL.PHP_EOL,
             implode(PHP_EOL, array_filter([
                 '## Managed workspace memory context',
@@ -368,58 +371,20 @@ class AgentProfileService
                 '- workspace_name: '.$workspaceName,
                 '- workspace_type: '.$workspaceType,
                 '- isolation: This memory belongs only to this '.$workspaceType.' workspace. Do not copy facts into Personal or another household unless a user explicitly asks to sync/share them.',
+                '- personality_type: '.$personality,
+                '- personality_label: '.((string) data_get($settings, 'personality_label', 'Balanced helper')),
+                $priorities !== [] ? '- priorities: '.implode(', ', $priorities) : null,
                 $summary ? '- preference_summary: '.$summary : null,
                 is_string($context) && trim($context) !== '' ? '- context: '.trim($context) : null,
                 '- updated_at: '.$updatedAt,
             ])).PHP_EOL.PHP_EOL."## Agent-learned durable facts\nAdd concise durable facts for this workspace below this heading. Keep Personal-only facts out of household files and household facts out of Personal files.\n"
         );
-
-        $householdLines = [
-            '## Managed workspace profile',
-            '- name: '.$workspaceName,
-            '- type: '.$workspaceType,
-            '- workspace_id: '.($workspaceId ?? 'unknown'),
-            '- owner_or_actor_user_id: '.($user?->id ?? 'unknown'),
-            '- owner_or_actor_name: '.($user?->name ?: 'unknown'),
-            '- updated_at: '.$updatedAt,
-        ];
-        if ($workspaceType === 'household') {
-            $householdLines[] = '- guidance: Store shared household routines, member preferences relevant to this household, and family scheduling context here.';
-        } else {
-            $householdLines[] = '- guidance: This is the Personal workspace. Store only the signed-in user\'s personal preferences and routines here.';
-        }
-        $this->putManagedMarkdown(
-            rtrim($profile->runtime_home, '/').'/HOUSEHOLD.md',
-            '# Household / Workspace Context'.PHP_EOL.PHP_EOL,
-            implode(PHP_EOL, $householdLines).PHP_EOL.PHP_EOL."## Agent-learned workspace context\nAdd household/workspace-specific context below this heading.\n"
-        );
-
-        $preferenceLines = [
-            '## Managed preferences',
-            '- personality_type: '.$personality,
-            '- personality_label: '.((string) data_get($settings, 'personality_label', 'Balanced helper')),
-        ];
-        foreach ($priorities as $priority) {
-            $preferenceLines[] = '- priority: '.$priority;
-        }
-        if (is_string($context) && trim($context) !== '') {
-            $preferenceLines[] = '- context: '.trim($context);
-        }
-        if ($summary) {
-            $preferenceLines[] = '- summary: '.$summary;
-        }
-        $preferenceLines[] = '- source: '.((string) data_get($memory, 'user_preferences.source', data_get($settings, 'memory.user_preferences.source', 'settings')));
-        $preferenceLines[] = '- updated_at: '.$updatedAt;
-
-        $this->putManagedMarkdown(
-            rtrim($profile->runtime_home, '/').'/PREFERENCES.md',
-            '# Preferences'.PHP_EOL.PHP_EOL,
-            implode(PHP_EOL, $preferenceLines).PHP_EOL.PHP_EOL."## Agent-learned preference notes\nAdd stable preference notes for this workspace below this heading.\n"
-        );
     }
 
     private function putManagedMarkdown(string $path, string $defaultHeader, string $managedContent): void
     {
+        File::ensureDirectoryExists(dirname($path));
+
         $begin = '<!-- BEGIN HERMES-BEAN MANAGED -->';
         $end = '<!-- END HERMES-BEAN MANAGED -->';
         $section = $begin.PHP_EOL.rtrim($managedContent).PHP_EOL.$end;
@@ -439,6 +404,26 @@ class AgentProfileService
         }
 
         File::put($path, rtrim($existing).PHP_EOL.PHP_EOL.$section.PHP_EOL);
+    }
+
+    private function memoriesDirectory(AgentProfile $profile): string
+    {
+        return rtrim((string) $profile->runtime_home, '/').'/memories';
+    }
+
+    private function memoryPath(AgentProfile $profile, string $file): string
+    {
+        return $this->memoriesDirectory($profile).'/'.$file;
+    }
+
+    private function deleteLegacyRootMemoryFiles(AgentProfile $profile): void
+    {
+        foreach (['USER.md', 'MEMORY.md', 'HOUSEHOLD.md', 'PREFERENCES.md'] as $legacyFile) {
+            $legacyPath = rtrim((string) $profile->runtime_home, '/').'/'.$legacyFile;
+            if (File::exists($legacyPath)) {
+                File::delete($legacyPath);
+            }
+        }
     }
 
     private function bootstrapRuntimeHome(AgentProfile $profile): void

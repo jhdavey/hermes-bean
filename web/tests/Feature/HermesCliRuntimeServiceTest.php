@@ -334,9 +334,10 @@ PHP);
         ]);
 
         $householdProfile = AgentProfile::where('workspace_id', $household->id)->firstOrFail();
-        $this->assertStringContainsString('Lauren prefers school reminders the night before.', File::get($householdProfile->runtime_home.'/MEMORY.md'));
+        $this->assertStringContainsString('Lauren prefers school reminders the night before.', File::get($householdProfile->runtime_home.'/memories/MEMORY.md'));
+        $this->assertFileDoesNotExist($householdProfile->runtime_home.'/MEMORY.md');
         $personalProfile = AgentProfile::where('workspace_id', $personalWorkspaceId)->firstOrFail();
-        $this->assertStringNotContainsString('Lauren prefers school reminders the night before.', File::get($personalProfile->runtime_home.'/MEMORY.md'));
+        $this->assertStringNotContainsString('Lauren prefers school reminders the night before.', File::get($personalProfile->runtime_home.'/memories/MEMORY.md'));
     }
 
     public function test_personal_agent_cannot_target_inaccessible_household_workspace(): void
@@ -754,7 +755,9 @@ PHP);
         $this->assertTrue($profile->settings['onboarding']['completed']);
         $this->assertSame(['Family', 'Planning'], $profile->settings['onboarding']['priorities']);
         $this->assertSame('Protect family dinner.', $profile->settings['memory']['user_preferences']['context']);
-        $this->assertFileExists($profile->runtime_home.'/PREFERENCES.md');
+        $this->assertFileExists($profile->runtime_home.'/memories/MEMORY.md');
+        $this->assertStringContainsString('Protect family dinner.', File::get($profile->runtime_home.'/memories/MEMORY.md'));
+        $this->assertFileDoesNotExist($profile->runtime_home.'/PREFERENCES.md');
         $this->assertFileDoesNotExist($profile->runtime_home.'/bean-preferences-memory.json');
     }
 

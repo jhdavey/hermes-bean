@@ -60,6 +60,7 @@ if (mount) {
         voiceStatus: '',
         voiceStatusTone: '',
         chatExpanded: false,
+        onboardingJustCompleted: false,
         calendarRefreshing: false,
         taskFilter: 'active',
         reminderFilter: 'pending',
@@ -256,7 +257,7 @@ if (mount) {
     }
 
     function onboardingIntroMessage() {
-        return 'Hey, I’m Bean. I’ll ask a few quick questions so I can learn your preferred style, top priorities, and anything important about your schedule or reminders. Start by telling me who you are and what you want Bean to help with most.';
+        return 'Hey, I’m Bean. This is a quick onboarding interview so I can learn your preferred style, top priorities, and any important schedule or reminder context. Start by telling me who you are and what you want Bean to help with most.';
     }
 
     function normalizeList(value) {
@@ -451,8 +452,10 @@ if (mount) {
                     <button class="hb-button-ghost" type="button" data-new-session>${icons.add} /new</button>
                 </div>
                 <div class="hb-chat-messages" id="hb-chat-messages">
+                    ${onboardingInterviewIntroMarkup()}
                     ${messages.map((message, index) => messageMarkup(message, index, messages)).join('')}
                     ${working ? '' : pendingApprovalChatMarkup()}
+                    ${working ? '' : onboardingCompletionMarkup()}
                     ${working ? messageMarkup({ id: 'busy', role: 'assistant', content: state.chatRunState || 'Working…', progress: true }) : ''}
                 </div>
                 <div class="hb-chat-voice-status ${state.voiceStatusTone === 'error' ? 'hb-chat-voice-status-error' : ''}" data-voice-status ${state.voiceStatus ? '' : 'hidden'}>${escapeHtml(state.voiceStatus)}</div>
@@ -462,6 +465,31 @@ if (mount) {
                     <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-voice-button" type="button" ${state.busy ? 'disabled' : 'data-voice-hold'} aria-label="${state.busy ? 'Bean is working' : 'Hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
                 </form>
             </section>`;
+    }
+
+    function onboardingInterviewIntroMarkup() {
+        if (!needsBeanOnboarding()) return '';
+        return `
+            <article class="hb-chat-onboarding-card">
+                <div class="hb-chat-onboarding-kicker">${icons.tune}<span>Quick onboarding interview</span></div>
+                <strong>Bean is learning how to help this workspace.</strong>
+                <p>Answer a few short questions about priorities, communication style, and anything Bean should remember. When it’s saved, you’ll get a clear way back to the dashboard.</p>
+            </article>`;
+    }
+
+    function onboardingCompletionMarkup() {
+        const sessionMode = state.session?.runtime_mode || state.session?.runtimeMode || '';
+        if (needsBeanOnboarding() || !(state.onboardingJustCompleted || sessionMode === 'onboarding')) return '';
+        return `
+            <article class="hb-chat-onboarding-card hb-chat-onboarding-complete">
+                <div class="hb-chat-onboarding-kicker">${icons.checkCircle}<span>Onboarding saved</span></div>
+                <strong>Bean is ready for this workspace.</strong>
+                <p>Your preferences are saved. You can keep chatting or head back to the dashboard.</p>
+                <div class="hb-message-actions">
+                    <button class="hb-button" type="button" data-onboarding-dashboard>Go to dashboard</button>
+                    <button class="hb-button-secondary" type="button" data-new-session>Start a new chat</button>
+                </div>
+            </article>`;
     }
 
     function desktopChatMarkup(options = {}) {
@@ -1493,6 +1521,14 @@ if (mount) {
             render();
             scrollChatToBottom();
         }));
+        mount.querySelector('[data-onboarding-dashboard]')?.addEventListener('click', () => {
+            state.selected = 'today';
+            state.chatExpanded = false;
+            state.onboardingJustCompleted = false;
+            state.error = '';
+            state.notice = '';
+            render();
+        });
         mount.querySelector('[data-today]')?.addEventListener('click', () => {
             state.selected = 'today';
             state.selectedDay = dateOnly(new Date());
@@ -1577,7 +1613,7 @@ if (mount) {
             button.addEventListener('contextmenu', handleVoiceContextMenu);
         });
         bindTimelineHorizontalScroll();
-        mount.querySelector('[data-new-session]')?.addEventListener('click', newSession);
+        mount.querySelectorAll('[data-new-session]').forEach((button) => button.addEventListener('click', newSession));
         scrollTimelineToSelected();
         scrollChatToBottom();
     }
@@ -2287,6 +2323,7 @@ if (mount) {
     }
 
     async function sendChatContent(content) {
+        const wasOnboarding = needsBeanOnboarding();
         state.messages.push({ id: `local-${Date.now()}`, role: 'user', content });
         state.busy = true;
         state.voiceDraft = '';
@@ -2312,6 +2349,9 @@ if (mount) {
             if (result.assistant_message) state.messages.push(result.assistant_message);
             state.chatRunState = result.status === 'blocked' ? 'Blocked for approval' : 'Ready';
             await refreshOnly(false);
+            if (wasOnboarding && !needsBeanOnboarding()) {
+                state.onboardingJustCompleted = true;
+            }
         } catch (error) {
             state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: friendlyError(error, 'send that message') });
             state.chatRunState = 'Failed';
@@ -2567,6 +2607,7 @@ if (mount) {
     async function newSession() {
         try {
             const onboarding = needsBeanOnboarding();
+            state.onboardingJustCompleted = false;
             state.session = await api('/assistant/sessions', {
                 method: 'POST',
                 body: { title: onboarding ? 'Welcome to Bean' : 'Workspace chat', runtime_mode: onboarding ? 'onboarding' : 'chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },

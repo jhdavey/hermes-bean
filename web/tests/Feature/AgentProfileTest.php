@@ -211,7 +211,7 @@ class AgentProfileTest extends TestCase
         $this->assertNotSame($profiles[0]->runtime_home, $profiles[1]->runtime_home);
     }
 
-    public function test_workspace_agent_bootstraps_isolated_markdown_memory_files(): void
+    public function test_workspace_agent_bootstraps_builtin_hermes_memory_files_only(): void
     {
         $runtimeRoot = sys_get_temp_dir().'/hermes-bean-agent-memory-'.bin2hex(random_bytes(6));
         config()->set('services.hermes_runtime.users_home', $runtimeRoot);
@@ -222,16 +222,20 @@ class AgentProfileTest extends TestCase
         $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
 
         $this->assertStringContainsString('/workspaces/'.$workspace->id.'/', $profile->runtime_home);
-        foreach (['USER.md', 'MEMORY.md', 'HOUSEHOLD.md', 'PREFERENCES.md'] as $file) {
-            $this->assertFileExists($profile->runtime_home.'/'.$file, $file.' should be created for the workspace agent.');
+        $this->assertFileExists($profile->runtime_home.'/memories/USER.md');
+        $this->assertFileExists($profile->runtime_home.'/memories/MEMORY.md');
+        $this->assertFileDoesNotExist($profile->runtime_home.'/memories/HOUSEHOLD.md');
+        $this->assertFileDoesNotExist($profile->runtime_home.'/memories/PREFERENCES.md');
+        foreach (['USER.md', 'MEMORY.md', 'HOUSEHOLD.md', 'PREFERENCES.md', 'bean-preferences-memory.json'] as $file) {
+            $this->assertFileDoesNotExist($profile->runtime_home.'/'.$file, $file.' should not be created at runtime home root.');
         }
 
-        $this->assertStringContainsString('Davey House', File::get($profile->runtime_home.'/HOUSEHOLD.md'));
-        $this->assertStringContainsString('workspace_id: '.$workspace->id, File::get($profile->runtime_home.'/MEMORY.md'));
-        $this->assertStringContainsString('Harley Davey', File::get($profile->runtime_home.'/USER.md'));
+        $this->assertStringContainsString('Davey House', File::get($profile->runtime_home.'/memories/MEMORY.md'));
+        $this->assertStringContainsString('workspace_id: '.$workspace->id, File::get($profile->runtime_home.'/memories/MEMORY.md'));
+        $this->assertStringContainsString('Harley Davey', File::get($profile->runtime_home.'/memories/USER.md'));
     }
 
-    public function test_workspace_preference_updates_refresh_database_and_markdown_memory_without_json_sidecar_or_cross_workspace_leakage(): void
+    public function test_workspace_preference_updates_refresh_database_and_builtin_memory_without_cross_workspace_leakage(): void
     {
         $runtimeRoot = sys_get_temp_dir().'/hermes-bean-agent-memory-'.bin2hex(random_bytes(6));
         config()->set('services.hermes_runtime.users_home', $runtimeRoot);
@@ -253,15 +257,15 @@ class AgentProfileTest extends TestCase
             ],
         ], 'agent');
 
-        $preferences = File::get($householdProfile->runtime_home.'/PREFERENCES.md');
-        $memory = File::get($householdProfile->runtime_home.'/MEMORY.md');
-        $this->assertStringContainsString('organizer', $preferences);
-        $this->assertStringContainsString('School pickups', $preferences);
-        $this->assertStringContainsString('Lauren prefers reminders the night before.', $memory);
+        $householdMemory = File::get($householdProfile->runtime_home.'/memories/MEMORY.md');
+        $householdUser = File::get($householdProfile->runtime_home.'/memories/USER.md');
+        $this->assertStringContainsString('organizer', $householdMemory);
+        $this->assertStringContainsString('School pickups', $householdMemory);
+        $this->assertStringContainsString('Lauren prefers reminders the night before.', $householdMemory);
+        $this->assertStringContainsString('Harley Davey', $householdUser);
         $this->assertSame('Lauren prefers reminders the night before.', $householdProfile->refresh()->settings['memory']['user_preferences']['context']);
-        $this->assertFileDoesNotExist($householdProfile->runtime_home.'/bean-preferences-memory.json');
 
-        File::append($householdProfile->runtime_home.'/MEMORY.md', PHP_EOL.'- Lauren likes dinner reminders before 5pm.'.PHP_EOL);
+        File::append($householdProfile->runtime_home.'/memories/MEMORY.md', PHP_EOL.'- Lauren likes dinner reminders before 5pm.'.PHP_EOL);
         $service->mergeSettings($householdProfile->refresh(), [
             'onboarding' => [
                 'completed' => true,
@@ -269,10 +273,16 @@ class AgentProfileTest extends TestCase
                 'context' => 'Lauren prefers reminders the night before.',
             ],
         ], 'settings');
-        $this->assertStringContainsString('Lauren likes dinner reminders before 5pm.', File::get($householdProfile->runtime_home.'/MEMORY.md'));
+        $this->assertStringContainsString('Lauren likes dinner reminders before 5pm.', File::get($householdProfile->runtime_home.'/memories/MEMORY.md'));
 
-        $this->assertFileExists($personalProfile->runtime_home.'/MEMORY.md');
-        $this->assertStringNotContainsString('Lauren prefers reminders the night before.', File::get($personalProfile->runtime_home.'/MEMORY.md'));
+        $this->assertFileExists($personalProfile->runtime_home.'/memories/MEMORY.md');
+        $this->assertStringNotContainsString('Lauren prefers reminders the night before.', File::get($personalProfile->runtime_home.'/memories/MEMORY.md'));
+        foreach (['USER.md', 'MEMORY.md', 'HOUSEHOLD.md', 'PREFERENCES.md'] as $file) {
+            $this->assertFileDoesNotExist($householdProfile->runtime_home.'/'.$file);
+            $this->assertFileDoesNotExist($personalProfile->runtime_home.'/'.$file);
+        }
+        $this->assertFileDoesNotExist($householdProfile->runtime_home.'/memories/HOUSEHOLD.md');
+        $this->assertFileDoesNotExist($householdProfile->runtime_home.'/memories/PREFERENCES.md');
     }
 
     public function test_today_endpoint_includes_agent_profile(): void
