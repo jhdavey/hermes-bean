@@ -246,7 +246,7 @@ PHP);
 #!/usr/bin/env php
 <?php
 $prompt = implode(' ', $argv);
-$required = ['task.update', 'task.delete', 'reminder.update', 'calendar_event.delete', 'approval.approve', 'blocker.resolve', 'agent_profile.update', 'is_critical', 'task_id', 'ask whether the user wants a reminder time', 'ask a follow-up about whether it should recur'];
+$required = ['task.update', 'task.delete', 'reminder.update', 'calendar_event.delete', 'approval.approve', 'blocker.resolve', 'agent_profile.update', 'is_critical', 'task_id', 'visible_response', 'response_contract', 'Do not ask for optional category, color, recurrence, notes, reminders, workspace, or critical/starred status', 'ask a follow-up about whether it should recur'];
 $missing = array_values(array_filter($required, fn ($needle) => ! str_contains($prompt, $needle)));
 echo json_encode([
     'message' => empty($missing) ? 'Schema includes universal dashboard controls.' : 'Missing schema controls: '.implode(', ', $missing),

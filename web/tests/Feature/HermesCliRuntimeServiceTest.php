@@ -165,6 +165,7 @@ PHP);
         foreach ([
             'hey Bean' => 'cheap-fast-model',
             'create a Maintenance category and make it yellow' => 'capable-cheap-model',
+            'Schedule workout on my calendar today from 6 to 7pm' => 'capable-cheap-model',
             'plan my day around school pickup and move anything that conflicts' => 'frontier-model',
         ] as $message => $expectedModel) {
             $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
@@ -185,7 +186,7 @@ PHP);
             ->map(fn (array $payload): string => $payload['model_route']['tier'])
             ->all();
 
-        $this->assertSame(['simple', 'standard', 'complex'], $routes);
+        $this->assertSame(['simple', 'standard', 'standard', 'complex'], $routes);
     }
 
     public function test_household_session_uses_household_agent_profile_runtime_home_and_workspace_payload(): void
@@ -580,6 +581,149 @@ PHP);
             ->assertJsonPath('data.assistant_message.content', 'Hello! How can I assist you today?')
             ->assertJsonMissingPath('data.assistant_message.content.actions')
             ->assertJsonFragment(['event_type' => 'assistant.agent_profile.updated']);
+    }
+
+    public function test_structured_cli_output_without_message_does_not_leak_json_to_chat(): void
+    {
+        $script = $this->writeExecutable('message-less-structured-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'actions' => [[
+        'type' => 'calendar_event.create',
+        'risk' => 'low',
+        'parameters' => [
+            'title' => 'Workout',
+            'starts_at' => '2026-05-27T18:00:00-04:00',
+            'ends_at' => '2026-05-27T19:00:00-04:00',
+        ],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('message-less-structured-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Schedule workout on my calendar today from 6 to 7pm',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I added Workout to your calendar.')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $this->assertDatabaseHas('calendar_events', [
+            'conversation_session_id' => $sessionId,
+            'title' => 'Workout',
+        ]);
+    }
+
+    public function test_visible_response_is_preferred_over_message_alias(): void
+    {
+        $script = $this->writeExecutable('visible-response-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'visible_response' => 'Workout is on your calendar from 6:00 PM to 7:00 PM.',
+    'message' => 'Legacy message should not be shown.',
+    'actions' => [[
+        'type' => 'calendar_event.create',
+        'risk' => 'low',
+        'parameters' => [
+            'title' => 'Workout',
+            'starts_at' => '2026-05-27T18:00:00-04:00',
+            'ends_at' => '2026-05-27T19:00:00-04:00',
+        ],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('visible-response-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Schedule workout on my calendar today from 6 to 7pm',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Workout is on your calendar from 6:00 PM to 7:00 PM.');
+    }
+
+    public function test_invalid_structured_create_action_does_not_create_junk_resource(): void
+    {
+        $script = $this->writeExecutable('invalid-create-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'visible_response' => 'I need a time before I can put that on your calendar.',
+    'actions' => [[
+        'type' => 'calendar_event.create',
+        'risk' => 'low',
+        'parameters' => [
+            'title' => 'Workout',
+        ],
+    ]],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+
+        $token = $this->apiToken('invalid-create-cli@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Put workout on my calendar',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I need a time before I can put that on your calendar.')
+            ->assertJsonFragment(['event_type' => 'assistant.action.failed']);
+
+        $this->assertDatabaseMissing('calendar_events', [
+            'conversation_session_id' => $sessionId,
+            'title' => 'Workout',
+        ]);
+    }
+
+    public function test_clear_calendar_create_prompt_discourages_unnecessary_followups(): void
+    {
+        $script = $this->writeExecutable('prompt-capture-hermes.php', <<<'PHP'
+#!/usr/bin/env php
+<?php
+$prompt = $argv[array_search('-q', $argv, true) + 1] ?? '';
+file_put_contents(getenv('HERMES_FAKE_LOG'), $prompt);
+echo json_encode(['message' => 'Workout is on your calendar for today from 6:00 PM to 7:00 PM.', 'actions' => []], JSON_THROW_ON_ERROR);
+PHP);
+
+        config()->set('services.hermes_runtime.mode', 'cli');
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.timeout', 5);
+        config()->set('services.hermes_runtime.environment', [
+            'HERMES_FAKE_LOG' => $this->tempDir.'/prompt.txt',
+        ]);
+
+        $token = $this->apiToken('clear-calendar-prompt@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Schedule workout on my calendar today from 6 to 7pm',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $prompt = File::get($this->tempDir.'/prompt.txt');
+        $this->assertStringContainsString('Prefer acting on clear scheduling/productivity requests instead of interrogating the user for optional details.', $prompt);
+        $this->assertStringContainsString('Schedule workout on my calendar today from 6 to 7pm', $prompt);
+        $this->assertStringContainsString('visible_response', $prompt);
+        $this->assertStringContainsString('Treat `visible_response` and `actions` as separate channels', $prompt);
+        $this->assertStringContainsString('response_contract', $prompt);
+        $this->assertStringContainsString('Do not ask for optional category, color, recurrence, notes, reminders, workspace, or critical/starred status', $prompt);
     }
 
     public function test_approving_a_queued_structured_action_executes_it_once(): void

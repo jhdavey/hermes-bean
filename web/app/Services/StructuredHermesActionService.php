@@ -44,6 +44,7 @@ class StructuredHermesActionService
 
             try {
                 $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+                $this->validateActionContract($action, $parameters);
                 $actionSession = $this->sessionForAction($session, $parameters);
             } catch (\Throwable $exception) {
                 $events->push($this->recordEvent($session, 'assistant.action.failed', [
@@ -190,6 +191,66 @@ class StructuredHermesActionService
         return is_array($required) && in_array($category, $required, true);
     }
 
+    private function validateActionContract(array $action, array $parameters): void
+    {
+        $type = (string) ($action['type'] ?? '');
+
+        match ($type) {
+            'task.create' => $this->requireActionFields($type, $parameters, ['title']),
+            'reminder.create' => $this->requireActionFields($type, $parameters, ['title', 'remind_at']),
+            'calendar_event.create', 'calendar.create' => $this->requireCalendarCreateFields($type, $parameters),
+            default => null,
+        };
+    }
+
+    private function requireCalendarCreateFields(string $type, array $parameters): void
+    {
+        $this->requireActionFields($type, $parameters, ['title']);
+
+        $hasStart = collect(['starts_at', 'start_at'])
+            ->contains(function (string $field) use ($parameters): bool {
+                if (! array_key_exists($field, $parameters)) {
+                    return false;
+                }
+
+                $value = $parameters[$field];
+
+                return is_scalar($value) ? trim((string) $value) !== '' : $value !== null;
+            });
+
+        if (! $hasStart) {
+            throw new InvalidArgumentException(sprintf('Structured action %s is missing required field: starts_at.', $type));
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $fields
+     */
+    private function requireActionFields(string $type, array $parameters, array $fields): void
+    {
+        $missing = collect($fields)
+            ->reject(function (string $field) use ($parameters): bool {
+                if (! array_key_exists($field, $parameters)) {
+                    return false;
+                }
+
+                $value = $parameters[$field];
+
+                return is_scalar($value) ? trim((string) $value) !== '' : $value !== null;
+            })
+            ->values()
+            ->all();
+
+        if ($missing !== []) {
+            throw new InvalidArgumentException(sprintf(
+                'Structured action %s is missing required field%s: %s.',
+                $type,
+                count($missing) === 1 ? '' : 's',
+                implode(', ', $missing)
+            ));
+        }
+    }
+
     private function rememberAlwaysApprovedAction(ConversationSession $session, array $action): void
     {
         $type = (string) ($action['type'] ?? '');
@@ -304,7 +365,7 @@ class StructuredHermesActionService
             'workspace_id' => $session->workspace_id,
             'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
             'conversation_session_id' => $session->id,
-            'title' => $this->stringParameter($parameters, 'title', 'Untitled task'),
+            'title' => $this->stringParameter($parameters, 'title', 'Task'),
             'type' => $this->stringParameter($parameters, 'type', 'todo'),
             'status' => $this->stringParameter($parameters, 'status', 'open'),
             'notes' => $parameters['notes'] ?? null,
@@ -332,12 +393,12 @@ class StructuredHermesActionService
             'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
             'conversation_session_id' => $session->id,
             'calendar_event_id' => $parameters['calendar_event_id'] ?? null,
-            'title' => $this->stringParameter($parameters, 'title', 'Untitled reminder'),
+            'title' => $this->stringParameter($parameters, 'title', 'Reminder'),
             'notes' => $parameters['notes'] ?? null,
             'category' => $this->resourceCategory($parameters),
             'color' => $this->resourceColor($parameters),
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
-            'remind_at' => $this->parseDashboardDateTime($session, $parameters['remind_at'] ?? now()->addDay()->toIso8601String()),
+            'remind_at' => $this->parseDashboardDateTime($session, $parameters['remind_at']),
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
             'metadata' => array_merge(
                 ['created_by' => 'structured_hermes_action'],
@@ -354,7 +415,7 @@ class StructuredHermesActionService
 
     private function createCalendarEvent(ConversationSession $session, array $parameters): ActivityEvent
     {
-        $startsAtValue = $parameters['starts_at'] ?? $parameters['start_at'] ?? now()->toIso8601String();
+        $startsAtValue = $parameters['starts_at'] ?? $parameters['start_at'];
         $endsAtValue = $parameters['ends_at'] ?? $parameters['end_at'] ?? null;
         $startsAt = $this->parseDashboardDateTime($session, $startsAtValue);
         $endsAt = $endsAtValue !== null ? $this->parseDashboardDateTime($session, $endsAtValue) : null;
@@ -364,7 +425,7 @@ class StructuredHermesActionService
             'workspace_id' => $session->workspace_id,
             'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
             'conversation_session_id' => $session->id,
-            'title' => $this->stringParameter($parameters, 'title', 'Untitled event'),
+            'title' => $this->stringParameter($parameters, 'title', 'Event'),
             'description' => $parameters['description'] ?? null,
             'location' => $parameters['location'] ?? null,
             'category' => $this->resourceCategory($parameters),

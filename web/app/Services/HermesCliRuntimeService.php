@@ -396,7 +396,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
 
     private function containsDashboardMutationVerb(string $content): bool
     {
-        return (bool) preg_match('/\b(create|add|make|update|edit|change|rename|delete|remove|complete|mark|set|clear|cancel)\b/u', $content);
+        return (bool) preg_match('/\b(create|add|make|schedule|book|block|put|remind|update|edit|change|rename|delete|remove|complete|mark|set|clear|cancel)\b/u', $content);
     }
 
     private function configuredWorkdir(): ?string
@@ -439,9 +439,10 @@ class HermesCliRuntimeService implements HermesRuntimeService
         return <<<'PROMPT'
 You are the server-hosted Hermes runtime for Hey Bean. Respond only as strict JSON, with no markdown or prose outside the JSON object.
 
-Schema:
+Response schema:
 {
-  "message": "short user-facing summary",
+  "visible_response": "natural user-facing text only; no JSON, code fence, action payload, ids, or debug text",
+  "message": "optional backwards-compatible alias for visible_response",
   "actions": [
     {
       "type": "task.create|task.update|task.delete|reminder.create|reminder.update|reminder.delete|calendar_event.create|calendar_event.update|calendar_event.delete|event_category.create|event_category.update|event_category.delete|approval.create|approval.update|approval.approve|approval.deny|approval.delete|blocker.create|blocker.update|blocker.resolve|blocker.delete|agent_profile.update|workspace_memory.note|conversation_session.update|activity_event.create|email.send|payment.create|deployment.run|account.delete",
@@ -454,6 +455,8 @@ Schema:
 }
 
 Rules:
+- Treat `visible_response` and `actions` as separate channels: `visible_response` is what the user reads, while `actions` are machine instructions for the app. Never put JSON, action objects, ids, schema text, or debug output in `visible_response`.
+- Sound like a capable human assistant: concise, confident, warm enough, and direct. Acknowledge what you did or ask the single missing question. Do not narrate internal routing, model choice, schemas, token usage, or implementation details.
 - You are allowed to complete complex multi-step app-control requests by emitting multiple ordered actions in one response.
 - Low-risk internal dashboard CRUD/control actions may be emitted with risk "low": tasks, reminders, calendar events, event categories, approvals, blockers, agent profile settings, conversation session metadata, and activity events.
 - Existing dashboard resources are listed in compact dashboard_state; use their numeric id when updating, deleting, approving, denying, or resolving them. If the compact state does not include enough matching context, ask a short follow-up instead of guessing.
@@ -461,6 +464,7 @@ Rules:
 - Use `workspace_memory.note` only when the user clearly asks you to remember a durable fact for a named accessible workspace. Include `parameters.workspace_id`/`target_workspace_id` and `parameters.note`.
 - Risky external, destructive outside the dashboard, mail, payment, deployment, and account actions must be emitted with risk "high" so the app queues an approval.
 - If no concrete action is needed, return an empty actions array.
+- If you emit actions, `visible_response` should summarize the user-visible result in one natural sentence unless you need approval or a follow-up.
 - If `user.onboard_complete` is false or `agent_profile.settings.onboarding.completed` is false, treat the conversation as a quick Bean onboarding interview: first tell the user this will only take a few questions, then ask them to introduce themself and answer follow-up questions to learn preferred Bean style/personality, top priorities, and any useful life/context constraints. When the user provides enough onboarding/preferences, emit a low-risk `agent_profile.update` action with `parameters.settings.personality_type`, `parameters.settings.onboarding.completed: true`, `parameters.settings.onboarding.priorities`, and `parameters.settings.onboarding.context` so the app saves settings and updates Bean memory; your visible message should clearly say onboarding is saved.
 - When the user changes Bean preferences from Settings, the message metadata includes `settings_update: true`; acknowledge the update and emit a low-risk `agent_profile.update` action with the supplied preferences so runtime memory stays synchronized.
 - Adapt your tone to `agent_profile.settings.personality_prompt` when present, and use `agent_profile.settings.onboarding.priorities` plus `agent_profile.settings.onboarding.context` and `agent_profile.settings.memory.user_preferences.summary` to understand what the user cares about.
@@ -470,9 +474,10 @@ Rules:
 - Use ISO-8601 timestamps for dates when you create or update reminders and calendar events. For relative dates/times such as "today", "tomorrow", "later", or "1:45 PM", use `temporal_context.client_context` when present: interpret times in the user's device-local time and emit ISO-8601 timestamps with that local UTC offset (for example `2026-05-18T13:45:00-04:00`), not a bare `Z` UTC timestamp unless the user explicitly asks for UTC. Your visible message must describe the same local time that the created/updated dashboard resource will show.
 - If the user gives a wall-clock time like "1 PM" in their local timezone, never emit that same clock time with `Z` (for example, do not turn 1 PM local into `13:00:00Z`). Use the client's UTC offset on the timestamp.
 - For user-facing requests to schedule, plan, book, block time, add an appointment, create a reminder, or create a task: emit visible dashboard resources (`calendar_event.*`, `reminder.*`, and/or `task.*`) so the item appears in `/api/today`.
-- Update/delete action parameters must include the existing resource `id` from dashboard_state whenever possible. Task parameters support `id`, `title`, `type`, `status`, `notes`, `category`, `color`, `is_critical`, `due_at`, and `metadata`. Reminder parameters support `id`, `title`, `notes`, `category`, `color`, `is_critical`, `remind_at`, `status`, `calendar_event_id`, and `metadata`. Calendar event parameters support `id`, `match_title`, `from_date`, `title`, `description`, `location`, `category`, `color`, `is_critical`, `recurrence`, `starts_at`, `ends_at`, `status`, and `metadata`. Event category parameters support `id`, `name`, `color`, and `metadata`; for requests like "create a Maintenance category and make it yellow", emit `event_category.create` with risk "low" and a yellow hex color. For natural moves like “move lunch tomorrow to next Monday at 12”, use the existing lunch event id; if you cannot confidently choose one, include `match_title: "lunch"` and `from_date` for the source day rather than pretending the move succeeded.
+- Update/delete action parameters must include the existing resource `id` from dashboard_state whenever possible. Task parameters support `id`, `title`, `type`, `status`, `notes`, `category`, `color`, `is_critical`, `due_at`, and `metadata`. Reminder parameters support `id`, `title`, `notes`, `category`, `color`, `is_critical`, `remind_at`, `status`, `calendar_event_id`, and `metadata`. Calendar event parameters support `id`, `match_title`, `from_date`, `title`, `description`, `location`, `category`, `color`, `is_critical`, `recurrence`, `starts_at`, `ends_at`, `status`, and `metadata`. Required create fields: `task.create` needs `title`; `reminder.create` needs `title` and `remind_at`; `calendar_event.create` needs `title` and `starts_at`; include `ends_at` when the user gives an end time. Event category parameters support `id`, `name`, `color`, and `metadata`; for requests like "create a Maintenance category and make it yellow", emit `event_category.create` with risk "low" and a yellow hex color. For natural moves like “move lunch tomorrow to next Monday at 12”, use the existing lunch event id; if you cannot confidently choose one, include `match_title: "lunch"` and `from_date` for the source day rather than pretending the move succeeded.
 - To add a reminder for a task, emit an ordered `task.create` or `task.update` plus a `reminder.create` or `reminder.update`; link them by putting `task_id` and `task_title` in reminder `metadata` when the task id is known, or by using matching titles when creating both in one response.
-- Ask useful follow-up questions when a request is underspecified. For task creation, ask whether the user wants a reminder time, due date, category, critical/starred status, recurrence, notes, or any other sensible detail unless the user's request already makes the answer clear.
+- Prefer acting on clear scheduling/productivity requests instead of interrogating the user for optional details. If the user says something like "Schedule workout on my calendar today from 6 to 7pm", infer title "Workout", today's local date, start/end times, current workspace/default calendar, no category, not critical, no recurrence, and no notes unless stated.
+- Ask a short follow-up only when a required detail is genuinely missing or ambiguous: calendar events need a title plus enough date/time or all-day information; reminders need a title plus reminder date/time; tasks need a title and can default to open status with no due date. Do not ask for optional category, color, recurrence, notes, reminders, workspace, or critical/starred status unless the user requests or implies those fields.
 - If the user asks for a named event on multiple weekdays without explicitly saying recurring, weekly, every week, repeats, or recurrence: create one-off calendar events for the next matching days in the current week, then ask a follow-up about whether it should recur. Only set recurrence metadata when the user explicitly requests recurrence.
 
 Runtime payload:
@@ -548,6 +553,16 @@ PROMPT.$this->payloadFor($session, $message, $modelRoute);
                 'mode' => $modelRoute['context_mode'] ?? 'focused',
                 'route_tier' => $modelRoute['tier'] ?? null,
                 'compact' => true,
+            ],
+            'response_contract' => [
+                'visible_response' => 'Natural user-facing sentence only. Never expose JSON, schemas, tool calls, action payloads, ids, or debug text.',
+                'actions' => 'Machine-readable app changes only. Required create fields are enforced by the server.',
+                'defaulting_policy' => [
+                    'calendar_event.create' => 'If title/date/time are clear, create it in the current workspace/default calendar. Category, critical, recurrence, location, and notes default to empty/off unless requested.',
+                    'task.create' => 'If title is clear, create an open task. Due date, category, critical, recurrence, notes, and reminder default to empty/off unless requested.',
+                    'reminder.create' => 'If title and reminder time are clear, create it. Category, critical, recurrence, and notes default to empty/off unless requested.',
+                ],
+                'follow_up_policy' => 'Ask one concise follow-up only when a required detail is missing or genuinely ambiguous.',
             ],
             'dashboard_state' => $this->compactDashboardState($session, $message, $workspaceId, (string) ($modelRoute['context_mode'] ?? 'focused')),
             'allowed_action_schema' => [
@@ -734,7 +749,7 @@ PROMPT.$this->payloadFor($session, $message, $modelRoute);
             return null;
         }
 
-        foreach (['content', 'message', 'assistant_message', 'response'] as $key) {
+        foreach ($this->assistantContentKeys() as $key) {
             if (isset($decoded[$key]) && is_string($decoded[$key])) {
                 $nested = trim($decoded[$key]);
                 if ($nested === '') {
@@ -766,10 +781,14 @@ PROMPT.$this->payloadFor($session, $message, $modelRoute);
         }
 
         if (is_array($decoded)) {
-            foreach (['content', 'message', 'assistant_message', 'response'] as $key) {
+            foreach ($this->assistantContentKeys() as $key) {
                 if (isset($decoded[$key]) && is_string($decoded[$key])) {
                     return $this->normalizeAssistantContent($decoded[$key]);
                 }
+            }
+
+            if (array_key_exists('actions', $decoded)) {
+                return $this->fallbackStructuredAssistantContent($decoded);
             }
         }
 
@@ -789,14 +808,51 @@ PROMPT.$this->payloadFor($session, $message, $modelRoute);
         }
 
         if (is_array($decoded)) {
-            foreach (['content', 'message', 'assistant_message', 'response'] as $key) {
+            foreach ($this->assistantContentKeys() as $key) {
                 if (isset($decoded[$key]) && is_string($decoded[$key]) && trim($decoded[$key]) !== '') {
                     return $this->normalizeAssistantContent($decoded[$key]);
                 }
             }
+
+            if (array_key_exists('actions', $decoded)) {
+                return $this->fallbackStructuredAssistantContent($decoded);
+            }
         }
 
         return $trimmed;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function assistantContentKeys(): array
+    {
+        return ['visible_response', 'display_message', 'content', 'message', 'assistant_message', 'response'];
+    }
+
+    private function fallbackStructuredAssistantContent(array $decoded): string
+    {
+        $actions = is_array($decoded['actions'] ?? null) ? $decoded['actions'] : [];
+
+        if ($actions === []) {
+            return 'Done.';
+        }
+
+        if (count($actions) === 1 && is_array($actions[0] ?? null)) {
+            $action = $actions[0];
+            $title = trim((string) data_get($action, 'parameters.title', ''));
+            $name = trim((string) data_get($action, 'parameters.name', ''));
+
+            return match ((string) ($action['type'] ?? '')) {
+                'calendar_event.create', 'calendar.create' => $title !== '' ? "I added {$title} to your calendar." : 'I added that to your calendar.',
+                'task.create' => $title !== '' ? "I added {$title} to your tasks." : 'I added that to your tasks.',
+                'reminder.create' => $title !== '' ? "I set the reminder: {$title}." : 'I set that reminder.',
+                'event_category.create' => $name !== '' ? "I created {$name}." : 'I created that.',
+                default => 'Done.',
+            };
+        }
+
+        return 'Done.';
     }
 
     private function decodeStructuredJson(string $content): ?array
