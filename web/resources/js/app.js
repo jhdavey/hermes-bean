@@ -25,6 +25,7 @@ if (mount) {
         tune: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M2 14h4M10 8h4M18 16h4"/></svg>',
         activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
+        mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
         refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.2 6.5L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.2 5.5L21 8"/><path d="M21 3v5h-5"/></svg>',
         chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
         chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
@@ -431,6 +432,7 @@ if (mount) {
                     ${showRefresh ? `<button class="hb-icon-button" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
+                    ${kioskVoiceToggleMarkup()}
                 </header>
                 <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
@@ -832,6 +834,11 @@ if (mount) {
                     <button class="hb-profile-action" type="button" data-logout>${icons.user}<span>Sign out</span></button>
                 </div>
             </details>`;
+    }
+
+    function kioskVoiceToggleMarkup() {
+        const enabled = state.kioskVoiceEnabled;
+        return `<button class="hb-icon-button hb-kiosk-toggle ${enabled ? 'hb-icon-button-active' : ''}" type="button" data-toggle-kiosk-voice aria-label="${enabled ? 'Turn off kiosk voice' : 'Turn on kiosk voice'}" title="${enabled ? 'Kiosk voice on' : 'Kiosk voice off'}" aria-pressed="${enabled}">${icons.mic}</button>`;
     }
 
     function todayTasksMarkup() {
@@ -1726,6 +1733,7 @@ if (mount) {
             render();
             scrollChatToBottom();
         }));
+        mount.querySelector('[data-toggle-kiosk-voice]')?.addEventListener('click', toggleKioskVoiceMode);
         mount.querySelector('[data-onboarding-dashboard]')?.addEventListener('click', () => {
             state.selected = 'today';
             state.chatExpanded = false;
@@ -3073,6 +3081,21 @@ if (mount) {
         if (error === 'not-allowed' || error === 'service-not-allowed') return 'allow microphone access';
         if (error === 'audio-capture') return 'microphone unavailable';
         return 'voice paused';
+    }
+
+    function toggleKioskVoiceMode() {
+        state.kioskVoiceEnabled = !state.kioskVoiceEnabled;
+        if (state.kioskVoiceEnabled) {
+            localStorage.setItem(kioskVoiceKey, 'true');
+            state.kioskVoicePhase = 'idle';
+            state.kioskVoiceMessage = '';
+            render();
+            startKioskVoiceMode();
+            return;
+        }
+        localStorage.removeItem(kioskVoiceKey);
+        stopKioskVoiceMode();
+        render();
     }
 
     function replaceLocalUserMessage(message) {
