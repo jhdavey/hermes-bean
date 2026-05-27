@@ -376,6 +376,39 @@ PHP);
         $this->assertSame('2026-05-18T21:00:00+00:00', $event->ends_at->utc()->toIso8601String());
     }
 
+    public function test_runtime_recovers_agent_utc_timestamps_that_match_user_local_wall_clock_times(): void
+    {
+        $this->configureFakeHermes(<<<'PHP'
+#!/usr/bin/env php
+<?php
+echo json_encode([
+    'message' => 'Saved the retreat from 1:00 PM to 8:00 PM.',
+    'actions' => [
+        ['type' => 'calendar_event.create', 'risk' => 'low', 'parameters' => [
+            'title' => 'Multi-day retreat',
+            'starts_at' => '2026-05-18T13:00:00Z',
+            'ends_at' => '2026-05-21T20:00:00Z',
+        ]],
+    ],
+], JSON_THROW_ON_ERROR);
+PHP);
+
+        $token = $this->apiToken();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'UTC wall-clock recovery',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a multi-day event from May 18 at 1pm until May 21 at 8pm.',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Saved the retreat from 1:00 PM to 8:00 PM.');
+
+        $event = CalendarEvent::where('title', 'Multi-day retreat')->firstOrFail();
+        $this->assertSame('2026-05-18T17:00:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-22T00:00:00+00:00', $event->ends_at->utc()->toIso8601String());
+    }
+
     public function test_runtime_normalizes_nested_json_assistant_message_and_applies_nested_actions(): void
     {
         $this->configureFakeHermes(<<<'PHP'
