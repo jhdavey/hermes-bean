@@ -254,7 +254,7 @@ if (mount) {
                 resumeSession(state.session.id);
             }
             startDashboardChangeFeed();
-            startKioskVoiceMode();
+            startKioskVoiceMode({ requestPermission: false });
             refreshCalendarInBackground();
         } catch (error) {
             stopDashboardChangeFeed();
@@ -2843,7 +2843,7 @@ if (mount) {
         return 'Chrome could not request microphone access. Check browser and system microphone permissions.';
     }
 
-    async function startKioskVoiceMode() {
+    async function startKioskVoiceMode(options = {}) {
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return;
         if (kioskRecognition || kioskRecognitionActive || state.voiceListening) {
             return;
@@ -2857,7 +2857,7 @@ if (mount) {
             restartKioskVoiceListeningSoon(1400);
             return;
         }
-        if (!await requestKioskMicrophoneAccess()) return;
+        if (!await requestKioskMicrophoneAccess(Boolean(options.requestPermission))) return;
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || state.voiceListening) return;
 
         const recognition = new SpeechRecognition();
@@ -2929,10 +2929,19 @@ if (mount) {
         }
     }
 
-    async function requestKioskMicrophoneAccess() {
+    async function requestKioskMicrophoneAccess(requestPermission = false) {
         if (kioskMicrophoneReady) return true;
         if (!navigator.mediaDevices?.getUserMedia) {
             setKioskVoiceStatus('error', 'microphone unavailable');
+            return false;
+        }
+        const permission = await microphonePermissionState();
+        if (permission === 'denied') {
+            setKioskVoiceStatus('error', 'mic blocked');
+            return false;
+        }
+        if (!requestPermission && permission !== 'granted') {
+            setKioskVoiceStatus('error', 'click mic to allow');
             return false;
         }
         let stream = null;
@@ -2942,10 +2951,20 @@ if (mount) {
             return true;
         } catch (error) {
             kioskMicrophoneReady = false;
-            setKioskVoiceStatus('error', 'allow microphone access');
+            setKioskVoiceStatus('error', kioskMicrophoneAccessMessage(error));
             return false;
         } finally {
             stream?.getTracks().forEach((track) => track.stop());
+        }
+    }
+
+    async function microphonePermissionState() {
+        if (!navigator.permissions?.query) return '';
+        try {
+            const permission = await navigator.permissions.query({ name: 'microphone' });
+            return permission.state || '';
+        } catch (error) {
+            return '';
         }
     }
 
@@ -3090,12 +3109,19 @@ if (mount) {
             state.kioskVoicePhase = 'idle';
             state.kioskVoiceMessage = '';
             render();
-            startKioskVoiceMode();
+            startKioskVoiceMode({ requestPermission: true });
             return;
         }
         localStorage.removeItem(kioskVoiceKey);
         stopKioskVoiceMode();
         render();
+    }
+
+    function kioskMicrophoneAccessMessage(error) {
+        if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') return 'mic blocked';
+        if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') return 'no microphone';
+        if (error?.name === 'NotReadableError' || error?.name === 'TrackStartError') return 'mic busy';
+        return 'allow mic';
     }
 
     function replaceLocalUserMessage(message) {
