@@ -737,7 +737,7 @@ if (mount) {
     }
 
     function kioskVoicePillMarkup() {
-        if (!state.kioskVoiceEnabled || state.kioskVoicePhase === 'idle') return '';
+        if (!state.kioskVoiceEnabled || ['idle', 'armed'].includes(state.kioskVoicePhase)) return '';
         const phase = state.kioskVoicePhase || 'listening';
         const label = state.kioskVoiceMessage || phase;
         return `<div class="hb-kiosk-voice-pill hb-kiosk-voice-pill-${escapeAttr(phase)}" role="status" aria-live="polite">${escapeHtml(label)}</div>`;
@@ -2981,14 +2981,13 @@ if (mount) {
         recognition.onresult = (event) => {
             const transcript = speechTranscript(event);
             if (!transcript) return;
-            if (kioskCancelRequested(transcript)) {
+            if ((kioskConversationActive || state.busy) && kioskCancelRequested(transcript)) {
                 cancelKioskVoiceCapture();
                 return;
             }
             if (!kioskConversationActive) {
                 const command = commandAfterWakePhrase(transcript);
                 if (command === null) {
-                    showKioskHeardTranscript(transcript);
                     return;
                 }
                 kioskCommandText = command;
@@ -3194,6 +3193,7 @@ if (mount) {
 
     function showKioskHeardTranscript(transcript, options = {}) {
         if (!transcript || ['working', 'responding'].includes(state.kioskVoicePhase)) return;
+        if (!kioskConversationActive) return;
         const preview = transcript.length > 44 ? `${transcript.slice(0, 41)}...` : transcript;
         const phase = options.phase || (kioskConversationActive ? 'heard' : 'armed');
         setKioskVoiceStatus(phase, `heard "${preview}"`);
