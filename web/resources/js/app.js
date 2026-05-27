@@ -1666,8 +1666,8 @@ if (mount) {
             return;
         }
         await withInlineCategoryBusy(button, async () => {
-            await api('/event-categories', { method: 'POST', body: { name, color } });
-            await refreshOnly(false);
+            const category = await api('/event-categories', { method: 'POST', body: { name, color } });
+            cacheCategory(category);
             nameInput.value = '';
             colorInput.value = '#16A34A';
             refreshInlineCategoryControls(panel, name, color);
@@ -1686,8 +1686,8 @@ if (mount) {
             return;
         }
         await withInlineCategoryBusy(button, async () => {
-            await api(`/event-categories/${row.dataset.inlineCategoryRow}`, { method: 'PATCH', body: { name, color } });
-            await refreshOnly(false);
+            const category = await api(`/event-categories/${row.dataset.inlineCategoryRow}`, { method: 'PATCH', body: { name, color } });
+            cacheCategory(category);
             refreshInlineCategoryControls(panel, name, color);
             setInlineCategoryMessage(panel, 'Saved.', '');
         });
@@ -1699,7 +1699,7 @@ if (mount) {
         if (!confirm('Delete this category from items?')) return;
         await withInlineCategoryBusy(button, async () => {
             await api(`/event-categories/${button.dataset.inlineCategoryDelete}`, { method: 'DELETE' });
-            await refreshOnly(false);
+            state.categories = state.categories.filter((category) => String(category.id) !== String(button.dataset.inlineCategoryDelete));
             refreshInlineCategoryControls(panel, '');
             setInlineCategoryMessage(panel, 'Deleted.', '');
         });
@@ -1714,6 +1714,11 @@ if (mount) {
         } finally {
             button.disabled = false;
         }
+    }
+
+    function cacheCategory(category) {
+        if (!category) return;
+        state.categories = upsertById(state.categories, category);
     }
 
     function refreshInlineCategoryControls(panel, selectedName = null, selectedColor = '') {
