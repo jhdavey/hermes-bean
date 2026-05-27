@@ -2563,6 +2563,10 @@
         overflow: hidden;
     }
 
+    .hb-dashboard-grid-single {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     .hb-primary-column,
     .hb-side-column {
         display: grid;

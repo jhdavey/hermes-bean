@@ -338,6 +338,7 @@ if (mount) {
 
     function signedInMarkup() {
         const criticalTasks = criticalTasksForToday();
+        const criticalReminders = criticalRemindersForToday();
         const criticalEvents = criticalEventsForToday();
         const addTitle = state.selected === 'tasks' ? 'Add task' : state.selected === 'reminders' ? 'Add reminder' : 'Create event';
         const showAdd = ['today', 'tasks', 'reminders'].includes(state.selected);
@@ -353,7 +354,7 @@ if (mount) {
                     ${topNavMarkup()}
                     ${showAdd ? `<button class="hb-icon-button" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
                     ${showRefresh ? `<button class="hb-icon-button" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
-                    ${criticalMenuMarkup(criticalTasks, criticalEvents)}
+                    ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
                 </header>
                 <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''}">
@@ -370,18 +371,19 @@ if (mount) {
         if (state.selected === 'settings') {
             return `<div class="hb-shell">${settingsMarkup()}</div>`;
         }
+        const showSideColumn = state.selected === 'today';
         const primary = state.selected === 'today'
             ? todayMarkup()
             : state.selected === 'tasks'
                 ? tasksMarkup()
                 : remindersMarkup();
         return `
-            <div class="hb-shell hb-dashboard-grid">
+            <div class="hb-shell hb-dashboard-grid ${showSideColumn ? '' : 'hb-dashboard-grid-single'}">
                 <div class="hb-primary-column">${primary}</div>
-                <aside class="hb-side-column">
+                ${showSideColumn ? `<aside class="hb-side-column">
                     ${atAGlanceMarkup()}
                     ${todayTasksMarkup()}
-                </aside>
+                </aside>` : ''}
             </div>`;
     }
 
@@ -598,7 +600,7 @@ if (mount) {
 
     function todayTasksMarkup() {
         const today = new Date();
-        const tasks = activeTopLevelTasks().filter((task) => isSameDay(task.due_at || task.dueAt, today));
+        const tasks = activeTopLevelTasks().filter((task) => itemOverdue(task, 'task') || isSameDay(task.due_at || task.dueAt, today)).sort(compareTasks);
         return `
             <section class="hb-card hb-card-pad hb-today-tasks-card">
                 <div class="hb-section-action-row">
@@ -726,8 +728,8 @@ if (mount) {
         return `<button class="hb-nav-item ${state.selected === key ? 'hb-nav-item-active' : ''}" type="button" data-nav="${key}">${icon}<span>${label}</span></button>`;
     }
 
-    function criticalMenuMarkup(tasks, events) {
-        const count = tasks.length + events.length;
+    function criticalMenuMarkup(tasks, reminders, events) {
+        const count = tasks.length + reminders.length + events.length;
         return `
             <details class="hb-critical-menu">
                 <summary class="hb-critical" title="${count} critical items" aria-label="Critical items">${count}</summary>
@@ -735,6 +737,7 @@ if (mount) {
                     <div class="hb-critical-list">
                         ${count === 0 ? criticalDropdownRowMarkup(icons.checkCircle, 'Nothing critical today', '') : ''}
                         ${tasks.map((task) => criticalDropdownRowMarkup(icons.tasks, task.title || task.name || 'Untitled', criticalTaskSubtitle(task), `critical-task-item-${escapeAttr(task.id)}`)).join('')}
+                        ${reminders.map((reminder) => criticalDropdownRowMarkup(icons.reminders, reminder.title || reminder.name || 'Untitled', criticalReminderSubtitle(reminder), `critical-reminder-item-${escapeAttr(reminder.id)}`)).join('')}
                         ${events.map((event) => criticalDropdownRowMarkup(icons.calendar, event.title || event.name || 'Untitled', criticalEventSubtitle(event), `critical-event-item-${escapeAttr(event.id)}`)).join('')}
                     </div>
                 </div>
@@ -959,7 +962,7 @@ if (mount) {
         const overdue = itemOverdue(item, kind);
         const baseSubtitle = kind === 'task' ? taskSubtitle(item) : reminderSubtitle(item);
         const subtitle = overdue ? ['overdue', baseSubtitle].filter(Boolean).join(' · ') : baseSubtitle;
-        const critical = item.is_critical || item.isCritical || overdue;
+        const critical = kind === 'task' ? taskCritical(item) : reminderCritical(item);
         const taskNotes = kind === 'task' ? taskNotesText(item) : '';
         const subtasks = kind === 'task' ? subtasksFor(item) : [];
         const expanded = kind === 'task' && state.expandedTaskIds.has(String(item.id));
@@ -2911,6 +2914,14 @@ if (mount) {
         return kind === 'task' ? (item?.due_at || item?.dueAt || '') : reminderDateValue(item);
     }
 
+    function taskCritical(task) {
+        return Boolean(task?.is_critical || task?.isCritical || itemOverdue(task, 'task'));
+    }
+
+    function reminderCritical(reminder) {
+        return Boolean(reminder?.is_critical || reminder?.isCritical || itemOverdue(reminder, 'reminder'));
+    }
+
     function itemOverdue(item, kind) {
         const completed = kind === 'task' ? taskCompleted(item) : reminderCompleted(item);
         if (completed) return false;
@@ -2941,14 +2952,21 @@ if (mount) {
     }
 
     function criticalItems() {
-        return [...criticalTasksForToday(), ...criticalEventsForToday()];
+        return [...criticalTasksForToday(), ...criticalRemindersForToday(), ...criticalEventsForToday()];
     }
 
     function criticalTasksForToday() {
         const today = new Date();
         return activeTopLevelTasks()
-            .filter((task) => (task.is_critical || task.isCritical) && isSameDay(task.due_at || task.dueAt, today))
+            .filter((task) => taskCritical(task) && (itemOverdue(task, 'task') || isSameDay(task.due_at || task.dueAt, today)))
             .sort(compareTasks);
+    }
+
+    function criticalRemindersForToday() {
+        const today = new Date();
+        return pendingReminders()
+            .filter((reminder) => reminderCritical(reminder) && (itemOverdue(reminder, 'reminder') || isSameDay(reminderDateValue(reminder), today)))
+            .sort(compareReminders);
     }
 
     function criticalEventsForToday() {
@@ -2962,9 +2980,19 @@ if (mount) {
         const parts = [];
         const dueLabel = task.due_at || task.dueAt ? formatDateTime(task.due_at || task.dueAt) : '';
         if (task.category) parts.push(task.category);
+        if (itemOverdue(task, 'task')) parts.push('overdue');
         if (dueLabel) parts.push(`Due ${dueLabel}`);
         if (taskIsRecurring(task)) parts.push('Recurring');
         return parts.join(' · ');
+    }
+
+    function criticalReminderSubtitle(reminder) {
+        const parts = [];
+        const dateLabel = reminderDateValue(reminder) ? formatDateTime(reminderDateValue(reminder)) : '';
+        if (reminder.category) parts.push(reminder.category);
+        if (itemOverdue(reminder, 'reminder')) parts.push('overdue');
+        if (dateLabel) parts.push(dateLabel);
+        return parts.join(' · ') || 'No reminder time';
     }
 
     function criticalEventSubtitle(event) {
