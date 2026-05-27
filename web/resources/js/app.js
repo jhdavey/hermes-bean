@@ -3139,7 +3139,14 @@ if (mount) {
     }
 
     function topbarTodayLabel(date) {
-        return parseLocalDate(date).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric' });
+        const parsed = parseLocalDate(date);
+        return `${parsed.toLocaleDateString(undefined, { month: 'short' })} ${ordinalDay(parsed.getDate())}`;
+    }
+
+    function ordinalDay(day) {
+        const teen = day % 100;
+        if (teen >= 11 && teen <= 13) return `${day}th`;
+        return `${day}${({ 1: 'st', 2: 'nd', 3: 'rd' })[day % 10] || 'th'}`;
     }
 
     function timelineDayHeaderLabel(date) {
