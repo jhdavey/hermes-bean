@@ -2999,7 +2999,7 @@ if (mount) {
         if (event.starts_at || event.startsAt || event.ends_at || event.endsAt) parts.push(eventTime(event));
         if (event.category) parts.push(event.category);
         const recurrence = itemRecurrenceValue(event);
-        if (recurrence && recurrence !== 'none') parts.push(recurrenceLabel(recurrence));
+        if (recurrence && recurrence !== 'none') parts.push(recurrenceSummary(event));
         return parts.join(' · ') || 'Unscheduled';
     }
 
@@ -3014,7 +3014,29 @@ if (mount) {
 
     function recurrenceSummary(item) {
         const recurrence = itemRecurrenceValue(item);
+        if (recurrence === 'interval') return intervalRecurrenceSummary(item?.metadata);
         return recurrence && recurrence !== 'none' ? recurrenceLabel(recurrence) : '';
+    }
+
+    function intervalRecurrenceSummary(metadata = {}) {
+        const interval = Number.parseInt(metadata?.interval, 10);
+        if (!Number.isFinite(interval) || interval <= 0) return 'Custom interval';
+        const unit = String(metadata?.unit || metadata?.interval_unit || metadata?.intervalUnit || 'days').toLowerCase();
+        return `Every ${interval} ${intervalUnitLabel(unit, interval)}`;
+    }
+
+    function intervalUnitLabel(unit, interval) {
+        const normalized = {
+            day: 'day',
+            days: 'day',
+            week: 'week',
+            weeks: 'week',
+            month: 'month',
+            months: 'month',
+            year: 'year',
+            years: 'year',
+        }[unit] || unit.replace(/s$/, '') || 'day';
+        return interval === 1 ? normalized : `${normalized}s`;
     }
 
     function workspaces() {

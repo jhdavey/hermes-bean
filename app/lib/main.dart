@@ -837,6 +837,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _criticalItemCountForToday() {
     if (_phase != _AuthPhase.signedIn) return 0;
     return _criticalTasksForToday(_tasks).length +
+        _criticalRemindersForToday(_reminders).length +
         _criticalEventsForToday(_calendar).length;
   }
 
@@ -2921,6 +2922,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                     const SizedBox(width: 8),
                     _CriticalTaskBadge(
                       tasks: _criticalTasksForToday(_tasks),
+                      reminders: _criticalRemindersForToday(_reminders),
                       events: _criticalEventsForToday(_calendar),
                     ),
                     if (_selectedDestination == _HomeDestination.today) ...[
@@ -5568,12 +5570,17 @@ class _TodayHomeView extends StatelessWidget {
 }
 
 class _CriticalTaskBadge extends StatelessWidget {
-  const _CriticalTaskBadge({required this.tasks, required this.events});
+  const _CriticalTaskBadge({
+    required this.tasks,
+    required this.reminders,
+    required this.events,
+  });
 
   final List<HermesTask> tasks;
+  final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> events;
 
-  int get count => tasks.length + events.length;
+  int get count => tasks.length + reminders.length + events.length;
 
   @override
   Widget build(BuildContext context) => PopupMenuButton<void>(
@@ -5604,6 +5611,13 @@ class _CriticalTaskBadge extends StatelessWidget {
                     icon: Icons.checklist_rounded,
                     title: task.title,
                     subtitle: _taskSubtitle(task),
+                  ),
+                for (final reminder in reminders)
+                  _CriticalDropdownRow(
+                    key: Key('critical-reminder-item-${reminder.id}'),
+                    icon: Icons.notifications_active_rounded,
+                    title: reminder.title,
+                    subtitle: _reminderSubtitle(reminder),
                   ),
                 for (final event in events)
                   _CriticalDropdownRow(
@@ -13668,6 +13682,26 @@ List<HermesCalendarEvent> _criticalEventsForToday(
   return visible;
 }
 
+List<HermesReminder> _criticalRemindersForToday(
+  List<HermesReminder> reminders,
+) {
+  final today = _dateOnly(DateTime.now());
+  final visible = reminders.where((reminder) {
+    if (!reminder.isCritical || _reminderIsCompleted(reminder)) return false;
+    final dueAt = _parseReminderDueDate(reminder);
+    return dueAt != null && !_dateOnly(dueAt).isAfter(today);
+  }).toList();
+  visible.sort((a, b) {
+    final aDue = _parseReminderDueDate(a);
+    final bDue = _parseReminderDueDate(b);
+    if (aDue != null && bDue != null) return aDue.compareTo(bDue);
+    if (aDue != null) return -1;
+    if (bDue != null) return 1;
+    return a.id.compareTo(b.id);
+  });
+  return visible;
+}
+
 bool _taskVisibleOnOrAfter(HermesTask task, DateTime today) {
   if (_taskIsRecurring(task)) return true;
   final dueAt = _parseTaskDueDate(task);
@@ -13695,7 +13729,7 @@ String _taskSubtitle(HermesTask task) {
     if (_taskIsCompleted(task)) 'Completed',
     if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
     if (dueLabel.isNotEmpty) 'Due $dueLabel',
-    if (_taskIsRecurring(task)) 'Recurring',
+    if (_taskIsRecurring(task)) _recurrenceSummaryFromMetadata(task.metadata),
   ];
   return parts.join(' · ');
 }
@@ -13711,9 +13745,63 @@ String _reminderSubtitle(HermesReminder reminder) {
     if (reminder.calendarEventId != null) 'Linked event',
     if ((reminder.metadata?['recurrence']?.toString() ?? '').isNotEmpty &&
         reminder.metadata?['recurrence'] != 'none')
-      'Repeats ${reminder.metadata!['recurrence']}',
+      _recurrenceSummaryFromMetadata(reminder.metadata),
   ];
   return parts.join(' · ');
+}
+
+DateTime? _parseReminderDueDate(HermesReminder reminder) {
+  final value = reminder.dueAt;
+  if (value == null || value.trim().isEmpty) return null;
+  return DateTime.tryParse(value)?.toLocal();
+}
+
+String _recurrenceSummaryFromMetadata(Map<String, Object?>? metadata) {
+  final recurrence = (metadata?['recurrence']?.toString() ?? 'none')
+      .trim()
+      .toLowerCase();
+  if (recurrence.isEmpty || recurrence == 'none') return '';
+  if (recurrence == 'interval') {
+    final interval = _recurrenceIntervalFromMetadata(metadata);
+    if (interval == null || interval <= 0) return 'Custom interval';
+    final unit =
+        metadata?['unit']?.toString() ??
+        metadata?['interval_unit']?.toString() ??
+        metadata?['intervalUnit']?.toString() ??
+        'days';
+    return 'Every $interval ${_intervalUnitLabel(unit, interval)}';
+  }
+  return switch (recurrence) {
+    'daily' => 'Daily',
+    'weekly' => 'Weekly',
+    'monthly' => 'Monthly',
+    'yearly' => 'Yearly',
+    'specific_days' => 'Specific days',
+    _ => recurrence,
+  };
+}
+
+int? _recurrenceIntervalFromMetadata(Map<String, Object?>? metadata) {
+  final value = metadata?['interval'];
+  if (value is int) return value;
+  if (value is num) return value.round();
+  return int.tryParse(value?.toString() ?? '');
+}
+
+String _intervalUnitLabel(String unit, int interval) {
+  final normalized = switch (unit.trim().toLowerCase()) {
+    'day' || 'days' => 'day',
+    'week' || 'weeks' => 'week',
+    'month' || 'months' => 'month',
+    'year' || 'years' => 'year',
+    final value when value.endsWith('s') && value.length > 1 => value.substring(
+      0,
+      value.length - 1,
+    ),
+    final value when value.isNotEmpty => value,
+    _ => 'day',
+  };
+  return interval == 1 ? normalized : '${normalized}s';
 }
 
 Color _safeCategoryColor(String? value) {

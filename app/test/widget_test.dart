@@ -1329,10 +1329,11 @@ void main() {
     expect(find.text('Critical'), findsNothing);
     expect(find.textContaining('Critical means open tasks'), findsNothing);
     expect(find.byKey(const Key('critical-task-item-1')), findsOneWidget);
+    expect(find.byKey(const Key('critical-reminder-item-2')), findsOneWidget);
     expect(find.byKey(const Key('critical-event-item-3')), findsOneWidget);
     expect(find.text('Plan launch'), findsWidgets);
+    expect(find.text('Stand up'), findsWidgets);
     expect(find.textContaining('Design review'), findsWidgets);
-    expect(find.byKey(const Key('critical-reminder-item-2')), findsNothing);
   });
 
   testWidgets('iPhone app icon badge mirrors the visible critical count', (
@@ -1349,9 +1350,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
-    expect(find.text('2'), findsWidgets);
-    expect(appBadgeCounts, containsAllInOrder([0, 2]));
-    expect(appBadgeCounts.last, 2);
+    expect(find.text('3'), findsWidgets);
+    expect(appBadgeCounts, containsAllInOrder([0, 3]));
+    expect(appBadgeCounts.last, 3);
   });
 
   testWidgets('reminder editor uses the shared date/time picker dock', (
