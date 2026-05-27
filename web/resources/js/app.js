@@ -936,16 +936,21 @@ if (mount) {
 
     function dayBoardMarkup(items, kind, emptyText) {
         const days = itemBoardDays(items, kind);
+        const allLabel = kind === 'task' ? 'All tasks' : 'All reminders';
+        const allItems = items.slice().sort(itemSortFunction(kind));
         return `
-            <div class="hb-day-board" aria-label="${escapeAttr(kind === 'task' ? 'Tasks by day' : 'Reminders by day')}">
-                ${days.map((day) => dayBoardColumnMarkup(day, itemsForItemDay(items, kind, day), kind, emptyText)).join('')}
+            <div class="hb-day-board-shell">
+                <div class="hb-day-board" aria-label="${escapeAttr(kind === 'task' ? 'Tasks by day' : 'Reminders by day')}">
+                    ${days.map((day) => dayBoardColumnMarkup(day, itemsForItemDay(items, kind, day), kind, emptyText)).join('')}
+                </div>
+                ${dayBoardColumnMarkup(null, allItems, kind, emptyText, allLabel, 'hb-day-board-column-all')}
             </div>`;
     }
 
-    function dayBoardColumnMarkup(day, items, kind, emptyText) {
-        const label = day ? glanceDayLabel(parseLocalDate(day)) : 'No date';
+    function dayBoardColumnMarkup(day, items, kind, emptyText, overrideLabel = '', extraClass = '') {
+        const label = overrideLabel || (day ? glanceDayLabel(parseLocalDate(day)) : 'No date');
         return `
-            <section class="hb-day-board-column ${day ? '' : 'hb-day-board-column-unscheduled'}" aria-label="${escapeAttr(label)}">
+            <section class="hb-day-board-column ${day ? '' : 'hb-day-board-column-unscheduled'} ${extraClass}" aria-label="${escapeAttr(label)}">
                 <div class="hb-day-board-head">
                     <strong>${escapeHtml(label)}</strong>
                     <span>${escapeHtml(itemCountLabel(items.length, kind))}</span>

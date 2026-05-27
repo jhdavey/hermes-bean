@@ -838,6 +838,12 @@
     grid-template-rows: auto auto minmax(0, 1fr);
 }
 
+.hb-day-board-shell {
+    min-height: 0;
+    display: grid;
+    gap: 12px;
+}
+
 .hb-day-board {
     min-height: 0;
     display: grid;
@@ -859,6 +865,11 @@
 
 .hb-day-board-column-unscheduled {
     background: var(--hb-surface2);
+}
+
+.hb-day-board-column-all {
+    background: rgba(246, 250, 244, .86);
+    border-color: var(--hb-border-strong);
 }
 
 .hb-day-board-head {
@@ -2628,7 +2639,7 @@
         padding-right: 2px;
     }
 
-    .hb-board-card .hb-day-board {
+    .hb-board-card .hb-day-board-shell {
         overflow: auto;
         padding-right: 2px;
     }
@@ -2736,6 +2747,11 @@
 }
 
 @media (min-width: 1180px) {
+    .hb-day-board-shell {
+        grid-template-columns: minmax(0, 3fr) minmax(260px, .9fr);
+        align-items: stretch;
+    }
+
     .hb-day-board {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }

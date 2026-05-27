@@ -11341,6 +11341,7 @@ class _TaskListCard extends StatefulWidget {
 
 class _TaskListCardState extends State<_TaskListCard> {
   bool _showCompleted = false;
+  bool _showAll = false;
 
   @override
   Widget build(BuildContext context) {
@@ -11348,7 +11349,7 @@ class _TaskListCardState extends State<_TaskListCard> {
     final visibleTasks = allTasks
         .where(
           (task) =>
-              _taskIsCompleted(task) == _showCompleted &&
+              (_showAll || _taskIsCompleted(task) == _showCompleted) &&
               (_showCompleted || !_taskIsSubtask(task)),
         )
         .toList();
@@ -11367,21 +11368,40 @@ class _TaskListCardState extends State<_TaskListCard> {
             ChoiceChip(
               key: const Key('task-filter-open'),
               label: const Text('Active'),
-              selected: !_showCompleted,
-              onSelected: (_) => setState(() => _showCompleted = false),
+              selected: !_showCompleted && !_showAll,
+              onSelected: (_) => setState(() {
+                _showCompleted = false;
+                _showAll = false;
+              }),
             ),
             ChoiceChip(
               key: const Key('task-filter-done'),
               label: const Text('Done'),
-              selected: _showCompleted,
-              onSelected: (_) => setState(() => _showCompleted = true),
+              selected: _showCompleted && !_showAll,
+              onSelected: (_) => setState(() {
+                _showCompleted = true;
+                _showAll = false;
+              }),
+            ),
+            ChoiceChip(
+              key: const Key('task-filter-all'),
+              label: const Text('All tasks'),
+              selected: _showAll,
+              onSelected: (_) => setState(() {
+                _showCompleted = false;
+                _showAll = true;
+              }),
             ),
           ],
         ),
         const SizedBox(height: 12),
         if (visibleTasks.isEmpty)
           _EmptySurface(
-            label: _showCompleted ? 'No completed tasks' : 'No active tasks',
+            label: _showAll
+                ? 'No tasks yet'
+                : _showCompleted
+                ? 'No completed tasks'
+                : 'No active tasks',
           )
         else
           for (final task in visibleTasks)
@@ -11396,7 +11416,8 @@ class _TaskListCardState extends State<_TaskListCard> {
               onSubtaskTap: (subtask) =>
                   _showTaskEditor(context, task: subtask),
               pendingTaskIds: widget.pendingTaskIds,
-              onAddSubtask: !_showCompleted && !_taskIsSubtask(task)
+              onAddSubtask:
+                  !_showCompleted && !_showAll && !_taskIsSubtask(task)
                   ? () => _showTaskEditor(context, parentTask: task)
                   : null,
             ),
@@ -11536,11 +11557,15 @@ class _ReminderListCard extends StatefulWidget {
 
 class _ReminderListCardState extends State<_ReminderListCard> {
   bool _showCompleted = false;
+  bool _showAll = false;
 
   @override
   Widget build(BuildContext context) {
     final visibleReminders = widget.reminders
-        .where((reminder) => _reminderIsCompleted(reminder) == _showCompleted)
+        .where(
+          (reminder) =>
+              _showAll || _reminderIsCompleted(reminder) == _showCompleted,
+        )
         .toList();
     return Column(
       key: const Key('reminders-view'),
@@ -11553,21 +11578,38 @@ class _ReminderListCardState extends State<_ReminderListCard> {
             ChoiceChip(
               key: const Key('reminder-filter-pending'),
               label: const Text('Pending'),
-              selected: !_showCompleted,
-              onSelected: (_) => setState(() => _showCompleted = false),
+              selected: !_showCompleted && !_showAll,
+              onSelected: (_) => setState(() {
+                _showCompleted = false;
+                _showAll = false;
+              }),
             ),
             ChoiceChip(
               key: const Key('reminder-filter-completed'),
               label: const Text('Completed'),
-              selected: _showCompleted,
-              onSelected: (_) => setState(() => _showCompleted = true),
+              selected: _showCompleted && !_showAll,
+              onSelected: (_) => setState(() {
+                _showCompleted = true;
+                _showAll = false;
+              }),
+            ),
+            ChoiceChip(
+              key: const Key('reminder-filter-all'),
+              label: const Text('All reminders'),
+              selected: _showAll,
+              onSelected: (_) => setState(() {
+                _showCompleted = false;
+                _showAll = true;
+              }),
             ),
           ],
         ),
         const SizedBox(height: 12),
         if (visibleReminders.isEmpty)
           _EmptySurface(
-            label: _showCompleted
+            label: _showAll
+                ? 'No reminders yet'
+                : _showCompleted
                 ? 'No completed reminders'
                 : 'No pending reminders',
           )
