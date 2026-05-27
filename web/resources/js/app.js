@@ -356,7 +356,7 @@ if (mount) {
                     ${criticalMenuMarkup(criticalTasks, criticalEvents)}
                     ${topProfileMenuMarkup()}
                 </header>
-                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''}">
+                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
@@ -933,13 +933,13 @@ if (mount) {
 
     function dayBoardMarkup(items, kind, emptyText) {
         const days = itemBoardDays(items, kind);
-        const unscheduled = items
-            .filter((item) => !itemDateOnly(item, kind))
+        const overflowItems = items
+            .filter((item) => !days.includes(itemDateOnly(item, kind)))
             .sort(itemSortFunction(kind));
         return `
             <div class="hb-day-board" aria-label="${escapeAttr(kind === 'task' ? 'Tasks by day' : 'Reminders by day')}">
                 ${days.map((day) => dayBoardColumnMarkup(day, itemsForItemDay(items, kind, day), kind, emptyText)).join('')}
-                ${unscheduled.length ? dayBoardColumnMarkup('', unscheduled, kind, kind === 'task' ? 'No unscheduled tasks' : 'No unscheduled reminders') : ''}
+                ${overflowItems.length ? dayBoardOverflowMarkup(overflowItems, kind) : ''}
             </div>`;
     }
 
@@ -953,6 +953,22 @@ if (mount) {
                 </div>
                 <div class="hb-list hb-day-board-list">
                     ${items.length ? items.map((item) => itemMarkup(item, kind)).join('') : `<div class="hb-empty hb-surface-soft">${escapeHtml(emptyText)}</div>`}
+                </div>
+            </section>`;
+    }
+
+    function dayBoardOverflowMarkup(items, kind) {
+        const hasDated = items.some((item) => itemDateOnly(item, kind));
+        const hasUndated = items.some((item) => !itemDateOnly(item, kind));
+        const label = hasDated && hasUndated ? 'Later / No date' : hasDated ? 'Later' : 'No date';
+        return `
+            <section class="hb-day-board-overflow" aria-label="${escapeAttr(kind === 'task' ? 'Other tasks' : 'Other reminders')}">
+                <div class="hb-day-board-head">
+                    <strong>${escapeHtml(label)}</strong>
+                    <span>${escapeHtml(itemCountLabel(items.length, kind))}</span>
+                </div>
+                <div class="hb-list hb-day-board-list">
+                    ${items.map((item) => itemMarkup(item, kind)).join('')}
                 </div>
             </section>`;
     }
@@ -2883,11 +2899,8 @@ if (mount) {
         return kind === 'task' ? compareTasks : compareReminders;
     }
 
-    function itemBoardDays(items, kind) {
-        const anchorDays = [new Date(), addDays(new Date(), 1), addDays(new Date(), 2)].map(dateOnly);
-        const itemDays = items.map((item) => itemDateOnly(item, kind)).filter(Boolean);
-        return Array.from(new Set([...anchorDays, ...itemDays]))
-            .sort((a, b) => parseLocalDate(a) - parseLocalDate(b));
+    function itemBoardDays() {
+        return [new Date(), addDays(new Date(), 1), addDays(new Date(), 2)].map(dateOnly);
     }
 
     function itemsForItemDay(items, kind, day) {

@@ -467,6 +467,23 @@
     padding: 0 0 112px;
 }
 
+.hb-main-board {
+    min-height: calc(100dvh - 58px);
+    padding-bottom: 8px;
+}
+
+.hb-main-board .hb-shell,
+.hb-main-board .hb-dashboard-grid,
+.hb-main-board .hb-primary-column,
+.hb-main-board .hb-board-card {
+    min-height: 0;
+}
+
+.hb-main-board .hb-shell,
+.hb-main-board .hb-dashboard-grid {
+    min-height: 100%;
+}
+
 .hb-main-chat {
     height: calc(100vh - 58px);
     min-height: 580px;
@@ -842,6 +859,17 @@
 
 .hb-day-board-column-unscheduled {
     background: var(--hb-surface2);
+}
+
+.hb-day-board-overflow {
+    min-width: 0;
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 10px;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    background: var(--hb-surface2);
+    padding: 10px;
 }
 
 .hb-day-board-head {
@@ -2516,6 +2544,18 @@
         min-height: 0;
         padding-bottom: 0;
         overflow: hidden;
+    }
+
+    .hb-main-board {
+        height: calc(100dvh - 58px);
+        min-height: 0;
+        padding-bottom: 0;
+        overflow: hidden;
+    }
+
+    .hb-main-board .hb-shell,
+    .hb-main-board .hb-dashboard-grid {
+        height: 100%;
     }
 
     .hb-calendar-card .hb-timeline {
