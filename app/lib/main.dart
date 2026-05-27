@@ -6732,7 +6732,7 @@ class _AllDayEventRow extends StatelessWidget {
                   Icon(
                     Icons.star_rounded,
                     key: Key('event-critical-star-${event.id}'),
-                    color: color,
+                    color: HeyBeanTheme.warning,
                     size: 14,
                   ),
                   const SizedBox(width: 4),
@@ -6941,7 +6941,7 @@ class _TimelineEventBlock extends StatelessWidget {
                 Icon(
                   Icons.star_rounded,
                   key: Key('event-critical-star-${event.id}'),
-                  color: _calendarEventColor(event),
+                  color: HeyBeanTheme.warning,
                   size: 14,
                 ),
                 const SizedBox(width: 4),
@@ -7987,6 +7987,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         _isCritical
                             ? Icons.star_rounded
                             : Icons.star_border_rounded,
+                        color: _isCritical
+                            ? HeyBeanTheme.warning
+                            : HeyBeanTheme.muted,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -10708,6 +10711,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                           isCritical
                               ? Icons.star_rounded
                               : Icons.star_border_rounded,
+                          color: isCritical
+                              ? HeyBeanTheme.warning
+                              : HeyBeanTheme.muted,
                           size: 18,
                         ),
                         label: const Text('Critical'),
@@ -13346,7 +13352,11 @@ class _TaskItemTileState extends State<_TaskItemTile> {
               key: Key('task-critical-star-${task.id}'),
               top: 1,
               right: 4,
-              child: Icon(Icons.star_rounded, color: categoryColor, size: 16),
+              child: const Icon(
+                Icons.star_rounded,
+                color: HeyBeanTheme.warning,
+                size: 16,
+              ),
             ),
         ],
       ),
@@ -13396,7 +13406,11 @@ class _SubtaskRow extends StatelessWidget {
                     activeColor: HeyBeanTheme.accentStrong,
                   ),
             if (task.isCritical)
-              const Icon(Icons.star_rounded, size: 14, color: Colors.black87),
+              const Icon(
+                Icons.star_rounded,
+                size: 14,
+                color: HeyBeanTheme.warning,
+              ),
             Expanded(
               child: Text(
                 task.title,

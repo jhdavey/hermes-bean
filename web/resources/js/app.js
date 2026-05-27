@@ -629,7 +629,7 @@ if (mount) {
     function glanceDayMarkup(day) {
         const events = eventsForDay(day);
         return `
-            <div class="hb-glance-day">
+            <div class="hb-glance-day ${events.length ? '' : 'hb-glance-day-empty'}">
                 <div class="hb-glance-day-label">${escapeHtml(glanceDayLabel(day))}</div>
                 <div class="hb-glance-events">
                     ${events.length ? events.map((event) => glanceEventMarkup(event)).join('') : '<div class="hb-empty hb-glance-empty">No events</div>'}
@@ -648,8 +648,8 @@ if (mount) {
         const color = safeColor(event.color);
         return `
             <button class="hb-glance-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
-                <div class="hb-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+                <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
+                <div class="hb-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</div>
             </button>`;
     }
 
@@ -882,7 +882,7 @@ if (mount) {
         const color = safeColor(event.color);
         return `
             <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <span class="hb-month-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+                <span class="hb-month-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
             </button>`;
     }
 
@@ -892,7 +892,7 @@ if (mount) {
         return `
             <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 ${time ? `<span class="hb-month-event-time">${escapeHtml(time)}</span>` : ''}
-                <span class="hb-month-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+                <span class="hb-month-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
             </button>`;
     }
 
@@ -901,7 +901,7 @@ if (mount) {
         return `
             <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <span class="hb-month-event-time">${escapeHtml(eventStartTime(event))}</span>
-                <span class="hb-month-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+                <span class="hb-month-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
             </button>`;
     }
 
@@ -974,10 +974,10 @@ if (mount) {
         const expandable = kind === 'task' && (taskNotes || subtasks.length || (!completed && !taskParentId(item)));
         return `
             <article class="hb-item hb-item-${kind} ${completed ? 'hb-item-complete' : ''} ${overdue ? 'hb-item-overdue' : ''}" style="${completed ? '' : `background:${hexAlpha(color, .14)};border-color:${hexAlpha(color, .34)}`}">
-                ${kind === 'task' && critical ? `<span class="hb-star hb-item-critical-star" style="color:${escapeAttr(color)}">★</span>` : ''}
+                ${kind === 'task' && critical ? '<span class="hb-star hb-item-critical-star">★</span>' : ''}
                 <label class="hb-check"><input type="checkbox" data-toggle-${kind}="${item.id}" ${completed ? 'checked' : ''}></label>
                 <button class="hb-item-main" type="button" data-edit-${kind}="${item.id}">
-                    <div class="hb-item-title">${kind !== 'task' && critical ? `<span class="hb-star" style="color:${escapeAttr(color)}">★</span>` : ''}<span>${escapeHtml(item.title || item.name || 'Untitled')}</span>${expandable ? `<span class="hb-task-expand-icon" data-toggle-task-details="${item.id}" aria-label="${expanded ? 'Hide task details' : 'Show task details'}">${expanded ? '▲' : '▼'}</span>` : ''}</div>
+                    <div class="hb-item-title">${kind !== 'task' && critical ? '<span class="hb-star">★</span>' : ''}<span>${escapeHtml(item.title || item.name || 'Untitled')}</span>${expandable ? `<span class="hb-task-expand-icon" data-toggle-task-details="${item.id}" aria-label="${expanded ? 'Hide task details' : 'Show task details'}">${expanded ? '▲' : '▼'}</span>` : ''}</div>
                     ${subtitle ? `<div class="hb-item-meta">${escapeHtml(subtitle)}</div>` : ''}
                 </button>
                 ${expanded ? taskDetailsMarkup(item, taskNotes, subtasks) : ''}
@@ -1000,7 +1000,7 @@ if (mount) {
         return `
             <button class="hb-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
-                <div class="hb-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+                <div class="hb-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</div>
             </button>`;
     }
 
@@ -1013,13 +1013,13 @@ if (mount) {
         return `
             <button class="hb-event hb-timed-event${shortClass}" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
                 <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
-                <div class="hb-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+                <div class="hb-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</div>
             </button>`;
     }
 
     function allDayEventMarkup(event) {
         const color = safeColor(event.color);
-        return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>`;
+        return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</button>`;
     }
 
     function multiDayEventMarkup(event, day) {
@@ -1028,8 +1028,12 @@ if (mount) {
         return `
             <button class="hb-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 ${time ? `<span class="hb-multi-day-event-time">${escapeHtml(time)}</span>` : ''}
-                <span>${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+                <span>${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
             </button>`;
+    }
+
+    function criticalStarMarkup(item) {
+        return item?.is_critical || item?.isCritical ? '<span class="hb-star hb-critical-star" aria-hidden="true">★</span> ' : '';
     }
 
     function messageMarkup(message, index = 0, messages = []) {

@@ -24,6 +24,7 @@
     --hb-accent-strong: #15803d;
     --hb-success: #22c55e;
     --hb-warning: #f59e0b;
+    --hb-critical-star: var(--hb-warning);
     --hb-destructive: #dc2626;
     --hb-shadow: 0 18px 44px rgba(15, 23, 42, .08);
 }
@@ -909,7 +910,7 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 8px;
+    gap: 3px;
     padding: 6px;
     border: 1px solid var(--hb-border);
     border-radius: 16px;
@@ -929,7 +930,7 @@
 }
 
 .hb-check {
-    width: 42px;
+    width: 34px;
     height: 42px;
     display: grid;
     place-items: center;
@@ -1016,7 +1017,7 @@
 }
 
 .hb-star {
-    color: var(--hb-accent);
+    color: var(--hb-critical-star);
     font-size: 16px;
     line-height: 1;
 }
@@ -1143,6 +1144,11 @@
     background: rgba(246, 250, 244, .76);
 }
 
+.hb-glance-day-empty {
+    gap: 3px;
+    padding: 6px 10px;
+}
+
 .hb-glance-day-label {
     min-width: 0;
     overflow: hidden;
@@ -1201,9 +1207,10 @@
 }
 
 .hb-glance-empty {
-    min-height: 34px;
-    padding: 8px 10px;
-    font-size: 12px;
+    min-height: 0;
+    padding: 1px 2px;
+    font-size: 11px;
+    line-height: 1.15;
 }
 
 .hb-day-strip {
