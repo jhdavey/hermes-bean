@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AgentProfile;
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
@@ -185,6 +186,50 @@ class AgentProfileService
         $profile->forceFill(['settings' => $merged])->save();
 
         return $profile->refresh();
+    }
+
+    public function updateTextToSpeechSettings(AgentProfile $profile, array $data): AgentProfile
+    {
+        $settings = $profile->settings ?? [];
+        $tts = (isset($settings['tts']) && is_array($settings['tts'])) ? $settings['tts'] : [];
+
+        $provider = (string) ($data['tts_provider'] ?? data_get($tts, 'provider', 'browser'));
+        $tts['provider'] = $provider === 'openai' ? 'openai' : 'browser';
+        $tts['openai_voice'] = (string) ($data['tts_openai_voice'] ?? data_get($tts, 'openai_voice', 'coral'));
+        $tts['openai_model'] = 'gpt-4o-mini-tts';
+        $tts['openai_instructions'] = trim((string) ($data['tts_openai_instructions'] ?? data_get($tts, 'openai_instructions', 'Speak naturally, warmly, and concisely as Bean.')));
+
+        if (! empty($data['tts_clear_openai_key'])) {
+            unset($tts['openai_api_key_encrypted']);
+        }
+
+        $apiKey = trim((string) ($data['tts_openai_api_key'] ?? ''));
+        if ($apiKey !== '') {
+            $tts['openai_api_key_encrypted'] = Crypt::encryptString($apiKey);
+        }
+
+        $settings['tts'] = $tts;
+        $profile->forceFill(['settings' => $settings])->save();
+
+        return $profile->refresh();
+    }
+
+    public function publicSettings(array $settings): array
+    {
+        if (isset($settings['tts']) && is_array($settings['tts'])) {
+            $configured = ! empty($settings['tts']['openai_api_key_encrypted']);
+            unset($settings['tts']['openai_api_key_encrypted']);
+            $settings['tts']['openai_api_key_configured'] = $configured;
+        }
+
+        return $settings;
+    }
+
+    public function exposePublicSettings(AgentProfile $profile): AgentProfile
+    {
+        $profile->setAttribute('settings', $this->publicSettings($profile->settings ?? []));
+
+        return $profile;
     }
 
     public function onboardingComplete(?AgentProfile $profile): bool

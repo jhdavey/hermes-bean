@@ -128,13 +128,20 @@ class AuthController extends Controller
             'onboarding_priorities' => ['sometimes', 'array', 'max:5'],
             'onboarding_priorities.*' => ['string', 'max:80'],
             'onboarding_context' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
+            'tts_openai_api_key' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'tts_clear_openai_key' => ['sometimes', 'boolean'],
+            'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
+            'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
             'notification_preferences' => ['sometimes', 'array'],
             'notification_preferences.reminder_push' => ['sometimes', 'boolean'],
             'notification_preferences.reminder_email' => ['sometimes', 'boolean'],
         ]);
 
         $profileKeys = ['agent_personality', 'onboarding_priorities', 'onboarding_context'];
+        $ttsKeys = ['tts_provider', 'tts_openai_api_key', 'tts_clear_openai_key', 'tts_openai_voice', 'tts_openai_instructions'];
         $profileData = collect($data)->only($profileKeys)->all();
+        $ttsData = collect($data)->only($ttsKeys)->all();
         $userData = collect($data)->only(['name', 'email'])->all();
         if (array_key_exists('notification_preferences', $data)) {
             $userData['notification_preferences'] = array_merge(
@@ -146,12 +153,19 @@ class AuthController extends Controller
         $user->fill($userData);
         $user->save();
 
-        if ($profileData !== []) {
+        if ($profileData !== [] || $ttsData !== []) {
             $workspaceService = app(WorkspaceService::class);
             $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh());
             $profile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
-            app(AgentProfileService::class)->applyOnboarding($profile, $data, 'settings');
-            $user->forceFill(['onboard_complete' => true])->save();
+            $profiles = app(AgentProfileService::class);
+            if ($profileData !== []) {
+                $profiles->applyOnboarding($profile, $data, 'settings');
+                $user->forceFill(['onboard_complete' => true])->save();
+                $profile = $profile->refresh();
+            }
+            if ($ttsData !== []) {
+                $profiles->updateTextToSpeechSettings($profile, $data);
+            }
             $user->unsetRelation('agentProfile');
         }
 
@@ -175,7 +189,7 @@ class AuthController extends Controller
 
         return response()->json(['data' => [
             'user' => $user,
-            'agent_profile' => AgentProfile::where('user_id', $user->id)->first(),
+            'agent_profile' => tap(AgentProfile::where('user_id', $user->id)->first(), fn ($profile) => $profile ? app(AgentProfileService::class)->exposePublicSettings($profile) : null),
             'conversation_sessions' => ConversationSession::where('user_id', $user->id)->with(['messages', 'activityEvents', 'blockers'])->orderBy('id')->get(),
             'tasks' => Task::where('user_id', $user->id)->orderBy('id')->get(),
             'reminders' => Reminder::where('user_id', $user->id)->orderBy('id')->get(),
@@ -245,6 +259,10 @@ class AuthController extends Controller
         $activeProfile = $activeProfile->refresh();
         $user->unsetRelation('agentProfile');
         $user->load('agentProfile');
+        if ($user->agentProfile) {
+            $agentProfiles->exposePublicSettings($user->agentProfile);
+        }
+        $agentProfiles->exposePublicSettings($activeProfile);
 
         $user->setAttribute('personal_workspace', $personalWorkspace);
         $user->setAttribute('active_workspace', $activeWorkspace);

@@ -2398,6 +2398,15 @@
     gap: 10px;
 }
 
+.hb-tts-settings {
+    display: grid;
+    gap: 10px;
+}
+
+.hb-tts-style {
+    min-height: 78px;
+}
+
 .hb-main-admin {
     min-height: calc(100vh - 58px);
 }

@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ConversationSessionController;
 use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
+use App\Http\Controllers\Api\TextToSpeechController;
 use App\Http\Controllers\Api\TodaySummaryController;
 use App\Http\Controllers\Api\WorkspaceController;
 use Illuminate\Support\Facades\Route;
@@ -43,6 +44,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/assistant/sessions/{session}/cancel', [ConversationSessionController::class, 'cancel']);
         Route::post('/assistant/sessions/{session}/messages', [ConversationMessageController::class, 'store']);
         Route::get('/assistant/sessions/{session}/events', [ActivityEventController::class, 'index']);
+        Route::post('/assistant/tts', [TextToSpeechController::class, 'store']);
 
         Route::get('/today', [TodaySummaryController::class, 'show']);
         Route::get('/dashboard-changes', [DashboardChangeController::class, 'index']);

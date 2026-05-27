@@ -36,6 +36,7 @@ class TodaySummaryController extends Controller
         $agentProfile = $agentProfile->refresh();
         $user->setAttribute('needs_bean_onboarding', $agentProfileService->needsOnboarding($user, $agentProfile));
         $user->setAttribute('bean_preferences_ready', $agentProfileService->preferencesReady($agentProfile));
+        $agentProfileService->exposePublicSettings($agentProfile);
         $reminders = Reminder::where('workspace_id', $workspace->id)->latest('remind_at')->get();
         $calendarEventsQuery = CalendarEvent::where('workspace_id', $workspace->id);
         $visibleGoogleCalendarIds = app(GoogleCalendarSyncService::class)->visibleGoogleCalendarIdsForWorkspace($user, $workspace);

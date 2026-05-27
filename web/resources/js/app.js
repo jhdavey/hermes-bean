@@ -306,6 +306,30 @@ if (mount) {
         return profile.onboarding_context || profile.onboardingContext || onboarding.context || '';
     }
 
+    function profileTtsSettings(profile = currentAgentProfile()) {
+        const settings = profileSettings(profile);
+        return typeof settings.tts === 'object' && settings.tts ? settings.tts : {};
+    }
+
+    function profileTtsProvider(profile = currentAgentProfile()) {
+        return profileTtsSettings(profile).provider === 'openai' ? 'openai' : 'browser';
+    }
+
+    function profileTtsOpenAiConfigured(profile = currentAgentProfile()) {
+        const tts = profileTtsSettings(profile);
+        return tts.openai_api_key_configured === true || tts.openaiApiKeyConfigured === true;
+    }
+
+    function profileTtsVoice(profile = currentAgentProfile()) {
+        const tts = profileTtsSettings(profile);
+        return tts.openai_voice || tts.openaiVoice || 'coral';
+    }
+
+    function profileTtsInstructions(profile = currentAgentProfile()) {
+        const tts = profileTtsSettings(profile);
+        return tts.openai_instructions || tts.openaiInstructions || 'Speak naturally, warmly, and concisely as Bean.';
+    }
+
     function profileOnboardingComplete(profile = currentAgentProfile()) {
         const onboarding = profileOnboarding(profile);
         return onboarding.completed === true || onboarding.completed === 1 || onboarding.completed === 'true';
@@ -1580,7 +1604,12 @@ if (mount) {
         const profile = currentAgentProfile();
         const priorities = new Set(profilePriorities(profile));
         const personality = profilePersonality(profile);
+        const ttsProvider = profileTtsProvider(profile);
+        const ttsKeyConfigured = profileTtsOpenAiConfigured(profile);
+        const ttsVoice = profileTtsVoice(profile);
+        const ttsInstructions = profileTtsInstructions(profile);
         const options = ['balanced', 'coach', 'organizer', 'creative'];
+        const voices = ['coral', 'marin', 'cedar', 'alloy', 'ash', 'ballad', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="agent">
@@ -1590,6 +1619,21 @@ if (mount) {
                         <div class="hb-tabs">${['Work', 'Family', 'Health', 'Planning', 'Reminders', 'Focus'].map((priority) => `<label class="hb-chip"><input type="checkbox" name="priorities" value="${priority}" ${priorities.has(priority) ? 'checked' : ''}> ${priority}</label>`).join('')}</div>
                     </div>
                     <label class="hb-label">Anything Bean should know?<textarea class="hb-textarea" name="context" placeholder="Example: I work nights, protect family time, and need gentle nudges.">${escapeHtml(profileOnboardingContext(profile))}</textarea></label>
+                    <div class="hb-surface-soft hb-card-pad hb-tts-settings">
+                        <strong>Voice responses</strong>
+                        <p class="hb-item-meta">Browser speech is free. OpenAI speech uses your own OpenAI API key and gives Bean a more natural voice.</p>
+                        <label class="hb-label">Speech engine<select class="hb-select" name="ttsProvider">
+                            <option value="browser" ${ttsProvider === 'browser' ? 'selected' : ''}>Browser TTS</option>
+                            <option value="openai" ${ttsProvider === 'openai' ? 'selected' : ''}>OpenAI TTS</option>
+                        </select></label>
+                        <div class="hb-field-row">
+                            <label class="hb-label">OpenAI voice<select class="hb-select" name="ttsOpenAiVoice">${voices.map((voice) => `<option value="${voice}" ${voice === ttsVoice ? 'selected' : ''}>${capitalize(voice)}</option>`).join('')}</select></label>
+                            <label class="hb-label">OpenAI API key<input class="hb-input" type="password" name="ttsOpenAiKey" placeholder="${ttsKeyConfigured ? 'Saved - leave blank to keep' : 'sk-...'}" autocomplete="off"></label>
+                        </div>
+                        <label class="hb-label">OpenAI voice style<textarea class="hb-textarea hb-tts-style" name="ttsOpenAiInstructions" placeholder="Example: Warm, natural, concise, and lightly upbeat.">${escapeHtml(ttsInstructions)}</textarea></label>
+                        ${ttsKeyConfigured ? '<label class="hb-checkbox-row"><input type="checkbox" name="ttsClearOpenAiKey" value="1"> Remove saved OpenAI API key</label>' : ''}
+                        <p class="hb-item-meta">OpenAI voices are AI-generated. Your key is encrypted before storage and is never shown back in the app.</p>
+                    </div>
                     <div class="hb-modal-actions"><button class="hb-button-secondary" type="button" data-close-modal>Cancel</button><button class="hb-button" type="submit">Save</button></div>
                 </form>
             </div>`;
@@ -2091,6 +2135,11 @@ if (mount) {
                         agent_personality: data.personality,
                         onboarding_priorities: priorities,
                         onboarding_context: data.context || null,
+                        tts_provider: data.ttsProvider || 'browser',
+                        tts_openai_api_key: data.ttsOpenAiKey || null,
+                        tts_clear_openai_key: data.ttsClearOpenAiKey === '1',
+                        tts_openai_voice: data.ttsOpenAiVoice || 'coral',
+                        tts_openai_instructions: data.ttsOpenAiInstructions || null,
                     },
                 });
             } else if (kind === 'workspace-create') {
@@ -3139,6 +3188,48 @@ if (mount) {
 
     function speakKioskResponse(content) {
         const text = speechTextFromAssistant(content);
+        if (openAiTtsEnabled()) {
+            return playOpenAiTts(text).then((played) => played || speakBrowserTts(text));
+        }
+        return speakBrowserTts(text);
+    }
+
+    function openAiTtsEnabled() {
+        return profileTtsProvider() === 'openai' && profileTtsOpenAiConfigured();
+    }
+
+    async function playOpenAiTts(text) {
+        if (!text) return false;
+        let url = '';
+        try {
+            setKioskVoiceStatus('responding', 'responding');
+            const response = await fetch('/api/assistant/tts', {
+                method: 'POST',
+                headers: {
+                    Accept: 'audio/mpeg',
+                    'Content-Type': 'application/json',
+                    ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+                },
+                body: JSON.stringify({ text, voice: profileTtsVoice() }),
+            });
+            if (!response.ok) return false;
+            const blob = await response.blob();
+            url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            await new Promise((resolve, reject) => {
+                audio.onended = resolve;
+                audio.onerror = reject;
+                audio.play().catch(reject);
+            });
+            return true;
+        } catch (error) {
+            return false;
+        } finally {
+            if (url) URL.revokeObjectURL(url);
+        }
+    }
+
+    function speakBrowserTts(text) {
         if (!text || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
             return Promise.resolve(false);
         }
