@@ -437,7 +437,7 @@ class DomainResourceController extends Controller
         foreach ($eventsToDelete as $eventToDelete) {
             $this->googleCalendar->deleteExportedEvent($eventToDelete);
         }
-        CalendarEvent::whereIn('id', $eventIds)->delete();
+        $eventsToDelete->each(fn (CalendarEvent $event): ?bool => $event->delete());
         $this->deleteWorkspaceItemLinksFor('calendar_events', $eventIds);
 
         return response()->json(status: 204);
@@ -767,7 +767,7 @@ class DomainResourceController extends Controller
                 });
             }
             $idsToRemove = $itemsToRemove->pluck('id')->map(fn ($id): int => (int) $id)->all();
-            $model::query()->whereIn('id', $idsToRemove)->delete();
+            $itemsToRemove->each(fn (Model $item): ?bool => $item->delete());
             $this->deleteWorkspaceItemLinksFor($type, $idsToRemove);
         }
 
@@ -821,7 +821,7 @@ class DomainResourceController extends Controller
 
         $ids = $itemsToDelete->pluck('id')->map(fn ($id): int => (int) $id)->all();
         if ($ids !== []) {
-            $model::query()->whereIn('id', $ids)->delete();
+            $itemsToDelete->each(fn (Model $item): ?bool => $item->delete());
             $this->deleteWorkspaceItemLinksFor($type, $ids);
         }
 

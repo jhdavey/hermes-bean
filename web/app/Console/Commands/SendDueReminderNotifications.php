@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Reminder;
 use App\Notifications\ReminderDueNotification;
+use App\Services\DashboardChangeNotifier;
 use Illuminate\Console\Command;
 
 class SendDueReminderNotifications extends Command
@@ -39,6 +40,18 @@ class SendDueReminderNotifications extends Command
                 $metadata = $reminder->metadata ?? [];
                 $metadata['email_notification_sent_at'] = now()->toIso8601String();
                 $reminder->forceFill(['metadata' => $metadata])->save();
+                app(DashboardChangeNotifier::class)->notify(
+                    userId: $reminder->user_id,
+                    workspaceId: $reminder->workspace_id,
+                    resourceType: 'reminder_alert',
+                    action: 'sent',
+                    resourceId: $reminder->id,
+                    payload: [
+                        'title' => $reminder->title,
+                        'remind_at' => $reminder->remind_at?->toIso8601String(),
+                        'channel' => 'email',
+                    ],
+                );
                 $sent++;
             });
 

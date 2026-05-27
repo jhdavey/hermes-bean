@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AdminUsageController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ConversationMessageController;
 use App\Http\Controllers\Api\ConversationSessionController;
+use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\TodaySummaryController;
@@ -44,6 +45,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/assistant/sessions/{session}/events', [ActivityEventController::class, 'index']);
 
         Route::get('/today', [TodaySummaryController::class, 'show']);
+        Route::get('/dashboard-changes', [DashboardChangeController::class, 'index']);
         Route::get('/google-calendar/status', [GoogleCalendarController::class, 'status']);
         Route::post('/google-calendar/auth-url', [GoogleCalendarController::class, 'authUrl']);
         Route::post('/google-calendar/sync', [GoogleCalendarController::class, 'sync']);

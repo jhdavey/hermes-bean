@@ -5,6 +5,7 @@ if (mount) {
     const initialMode = mount.dataset.authMode || 'login';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
+    const dashboardChangeKey = 'heybean.dashboard.changeId';
     const calendarInitialWindowDays = 56;
     const calendarWindowChunkDays = 28;
 
@@ -66,6 +67,7 @@ if (mount) {
         calendarRefreshing: false,
         taskFilter: 'active',
         reminderFilter: 'pending',
+        dashboardChangeLastId: Number(localStorage.getItem(dashboardChangeKey) || 0),
         expandedTaskIds: new Set(),
         pendingCalendarUpserts: new Map(),
         pendingCalendarDeletes: new Set(),
@@ -82,10 +84,14 @@ if (mount) {
     let suppressNextSendClick = false;
     let timelineDrag = null;
     let timelineSuppressClick = false;
+    let dashboardChangeAbort = null;
+    let dashboardChangeLoopActive = false;
+    let dashboardRefreshTimer = 0;
 
     boot();
     bindResponsiveCalendar();
     bindCurrentTimeTicker();
+    bindDashboardRealtimeFallbacks();
 
     async function boot() {
         if (state.token) {
@@ -116,6 +122,19 @@ if (mount) {
             if (state.phase !== 'signedIn' || state.selected !== 'today' || state.showMonth || state.modal) return;
             updateCurrentTimeMarker();
         }, 30000);
+    }
+
+    function bindDashboardRealtimeFallbacks() {
+        window.addEventListener('focus', () => {
+            if (state.phase !== 'signedIn') return;
+            scheduleDashboardRealtimeRefresh();
+            startDashboardChangeFeed();
+        });
+        window.setInterval(() => {
+            if (state.phase !== 'signedIn') return;
+            scheduleDashboardRealtimeRefresh();
+            startDashboardChangeFeed();
+        }, 120000);
     }
 
     function readToken() {
@@ -193,6 +212,7 @@ if (mount) {
             state.activity = normalizeList(summary?.activity_events);
             state.googleStatus = googleStatus;
             state.session = summary?.session || null;
+            state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || state.dashboardChangeLastId || 0);
             state.phase = 'signedIn';
             state.error = '';
             if (needsBeanOnboarding()) {
@@ -206,8 +226,10 @@ if (mount) {
             if (state.session?.id) {
                 resumeSession(state.session.id);
             }
+            startDashboardChangeFeed();
             refreshCalendarInBackground();
         } catch (error) {
+            stopDashboardChangeFeed();
             clearToken();
             state.phase = 'signedOut';
             state.error = friendlyError(error, 'load your account');
@@ -1677,6 +1699,7 @@ if (mount) {
             render();
         });
         mount.querySelector('[data-admin-login]')?.addEventListener('click', () => {
+            stopDashboardChangeFeed();
             clearToken();
             state.phase = 'signedOut';
             state.authMode = 'login';
@@ -2827,6 +2850,81 @@ if (mount) {
         refreshOnly(true, options);
     }
 
+    function startDashboardChangeFeed() {
+        if (!state.token || state.phase !== 'signedIn' || dashboardChangeLoopActive) return;
+        dashboardChangeLoopActive = true;
+        pollDashboardChanges();
+    }
+
+    function stopDashboardChangeFeed() {
+        dashboardChangeLoopActive = false;
+        window.clearTimeout(dashboardRefreshTimer);
+        dashboardRefreshTimer = 0;
+        if (dashboardChangeAbort) {
+            dashboardChangeAbort.abort();
+            dashboardChangeAbort = null;
+        }
+    }
+
+    async function pollDashboardChanges() {
+        if (!dashboardChangeLoopActive || !state.token) return;
+        dashboardChangeAbort = new AbortController();
+        try {
+            const response = await fetch(`/api/dashboard-changes?after=${encodeURIComponent(state.dashboardChangeLastId)}&wait=25&limit=100`, {
+                headers: {
+                    Accept: 'application/json',
+                    Authorization: `Bearer ${state.token}`,
+                },
+                signal: dashboardChangeAbort.signal,
+            });
+            if (response.status === 401) {
+                stopDashboardChangeFeed();
+                return;
+            }
+            if (!response.ok) throw new Error('Dashboard change feed failed.');
+            const payload = await response.json();
+            const data = payload.data || payload;
+            const changes = normalizeList(data.changes);
+            const latestId = Number(data.latest_id || data.latestId || 0);
+            if (latestId > state.dashboardChangeLastId) {
+                state.dashboardChangeLastId = latestId;
+                localStorage.setItem(dashboardChangeStorageKey(), String(latestId));
+            }
+            if (changes.length) {
+                scheduleDashboardRealtimeRefresh(changes);
+            }
+        } catch (error) {
+            if (error?.name !== 'AbortError') {
+                await sleep(2500);
+            }
+        } finally {
+            dashboardChangeAbort = null;
+            if (dashboardChangeLoopActive) {
+                window.setTimeout(pollDashboardChanges, 120);
+            }
+        }
+    }
+
+    function scheduleDashboardRealtimeRefresh(changes = []) {
+        window.clearTimeout(dashboardRefreshTimer);
+        dashboardRefreshTimer = window.setTimeout(() => {
+            dashboardRefreshTimer = 0;
+            if (state.phase !== 'signedIn') return;
+            refreshOnlyInBackground({ skipCalendarSync: true });
+            if (state.selected === 'admin') {
+                loadAdminUsage(true);
+            }
+        }, changes.length ? 350 : 100);
+    }
+
+    function sleep(ms) {
+        return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
+    function dashboardChangeStorageKey() {
+        return `${dashboardChangeKey}.${state.user?.id || 'anon'}`;
+    }
+
     function refreshCalendarInBackground() {
         api('/calendar-events')
             .then((calendar) => {
@@ -3030,6 +3128,7 @@ if (mount) {
 
     async function logout() {
         try { await api('/auth/logout', { method: 'POST' }); } catch (_) {}
+        stopDashboardChangeFeed();
         clearToken();
         state.phase = 'signedOut';
         state.authMode = 'login';
@@ -3041,6 +3140,7 @@ if (mount) {
         if (!confirm('Delete your HeyBean account and data? This cannot be undone.')) return;
         try {
             await api('/account', { method: 'DELETE' });
+            stopDashboardChangeFeed();
             clearToken();
             state.phase = 'signedOut';
             state.authMode = 'login';

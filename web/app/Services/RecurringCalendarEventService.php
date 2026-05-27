@@ -120,36 +120,40 @@ class RecurringCalendarEventService
 
     public function deleteGeneratedOccurrences(CalendarEvent $event): int
     {
-        $ids = $this->generatedOccurrences($event)->pluck('id')->all();
-        if ($ids === []) {
+        $occurrences = $this->generatedOccurrences($event)->values();
+        if ($occurrences->isEmpty()) {
             return 0;
         }
 
-        return CalendarEvent::query()->whereIn('id', $ids)->delete();
+        $occurrences->each(fn (CalendarEvent $occurrence): ?bool => $occurrence->delete());
+
+        return $occurrences->count();
     }
 
     public function deleteGeneratedOccurrence(CalendarEvent $event, string $occurrenceDate): int
     {
-        $ids = $this->generatedOccurrences($event)
+        $occurrences = $this->generatedOccurrences($event)
             ->filter(fn (CalendarEvent $occurrence): bool => $this->occurrenceDate($occurrence) === $occurrenceDate)
-            ->pluck('id')
-            ->all();
+            ->values();
 
-        return $ids === [] ? 0 : CalendarEvent::query()->whereIn('id', $ids)->delete();
+        $occurrences->each(fn (CalendarEvent $occurrence): ?bool => $occurrence->delete());
+
+        return $occurrences->count();
     }
 
     public function deleteGeneratedOccurrencesFrom(CalendarEvent $event, string $occurrenceDate): int
     {
-        $ids = $this->generatedOccurrences($event)
+        $occurrences = $this->generatedOccurrences($event)
             ->filter(function (CalendarEvent $occurrence) use ($occurrenceDate): bool {
                 $date = $this->occurrenceDate($occurrence);
 
                 return $date !== null && $date >= $occurrenceDate;
             })
-            ->pluck('id')
-            ->all();
+            ->values();
 
-        return $ids === [] ? 0 : CalendarEvent::query()->whereIn('id', $ids)->delete();
+        $occurrences->each(fn (CalendarEvent $occurrence): ?bool => $occurrence->delete());
+
+        return $occurrences->count();
     }
 
     private function isRecurringSource(CalendarEvent $event): bool

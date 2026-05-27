@@ -112,7 +112,10 @@ class GoogleCalendarSyncService
     public function disconnect(User $user): void
     {
         $user->googleCalendarConnection()->delete();
-        CalendarEvent::where('user_id', $user->id)->whereNotNull('google_event_id')->delete();
+        CalendarEvent::where('user_id', $user->id)
+            ->whereNotNull('google_event_id')
+            ->get()
+            ->each(fn (CalendarEvent $event): ?bool => $event->delete());
     }
 
     public function updateSelectedCalendars(User $user, array $selectedCalendarIds, ?string $defaultCalendarId = null): array
@@ -185,12 +188,14 @@ class GoogleCalendarSyncService
             $payload = $response->json();
             foreach (($payload['items'] ?? []) as $item) {
                 if (($item['status'] ?? '') === 'cancelled') {
-                    $deleted += CalendarEvent::where('workspace_id', $workspace->id)
+                    $cancelledEvents = CalendarEvent::where('workspace_id', $workspace->id)
                         ->where('google_event_id', $item['id'])
                         ->where(function ($query) use ($calendarId): void {
                             $query->where('google_calendar_id', $calendarId)->orWhereNull('google_calendar_id');
                         })
-                        ->delete();
+                        ->get();
+                    $cancelledEvents->each(fn (CalendarEvent $event): ?bool => $event->delete());
+                    $deleted += $cancelledEvents->count();
 
                     continue;
                 }
@@ -582,7 +587,8 @@ class GoogleCalendarSyncService
                         }
                     });
             })
-            ->delete();
+            ->get()
+            ->each(fn (CalendarEvent $event): ?bool => $event->delete());
     }
 
     private function calendarSummary(GoogleCalendarConnection $connection, string $calendarId): ?string
