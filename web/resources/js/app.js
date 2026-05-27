@@ -764,6 +764,7 @@ if (mount) {
                     <div class="hb-timeline-hour"></div>
                     ${days.map((day) => `<button class="hb-timeline-day-head ${sameDate(day, parseLocalDate(state.selectedDay)) ? 'hb-timeline-day-head-active' : ''}" type="button" data-select-day="${dateOnly(day)}" aria-pressed="${sameDate(day, parseLocalDate(state.selectedDay))}"><strong>${escapeHtml(timelineDayHeaderLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></button>`).join('')}
                 </div>
+                ${multiDayRowMarkup(days)}
                 ${allDayRowMarkup(days)}
                 <div class="hb-timeline-body">
                     <div class="hb-timeline-hour-grid" aria-hidden="true">
@@ -776,7 +777,7 @@ if (mount) {
                     </div>
                     <div class="hb-timeline-events-grid">
                         <div class="hb-timeline-gutter" aria-hidden="true"></div>
-                        ${days.map((day) => `<div class="hb-timeline-day-column">${eventsForDay(day).filter((event) => !eventAllDay(event)).map((event) => timedEventMarkup(event, day, startHour, endHour)).join('')}</div>`).join('')}
+                        ${days.map((day) => `<div class="hb-timeline-day-column">${eventsForDay(day).filter((event) => !eventAllDay(event) && !eventMultiDayTimed(event)).map((event) => timedEventMarkup(event, day, startHour, endHour)).join('')}</div>`).join('')}
                     </div>
                     ${currentTimeMarker}
                 </div>
@@ -802,6 +803,20 @@ if (mount) {
             <div class="hb-now-marker" data-today-index="${todayIndex}" style="--hb-now-top:${top.toFixed(2)}px" aria-label="Current time ${escapeAttr(formatTime(now))}">
                 <div class="hb-now-label">${escapeHtml(formatTime(now))}</div>
                 <div class="hb-now-line" style="grid-column:${dayColumn}"></div>
+            </div>`;
+    }
+
+    function multiDayRowMarkup(days) {
+        const dayEvents = days.map((day) => multiDayTimedEventsForDay(day));
+        if (!dayEvents.some((events) => events.length)) return '';
+        return `
+            <div class="hb-multi-day-row">
+                <div class="hb-timeline-hour">Multi-Day</div>
+                ${dayEvents.map((events, index) => `
+                    <div class="hb-multi-day-cell">
+                        ${events.map((event) => multiDayEventMarkup(event, days[index])).join('')}
+                    </div>
+                `).join('')}
             </div>`;
     }
 
@@ -842,7 +857,8 @@ if (mount) {
     function monthCellMarkup(day, dayNumber) {
         const events = eventsForDay(day);
         const allDayEvents = events.filter((event) => eventAllDay(event));
-        const timedEvents = events.filter((event) => !eventAllDay(event));
+        const multiDayEvents = events.filter((event) => eventMultiDayTimed(event));
+        const timedEvents = events.filter((event) => !eventAllDay(event) && !eventMultiDayTimed(event));
         const today = new Date();
         return `
             <div class="hb-month-cell ${sameDate(day, today) ? 'hb-month-cell-active' : ''}">
@@ -850,6 +866,7 @@ if (mount) {
                     <button class="hb-month-date" type="button" data-select-day="${dateOnly(day)}" aria-label="${escapeAttr(dayLabel(day))}">
                         <strong>${dayNumber}</strong>
                     </button>
+                    ${multiDayEvents.length ? `<div class="hb-month-all-day-list">${multiDayEvents.map((event) => monthMultiDayEventMarkup(event, day)).join('')}</div>` : ''}
                     ${allDayEvents.length ? `<div class="hb-month-all-day-list">${allDayEvents.map((event) => monthAllDayEventMarkup(event)).join('')}</div>` : ''}
                 </div>
                 <div class="hb-month-event-list ${timedEvents.length >= 3 ? 'hb-month-event-list-scroll' : ''}">
@@ -862,6 +879,16 @@ if (mount) {
         const color = safeColor(event.color);
         return `
             <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+                <span class="hb-month-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+            </button>`;
+    }
+
+    function monthMultiDayEventMarkup(event, day) {
+        const color = safeColor(event.color);
+        const time = multiDayEventDayTime(event, day);
+        return `
+            <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+                ${time ? `<span class="hb-month-event-time">${escapeHtml(time)}</span>` : ''}
                 <span class="hb-month-event-title">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
             </button>`;
     }
@@ -987,6 +1014,16 @@ if (mount) {
     function allDayEventMarkup(event) {
         const color = safeColor(event.color);
         return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</button>`;
+    }
+
+    function multiDayEventMarkup(event, day) {
+        const color = safeColor(event.color);
+        const time = multiDayEventDayTime(event, day);
+        return `
+            <button class="hb-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
+                ${time ? `<span class="hb-multi-day-event-time">${escapeHtml(time)}</span>` : ''}
+                <span>${event.is_critical || event.isCritical ? '★ ' : ''}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+            </button>`;
     }
 
     function messageMarkup(message, index = 0, messages = []) {
@@ -2893,7 +2930,7 @@ if (mount) {
     function criticalEventsForToday() {
         const today = new Date();
         return state.calendar
-            .filter((event) => (event.is_critical || event.isCritical) && (eventAllDay(event) ? eventIntersectsDay(event, today) : isSameDay(event.starts_at || event.startsAt, today)))
+            .filter((event) => (event.is_critical || event.isCritical) && eventIntersectsDay(event, today))
             .sort((a, b) => new Date(a.starts_at || a.startsAt || 0) - new Date(b.starts_at || b.startsAt || 0));
     }
 
@@ -3005,12 +3042,16 @@ if (mount) {
 
     function eventsForDay(day) {
         return state.calendar
-            .filter((event) => eventAllDay(event) ? eventIntersectsDay(event, day) : isSameDay(event.starts_at || event.startsAt, day))
+            .filter((event) => eventIntersectsDay(event, day))
             .sort((a, b) => new Date(a.starts_at || a.startsAt || 0) - new Date(b.starts_at || b.startsAt || 0));
     }
 
     function allDayEventsForDay(day) {
         return eventsForDay(day).filter((event) => eventAllDay(event));
+    }
+
+    function multiDayTimedEventsForDay(day) {
+        return eventsForDay(day).filter((event) => eventMultiDayTimed(event));
     }
 
     function eventsForDays(days) {
@@ -3030,6 +3071,30 @@ if (mount) {
         if (eventAllDay(event)) return 'All day';
         const start = event.starts_at || event.startsAt;
         return start ? formatTime(start) : 'All day';
+    }
+
+    function eventEndTime(event) {
+        if (eventAllDay(event)) return 'All day';
+        const end = event.ends_at || event.endsAt;
+        return end ? formatTime(end) : '';
+    }
+
+    function eventMultiDayTimed(event) {
+        if (eventAllDay(event)) return false;
+        const startValue = event.starts_at || event.startsAt;
+        const endValue = event.ends_at || event.endsAt;
+        if (!startValue || !endValue) return false;
+        const start = parseLocalDate(startValue);
+        const end = parseLocalDate(endValue);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return false;
+        return dateOnly(start) !== dateOnly(end);
+    }
+
+    function multiDayEventDayTime(event, day) {
+        const dayValue = dateOnly(day);
+        if (dateOnly(event.starts_at || event.startsAt) === dayValue) return eventStartTime(event);
+        if (dateOnly(event.ends_at || event.endsAt) === dayValue) return eventEndTime(event);
+        return '';
     }
 
     function timelineEventStyle(event, day, startHour, endHour) {
@@ -3077,7 +3142,7 @@ if (mount) {
         const dayEnd = addDays(dayStart, 1);
         const start = new Date(startValue);
         const endValue = event.ends_at || event.endsAt;
-        const end = endValue ? new Date(endValue) : addDays(start, 1);
+        const end = endValue ? new Date(endValue) : addMinutes(start, 60);
         return start < dayEnd && end > dayStart;
     }
 
