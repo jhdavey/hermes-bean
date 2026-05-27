@@ -2979,14 +2979,14 @@ if (mount) {
             setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'say hey bean');
         };
         recognition.onresult = (event) => {
-            const transcript = speechTranscript(event);
-            if (!transcript) return;
-            if ((kioskConversationActive || state.busy) && kioskCancelRequested(transcript)) {
+            if (state.busy && kioskCancelRequested(speechTranscript(event, { fromResultIndex: true }))) {
                 cancelKioskVoiceCapture();
                 return;
             }
             if (!kioskConversationActive) {
-                const command = commandAfterWakePhrase(transcript);
+                const wakeTranscript = speechTranscript(event, { finalOnly: true, fromResultIndex: true });
+                if (!wakeTranscript) return;
+                const command = commandAfterWakePhrase(wakeTranscript);
                 if (command === null) {
                     return;
                 }
@@ -2998,6 +2998,12 @@ if (mount) {
                     showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
                     armKioskCommandSubmit();
                 }
+                return;
+            }
+            const transcript = speechTranscript(event);
+            if (!transcript) return;
+            if ((kioskConversationActive || state.busy) && kioskCancelRequested(transcript)) {
+                cancelKioskVoiceCapture();
                 return;
             }
             if (!['listening', 'heard'].includes(state.kioskVoicePhase)) return;
@@ -3132,8 +3138,13 @@ if (mount) {
         }, delay);
     }
 
-    function speechTranscript(event) {
-        return Array.from(event.results || [])
+    function speechTranscript(event, options = {}) {
+        const results = Array.from(event.results || []);
+        const startIndex = options.fromResultIndex ? Math.max(0, event.resultIndex || 0) : 0;
+
+        return results
+            .slice(startIndex)
+            .filter((result) => !options.finalOnly || result.isFinal)
             .map((result) => result[0]?.transcript || '')
             .join(' ')
             .replace(/\s+/g, ' ')
@@ -3141,7 +3152,7 @@ if (mount) {
     }
 
     function commandAfterWakePhrase(transcript) {
-        const match = transcript.match(/(?:^|\s)(?:hey|hay|hi|okay|ok)\s+(?:bean|been|beam|being)\b[\s,.:;!?-]*/i);
+        const match = transcript.match(/(?:^|\s)hey\s+(?:bean|been)\b[\s,.:;!?-]*/i);
         if (!match) return null;
         return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
     }
