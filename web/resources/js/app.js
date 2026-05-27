@@ -4309,7 +4309,7 @@ if (mount) {
 
     function topbarTodayLabel(date) {
         const parsed = parseLocalDate(date);
-        return `${parsed.toLocaleDateString(undefined, { month: 'short' })} ${ordinalDay(parsed.getDate())}`;
+        return `${weekdayShort(parsed)} ${ordinalDay(parsed.getDate())}`;
     }
 
     function ordinalDay(day) {

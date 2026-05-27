@@ -2820,7 +2820,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 Icon(
                   workspace.id == activeWorkspace.id
                       ? Icons.check_circle_rounded
-                      : Icons.home_work_outlined,
+                      : Icons.grid_view_rounded,
                   size: 18,
                   color: workspace.id == activeWorkspace.id
                       ? HeyBeanTheme.accentStrong
@@ -2849,7 +2849,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(
-              Icons.home_work_outlined,
+              Icons.grid_view_rounded,
               size: 16,
               color: HeyBeanTheme.accentStrong,
             ),
@@ -2904,28 +2904,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             ),
             Scaffold(
               appBar: AppBar(
-                titleSpacing: 20,
-                title: _phase == _AuthPhase.signedIn
-                    ? _CalendarHeaderButton(
-                        key: const Key('calendar-month-chevron'),
-                        label: _calendarHeaderMonthLabel(DateTime.now()),
-                        icon: Icons.chevron_left_rounded,
-                        secondaryIcon: Icons.calendar_month_rounded,
-                        iconSize: 16,
-                        secondaryIconSize: 15,
-                        horizontalPadding: 10,
-                        verticalPadding: 7,
-                        labelStyle: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
-                        onTap: _openCurrentCalendarMonth,
-                      )
-                    : null,
+                titleSpacing: 12,
+                title: null,
                 actions: [
                   if (_phase == _AuthPhase.signedIn) ...[
-                    _topWorkspaceSwitcher(),
-                    const SizedBox(width: 8),
                     _CalendarHeaderButton(
                       key: const Key('calendar-today-button'),
                       label: _calendarHeaderDayLabel(DateTime.now()),
@@ -2938,6 +2920,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                       ),
                       onTap: _returnToToday,
                     ),
+                    const SizedBox(width: 8),
+                    _CalendarHeaderButton(
+                      key: const Key('calendar-month-chevron'),
+                      label: _calendarHeaderMonthLabel(DateTime.now()),
+                      icon: Icons.calendar_month_rounded,
+                      horizontalPadding: 10,
+                      verticalPadding: 7,
+                      labelStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      onTap: _openCurrentCalendarMonth,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(child: _topWorkspaceSwitcher()),
                     const SizedBox(width: 8),
                     _CriticalTaskBadge(
                       tasks: _criticalTasksForToday(_tasks),
@@ -6289,9 +6286,6 @@ class _CalendarHeaderButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onTap,
-    this.secondaryIcon,
-    this.iconSize = 20,
-    this.secondaryIconSize = 20,
     this.horizontalPadding = 12,
     this.verticalPadding = 8,
     this.labelStyle = const TextStyle(fontWeight: FontWeight.w800),
@@ -6299,10 +6293,7 @@ class _CalendarHeaderButton extends StatelessWidget {
 
   final String label;
   final IconData? icon;
-  final IconData? secondaryIcon;
   final VoidCallback onTap;
-  final double iconSize;
-  final double secondaryIconSize;
   final double horizontalPadding;
   final double verticalPadding;
   final TextStyle labelStyle;
@@ -6311,36 +6302,43 @@ class _CalendarHeaderButton extends StatelessWidget {
   Widget build(BuildContext context) => InkWell(
     borderRadius: BorderRadius.circular(22),
     onTap: onTap,
-    child: Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: horizontalPadding,
-        vertical: verticalPadding,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: HeyBeanTheme.border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x12000000),
-            blurRadius: 14,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: iconSize),
-            SizedBox(width: secondaryIcon == null ? 4 : 2),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 0),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: horizontalPadding,
+          vertical: verticalPadding,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: HeyBeanTheme.border),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x12000000),
+              blurRadius: 14,
+              offset: Offset(0, 6),
+            ),
           ],
-          if (secondaryIcon != null) ...[
-            Icon(secondaryIcon, size: secondaryIconSize),
-            const SizedBox(width: 4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              const SizedBox(width: 4),
+              Icon(icon, size: 16),
+              const SizedBox(width: 4),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: labelStyle,
+              ),
+            ),
           ],
-          Text(label, style: labelStyle),
-        ],
+        ),
       ),
     ),
   );
@@ -9308,7 +9306,7 @@ String _shortWeekdayName(int weekday) =>
     const ['Mon', 'Tues', 'Wed', 'Thurs', 'Fri', 'Sat', 'Sun'][weekday - 1];
 
 String _calendarHeaderDayLabel(DateTime date) =>
-    '${_shortMonthName(date.month)} ${_ordinalDay(date.day)}';
+    '${_shortWeekdayName(date.weekday)} ${_ordinalDay(date.day)}';
 
 String _ordinalDay(int day) {
   final teen = day % 100;
