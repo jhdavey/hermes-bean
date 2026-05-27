@@ -737,7 +737,7 @@ if (mount) {
     }
 
     function kioskVoicePillMarkup() {
-        if (!state.kioskVoiceEnabled || ['idle', 'armed'].includes(state.kioskVoicePhase)) return '';
+        if (!state.kioskVoiceEnabled || state.kioskVoicePhase === 'idle') return '';
         const phase = state.kioskVoicePhase || 'listening';
         const label = state.kioskVoiceMessage || phase;
         return `<div class="hb-kiosk-voice-pill hb-kiosk-voice-pill-${escapeAttr(phase)}" role="status" aria-live="polite">${escapeHtml(label)}</div>`;
@@ -3152,8 +3152,8 @@ if (mount) {
     }
 
     function commandAfterWakePhrase(transcript) {
-        const match = transcript.match(/(?:^|\s)(?:hey|hay|hi|okay|ok)\s*,?\s*(?:bean|been|beam|being|bin)\b[\s,.:;!?-]*/i)
-            || transcript.match(/(?:^|\s)hey\s*bean\b[\s,.:;!?-]*/i);
+        const match = transcript.match(/(?:^|\s)(?:hey|hay|hi|okay|ok)\s*,?\s*(?:bean|beans|been|ben|beam|being|bin)\b[\s,.:;!?-]*/i)
+            || transcript.match(/(?:^|\s)(?:hey|hay)\s*b(?:ean|eans|een|en|eam|eing|in)\b[\s,.:;!?-]*/i);
         if (!match) return null;
         return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
     }
