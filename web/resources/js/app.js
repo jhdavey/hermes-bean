@@ -3152,7 +3152,8 @@ if (mount) {
     }
 
     function commandAfterWakePhrase(transcript) {
-        const match = transcript.match(/(?:^|\s)(?:hey|hay)\s+(?:bean|been|beam|being)\b[\s,.:;!?-]*/i);
+        const match = transcript.match(/(?:^|\s)(?:hey|hay|hi|okay|ok)\s*,?\s*(?:bean|been|beam|being|bin)\b[\s,.:;!?-]*/i)
+            || transcript.match(/(?:^|\s)hey\s*bean\b[\s,.:;!?-]*/i);
         if (!match) return null;
         return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
     }
