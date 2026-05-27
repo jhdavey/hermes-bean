@@ -14,6 +14,7 @@ if (mount) {
         tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 2 2 4-5"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>',
         reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
         settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.8l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.7.6 1 .3.25.68.4 1.1.4H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.6Z"/></svg>',
+        checkCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.5 11 14.5 15.5 9.5"/><circle cx="12" cy="12" r="9"/></svg>',
         send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>',
         stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
         edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>',
@@ -335,7 +336,8 @@ if (mount) {
     }
 
     function signedInMarkup() {
-        const critical = criticalItems().length;
+        const criticalTasks = criticalTasksForToday();
+        const criticalEvents = criticalEventsForToday();
         const addTitle = state.selected === 'tasks' ? 'Add task' : state.selected === 'reminders' ? 'Add reminder' : 'Create event';
         const showAdd = ['today', 'tasks', 'reminders'].includes(state.selected);
         const showCalendarRefresh = state.selected === 'today';
@@ -348,7 +350,7 @@ if (mount) {
                     ${topWorkspaceSwitcherMarkup()}
                     <span class="hb-spacer"></span>
                     ${topNavMarkup()}
-                    <button class="hb-critical" type="button" title="${critical} critical items">${critical}</button>
+                    ${criticalMenuMarkup(criticalTasks, criticalEvents)}
                     ${showAdd ? `<button class="hb-icon-button" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
                     ${showCalendarRefresh ? `<button class="hb-icon-button" type="button" data-refresh-calendar aria-label="Refresh calendar" title="Refresh calendar" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${topProfileMenuMarkup()}
@@ -722,6 +724,32 @@ if (mount) {
 
     function navButton([key, label, icon]) {
         return `<button class="hb-nav-item ${state.selected === key ? 'hb-nav-item-active' : ''}" type="button" data-nav="${key}">${icon}<span>${label}</span></button>`;
+    }
+
+    function criticalMenuMarkup(tasks, events) {
+        const count = tasks.length + events.length;
+        return `
+            <details class="hb-critical-menu">
+                <summary class="hb-critical" title="${count} critical items" aria-label="Critical items">${count}</summary>
+                <div class="hb-critical-popover" role="menu">
+                    <div class="hb-critical-list">
+                        ${count === 0 ? criticalDropdownRowMarkup(icons.checkCircle, 'Nothing critical today', '') : ''}
+                        ${tasks.map((task) => criticalDropdownRowMarkup(icons.tasks, task.title || task.name || 'Untitled', criticalTaskSubtitle(task), `critical-task-item-${escapeAttr(task.id)}`)).join('')}
+                        ${events.map((event) => criticalDropdownRowMarkup(icons.calendar, event.title || event.name || 'Untitled', criticalEventSubtitle(event), `critical-event-item-${escapeAttr(event.id)}`)).join('')}
+                    </div>
+                </div>
+            </details>`;
+    }
+
+    function criticalDropdownRowMarkup(icon, title, subtitle = '', key = '') {
+        return `
+            <div class="hb-critical-row" ${key ? `data-critical-row="${key}"` : ''}>
+                <span class="hb-critical-row-icon" aria-hidden="true">${icon}</span>
+                <span class="hb-critical-row-copy">
+                    <strong>${escapeHtml(title)}</strong>
+                    ${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ''}
+                </span>
+            </div>`;
     }
 
     function timelineMarkup(days) {
@@ -2761,10 +2789,44 @@ if (mount) {
     }
 
     function criticalItems() {
-        return [
-            ...state.tasks.filter((item) => !taskCompleted(item) && (item.is_critical || item.isCritical)),
-            ...state.calendar.filter((item) => (item.is_critical || item.isCritical) && (eventAllDay(item) ? eventIntersectsDay(item, new Date()) : isSameDay(item.starts_at || item.startsAt, new Date()))),
-        ];
+        return [...criticalTasksForToday(), ...criticalEventsForToday()];
+    }
+
+    function criticalTasksForToday() {
+        const today = new Date();
+        return activeTopLevelTasks()
+            .filter((task) => (task.is_critical || task.isCritical) && isSameDay(task.due_at || task.dueAt, today))
+            .sort(compareTasks);
+    }
+
+    function criticalEventsForToday() {
+        const today = new Date();
+        return state.calendar
+            .filter((event) => (event.is_critical || event.isCritical) && (eventAllDay(event) ? eventIntersectsDay(event, today) : isSameDay(event.starts_at || event.startsAt, today)))
+            .sort((a, b) => new Date(a.starts_at || a.startsAt || 0) - new Date(b.starts_at || b.startsAt || 0));
+    }
+
+    function criticalTaskSubtitle(task) {
+        const parts = [];
+        const dueLabel = task.due_at || task.dueAt ? formatDateTime(task.due_at || task.dueAt) : '';
+        if (task.category) parts.push(task.category);
+        if (dueLabel) parts.push(`Due ${dueLabel}`);
+        if (taskIsRecurring(task)) parts.push('Recurring');
+        return parts.join(' · ');
+    }
+
+    function criticalEventSubtitle(event) {
+        const parts = [];
+        if (event.starts_at || event.startsAt || event.ends_at || event.endsAt) parts.push(eventTime(event));
+        if (event.category) parts.push(event.category);
+        const recurrence = event.recurrence || event?.metadata?.recurrence || '';
+        if (recurrence && recurrence !== 'none') parts.push(recurrence);
+        return parts.join(' · ') || 'Unscheduled';
+    }
+
+    function taskIsRecurring(task) {
+        const recurrence = task?.recurrence || task?.metadata?.recurrence || 'none';
+        return recurrence && recurrence !== 'none';
     }
 
     function workspaces() {
@@ -2896,7 +2958,7 @@ if (mount) {
         if (visibleEnd <= dayStart || visibleStart >= dayEnd || visibleEnd <= visibleStart) return null;
         const minutesFromStart = Math.max(0, (visibleStart - dayStart) / 60000);
         const durationMinutes = Math.max(15, (visibleEnd - visibleStart) / 60000);
-        const hourHeight = 70.4;
+        const hourHeight = 88;
         return {
             minutes: Math.round(durationMinutes),
             css: `top:${(minutesFromStart / 60) * hourHeight}px;height:${(durationMinutes / 60) * hourHeight}px`,
