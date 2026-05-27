@@ -1472,7 +1472,8 @@
 }
 
 .hb-month-event-list-scroll {
-    max-height: 62px;
+    max-height: none;
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     padding-right: 2px;
