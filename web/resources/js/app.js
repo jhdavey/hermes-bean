@@ -6,6 +6,7 @@ if (mount) {
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
     const dashboardChangeKey = 'heybean.dashboard.changeId';
+    const kioskVoiceKey = 'heybean.kioskVoice';
     const calendarInitialWindowDays = 56;
     const calendarWindowChunkDays = 28;
 
@@ -63,6 +64,9 @@ if (mount) {
         voiceStatus: '',
         voiceStatusTone: '',
         chatExpanded: false,
+        kioskVoiceEnabled: kioskVoiceRequested(),
+        kioskVoicePhase: 'idle',
+        kioskVoiceMessage: '',
         onboardingJustCompleted: false,
         calendarRefreshing: false,
         taskFilter: 'active',
@@ -87,6 +91,14 @@ if (mount) {
     let dashboardChangeAbort = null;
     let dashboardChangeLoopActive = false;
     let dashboardRefreshTimer = 0;
+    let kioskRecognition = null;
+    let kioskRecognitionActive = false;
+    let kioskRecognitionShouldRestart = false;
+    let kioskCommandText = '';
+    let kioskCommandTimer = 0;
+    let kioskRestartTimer = 0;
+    let kioskAutoCloseTimer = 0;
+    let kioskMicrophoneReady = false;
 
     boot();
     bindResponsiveCalendar();
@@ -160,6 +172,20 @@ if (mount) {
         return window.location.pathname === '/admin' ? 'admin' : 'today';
     }
 
+    function kioskVoiceRequested() {
+        const params = new URLSearchParams(window.location.search);
+        const value = params.get('kiosk') ?? params.get('voice');
+        if (value !== null) {
+            const normalized = String(value).toLowerCase();
+            if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+                localStorage.setItem(kioskVoiceKey, 'true');
+            } else if (['0', 'false', 'no', 'off'].includes(normalized)) {
+                localStorage.removeItem(kioskVoiceKey);
+            }
+        }
+        return localStorage.getItem(kioskVoiceKey) === 'true';
+    }
+
     function pathForView(view) {
         return view === 'admin' ? '/admin' : '/app';
     }
@@ -227,9 +253,11 @@ if (mount) {
                 resumeSession(state.session.id);
             }
             startDashboardChangeFeed();
+            startKioskVoiceMode();
             refreshCalendarInBackground();
         } catch (error) {
             stopDashboardChangeFeed();
+            stopKioskVoiceMode();
             clearToken();
             state.phase = 'signedOut';
             state.error = friendlyError(error, 'load your account');
@@ -410,6 +438,7 @@ if (mount) {
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
                 ${bottomMenuMarkup()}
                 ${state.selected === 'bean' ? '' : floatingBeanButtonMarkup()}
+                ${state.selected === 'bean' ? '' : kioskVoicePillMarkup()}
                 ${state.chatExpanded && state.selected !== 'bean' ? desktopChatMarkup({ expanded: true }) : ''}
             </div>`;
     }
@@ -668,6 +697,13 @@ if (mount) {
             <button class="hb-bean-button hb-floating-bean-button ${state.chatExpanded ? 'hb-bean-button-active' : ''}" type="button" data-toggle-chat-expand aria-label="${state.chatExpanded ? 'Close Bean chat' : 'Open Bean chat'}">
                 <img src="${escapeAttr(logoUrl)}" alt="">
             </button>`;
+    }
+
+    function kioskVoicePillMarkup() {
+        if (!state.kioskVoiceEnabled || state.kioskVoicePhase === 'idle') return '';
+        const phase = state.kioskVoicePhase || 'listening';
+        const label = state.kioskVoiceMessage || phase;
+        return `<div class="hb-kiosk-voice-pill hb-kiosk-voice-pill-${escapeAttr(phase)}" role="status" aria-live="polite">${escapeHtml(label)}</div>`;
     }
 
     function settingsMarkup() {
@@ -1700,6 +1736,7 @@ if (mount) {
         });
         mount.querySelector('[data-admin-login]')?.addEventListener('click', () => {
             stopDashboardChangeFeed();
+            stopKioskVoiceMode();
             clearToken();
             state.phase = 'signedOut';
             state.authMode = 'login';
@@ -2459,6 +2496,7 @@ if (mount) {
             state.voiceStatus = 'Chrome could not start voice input. Check microphone permissions and try again.';
             state.voiceStatusTone = 'error';
             render();
+            restartKioskVoiceListeningSoon(900);
         });
         suppressNextSendClick = true;
         event.preventDefault();
@@ -2506,8 +2544,14 @@ if (mount) {
         await sendChatContent(content);
     }
 
-    async function sendChatContent(content) {
+    async function sendChatContent(content, options = {}) {
         const wasOnboarding = needsBeanOnboarding();
+        let result = null;
+        let assistantContent = '';
+        window.clearTimeout(kioskAutoCloseTimer);
+        if (options.autoOpenChat && state.selected !== 'bean') {
+            state.chatExpanded = true;
+        }
         state.messages.push({ id: `local-${Date.now()}`, role: 'user', content });
         state.busy = true;
         state.voiceDraft = '';
@@ -2523,27 +2567,35 @@ if (mount) {
                     body: { title: onboarding ? 'Welcome to Bean' : 'Workspace chat', runtime_mode: onboarding ? 'onboarding' : 'chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },
                 });
             }
-            const result = await api(`/assistant/sessions/${state.session.id}/messages`, {
+            result = await api(`/assistant/sessions/${state.session.id}/messages`, {
                 method: 'POST',
                 body: { content },
             });
             state.session = result.session || state.session;
             state.activity = normalizeList(result.events).length ? result.events : state.activity;
             if (result.user_message) replaceLocalUserMessage(result.user_message);
-            if (result.assistant_message) state.messages.push(result.assistant_message);
+            if (result.assistant_message) {
+                state.messages.push(result.assistant_message);
+                assistantContent = result.assistant_message.content || '';
+            }
             state.chatRunState = result.status === 'blocked' ? 'Blocked for approval' : 'Ready';
             await refreshOnly(false);
             if (wasOnboarding && !needsBeanOnboarding()) {
                 state.onboardingJustCompleted = true;
             }
         } catch (error) {
-            state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: friendlyError(error, 'send that message') });
+            assistantContent = friendlyError(error, 'send that message');
+            state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: assistantContent });
             state.chatRunState = 'Failed';
         } finally {
             state.busy = false;
             render();
             scrollChatToBottom();
+            if (options.autoCloseChatMs) {
+                scheduleKioskChatAutoClose(options.autoCloseChatMs);
+            }
         }
+        return { result, assistantContent };
     }
 
     async function startVoiceHoldInput() {
@@ -2563,8 +2615,10 @@ if (mount) {
         if (state.voiceListening && state.voiceRecognition) {
             return true;
         }
+        pauseKioskVoiceListening();
         const hasMicrophoneAccess = await requestMicrophoneAccess();
         if (!hasMicrophoneAccess || !voiceHoldPressed) {
+            restartKioskVoiceListeningSoon(700);
             return false;
         }
         const recognition = new SpeechRecognition();
@@ -2602,7 +2656,7 @@ if (mount) {
             if (shouldSubmit && content && !state.busy) {
                 state.voiceStatus = '';
                 state.voiceStatusTone = '';
-                sendChatContent(content);
+                sendChatContent(content).finally(() => restartKioskVoiceListeningSoon(900));
                 return;
             }
             if (shouldSubmit && !content) {
@@ -2610,6 +2664,7 @@ if (mount) {
                 state.voiceStatusTone = 'error';
             }
             render();
+            restartKioskVoiceListeningSoon(700);
         };
         recognition.onerror = (event) => {
             state.voiceListening = false;
@@ -2620,6 +2675,7 @@ if (mount) {
             state.voiceStatus = voiceErrorMessage(event.error);
             state.voiceStatusTone = 'error';
             render();
+            restartKioskVoiceListeningSoon(900);
         };
         state.voiceRecognition = recognition;
         state.voiceListening = true;
@@ -2633,6 +2689,7 @@ if (mount) {
             state.voiceStatus = 'Voice input is already active. Release and try again.';
             state.voiceStatusTone = 'error';
             render();
+            restartKioskVoiceListeningSoon(900);
             return false;
         }
         markVoiceListening();
@@ -2713,7 +2770,7 @@ if (mount) {
             }
         }
 
-        sendChatContent(content);
+        sendChatContent(content).finally(() => restartKioskVoiceListeningSoon(900));
     }
 
     function currentVoiceContent() {
@@ -2776,6 +2833,246 @@ if (mount) {
             return 'Chrome could not start the microphone. Another app may be using it, or system privacy settings may be blocking it.';
         }
         return 'Chrome could not request microphone access. Check browser and system microphone permissions.';
+    }
+
+    async function startKioskVoiceMode() {
+        if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return;
+        if (kioskRecognition || kioskRecognitionActive || state.voiceListening) {
+            return;
+        }
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!window.isSecureContext || !SpeechRecognition) {
+            setKioskVoiceStatus('error', !window.isSecureContext ? 'voice needs https or localhost' : 'voice unavailable');
+            return;
+        }
+        if (state.busy) {
+            restartKioskVoiceListeningSoon(1400);
+            return;
+        }
+        if (!await requestKioskMicrophoneAccess()) return;
+        if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || state.voiceListening) return;
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        kioskRecognition = recognition;
+        kioskRecognitionShouldRestart = true;
+
+        recognition.onstart = () => {
+            kioskRecognitionActive = true;
+        };
+        recognition.onresult = (event) => {
+            const transcript = speechTranscript(event);
+            if (!transcript) return;
+            if (state.kioskVoicePhase === 'idle') {
+                const command = commandAfterWakePhrase(transcript);
+                if (command === null) return;
+                kioskCommandText = command;
+                window.speechSynthesis?.cancel();
+                openKioskChat();
+                setKioskVoiceStatus('listening', 'listening');
+                if (kioskCommandText.trim()) {
+                    armKioskCommandSubmit();
+                }
+                return;
+            }
+            if (state.kioskVoicePhase !== 'listening') return;
+            const command = commandAfterWakePhrase(transcript);
+            kioskCommandText = (command === null ? transcript : command).trim();
+            if (kioskCommandText) {
+                setKioskVoiceStatus('listening', 'listening');
+                armKioskCommandSubmit();
+            }
+        };
+        recognition.onend = () => {
+            kioskRecognitionActive = false;
+            kioskRecognition = null;
+            if (state.kioskVoicePhase === 'listening' && kioskCommandText.trim()) {
+                finishKioskVoiceCommand();
+                return;
+            }
+            if (state.kioskVoicePhase === 'listening') {
+                kioskCommandText = '';
+                setKioskVoiceStatus('idle', '');
+            }
+            if (kioskRecognitionShouldRestart) {
+                restartKioskVoiceListeningSoon(700);
+            }
+        };
+        recognition.onerror = (event) => {
+            const recoverable = ['aborted', 'network', 'no-speech'].includes(event.error);
+            kioskRecognitionActive = false;
+            kioskRecognition = null;
+            if (!recoverable) {
+                setKioskVoiceStatus('error', kioskVoiceErrorMessage(event.error));
+            }
+            if (kioskRecognitionShouldRestart && recoverable) {
+                restartKioskVoiceListeningSoon(event.error === 'no-speech' ? 500 : 1600);
+            }
+        };
+
+        try {
+            recognition.start();
+        } catch (error) {
+            kioskRecognition = null;
+            kioskRecognitionActive = false;
+            restartKioskVoiceListeningSoon(1200);
+        }
+    }
+
+    async function requestKioskMicrophoneAccess() {
+        if (kioskMicrophoneReady) return true;
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setKioskVoiceStatus('error', 'microphone unavailable');
+            return false;
+        }
+        let stream = null;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            kioskMicrophoneReady = true;
+            return true;
+        } catch (error) {
+            kioskMicrophoneReady = false;
+            setKioskVoiceStatus('error', 'allow microphone access');
+            return false;
+        } finally {
+            stream?.getTracks().forEach((track) => track.stop());
+        }
+    }
+
+    function pauseKioskVoiceListening() {
+        kioskRecognitionShouldRestart = false;
+        window.clearTimeout(kioskRestartTimer);
+        window.clearTimeout(kioskCommandTimer);
+        kioskRestartTimer = 0;
+        kioskCommandTimer = 0;
+        if (kioskRecognition) {
+            const recognition = kioskRecognition;
+            kioskRecognition = null;
+            recognition.onend = null;
+            recognition.onerror = null;
+            try { recognition.stop(); } catch (_) {}
+        }
+        kioskRecognitionActive = false;
+    }
+
+    function stopKioskVoiceMode() {
+        pauseKioskVoiceListening();
+        window.clearTimeout(kioskAutoCloseTimer);
+        kioskAutoCloseTimer = 0;
+        kioskCommandText = '';
+        state.kioskVoicePhase = 'idle';
+        state.kioskVoiceMessage = '';
+        window.speechSynthesis?.cancel();
+    }
+
+    function restartKioskVoiceListeningSoon(delay = 900) {
+        window.clearTimeout(kioskRestartTimer);
+        if (!state.kioskVoiceEnabled || state.phase !== 'signedIn') return;
+        kioskRestartTimer = window.setTimeout(() => {
+            kioskRestartTimer = 0;
+            startKioskVoiceMode();
+        }, delay);
+    }
+
+    function speechTranscript(event) {
+        return Array.from(event.results || [])
+            .map((result) => result[0]?.transcript || '')
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function commandAfterWakePhrase(transcript) {
+        const match = transcript.match(/(?:^|\s)(?:hey|hay)\s+(?:bean|been)\b[\s,.:;!?-]*/i);
+        if (!match) return null;
+        return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
+    }
+
+    function armKioskCommandSubmit() {
+        window.clearTimeout(kioskCommandTimer);
+        kioskCommandTimer = window.setTimeout(finishKioskVoiceCommand, 1800);
+    }
+
+    async function finishKioskVoiceCommand() {
+        const content = kioskCommandText.trim();
+        window.clearTimeout(kioskCommandTimer);
+        kioskCommandTimer = 0;
+        kioskCommandText = '';
+        pauseKioskVoiceListening();
+        if (!content || state.busy) {
+            setKioskVoiceStatus('idle', '');
+            restartKioskVoiceListeningSoon(900);
+            return;
+        }
+
+        setKioskVoiceStatus('sending', 'sending...');
+        const response = await sendChatContent(content, { autoOpenChat: true, autoCloseChatMs: 10000 });
+        const spoken = await speakKioskResponse(response.assistantContent);
+        if (!spoken) {
+            scheduleKioskChatAutoClose(10000);
+        }
+        setKioskVoiceStatus('idle', '');
+        restartKioskVoiceListeningSoon(1200);
+    }
+
+    function setKioskVoiceStatus(phase, message) {
+        state.kioskVoicePhase = phase;
+        state.kioskVoiceMessage = message;
+        if (state.phase === 'signedIn') render();
+    }
+
+    function openKioskChat() {
+        if (state.selected === 'bean') return;
+        state.chatExpanded = true;
+        render();
+        scrollChatToBottom();
+    }
+
+    function scheduleKioskChatAutoClose(delay) {
+        window.clearTimeout(kioskAutoCloseTimer);
+        kioskAutoCloseTimer = window.setTimeout(() => {
+            kioskAutoCloseTimer = 0;
+            if (state.selected !== 'bean' && state.chatExpanded && !state.busy) {
+                state.chatExpanded = false;
+                render();
+            }
+        }, delay);
+    }
+
+    function speakKioskResponse(content) {
+        const text = speechTextFromAssistant(content);
+        if (!text || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+            return Promise.resolve(false);
+        }
+        return new Promise((resolve) => {
+            window.speechSynthesis.cancel();
+            setKioskVoiceStatus('speaking', 'speaking');
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1;
+            utterance.pitch = 1;
+            utterance.volume = 1;
+            utterance.onend = () => resolve(true);
+            utterance.onerror = () => resolve(false);
+            window.speechSynthesis.speak(utterance);
+        });
+    }
+
+    function speechTextFromAssistant(content) {
+        return String(content || '')
+            .replace(/```[\s\S]*?```/g, ' ')
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+            .replace(/[#*_>`]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 1200);
+    }
+
+    function kioskVoiceErrorMessage(error) {
+        if (error === 'not-allowed' || error === 'service-not-allowed') return 'allow microphone access';
+        if (error === 'audio-capture') return 'microphone unavailable';
+        return 'voice paused';
     }
 
     function replaceLocalUserMessage(message) {
@@ -3129,6 +3426,7 @@ if (mount) {
     async function logout() {
         try { await api('/auth/logout', { method: 'POST' }); } catch (_) {}
         stopDashboardChangeFeed();
+        stopKioskVoiceMode();
         clearToken();
         state.phase = 'signedOut';
         state.authMode = 'login';
@@ -3141,6 +3439,7 @@ if (mount) {
         try {
             await api('/account', { method: 'DELETE' });
             stopDashboardChangeFeed();
+            stopKioskVoiceMode();
             clearToken();
             state.phase = 'signedOut';
             state.authMode = 'login';
