@@ -903,6 +903,8 @@ class HermesUser {
     this.activeWorkspace,
     this.workspaces = const [],
     this.activeWorkspaceAgentProfile,
+    this.needsBeanOnboarding,
+    this.beanPreferencesReady,
     this.notificationPreferences = const HermesNotificationPreferences(),
   });
 
@@ -916,7 +918,12 @@ class HermesUser {
   final HermesWorkspace? activeWorkspace;
   final List<HermesWorkspace> workspaces;
   final HermesAgentProfile? activeWorkspaceAgentProfile;
+  final bool? needsBeanOnboarding;
+  final bool? beanPreferencesReady;
   final HermesNotificationPreferences notificationPreferences;
+
+  HermesAgentProfile? get currentAgentProfile =>
+      activeWorkspaceAgentProfile ?? agentProfile;
 
   HermesUser copyWith({
     String? name,
@@ -928,6 +935,8 @@ class HermesUser {
     HermesWorkspace? activeWorkspace,
     List<HermesWorkspace>? workspaces,
     HermesAgentProfile? activeWorkspaceAgentProfile,
+    bool? needsBeanOnboarding,
+    bool? beanPreferencesReady,
     HermesNotificationPreferences? notificationPreferences,
   }) => HermesUser(
     id: id,
@@ -941,6 +950,8 @@ class HermesUser {
     workspaces: workspaces ?? this.workspaces,
     activeWorkspaceAgentProfile:
         activeWorkspaceAgentProfile ?? this.activeWorkspaceAgentProfile,
+    needsBeanOnboarding: needsBeanOnboarding ?? this.needsBeanOnboarding,
+    beanPreferencesReady: beanPreferencesReady ?? this.beanPreferencesReady,
     notificationPreferences:
         notificationPreferences ?? this.notificationPreferences,
   );
@@ -969,6 +980,16 @@ class HermesUser {
             _expectMap(json['active_workspace_agent_profile']),
           )
         : null,
+    needsBeanOnboarding: json['needs_bean_onboarding'] == null
+        ? (json['needsBeanOnboarding'] is bool
+              ? json['needsBeanOnboarding'] as bool
+              : null)
+        : json['needs_bean_onboarding'] == true,
+    beanPreferencesReady: json['bean_preferences_ready'] == null
+        ? (json['beanPreferencesReady'] is bool
+              ? json['beanPreferencesReady'] as bool
+              : null)
+        : json['bean_preferences_ready'] == true,
     notificationPreferences: HermesNotificationPreferences.fromJson(
       _expectMapOrNull(json['notification_preferences']),
     ),
@@ -1196,6 +1217,10 @@ class HermesAgentProfile {
     final onboarding = settings['onboarding'];
     return onboarding is Map && onboarding['completed'] == true;
   }
+
+  bool get preferencesReady =>
+      onboardingCompleted &&
+      (onboardingPriorities.isNotEmpty || onboardingContext.trim().isNotEmpty);
 
   String get personalityType =>
       settings['personality_type']?.toString() ?? 'balanced';

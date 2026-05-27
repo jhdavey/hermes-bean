@@ -584,9 +584,10 @@ class StructuredHermesActionService
         $profile = $this->profileForSession($session);
         $updates = $this->onlyPresent($parameters, ['slug', 'display_name', 'status', 'provider', 'model', 'router_mode', 'runtime_home', 'tool_policy', 'approval_policy', 'metadata']);
         if (isset($parameters['settings']) && is_array($parameters['settings'])) {
-            app(AgentProfileService::class)->mergeSettings($profile, $parameters['settings'], 'agent');
+            $agentProfiles = app(AgentProfileService::class);
+            $profile = $agentProfiles->mergeSettings($profile, $parameters['settings'], 'agent');
             if (data_get($parameters['settings'], 'onboarding.completed') === true) {
-                User::where('id', $session->user_id)->update(['onboard_complete' => true]);
+                User::where('id', $session->user_id)->update(['onboard_complete' => $agentProfiles->preferencesReady($profile)]);
             }
         }
         if ($updates !== []) {

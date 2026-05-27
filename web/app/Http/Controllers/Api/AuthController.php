@@ -242,13 +242,16 @@ class AuthController extends Controller
         $activeWorkspace = $workspaceService->resolveWorkspace($user);
         $activeProfile = $agentProfiles->ensureForWorkspace($activeWorkspace, $user);
         $user = $agentProfiles->syncUserOnboardingFlag($user, $activeProfile);
+        $activeProfile = $activeProfile->refresh();
         $user->unsetRelation('agentProfile');
         $user->load('agentProfile');
 
         $user->setAttribute('personal_workspace', $personalWorkspace);
         $user->setAttribute('active_workspace', $activeWorkspace);
         $user->setAttribute('workspaces', $workspaceService->accessibleWorkspaces($user));
-        $user->setAttribute('active_workspace_agent_profile', $activeProfile->refresh());
+        $user->setAttribute('active_workspace_agent_profile', $activeProfile);
+        $user->setAttribute('needs_bean_onboarding', $agentProfiles->needsOnboarding($user, $activeProfile));
+        $user->setAttribute('bean_preferences_ready', $agentProfiles->preferencesReady($activeProfile));
 
         return $user;
     }

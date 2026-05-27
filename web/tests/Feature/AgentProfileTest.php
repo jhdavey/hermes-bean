@@ -117,6 +117,8 @@ class AgentProfileTest extends TestCase
             ])
             ->assertOk()
             ->assertJsonPath('data.onboard_complete', true)
+            ->assertJsonPath('data.needs_bean_onboarding', false)
+            ->assertJsonPath('data.bean_preferences_ready', true)
             ->assertJsonPath('data.active_workspace.id', $household->id)
             ->assertJsonPath('data.active_workspace_agent_profile.id', $householdProfile->id)
             ->assertJsonPath('data.active_workspace_agent_profile.settings.personality_type', 'coach')
@@ -150,6 +152,29 @@ class AgentProfileTest extends TestCase
             ->assertJsonPath('data.active_workspace_agent_profile.settings.onboarding.completed', true);
 
         $this->assertTrue($user->refresh()->onboard_complete);
+    }
+
+    public function test_me_endpoint_marks_legacy_empty_preferences_as_needing_onboarding(): void
+    {
+        $user = User::factory()->create(['onboard_complete' => true]);
+        app(AgentProfileService::class)->ensureForUser($user);
+
+        $token = 'legacy-empty-preferences-token';
+        PersonalAccessToken::create([
+            'user_id' => $user->id,
+            'name' => 'api',
+            'token' => hash('sha256', $token),
+        ]);
+
+        $this->withToken($token)
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.onboard_complete', false)
+            ->assertJsonPath('data.needs_bean_onboarding', true)
+            ->assertJsonPath('data.bean_preferences_ready', false)
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.onboarding.completed', false);
+
+        $this->assertFalse((bool) $user->refresh()->onboard_complete);
     }
 
     public function test_me_endpoint_backfills_agent_profile_for_existing_users(): void
@@ -259,6 +284,8 @@ class AgentProfileTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.agent_profile.provider', 'openrouter')
             ->assertJsonPath('data.agent_profile.model', 'gpt-5.5')
+            ->assertJsonPath('data.user.needs_bean_onboarding', true)
+            ->assertJsonPath('data.user.bean_preferences_ready', false)
             ->assertJsonPath('data.agent_profile.approval_policy.approval_surface', 'app_home_top_banner');
     }
 }

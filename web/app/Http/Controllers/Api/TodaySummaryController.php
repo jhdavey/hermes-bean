@@ -24,6 +24,7 @@ class TodaySummaryController extends Controller
         $workspaceService = app(WorkspaceService::class);
         $workspace = $workspaceService->resolveWorkspace($user, $request->query('workspace_id'));
         $session = ConversationSession::where('user_id', $user->id)
+            ->where('workspace_id', $workspace->id)
             ->latest('last_activity_at')
             ->latest('id')
             ->first();
@@ -32,6 +33,9 @@ class TodaySummaryController extends Controller
         $agentProfileService = app(AgentProfileService::class);
         $agentProfile = $agentProfileService->ensureForWorkspace($workspace, $user);
         $user = $agentProfileService->syncUserOnboardingFlag($user, $agentProfile);
+        $agentProfile = $agentProfile->refresh();
+        $user->setAttribute('needs_bean_onboarding', $agentProfileService->needsOnboarding($user, $agentProfile));
+        $user->setAttribute('bean_preferences_ready', $agentProfileService->preferencesReady($agentProfile));
         $reminders = Reminder::where('workspace_id', $workspace->id)->latest('remind_at')->get();
         $calendarEventsQuery = CalendarEvent::where('workspace_id', $workspace->id);
         $visibleGoogleCalendarIds = app(GoogleCalendarSyncService::class)->visibleGoogleCalendarIdsForWorkspace($user, $workspace);

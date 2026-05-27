@@ -192,13 +192,44 @@ class AgentProfileService
         return data_get($profile?->settings ?? [], 'onboarding.completed') === true;
     }
 
+    public function preferencesReady(?AgentProfile $profile): bool
+    {
+        if (! $this->onboardingComplete($profile)) {
+            return false;
+        }
+
+        $settings = $profile?->settings ?? [];
+        $priorities = array_values(array_filter(
+            array_map(fn ($priority) => trim((string) $priority), (array) data_get($settings, 'onboarding.priorities', [])),
+            fn (string $priority) => $priority !== ''
+        ));
+        $context = trim((string) data_get($settings, 'onboarding.context', ''));
+
+        return $priorities !== [] || $context !== '';
+    }
+
+    public function needsOnboarding(User $user, ?AgentProfile $profile = null): bool
+    {
+        return ! $user->onboard_complete || ! $this->preferencesReady($profile);
+    }
+
     public function syncUserOnboardingFlag(User $user, ?AgentProfile $profile = null): User
     {
-        if ($user->onboard_complete || ! $this->onboardingComplete($profile)) {
+        if ($this->preferencesReady($profile)) {
+            if (! $user->onboard_complete) {
+                $user->forceFill(['onboard_complete' => true])->save();
+
+                return $user->refresh();
+            }
+
             return $user;
         }
 
-        $user->forceFill(['onboard_complete' => true])->save();
+        if (! $user->onboard_complete) {
+            return $user;
+        }
+
+        $user->forceFill(['onboard_complete' => false])->save();
 
         return $user->refresh();
     }

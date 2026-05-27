@@ -4580,9 +4580,23 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     agentProfile: const HermesAgentProfile(
       settings: {
         'personality_type': 'balanced',
-        'onboarding': {'completed': true, 'priorities': <String>[]},
+        'onboarding': {
+          'completed': true,
+          'priorities': <String>['Planning'],
+        },
       },
     ),
+    activeWorkspaceAgentProfile: const HermesAgentProfile(
+      settings: {
+        'personality_type': 'balanced',
+        'onboarding': {
+          'completed': true,
+          'priorities': <String>['Planning'],
+        },
+      },
+    ),
+    needsBeanOnboarding: false,
+    beanPreferencesReady: true,
   );
 
   @override
@@ -4823,26 +4837,35 @@ class _FakeHermesApiClient extends HermesApiClient {
         ? null
         : updatedPriorities;
     final persistedContext = staleSettingsAfterUpdate ? null : updatedContext;
+    final onboardingComplete =
+        !staleOnboardingAfterUpdate &&
+        (updatedAgentPersonality != null || onboardingCompleted);
+    final priorities =
+        persistedPriorities ??
+        (onboardingComplete ? <String>['Planning'] : <String>[]);
+    final needsBeanOnboarding =
+        !onboardingComplete ||
+        (priorities.isEmpty && (persistedContext?.trim().isEmpty ?? true));
+    final profile = HermesAgentProfile(
+      settings: {
+        'personality_type': persistedPersonality ?? 'balanced',
+        'onboarding': {
+          'completed': onboardingComplete,
+          'priorities': priorities,
+          'context': persistedContext,
+        },
+      },
+    );
 
     return HermesUser(
       id: 1,
       name: name,
       email: email,
-      onboardComplete:
-          !staleOnboardingAfterUpdate &&
-          (updatedAgentPersonality != null || onboardingCompleted),
-      agentProfile: HermesAgentProfile(
-        settings: {
-          'personality_type': persistedPersonality ?? 'balanced',
-          'onboarding': {
-            'completed':
-                !staleOnboardingAfterUpdate &&
-                (updatedAgentPersonality != null || onboardingCompleted),
-            'priorities': persistedPriorities ?? <String>[],
-            'context': persistedContext,
-          },
-        },
-      ),
+      onboardComplete: !needsBeanOnboarding,
+      agentProfile: profile,
+      activeWorkspaceAgentProfile: profile,
+      needsBeanOnboarding: needsBeanOnboarding,
+      beanPreferencesReady: !needsBeanOnboarding,
       notificationPreferences: updatedNotificationPreferences,
     );
   }

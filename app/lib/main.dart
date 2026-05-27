@@ -979,7 +979,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
       final session = await recover<HermesSession?>(
         widget.apiClient.startSession(
-          title: 'Today',
+          title: _userNeedsBeanIntroduction(user) ? 'Welcome to Bean' : 'Today',
+          runtimeMode: _userNeedsBeanIntroduction(user) ? 'onboarding' : 'chat',
           workspaceId: user.activeWorkspace?.numericId,
           metadata: _flutterChatMetadata(),
         ),
@@ -1167,21 +1168,25 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
       if (!mounted) return;
       final savedPriorities = List<String>.from(onboardingPriorities);
+      final updatedActiveProfile =
+          updatedUser.activeWorkspaceAgentProfile ?? updatedUser.agentProfile;
+      final previousActiveProfile =
+          _user?.activeWorkspaceAgentProfile ?? _user?.agentProfile;
       final savedProfile = HermesAgentProfile(
-        id: updatedUser.agentProfile?.id ?? _user?.agentProfile?.id,
+        id: updatedActiveProfile?.id ?? previousActiveProfile?.id,
         settings: {
-          ...?updatedUser.agentProfile?.settings,
-          ...?_user?.agentProfile?.settings,
+          ...?previousActiveProfile?.settings,
+          ...?updatedActiveProfile?.settings,
           'personality_type': agentPersonality,
           'onboarding': {
-            ...?((updatedUser.agentProfile?.settings['onboarding'] is Map)
+            ...?((previousActiveProfile?.settings['onboarding'] is Map)
                 ? Map<String, Object?>.from(
-                    updatedUser.agentProfile!.settings['onboarding'] as Map,
+                    previousActiveProfile!.settings['onboarding'] as Map,
                   )
                 : null),
-            ...?((_user?.agentProfile?.settings['onboarding'] is Map)
+            ...?((updatedActiveProfile?.settings['onboarding'] is Map)
                 ? Map<String, Object?>.from(
-                    _user!.agentProfile!.settings['onboarding'] as Map,
+                    updatedActiveProfile!.settings['onboarding'] as Map,
                   )
                 : null),
             'completed': true,
@@ -1193,7 +1198,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _user = updatedUser.copyWith(
           onboardComplete: true,
-          agentProfile: savedProfile,
+          agentProfile:
+              updatedUser.agentProfile ?? _user?.agentProfile ?? savedProfile,
+          activeWorkspaceAgentProfile: savedProfile,
+          needsBeanOnboarding: false,
+          beanPreferencesReady: true,
         );
         _forceAgentOnboarding = false;
         _editingAgentPreferences = false;
@@ -1226,8 +1235,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool get _needsBeanIntroduction {
     final user = _user;
     if (user == null) return false;
-    return !user.onboardComplete &&
-        !(user.agentProfile?.onboardingCompleted ?? false);
+    return _userNeedsBeanIntroduction(user);
+  }
+
+  bool _userNeedsBeanIntroduction(HermesUser user) {
+    final serverValue = user.needsBeanOnboarding;
+    if (serverValue != null) return serverValue;
+    return !user.onboardComplete ||
+        !(user.currentAgentProfile?.preferencesReady ?? false);
   }
 
   void _selectDestination(_HomeDestination destination) {
@@ -1292,7 +1307,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     });
     try {
       final session = await widget.apiClient.startSession(
-        title: 'New chat',
+        title: _needsBeanIntroduction ? 'Welcome to Bean' : 'New chat',
+        runtimeMode: _needsBeanIntroduction ? 'onboarding' : 'chat',
         workspaceId: _user?.activeWorkspace?.numericId,
         metadata: _flutterChatMetadata(),
       );
@@ -2504,7 +2520,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             ),
       );
       final session = await widget.apiClient.startSession(
-        title: 'Workspace chat',
+        title: _userNeedsBeanIntroduction(user)
+            ? 'Welcome to Bean'
+            : 'Workspace chat',
+        runtimeMode: _userNeedsBeanIntroduction(user) ? 'onboarding' : 'chat',
         workspaceId: user.activeWorkspace?.numericId,
         metadata: {'source': 'flutter', 'reason': 'workspace_refresh'},
       );
@@ -3069,10 +3088,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _AgentOnboardingOverlay(
             key: const Key('agent-onboarding-overlay'),
             initialPersonality:
-                user.agentProfile?.personalityType ?? 'balanced',
+                user.currentAgentProfile?.personalityType ?? 'balanced',
             initialPriorities:
-                user.agentProfile?.onboardingPriorities ?? const [],
-            initialContext: user.agentProfile?.onboardingContext ?? '',
+                user.currentAgentProfile?.onboardingPriorities ?? const [],
+            initialContext: user.currentAgentProfile?.onboardingContext ?? '',
             busy: _busy,
             editMode: editingAgentPreferences,
             onCancel: editingAgentPreferences
@@ -11823,7 +11842,7 @@ class _SettingsView extends StatelessWidget {
             _CompactItemTile(
               icon: Icons.tune_rounded,
               title: 'Bean preferences',
-              subtitle: _agentPreferencesSummary(user.agentProfile),
+              subtitle: _agentPreferencesSummary(user.currentAgentProfile),
               trailing: TextButton(
                 key: const Key('open-bean-preferences'),
                 onPressed: onEditAgentOnboarding,

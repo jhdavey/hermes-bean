@@ -243,9 +243,16 @@ if (mount) {
         return onboarding.completed === true || onboarding.completed === 1 || onboarding.completed === 'true';
     }
 
+    function profilePreferencesReady(profile = currentAgentProfile()) {
+        if (!profileOnboardingComplete(profile)) return false;
+        return profilePriorities(profile).length > 0 || profileOnboardingContext(profile).trim() !== '';
+    }
+
     function needsBeanOnboarding() {
+        if (state.user?.needs_bean_onboarding !== undefined) return state.user.needs_bean_onboarding === true;
+        if (state.user?.needsBeanOnboarding !== undefined) return state.user.needsBeanOnboarding === true;
         const userComplete = state.user?.onboard_complete === true || state.user?.onboardComplete === true;
-        return !userComplete && !profileOnboardingComplete();
+        return !userComplete || !profilePreferencesReady();
     }
 
     function onboardingIntroMessage() {
@@ -477,7 +484,7 @@ if (mount) {
         const profile = currentAgentProfile();
         const priorities = profilePriorities(profile);
         const context = profileOnboardingContext(profile);
-        const complete = profileOnboardingComplete(profile);
+        const complete = profilePreferencesReady(profile);
         const workspaceItems = workspaces();
         const activeWorkspaceId = String(currentWorkspaceId() || '');
         return `
