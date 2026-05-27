@@ -2307,7 +2307,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Yesterday one-off'), findsNothing);
+      expect(find.text('Yesterday one-off'), findsOneWidget);
+      expect(find.byKey(const Key('task-critical-star-103')), findsOneWidget);
       expect(find.text('Recurring vitamins'), findsOneWidget);
       expect(find.textContaining('Travel'), findsWidgets);
       expect(find.textContaining('Due today at'), findsWidgets);
@@ -3244,7 +3245,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const Key('critical-task-count')),
-          matching: find.text('2'),
+          matching: find.text('3'),
         ),
         findsOneWidget,
       );
@@ -6337,11 +6338,23 @@ String? _headingDaysAfter(String? heading, int days) {
 
 Finder _topHeaderDayLabelFinder() {
   final now = DateTime.now();
-  final label = '${_testCompactWeekdayNames[now.weekday - 1]} ${now.day}';
+  final label =
+      '${_testShortMonthNames[now.month - 1]} ${_testOrdinalDay(now.day)}';
   return find.descendant(
     of: find.byKey(const Key('calendar-today-button')),
     matching: find.text(label),
   );
+}
+
+String _testOrdinalDay(int day) {
+  final teen = day % 100;
+  if (teen >= 11 && teen <= 13) return '${day}th';
+  return '$day${switch (day % 10) {
+    1 => 'st',
+    2 => 'nd',
+    3 => 'rd',
+    _ => 'th',
+  }}';
 }
 
 Finder _topHeaderDayMonthTextFinder() {

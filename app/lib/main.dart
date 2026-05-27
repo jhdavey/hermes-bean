@@ -9288,11 +9288,19 @@ String _weekdayLetter(int weekday) =>
 String _shortWeekdayName(int weekday) =>
     const ['Mon', 'Tues', 'Wed', 'Thurs', 'Fri', 'Sat', 'Sun'][weekday - 1];
 
-String _compactWeekdayName(int weekday) =>
-    const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
-
 String _calendarHeaderDayLabel(DateTime date) =>
-    '${_compactWeekdayName(date.weekday)} ${date.day}';
+    '${_shortMonthName(date.month)} ${_ordinalDay(date.day)}';
+
+String _ordinalDay(int day) {
+  final teen = day % 100;
+  if (teen >= 11 && teen <= 13) return '${day}th';
+  return '$day${switch (day % 10) {
+    1 => 'st',
+    2 => 'nd',
+    3 => 'rd',
+    _ => 'th',
+  }}';
+}
 
 String _calendarHeaderMonthLabel(DateTime date) =>
     "${_shortMonthName(date.month)} '${(date.year % 100).toString().padLeft(2, '0')}";
@@ -9945,12 +9953,13 @@ class _MonthGrid extends StatelessWidget {
     final totalCells = leadingBlanks + daysInMonth;
     final rowCount = (totalCells / 7).ceil();
     final eventDays = <int>{};
-    for (final event in calendar) {
-      final parsed = _parseCalendarEventDateTime(event.startsAt);
-      if (parsed != null &&
-          parsed.month == visibleMonth.month &&
-          parsed.year == visibleMonth.year) {
-        eventDays.add(parsed.day);
+    for (var day = 1; day <= daysInMonth; day++) {
+      final date = DateTime(visibleMonth.year, visibleMonth.month, day);
+      for (final event in calendar) {
+        if (_eventFallsOnDay(event, date)) {
+          eventDays.add(day);
+          break;
+        }
       }
     }
 
@@ -11587,6 +11596,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
               _showAll || _reminderIsCompleted(reminder) == _showCompleted,
         )
         .toList();
+    visibleReminders.sort(_compareRemindersByCompletionAndDueDate);
     return Column(
       key: const Key('reminders-view'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -13347,7 +13357,7 @@ class _TaskItemTileState extends State<_TaskItemTile> {
               ],
             ],
           ),
-          if (task.isCritical)
+          if (_taskIsCritical(task))
             Positioned(
               key: Key('task-critical-star-${task.id}'),
               top: 1,
@@ -13405,7 +13415,7 @@ class _SubtaskRow extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                     activeColor: HeyBeanTheme.accentStrong,
                   ),
-            if (task.isCritical)
+            if (_taskIsCritical(task))
               const Icon(
                 Icons.star_rounded,
                 size: 14,
@@ -13449,6 +13459,7 @@ class _ReminderItemTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final completed = _reminderIsCompleted(reminder);
+    final critical = _reminderIsCritical(reminder);
     final categoryColor = _safeCategoryColor(reminder.color);
     final surfaceColor = completed
         ? HeyBeanTheme.surface
@@ -13485,6 +13496,14 @@ class _ReminderItemTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
+                        if (critical) ...[
+                          const Icon(
+                            Icons.star_rounded,
+                            size: 15,
+                            color: HeyBeanTheme.warning,
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         Expanded(
                           child: Text(
                             reminder.title,
@@ -13643,6 +13662,7 @@ List<HermesTask> _tasksForDay(List<HermesTask> tasks, DateTime day) {
   final today = _dateOnly(DateTime.now());
   final visible = tasks.where((task) {
     if (_taskIsRecurring(task)) return true;
+    if (_taskIsOverdue(task)) return _sameCalendarDay(selectedDay, today);
     final dueAt = _parseTaskDueDate(task);
     if (dueAt == null) return _sameCalendarDay(selectedDay, today);
     return _sameCalendarDay(_dateOnly(dueAt), selectedDay);
@@ -13656,8 +13676,37 @@ int _compareTasksByCompletionAndDueDate(HermesTask a, HermesTask b) {
       ? 0
       : (_taskIsCompleted(a) ? 1 : -1);
   if (completedCompare != 0) return completedCompare;
+  final overdueCompare = _taskIsOverdue(a) == _taskIsOverdue(b)
+      ? 0
+      : (_taskIsOverdue(a) ? -1 : 1);
+  if (overdueCompare != 0) return overdueCompare;
   final aDue = _parseTaskDueDate(a);
   final bDue = _parseTaskDueDate(b);
+  if (aDue != null && bDue != null) {
+    final dueCompare = aDue.compareTo(bDue);
+    if (dueCompare != 0) return dueCompare;
+  } else if (aDue != null) {
+    return -1;
+  } else if (bDue != null) {
+    return 1;
+  }
+  return a.id.compareTo(b.id);
+}
+
+int _compareRemindersByCompletionAndDueDate(
+  HermesReminder a,
+  HermesReminder b,
+) {
+  final completedCompare = _reminderIsCompleted(a) == _reminderIsCompleted(b)
+      ? 0
+      : (_reminderIsCompleted(a) ? 1 : -1);
+  if (completedCompare != 0) return completedCompare;
+  final overdueCompare = _reminderIsOverdue(a) == _reminderIsOverdue(b)
+      ? 0
+      : (_reminderIsOverdue(a) ? -1 : 1);
+  if (overdueCompare != 0) return overdueCompare;
+  final aDue = _parseReminderDueDate(a);
+  final bDue = _parseReminderDueDate(b);
   if (aDue != null && bDue != null) {
     final dueCompare = aDue.compareTo(bDue);
     if (dueCompare != 0) return dueCompare;
@@ -13673,7 +13722,9 @@ List<HermesTask> _criticalTasksForToday(List<HermesTask> tasks) {
   return _tasksForDay(tasks, DateTime.now())
       .where(
         (task) =>
-            task.isCritical && !_taskIsCompleted(task) && !_taskIsSubtask(task),
+            _taskIsCritical(task) &&
+            !_taskIsCompleted(task) &&
+            !_taskIsSubtask(task),
       )
       .toList();
 }
@@ -13701,7 +13752,9 @@ List<HermesReminder> _criticalRemindersForToday(
 ) {
   final today = _dateOnly(DateTime.now());
   final visible = reminders.where((reminder) {
-    if (!reminder.isCritical || _reminderIsCompleted(reminder)) return false;
+    if (!_reminderIsCritical(reminder) || _reminderIsCompleted(reminder)) {
+      return false;
+    }
     final dueAt = _parseReminderDueDate(reminder);
     return dueAt != null && !_dateOnly(dueAt).isAfter(today);
   }).toList();
@@ -13718,8 +13771,27 @@ List<HermesReminder> _criticalRemindersForToday(
 
 bool _taskVisibleOnOrAfter(HermesTask task, DateTime today) {
   if (_taskIsRecurring(task)) return true;
+  if (_taskIsOverdue(task)) return true;
   final dueAt = _parseTaskDueDate(task);
   return dueAt == null || !_dateOnly(dueAt).isBefore(today);
+}
+
+bool _taskIsCritical(HermesTask task) =>
+    task.isCritical || _taskIsOverdue(task);
+
+bool _reminderIsCritical(HermesReminder reminder) =>
+    reminder.isCritical || _reminderIsOverdue(reminder);
+
+bool _taskIsOverdue(HermesTask task) {
+  if (_taskIsCompleted(task)) return false;
+  final dueAt = _parseTaskDueDate(task);
+  return dueAt != null && dueAt.isBefore(DateTime.now());
+}
+
+bool _reminderIsOverdue(HermesReminder reminder) {
+  if (_reminderIsCompleted(reminder)) return false;
+  final dueAt = _parseReminderDueDate(reminder);
+  return dueAt != null && dueAt.isBefore(DateTime.now());
 }
 
 bool _taskIsCompleted(HermesTask task) {
@@ -13742,6 +13814,7 @@ String _taskSubtitle(HermesTask task) {
   final parts = <String>[
     if (_taskIsCompleted(task)) 'Completed',
     if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
+    if (_taskIsOverdue(task)) 'overdue',
     if (dueLabel.isNotEmpty) 'Due $dueLabel',
     if (_taskIsRecurring(task)) _recurrenceSummaryFromMetadata(task.metadata),
   ];
@@ -13752,6 +13825,7 @@ String _reminderSubtitle(HermesReminder reminder) {
   final parts = <String>[
     _reminderIsCompleted(reminder) ? 'Completed' : 'Pending',
     if ((reminder.category ?? '').trim().isNotEmpty) reminder.category!.trim(),
+    if (_reminderIsOverdue(reminder)) 'overdue',
     if (reminder.dueAt != null && reminder.dueAt!.trim().isNotEmpty)
       _formatCalendarEventDateTime(reminder.dueAt)
     else
