@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AiUsageAlert;
 use App\Models\AiUsageLog;
+use App\Models\IssueReport;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Http\JsonResponse;
@@ -30,6 +31,7 @@ class AdminUsageController extends Controller
                 'cost_today' => round((float) (clone $logs)->where('created_at', '>=', $today)->sum('estimated_cost_usd'), 4),
                 'cost_month' => round((float) (clone $logs)->where('created_at', '>=', $month)->sum('estimated_cost_usd'), 4),
                 'open_alerts' => AiUsageAlert::whereNull('acknowledged_at')->count(),
+                'open_issue_reports' => IssueReport::where('status', 'open')->count(),
             ],
             'by_model' => $this->groupedUsage('model', $month),
             'by_route_tier' => $this->groupedUsage('route_tier', $month),
@@ -37,6 +39,7 @@ class AdminUsageController extends Controller
             'top_workspaces' => $this->topWorkspaces($month),
             'recent_logs' => $this->logsQuery()->limit(25)->get(),
             'alerts' => $this->alertsQuery()->limit(20)->get(),
+            'issue_reports' => $this->issueReportsQuery()->limit(20)->get(),
         ]]);
     }
 
@@ -121,6 +124,13 @@ class AdminUsageController extends Controller
     private function alertsQuery()
     {
         return AiUsageAlert::query()
+            ->with(['user:id,name,email', 'workspace:id,name,type'])
+            ->latest('id');
+    }
+
+    private function issueReportsQuery()
+    {
+        return IssueReport::query()
             ->with(['user:id,name,email', 'workspace:id,name,type'])
             ->latest('id');
     }

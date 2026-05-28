@@ -45,6 +45,16 @@ class User extends Authenticatable
         return $this->hasMany(PersonalAccessToken::class);
     }
 
+    public function betaUser(): HasOne
+    {
+        return $this->hasOne(BetaUser::class);
+    }
+
+    public function issueReports(): HasMany
+    {
+        return $this->hasMany(IssueReport::class);
+    }
+
     public function getNotificationPreferencesAttribute($value): array
     {
         $decoded = is_string($value) ? json_decode($value, true) : $value;

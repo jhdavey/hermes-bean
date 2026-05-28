@@ -51,6 +51,10 @@ return [
         'timeout' => (float) env('HERMES_AGENT_TIMEOUT', 120),
     ],
 
+    'beta' => [
+        'enabled' => (bool) env('BETA_SIGNUPS_ENABLED', true),
+    ],
+
     'ai_usage' => [
         'reserve_output_tokens' => (int) env('AI_USAGE_RESERVE_OUTPUT_TOKENS', 1200),
         'spike_multiplier' => (float) env('AI_USAGE_SPIKE_MULTIPLIER', 3),

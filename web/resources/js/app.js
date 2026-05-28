@@ -54,6 +54,7 @@ if (mount) {
         activity: [],
         adminUsage: null,
         adminUsageLoading: false,
+        issueReportSubmitting: false,
         googleStatus: null,
         googleAuthUrl: '',
         messages: [],
@@ -213,6 +214,26 @@ if (mount) {
             body: options.body ? JSON.stringify(options.body) : undefined,
         });
         if (response.status === 204) return null;
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const details = payload.errors
+                ? Object.values(payload.errors).flat().join(' ')
+                : payload.message;
+            throw new Error(details || 'Something went wrong.');
+        }
+        return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
+    }
+
+    async function apiForm(path, formData, options = {}) {
+        const response = await fetch(`/api${path}`, {
+            method: options.method || 'POST',
+            headers: {
+                Accept: 'application/json',
+                ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+                ...(options.headers || {}),
+            },
+            body: formData,
+        });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
             const details = payload.errors
@@ -389,6 +410,10 @@ if (mount) {
         return state.user?.is_admin === true || state.user?.isAdmin === true;
     }
 
+    function userIsBeta() {
+        return state.user?.is_beta === true || state.user?.isBeta === true || Boolean(state.user?.beta_user || state.user?.betaUser);
+    }
+
     function normalizeList(value) {
         return Array.isArray(value) ? value : [];
     }
@@ -482,6 +507,7 @@ if (mount) {
         const showRefresh = ['today', 'tasks', 'reminders', 'admin'].includes(state.selected);
         return `
             <div class="hb-app">
+                ${betaBannerMarkup()}
                 <header class="hb-topbar">
                     <button class="hb-header-pill" data-today type="button">${escapeHtml(topbarTodayLabel(new Date()))}</button>
                     <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(new Date()))}</span></button>
@@ -504,6 +530,12 @@ if (mount) {
                 ${state.selected === 'bean' ? '' : kioskVoicePillMarkup()}
                 ${state.chatExpanded && state.selected !== 'bean' ? desktopChatMarkup({ expanded: true }) : ''}
             </div>`;
+    }
+
+    function betaBannerMarkup() {
+        if (!userIsBeta()) return '';
+
+        return `<button class="hb-beta-banner" type="button" data-open-issue-report>You are in beta testing. If you have any issues please report them here.</button>`;
     }
 
     function appPanelMarkup() {
@@ -585,6 +617,7 @@ if (mount) {
         const usage = state.adminUsage || {};
         const totals = usage.totals || {};
         const alerts = normalizeList(usage.alerts);
+        const issueReports = normalizeList(usage.issue_reports || usage.issueReports);
         const recentLogs = normalizeList(usage.recent_logs || usage.recentLogs);
         const byModel = normalizeList(usage.by_model || usage.byModel);
         const byRoute = normalizeList(usage.by_route_tier || usage.byRouteTier);
@@ -605,8 +638,10 @@ if (mount) {
                     ${adminMetricMarkup('Month cost', formatCurrency(totals.cost_month), `${formatTokens(totals.tokens_month)} tokens`)}
                     ${adminMetricMarkup('Today cost', formatCurrency(totals.cost_today), `${totals.ai_actions_month || 0} actions this month`)}
                     ${adminMetricMarkup('Open alerts', totals.open_alerts, 'Warnings and hard caps')}
+                    ${adminMetricMarkup('Issue reports', totals.open_issue_reports, 'Open beta feedback')}
                 </div>
                 <div class="hb-admin-grid">
+                    ${adminListBlockMarkup('Beta issue reports', issueReports, adminIssueReportRowMarkup, 'No issue reports yet.')}
                     ${adminListBlockMarkup('Budget and spike alerts', alerts, adminAlertRowMarkup, 'No alerts yet.')}
                     ${adminListBlockMarkup('Model mix this month', byModel, adminAggregateRowMarkup, 'No model usage yet.')}
                     ${adminListBlockMarkup('Route tiers this month', byRoute, adminAggregateRowMarkup, 'No routed usage yet.')}
@@ -675,6 +710,22 @@ if (mount) {
             <div class="hb-admin-row">
                 <div><strong>${escapeHtml(row.name || 'Workspace')}</strong><small>${escapeHtml(`${row.type || 'workspace'} · ${row.actions || 0} actions · ${formatTokens(row.tokens)}`)}</small></div>
                 <span>${escapeHtml(formatCurrency(row.cost))}</span>
+            </div>`;
+    }
+
+    function adminIssueReportRowMarkup(report) {
+        const user = report.user || {};
+        const workspace = report.workspace || {};
+        const screenshots = normalizeList(report.screenshots);
+        return `
+            <div class="hb-admin-row hb-admin-issue-row">
+                <div>
+                    <strong>${escapeHtml(report.message || 'Issue report')}</strong>
+                    <small>${escapeHtml(user.email || user.name || 'Unknown user')} · ${escapeHtml(workspace.name || 'No workspace')} · ${escapeHtml(formatDateTime(report.created_at || report.createdAt))}</small>
+                    ${report.page_url || report.pageUrl ? `<a href="${escapeAttr(report.page_url || report.pageUrl)}" target="_blank" rel="noreferrer">Reported page</a>` : ''}
+                    ${screenshots.length ? `<div class="hb-admin-issue-shots">${screenshots.map((shot, index) => `<a href="${escapeAttr(shot.url || '')}" target="_blank" rel="noreferrer">Screenshot ${index + 1}</a>`).join('')}</div>` : ''}
+                </div>
+                <span>${escapeHtml(report.status || 'open')}</span>
             </div>`;
     }
 
@@ -1424,12 +1475,34 @@ if (mount) {
     }
 
     function modalMarkup(modal) {
+        if (modal.type === 'issue-report') return issueReportModalMarkup();
         if (modal.type === 'profile') return profileModalMarkup();
         if (modal.type === 'agent') return agentModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
         if (modal.type === 'categories') return categoriesModalMarkup();
         if (modal.type === 'recurring-delete') return recurringDeleteModalMarkup(modal.item);
         return itemModalMarkup(modal.type, modal.item, modal.parentTask);
+    }
+
+    function issueReportModalMarkup() {
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Report a beta issue">
+                <form class="hb-card hb-modal hb-form hb-issue-report-modal" data-modal-form="issue-report">
+                    ${sectionTitle(icons.activity, 'Report an issue', 'Tell us what happened so we can fix it quickly.')}
+                    ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
+                    <label class="hb-label">What happened?
+                        <textarea class="hb-textarea hb-issue-report-textarea" name="message" required maxlength="4000" placeholder="Describe what you were doing, what went wrong, and what you expected instead."></textarea>
+                    </label>
+                    <label class="hb-label">Screenshots <span class="hb-label-optional">optional</span>
+                        <input class="hb-input" type="file" name="screenshots" accept="image/png,image/jpeg,image/webp" multiple>
+                    </label>
+                    <p class="hb-item-meta">You can attach up to 5 screenshots. We’ll include your current page and workspace automatically.</p>
+                    <div class="hb-modal-actions">
+                        <button class="hb-button-secondary" type="button" data-close-modal ${state.issueReportSubmitting ? 'disabled' : ''}>Cancel</button>
+                        <button class="hb-button" type="submit" ${state.issueReportSubmitting ? 'disabled' : ''}>${state.issueReportSubmitting ? 'Sending...' : 'Send report'}</button>
+                    </div>
+                </form>
+            </div>`;
     }
 
     function itemModalMarkup(kind, item = null, parentTask = null) {
@@ -1870,6 +1943,7 @@ if (mount) {
         mount.querySelector('[data-refresh-app]')?.addEventListener('click', refreshCurrentView);
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
+        mount.querySelector('[data-open-issue-report]')?.addEventListener('click', () => openModal('issue-report'));
         mount.querySelectorAll('[data-edit-task]').forEach((button) => button.addEventListener('click', () => openModal('task', findById(state.tasks, button.dataset.editTask))));
         mount.querySelectorAll('[data-edit-reminder]').forEach((button) => button.addEventListener('click', () => openModal('reminder', findById(state.reminders, button.dataset.editReminder))));
         mount.querySelectorAll('[data-edit-event]').forEach((button) => button.addEventListener('click', () => openModal('event', findById(state.calendar, button.dataset.editEvent))));
@@ -2166,6 +2240,9 @@ if (mount) {
         try {
             if (kind === 'profile') {
                 state.user = await api('/auth/me', { method: 'PATCH', body: { email: data.email } });
+            } else if (kind === 'issue-report') {
+                await submitIssueReport(form);
+                return;
             } else if (kind === 'agent') {
                 const priorities = Array.from(form.querySelectorAll('input[name="priorities"]:checked')).map((input) => input.value);
                 const ttsKeyInput = form.querySelector('input[name="ttsOpenAiKey"]');
@@ -2215,6 +2292,32 @@ if (mount) {
         } catch (error) {
             state.error = friendlyError(error, 'save that change');
             state.modal = null;
+            render();
+        }
+    }
+
+    async function submitIssueReport(form) {
+        const formData = new FormData();
+        const message = String(form.querySelector('textarea[name="message"]')?.value || '').trim();
+        const files = Array.from(form.querySelector('input[name="screenshots"]')?.files || []).slice(0, 5);
+        formData.append('message', message);
+        formData.append('workspace_id', currentWorkspaceId() || '');
+        formData.append('page_url', window.location.href);
+        files.forEach((file) => formData.append('screenshots[]', file));
+
+        state.issueReportSubmitting = true;
+        state.error = '';
+        render();
+        try {
+            await apiForm('/issue-reports', formData);
+            state.issueReportSubmitting = false;
+            state.modal = null;
+            state.notice = 'Issue report sent. Thank you for helping test Bean.';
+            render();
+            if (state.selected === 'admin') loadAdminUsage(true);
+        } catch (error) {
+            state.issueReportSubmitting = false;
+            state.error = friendlyError(error, 'send that issue report');
             render();
         }
     }

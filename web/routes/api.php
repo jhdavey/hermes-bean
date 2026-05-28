@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ConversationSessionController;
 use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
+use App\Http\Controllers\Api\IssueReportController;
 use App\Http\Controllers\Api\TextToSpeechController;
 use App\Http\Controllers\Api\TodaySummaryController;
 use App\Http\Controllers\Api\WorkspaceController;
@@ -48,6 +49,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
 
         Route::get('/today', [TodaySummaryController::class, 'show']);
         Route::get('/dashboard-changes', [DashboardChangeController::class, 'index']);
+        Route::post('/issue-reports', [IssueReportController::class, 'store']);
         Route::get('/google-calendar/status', [GoogleCalendarController::class, 'status']);
         Route::post('/google-calendar/auth-url', [GoogleCalendarController::class, 'authUrl']);
         Route::post('/google-calendar/sync', [GoogleCalendarController::class, 'sync']);
