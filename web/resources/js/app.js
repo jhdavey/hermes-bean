@@ -900,7 +900,7 @@ if (mount) {
     function kioskVoiceToggleMarkup() {
         const enabled = state.kioskVoiceEnabled;
         const needsOpenAiAudio = enabled && profileTtsProvider() === 'openai' && !kioskAudioUnlocked;
-        return `<button class="hb-icon-button hb-kiosk-toggle ${enabled ? 'hb-icon-button-active' : ''}" type="button" data-toggle-kiosk-voice aria-label="${needsOpenAiAudio ? 'Enable OpenAI voice audio' : enabled ? 'Turn off kiosk voice' : 'Turn on kiosk voice'}" title="${needsOpenAiAudio ? 'Tap to enable OpenAI voice audio' : enabled ? 'Kiosk voice on' : 'Kiosk voice off'}" aria-pressed="${enabled}">${icons.mic}</button>`;
+        return `<button class="hb-icon-button hb-kiosk-toggle ${enabled ? 'hb-icon-button-active' : ''}" type="button" data-toggle-kiosk-voice aria-label="${needsOpenAiAudio ? 'Enable Bean voice audio' : enabled ? 'Turn off kiosk voice' : 'Turn on kiosk voice'}" title="${needsOpenAiAudio ? 'Enable Bean voice audio' : enabled ? 'Kiosk voice on' : 'Kiosk voice off'}" aria-pressed="${enabled}">${icons.mic}</button>`;
     }
 
     function todayTasksMarkup() {
@@ -3007,11 +3007,7 @@ if (mount) {
 
         recognition.onstart = () => {
             kioskRecognitionActive = true;
-            const needsOpenAiAudio = profileTtsProvider() === 'openai' && profileTtsOpenAiConfigured() && !kioskAudioUnlocked;
-            setKioskVoiceStatus(
-                kioskConversationActive ? 'listening' : needsOpenAiAudio ? 'error' : 'armed',
-                kioskConversationActive ? 'listening' : needsOpenAiAudio ? 'tap mic to enable OpenAI voice' : 'say hey bean'
-            );
+            setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'say hey bean');
         };
         recognition.onresult = (event) => {
             if (state.busy && kioskCancelRequested(speechTranscript(event, { fromResultIndex: true }))) {
@@ -3353,7 +3349,7 @@ if (mount) {
         const text = speechTextFromAssistant(content);
         if (profileTtsProvider() === 'openai') {
             if (!profileTtsOpenAiConfigured()) {
-                setKioskVoiceStatus('responding', 'save OpenAI voice key');
+                setKioskVoiceStatus('responding', 'save Bean voice key');
                 return false;
             }
             return playOpenAiTts(text);
@@ -3369,7 +3365,7 @@ if (mount) {
             if (!await ensureOpenAiAudioUnlocked()) {
                 throw new Error('audio_not_unlocked');
             }
-            setKioskVoiceStatus('responding', 'OpenAI voice');
+            setKioskVoiceStatus('responding', "Bean's voice");
             const response = await fetch('/api/assistant/tts', {
                 method: 'POST',
                 headers: {
@@ -3381,12 +3377,12 @@ if (mount) {
             });
             if (!response.ok) {
                 const payload = await response.json().catch(() => null);
-                rememberOpenAiTtsError(payload?.message || 'OpenAI voice unavailable');
+                rememberOpenAiTtsError(payload?.message || "Bean's voice unavailable");
                 return false;
             }
             const audioBuffer = await response.arrayBuffer();
             if (!audioBuffer.byteLength) {
-                rememberOpenAiTtsError('OpenAI voice returned empty audio');
+                rememberOpenAiTtsError("Bean's voice returned empty audio");
                 return false;
             }
             if (await playOpenAiAudioBuffer(audioBuffer)) return true;
@@ -3402,8 +3398,8 @@ if (mount) {
             return true;
         } catch (error) {
             const message = error?.message === 'audio_not_unlocked' || error?.name === 'NotAllowedError'
-                ? 'tap mic to enable OpenAI voice'
-                : `OpenAI voice playback failed${error?.name ? `: ${error.name}` : ''}`;
+                ? "Bean's voice needs one click"
+                : `Bean voice playback failed${error?.name ? `: ${error.name}` : ''}`;
             rememberOpenAiTtsError(message);
             return false;
         } finally {
@@ -3418,8 +3414,16 @@ if (mount) {
     }
 
     function rememberOpenAiTtsError(message) {
-        kioskLastTtsError = message || 'OpenAI voice unavailable';
+        kioskLastTtsError = beanVoiceStatusMessage(message);
         setKioskVoiceStatus('error', kioskLastTtsError);
+    }
+
+    function beanVoiceStatusMessage(message) {
+        return String(message || "Bean's voice unavailable")
+            .replace(/OpenAI text-to-speech/gi, "Bean's voice")
+            .replace(/OpenAI voice/gi, "Bean's voice")
+            .replace(/OpenAI/gi, 'Bean voice')
+            .replace(/API key/gi, 'voice key');
     }
 
     async function playOpenAiAudioBuffer(arrayBuffer) {
@@ -3520,7 +3524,7 @@ if (mount) {
     async function toggleKioskVoiceMode() {
         if (state.kioskVoiceEnabled && profileTtsProvider() === 'openai' && !kioskAudioUnlocked) {
             const unlocked = await unlockKioskAudio();
-            setKioskVoiceStatus(unlocked ? 'armed' : 'error', unlocked ? 'OpenAI voice ready' : 'tap mic to enable OpenAI voice');
+            setKioskVoiceStatus(unlocked ? 'armed' : 'error', unlocked ? "Bean's voice ready" : "Bean's voice needs one click");
             render();
             if (unlocked && (!kioskRecognition && !kioskRecognitionActive)) {
                 startKioskVoiceMode({ requestPermission: true });
