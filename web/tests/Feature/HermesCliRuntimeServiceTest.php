@@ -1114,6 +1114,7 @@ PHP);
             $payload = $request->data();
             $context = json_decode(str_replace("Runtime context:\n", '', (string) $payload['messages'][1]['content']), true, flags: JSON_THROW_ON_ERROR);
             $tools = $payload['tools'] ?? [];
+            $toolNames = collect($tools)->map(fn (array $tool): ?string => data_get($tool, 'function.name'));
 
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && $request->hasHeader('Authorization', 'Bearer test-key')
@@ -1123,9 +1124,46 @@ PHP);
                 && ! array_key_exists('dashboard_state', $context)
                 && isset($context['temporal_context'], $context['workspace'], $context['agent_profile'])
                 && ($tools[0]['type'] ?? null) === 'function'
-                && collect($tools)->contains(fn (array $tool): bool => data_get($tool, 'function.name') === 'search_tasks')
-                && collect($tools)->contains(fn (array $tool): bool => data_get($tool, 'function.name') === 'update_task');
+                && $toolNames->contains('search_tasks')
+                && $toolNames->contains('update_task')
+                && ! $toolNames->contains('create_approval')
+                && ! collect($tools)->contains(fn (array $tool): bool => array_key_exists('risk', data_get($tool, 'function.parameters.properties', [])));
         });
+    }
+
+    public function test_tool_runtime_budget_alerts_do_not_block_agent_request(): void
+    {
+        config()->set('services.hermes_runtime.mode', 'tools');
+        config()->set('services.hermes_runtime.default_provider', 'openai');
+        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.api_key', 'test-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        config()->set('services.ai_usage.budgets.free.daily_hard_tokens', 1);
+
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-direct',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I can help with that.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-budget-runtime@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'hello bean',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I can help with that.')
+            ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
+
+        Http::assertSentCount(1);
     }
 
     public function test_tool_runtime_supports_read_tool_before_write_tool(): void

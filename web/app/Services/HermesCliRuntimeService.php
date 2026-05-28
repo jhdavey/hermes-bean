@@ -104,7 +104,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
             ? $this->toolPromptFor($session, $userMessage, $modelRoute)
             : $this->promptFor($session, $userMessage, $modelRoute);
         $budget = $this->usageService->preflight($session, $userMessage, $modelRoute, $prompt);
-        if (! $budget['allowed']) {
+        if (! $budget['allowed'] && $this->runtimeMode() !== 'tools') {
             return $this->budgetBlocked($session, $userMessage, collect([$received]), (string) $budget['reason'], $modelRoute, $budget);
         }
 
@@ -238,14 +238,14 @@ class HermesCliRuntimeService implements HermesRuntimeService
     ): array {
         $apiKey = $this->providerApiKey();
         if ($apiKey === '') {
-            return $this->failClosed($session, $userMessage, collect([$received]), 'Hermes tool runtime is missing an API key.', [
+            return $this->toolRuntimeFailed($session, $userMessage, collect([$received]), 'Bean is not configured to contact the agent model yet.', [
                 'failure_type' => 'missing_api_key',
                 'provider' => config('services.hermes_runtime.default_provider'),
             ]);
         }
 
         if (! filled($modelRoute['model'] ?? null)) {
-            return $this->failClosed($session, $userMessage, collect([$received]), 'Hermes tool runtime is missing an agent model.', [
+            return $this->toolRuntimeFailed($session, $userMessage, collect([$received]), 'Bean is missing an agent model configuration.', [
                 'failure_type' => 'missing_model',
             ]);
         }
@@ -312,7 +312,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 $assistantContent = trim((string) data_get($response, 'choices.0.message.content', ''));
             }
         } catch (\Throwable $exception) {
-            return $this->failClosed($session, $userMessage, collect([$received, $started]), 'Hermes tool runtime failed.', [
+            return $this->toolRuntimeFailed($session, $userMessage, collect([$received, $started]), 'Bean could not complete that request because the agent runtime failed.', [
                 'failure_type' => 'tool_runtime_failed',
                 'exception' => $exception->getMessage(),
             ]);
@@ -425,11 +425,9 @@ class HermesCliRuntimeService implements HermesRuntimeService
             ]];
         }
 
-        $risk = (string) ($arguments['risk'] ?? 'low');
-        unset($arguments['risk']);
         $action = [
             'type' => $actionType,
-            'risk' => $risk,
+            'risk' => 'low',
             'parameters' => $arguments,
         ];
 
@@ -474,11 +472,6 @@ class HermesCliRuntimeService implements HermesRuntimeService
             'create_event_category' => 'event_category.create',
             'update_event_category' => 'event_category.update',
             'delete_event_category' => 'event_category.delete',
-            'create_approval' => 'approval.create',
-            'update_approval' => 'approval.update',
-            'approve_approval' => 'approval.approve',
-            'deny_approval' => 'approval.deny',
-            'delete_approval' => 'approval.delete',
             'create_blocker' => 'blocker.create',
             'update_blocker' => 'blocker.update',
             'resolve_blocker' => 'blocker.resolve',
@@ -796,9 +789,9 @@ You are Bean, a capable human-like assistant inside the Hey Bean app.
 
 You own intent and conversation. Interpret the user's message naturally, including messy wording, typos, shorthand, and voice transcription errors. Decide whether to answer directly, call read tools, call write tools, or ask one concise follow-up.
 
-Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded or an approval was queued.
+Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded.
 
-Laravel owns app mechanics: workspace access, database writes, validation, syncing, and tool results. Trust tool results. If a read/write tool says not found, ambiguous, blocked, failed, or approval queued, respond naturally from that result.
+Laravel owns app mechanics: workspace access, database writes, validation, syncing, and tool results. Trust tool results. If a read/write tool says not found, ambiguous, or failed, respond naturally from that result.
 
 Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no notes unless the user says otherwise. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
 
@@ -827,11 +820,6 @@ PROMPT;
             $this->nativeTool('create_event_category', 'Create or save an event category.', $this->categoryProperties(), ['name']),
             $this->nativeTool('update_event_category', 'Update one event category by id.', $this->categoryProperties(requireId: true), ['id']),
             $this->nativeTool('delete_event_category', 'Delete one event category by id.', $this->idProperties(), ['id']),
-            $this->nativeTool('create_approval', 'Queue an approval for an action that should not run directly.', $this->approvalProperties(), ['title']),
-            $this->nativeTool('update_approval', 'Update an approval by id.', $this->approvalProperties(requireId: true), ['id']),
-            $this->nativeTool('approve_approval', 'Approve an existing pending approval by id.', $this->idProperties(), ['id']),
-            $this->nativeTool('deny_approval', 'Deny an existing pending approval by id.', $this->idProperties(), ['id']),
-            $this->nativeTool('delete_approval', 'Delete an approval by id.', $this->idProperties(), ['id']),
             $this->nativeTool('create_blocker', 'Create a blocker or issue for the user.', $this->blockerProperties(), ['reason']),
             $this->nativeTool('update_blocker', 'Update a blocker by id.', $this->blockerProperties(requireId: true), ['id']),
             $this->nativeTool('resolve_blocker', 'Resolve a blocker by id.', $this->idProperties(), ['id']),
@@ -859,12 +847,6 @@ PROMPT;
 
     private function nativeTool(string $name, string $description, array $properties, array $required = []): array
     {
-        $properties['risk'] ??= [
-            'type' => 'string',
-            'enum' => ['low', 'medium', 'high'],
-            'description' => 'Use low for normal internal dashboard changes. Use high for risky external/destructive work.',
-        ];
-
         return [
             'type' => 'function',
             'function' => [
@@ -991,16 +973,6 @@ PROMPT;
         ]);
     }
 
-    private function approvalProperties(bool $requireId = false): array
-    {
-        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer']], [
-            'title' => ['type' => 'string'],
-            'description' => ['type' => 'string'],
-            'status' => ['type' => 'string'],
-            'payload' => ['type' => 'object', 'additionalProperties' => true],
-        ]);
-    }
-
     private function blockerProperties(bool $requireId = false): array
     {
         return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer']], [
@@ -1025,6 +997,44 @@ PROMPT;
             'approval_policy' => ['type' => 'object', 'additionalProperties' => true],
             'metadata' => ['type' => 'object', 'additionalProperties' => true],
         ];
+    }
+
+    private function toolRuntimeFailed(ConversationSession $session, ConversationMessage $userMessage, Collection $events, string $message, array $context): array
+    {
+        return DB::transaction(function () use ($session, $userMessage, $events, $message, $context): array {
+            $failed = $this->recordEvent($session, 'runtime.tool_model_failed', [
+                'message_id' => $userMessage->id,
+                'reason' => $message,
+                ...$context,
+            ], 'hermes.tools', 'failed');
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $message,
+                'metadata' => [
+                    'runtime' => 'tools',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'failure' => $context,
+                ],
+            ]);
+
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+            ]);
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => $events->push($failed)->push($messageCompleted),
+                'blocker' => null,
+            ];
+        });
     }
 
     private function cancelled(ConversationSession $session, ConversationMessage $userMessage, Collection $events): array
