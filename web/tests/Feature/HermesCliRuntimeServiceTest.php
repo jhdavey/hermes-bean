@@ -14,6 +14,7 @@ use App\Services\AgentProfileService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class HermesCliRuntimeServiceTest extends TestCase
@@ -1046,6 +1047,89 @@ PHP);
         $this->assertSame('organizer', $payload['agent_profile']['settings']['personality_type']);
         $this->assertSame(['Work', 'Focus'], $payload['agent_profile']['settings']['onboarding']['priorities']);
         $this->assertStringContainsString('Protect deep work', $payload['agent_profile']['settings']['memory']['user_preferences']['summary']);
+    }
+
+    public function test_tool_runtime_executes_native_task_update_tool_call(): void
+    {
+        config()->set('services.hermes_runtime.mode', 'tools');
+        config()->set('services.hermes_runtime.default_provider', 'openai');
+        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.api_key', 'test-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_1',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'update_task',
+                                'arguments' => json_encode([
+                                    'match_title' => 'Litter Box',
+                                    'status' => 'completed',
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Marked Litter Box complete.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-runtime@example.com');
+        $user = User::where('email', 'tool-runtime@example.com')->firstOrFail();
+        $workspace = app(WorkspaceService::class)->resolveWorkspace($user);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Litter Box',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'mark litter box complete',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Marked Litter Box complete.')
+            ->assertJsonFragment(['event_type' => 'assistant.task.updated'])
+            ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
+
+        $this->assertDatabaseHas('tasks', [
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'title' => 'Litter Box',
+            'status' => 'completed',
+        ]);
+
+        Http::assertSentCount(2);
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+
+            return $request->url() === 'https://api.openai.test/v1/chat/completions'
+                && $request->hasHeader('Authorization', 'Bearer test-key')
+                && ($payload['tools'][0]['type'] ?? null) === 'function'
+                && collect($payload['tools'])->contains(fn (array $tool): bool => data_get($tool, 'function.name') === 'update_task');
+        });
     }
 
     private function writeExecutable(string $name, string $contents): string

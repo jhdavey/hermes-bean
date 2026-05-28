@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
@@ -41,7 +42,7 @@ class HermesCliRuntimeService implements HermesRuntimeService
                 'created_by_user_id' => $user->id,
                 'title' => $attributes['title'] ?? null,
                 'status' => 'active',
-                'runtime_mode' => $attributes['runtime_mode'] ?? 'cli',
+                'runtime_mode' => $attributes['runtime_mode'] ?? $this->runtimeMode(),
                 'metadata' => $attributes['metadata'] ?? null,
                 'last_activity_at' => now(),
             ]);
@@ -98,19 +99,25 @@ class HermesCliRuntimeService implements HermesRuntimeService
             return [$userMessage, $received];
         });
 
+        $modelRoute = $this->modelRouteFor($session);
+        $prompt = $this->runtimeMode() === 'tools'
+            ? $this->toolPromptFor($session, $userMessage, $modelRoute)
+            : $this->promptFor($session, $userMessage, $modelRoute);
+        $budget = $this->usageService->preflight($session, $userMessage, $modelRoute, $prompt);
+        if (! $budget['allowed']) {
+            return $this->budgetBlocked($session, $userMessage, collect([$received]), (string) $budget['reason'], $modelRoute, $budget);
+        }
+
+        if ($this->runtimeMode() === 'tools') {
+            return $this->sendMessageWithTools($session, $userMessage, $received, $modelRoute, $prompt);
+        }
+
         $cliPath = (string) config('services.hermes_runtime.cli_path', '');
         if ($cliPath === '' || ! is_file($cliPath) || ! is_executable($cliPath)) {
             return $this->failClosed($session, $userMessage, collect([$received]), 'Hermes CLI executable is not configured or is not executable.', [
                 'failure_type' => 'missing_cli',
                 'cli_path' => $cliPath,
             ]);
-        }
-
-        $modelRoute = $this->modelRouteFor($userMessage);
-        $prompt = $this->promptFor($session, $userMessage, $modelRoute);
-        $budget = $this->usageService->preflight($session, $userMessage, $modelRoute, $prompt);
-        if (! $budget['allowed']) {
-            return $this->budgetBlocked($session, $userMessage, collect([$received]), (string) $budget['reason'], $modelRoute, $budget);
         }
 
         $command = $this->commandFor($cliPath, $modelRoute['model'], $prompt);
@@ -222,6 +229,456 @@ class HermesCliRuntimeService implements HermesRuntimeService
         });
     }
 
+    private function sendMessageWithTools(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        ActivityEvent $received,
+        array $modelRoute,
+        string $prompt
+    ): array {
+        $apiKey = $this->providerApiKey();
+        if ($apiKey === '') {
+            return $this->failClosed($session, $userMessage, collect([$received]), 'Hermes tool runtime is missing an API key.', [
+                'failure_type' => 'missing_api_key',
+                'provider' => config('services.hermes_runtime.default_provider'),
+            ]);
+        }
+
+        if (! filled($modelRoute['model'] ?? null)) {
+            return $this->failClosed($session, $userMessage, collect([$received]), 'Hermes tool runtime is missing an agent model.', [
+                'failure_type' => 'missing_model',
+            ]);
+        }
+
+        $started = $this->recordEvent($session, 'runtime.tool_model_started', [
+            'message_id' => $userMessage->id,
+            'provider' => config('services.hermes_runtime.default_provider'),
+            'model' => $modelRoute['model'],
+            'model_route' => $modelRoute,
+        ], 'hermes.tools', 'started');
+        $session->update(['status' => 'running', 'last_activity_at' => now()]);
+
+        $messages = [
+            ['role' => 'system', 'content' => $this->toolSystemInstructions()],
+            ['role' => 'user', 'content' => $prompt],
+        ];
+        $responses = [];
+        $domainEvents = collect();
+        $actions = [];
+        $assistantContent = '';
+        $finalResponse = null;
+
+        try {
+            for ($turn = 0; $turn < 3; $turn++) {
+                $response = $this->chatCompletion($modelRoute, $messages, true);
+                $responses[] = $response;
+                $finalResponse = $response;
+                $modelRoute['model'] = (string) data_get($response, 'model', $modelRoute['model']);
+                $message = data_get($response, 'choices.0.message', []);
+                $toolCalls = is_array($message) && is_array($message['tool_calls'] ?? null) ? $message['tool_calls'] : [];
+
+                if ($toolCalls === []) {
+                    $assistantContent = trim((string) data_get($message, 'content', ''));
+                    break;
+                }
+
+                $messages[] = [
+                    'role' => 'assistant',
+                    'content' => data_get($message, 'content'),
+                    'tool_calls' => $toolCalls,
+                ];
+
+                foreach ($toolCalls as $toolCall) {
+                    if (! is_array($toolCall)) {
+                        continue;
+                    }
+                    [$toolActions, $toolEvents, $toolOutput] = $this->executeNativeToolCall($session, $toolCall);
+                    $actions = array_merge($actions, $toolActions);
+                    $domainEvents = $domainEvents->concat($toolEvents);
+                    $messages[] = [
+                        'role' => 'tool',
+                        'tool_call_id' => (string) ($toolCall['id'] ?? ''),
+                        'content' => json_encode($toolOutput, JSON_THROW_ON_ERROR),
+                    ];
+                }
+            }
+
+            if ($assistantContent === '' && $actions !== []) {
+                $response = $this->chatCompletion($modelRoute, $messages, false);
+                $responses[] = $response;
+                $finalResponse = $response;
+                $modelRoute['model'] = (string) data_get($response, 'model', $modelRoute['model']);
+                $assistantContent = trim((string) data_get($response, 'choices.0.message.content', ''));
+            }
+        } catch (\Throwable $exception) {
+            return $this->failClosed($session, $userMessage, collect([$received, $started]), 'Hermes tool runtime failed.', [
+                'failure_type' => 'tool_runtime_failed',
+                'exception' => $exception->getMessage(),
+            ]);
+        }
+
+        if ($assistantContent === '') {
+            $assistantContent = $actions !== []
+                ? $this->fallbackStructuredAssistantContent(['actions' => $actions])
+                : 'Done.';
+        }
+
+        return DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse): array {
+            $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
+                'message_id' => $userMessage->id,
+                'response_count' => count($responses),
+                'finish_reason' => data_get($finalResponse, 'choices.0.finish_reason'),
+            ], 'hermes.tools', 'succeeded');
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $assistantContent,
+                'metadata' => [
+                    'runtime' => 'tools',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $modelRoute['model'],
+                    'model_route' => $modelRoute,
+                ],
+            ]);
+
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+            ]);
+
+            $usageLog = $this->usageService->recordCompletion(
+                $session,
+                $userMessage,
+                $assistantMessage,
+                $modelRoute,
+                $prompt,
+                json_encode($responses, JSON_THROW_ON_ERROR),
+                $domainEvents
+            );
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => collect([$received, $started, $completed])->concat($domainEvents)->push($messageCompleted),
+                'usage' => $usageLog,
+                'blocker' => null,
+            ];
+        });
+    }
+
+    private function chatCompletion(array $modelRoute, array $messages, bool $allowTools): array
+    {
+        $payload = [
+            'model' => (string) $modelRoute['model'],
+            'messages' => $messages,
+        ];
+        if ($allowTools) {
+            $payload['tools'] = $this->nativeToolDefinitions();
+            $payload['tool_choice'] = 'auto';
+        } else {
+            $payload['tool_choice'] = 'none';
+        }
+
+        $response = Http::withToken($this->providerApiKey())
+            ->acceptJson()
+            ->asJson()
+            ->timeout((float) config('services.hermes_runtime.timeout', 30))
+            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/chat/completions', $payload);
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('Model API returned HTTP '.$response->status().': '.mb_substr($response->body(), 0, 1000));
+        }
+
+        $decoded = $response->json();
+        if (! is_array($decoded)) {
+            throw new \RuntimeException('Model API returned a non-JSON response.');
+        }
+
+        return $decoded;
+    }
+
+    private function executeNativeToolCall(ConversationSession $session, array $toolCall): array
+    {
+        $name = (string) data_get($toolCall, 'function.name', '');
+        $arguments = $this->decodeToolArguments((string) data_get($toolCall, 'function.arguments', '{}'));
+        $actionType = $this->actionTypeForNativeTool($name);
+        if ($actionType === null) {
+            $event = $this->recordEvent($session, 'assistant.action.skipped', [
+                'tool_name' => $name,
+                'reason' => 'Unsupported native tool name.',
+            ], 'native_tool', 'skipped');
+
+            return [[], collect([$event]), [
+                'ok' => false,
+                'message' => 'Unsupported tool.',
+                'events' => [['event_type' => $event->event_type, 'status' => $event->status]],
+            ]];
+        }
+
+        $risk = (string) ($arguments['risk'] ?? 'low');
+        unset($arguments['risk']);
+        $action = [
+            'type' => $actionType,
+            'risk' => $risk,
+            'parameters' => $arguments,
+        ];
+
+        $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
+        $failed = $events->contains(fn (ActivityEvent $event): bool => $event->status === 'failed');
+
+        return [[$action], $events, [
+            'ok' => ! $failed,
+            'action_type' => $actionType,
+            'events' => $events->map(fn (ActivityEvent $event): array => [
+                'event_type' => $event->event_type,
+                'tool_name' => $event->tool_name,
+                'status' => $event->status,
+                'payload' => $event->payload,
+            ])->values()->all(),
+        ]];
+    }
+
+    private function decodeToolArguments(string $arguments): array
+    {
+        try {
+            $decoded = json_decode($arguments !== '' ? $arguments : '{}', true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return [];
+        }
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function actionTypeForNativeTool(string $name): ?string
+    {
+        return [
+            'create_task' => 'task.create',
+            'update_task' => 'task.update',
+            'delete_task' => 'task.delete',
+            'create_reminder' => 'reminder.create',
+            'update_reminder' => 'reminder.update',
+            'delete_reminder' => 'reminder.delete',
+            'create_calendar_event' => 'calendar_event.create',
+            'update_calendar_event' => 'calendar_event.update',
+            'delete_calendar_event' => 'calendar_event.delete',
+            'create_event_category' => 'event_category.create',
+            'update_event_category' => 'event_category.update',
+            'delete_event_category' => 'event_category.delete',
+            'create_approval' => 'approval.create',
+            'update_approval' => 'approval.update',
+            'approve_approval' => 'approval.approve',
+            'deny_approval' => 'approval.deny',
+            'delete_approval' => 'approval.delete',
+            'create_blocker' => 'blocker.create',
+            'update_blocker' => 'blocker.update',
+            'resolve_blocker' => 'blocker.resolve',
+            'delete_blocker' => 'blocker.delete',
+            'update_agent_profile' => 'agent_profile.update',
+            'note_workspace_memory' => 'workspace_memory.note',
+            'update_conversation_session' => 'conversation_session.update',
+            'create_activity_event' => 'activity_event.create',
+        ][$name] ?? null;
+    }
+
+    private function providerApiKey(): string
+    {
+        return (string) config('services.hermes_runtime.api_key', '');
+    }
+
+    private function toolPromptFor(ConversationSession $session, ConversationMessage $message, array $modelRoute): string
+    {
+        return "Runtime payload:\n".$this->payloadFor($session, $message, $modelRoute);
+    }
+
+    private function toolSystemInstructions(): string
+    {
+        return <<<'PROMPT'
+You are Bean, a capable human-like assistant inside the Hey Bean app.
+
+Use the provided tools for app changes. Do not describe a dashboard change as complete unless you used the matching tool or the tool result confirms an approval was queued. Respond to the user in natural language only; never output JSON, tool arguments, ids, schema text, or debug text.
+
+Low-risk internal app actions may be done directly with tools: tasks, reminders, calendar events, event categories, approvals, blockers, Bean preferences, conversation metadata, and activity notes. Risky external/destructive actions outside the dashboard should not be performed directly; use approval-oriented tools when available or ask a concise follow-up.
+
+Existing dashboard resources are in runtime payload dashboard_state. Use ids from dashboard_state when updating, deleting, approving, denying, or resolving. If an id is not available but the user gives a clear name, pass match_title/title so the server can validate a unique match. If several resources could match, ask one short clarifying question.
+
+Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no notes unless the user says otherwise. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
+
+If onboarding is incomplete, run a quick onboarding interview and use update_agent_profile when enough preferences are provided. Adapt tone to agent_profile settings and memory.
+PROMPT;
+    }
+
+    private function nativeToolDefinitions(): array
+    {
+        return [
+            $this->nativeTool('create_task', 'Create a visible task in Hey Bean.', $this->taskProperties(), ['title']),
+            $this->nativeTool('update_task', 'Update one existing task. Prefer id from dashboard_state; otherwise use match_title.', $this->taskProperties(requireId: false)),
+            $this->nativeTool('delete_task', 'Delete one existing task by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('create_reminder', 'Create a visible reminder in Hey Bean.', $this->reminderProperties(), ['title', 'remind_at']),
+            $this->nativeTool('update_reminder', 'Update one existing reminder by id.', $this->reminderProperties(requireId: true), ['id']),
+            $this->nativeTool('delete_reminder', 'Delete one existing reminder by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('create_calendar_event', 'Create a visible calendar event in Hey Bean.', $this->calendarEventProperties(), ['title', 'starts_at']),
+            $this->nativeTool('update_calendar_event', 'Update one existing calendar event. Prefer id; use match_title and from_date only when needed.', $this->calendarEventProperties(requireId: false)),
+            $this->nativeTool('delete_calendar_event', 'Delete one existing calendar event by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('create_event_category', 'Create or save an event category.', $this->categoryProperties(), ['name']),
+            $this->nativeTool('update_event_category', 'Update one event category by id.', $this->categoryProperties(requireId: true), ['id']),
+            $this->nativeTool('delete_event_category', 'Delete one event category by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('create_approval', 'Queue an approval for an action that should not run directly.', $this->approvalProperties(), ['title']),
+            $this->nativeTool('update_approval', 'Update an approval by id.', $this->approvalProperties(requireId: true), ['id']),
+            $this->nativeTool('approve_approval', 'Approve an existing pending approval by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('deny_approval', 'Deny an existing pending approval by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('delete_approval', 'Delete an approval by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('create_blocker', 'Create a blocker or issue for the user.', $this->blockerProperties(), ['reason']),
+            $this->nativeTool('update_blocker', 'Update a blocker by id.', $this->blockerProperties(requireId: true), ['id']),
+            $this->nativeTool('resolve_blocker', 'Resolve a blocker by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('delete_blocker', 'Delete a blocker by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('update_agent_profile', 'Update Bean preferences, onboarding, model/profile settings, or memory settings.', $this->agentProfileProperties()),
+            $this->nativeTool('note_workspace_memory', 'Save a durable workspace memory note when the user explicitly asks Bean to remember something.', [
+                'note' => ['type' => 'string'],
+                'workspace_id' => ['type' => 'integer'],
+                'target_workspace_id' => ['type' => 'integer'],
+            ], ['note']),
+            $this->nativeTool('update_conversation_session', 'Update conversation session metadata.', [
+                'title' => ['type' => 'string'],
+                'status' => ['type' => 'string'],
+                'runtime_mode' => ['type' => 'string'],
+                'metadata' => ['type' => 'object', 'additionalProperties' => true],
+            ]),
+            $this->nativeTool('create_activity_event', 'Record a non-resource activity event.', [
+                'event_type' => ['type' => 'string'],
+                'tool_name' => ['type' => 'string'],
+                'status' => ['type' => 'string'],
+                'payload' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['event_type']),
+        ];
+    }
+
+    private function nativeTool(string $name, string $description, array $properties, array $required = []): array
+    {
+        $properties['risk'] ??= [
+            'type' => 'string',
+            'enum' => ['low', 'medium', 'high'],
+            'description' => 'Use low for normal internal dashboard changes. Use high for risky external/destructive work.',
+        ];
+
+        return [
+            'type' => 'function',
+            'function' => [
+                'name' => $name,
+                'description' => $description,
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => $properties,
+                    'required' => $required,
+                    'additionalProperties' => true,
+                ],
+            ],
+        ];
+    }
+
+    private function idProperties(): array
+    {
+        return ['id' => ['type' => 'integer']];
+    }
+
+    private function taskProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer'], 'match_title' => ['type' => 'string']], [
+            'title' => ['type' => 'string'],
+            'type' => ['type' => 'string'],
+            'status' => ['type' => 'string', 'description' => 'Use completed when marking a task done; use open for active tasks.'],
+            'notes' => ['type' => 'string'],
+            'category' => ['type' => 'string'],
+            'color' => ['type' => 'string'],
+            'is_critical' => ['type' => 'boolean'],
+            'due_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp when applicable.'],
+            'metadata' => ['type' => 'object', 'additionalProperties' => true],
+        ]);
+    }
+
+    private function reminderProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer']], [
+            'title' => ['type' => 'string'],
+            'notes' => ['type' => 'string'],
+            'category' => ['type' => 'string'],
+            'color' => ['type' => 'string'],
+            'is_critical' => ['type' => 'boolean'],
+            'remind_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp.'],
+            'status' => ['type' => 'string'],
+            'calendar_event_id' => ['type' => 'integer'],
+            'metadata' => ['type' => 'object', 'additionalProperties' => true],
+        ]);
+    }
+
+    private function calendarEventProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer'], 'match_title' => ['type' => 'string'], 'from_date' => ['type' => 'string']], [
+            'title' => ['type' => 'string'],
+            'description' => ['type' => 'string'],
+            'location' => ['type' => 'string'],
+            'category' => ['type' => 'string'],
+            'color' => ['type' => 'string'],
+            'is_critical' => ['type' => 'boolean'],
+            'recurrence' => ['type' => ['object', 'string', 'null'], 'additionalProperties' => true],
+            'starts_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp.'],
+            'ends_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp.'],
+            'status' => ['type' => 'string'],
+            'metadata' => ['type' => 'object', 'additionalProperties' => true],
+            'workspace_id' => ['type' => 'integer'],
+            'target_workspace_id' => ['type' => 'integer'],
+        ]);
+    }
+
+    private function categoryProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer']], [
+            'name' => ['type' => 'string'],
+            'color' => ['type' => 'string'],
+            'metadata' => ['type' => 'object', 'additionalProperties' => true],
+        ]);
+    }
+
+    private function approvalProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer']], [
+            'title' => ['type' => 'string'],
+            'description' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'payload' => ['type' => 'object', 'additionalProperties' => true],
+        ]);
+    }
+
+    private function blockerProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer']], [
+            'reason' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'context' => ['type' => 'object', 'additionalProperties' => true],
+        ]);
+    }
+
+    private function agentProfileProperties(): array
+    {
+        return [
+            'slug' => ['type' => 'string'],
+            'display_name' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'provider' => ['type' => 'string'],
+            'model' => ['type' => 'string'],
+            'router_mode' => ['type' => 'string'],
+            'runtime_home' => ['type' => 'string'],
+            'settings' => ['type' => 'object', 'additionalProperties' => true],
+            'tool_policy' => ['type' => 'object', 'additionalProperties' => true],
+            'approval_policy' => ['type' => 'object', 'additionalProperties' => true],
+            'metadata' => ['type' => 'object', 'additionalProperties' => true],
+        ];
+    }
+
     private function cancelled(ConversationSession $session, ConversationMessage $userMessage, Collection $events): array
     {
         return DB::transaction(function () use ($session, $userMessage, $events): array {
@@ -321,19 +778,29 @@ class HermesCliRuntimeService implements HermesRuntimeService
     /**
      * @return array{mode:string,tier:string,model:?string,billing_model:string,context_mode:string,reason:string}
      */
-    private function modelRouteFor(ConversationMessage $message): array
+    private function modelRouteFor(ConversationSession $session): array
     {
         $mode = (string) config('services.hermes_runtime.router_mode', 'agent');
         $defaultModel = (string) config('services.hermes_runtime.default_model', 'gpt-5.5');
+        $model = $this->runtimeMode() === 'tools'
+            ? (string) ($this->profileForSession($session)?->model ?: $defaultModel)
+            : null;
 
         return [
             'mode' => $mode,
             'tier' => 'agent',
-            'model' => null,
-            'billing_model' => $defaultModel,
+            'model' => $model,
+            'billing_model' => $model ?: $defaultModel,
             'context_mode' => 'focused',
-            'reason' => 'Laravel does not route by keyword; the Hermes runtime/profile chooses the model.',
+            'reason' => $this->runtimeMode() === 'tools'
+                ? 'Laravel does not route by keyword; the configured agent model receives native app tools.'
+                : 'Laravel does not route by keyword; the Hermes runtime/profile chooses the model.',
         ];
+    }
+
+    private function runtimeMode(): string
+    {
+        return (string) config('services.hermes_runtime.mode', 'cli');
     }
 
     private function configuredWorkdir(): ?string
