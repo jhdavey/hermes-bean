@@ -8,9 +8,6 @@ return new class extends Migration
     public function up(): void
     {
         Schema::dropIfExists('scheduler_job_records');
-        Schema::dropIfExists('job_batches');
-        Schema::dropIfExists('failed_jobs');
-        Schema::dropIfExists('jobs');
         Schema::dropIfExists('cache_locks');
     }
 

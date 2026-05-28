@@ -27,7 +27,7 @@ class AgentProfileTest extends TestCase
         $profile = AgentProfile::query()->firstOrFail();
 
         $this->assertSame($response->json('data.user.id'), $profile->user_id);
-        $this->assertSame('openrouter', $profile->provider);
+        $this->assertSame('openai', $profile->provider);
         $this->assertSame('gpt-5.5', $profile->model);
         $this->assertSame('agent', $profile->router_mode);
         $this->assertStringContainsString($profile->slug, (string) $profile->runtime_home);
@@ -292,7 +292,7 @@ class AgentProfileTest extends TestCase
         $this->withToken($token)
             ->getJson('/api/today')
             ->assertOk()
-            ->assertJsonPath('data.agent_profile.provider', 'openrouter')
+            ->assertJsonPath('data.agent_profile.provider', 'openai')
             ->assertJsonPath('data.agent_profile.model', 'gpt-5.5')
             ->assertJsonPath('data.user.needs_bean_onboarding', true)
             ->assertJsonPath('data.user.bean_preferences_ready', false)

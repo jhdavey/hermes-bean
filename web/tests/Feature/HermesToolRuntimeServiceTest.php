@@ -167,4 +167,48 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         Http::assertSentCount(1);
     }
+
+    public function test_successful_tool_execution_returns_fallback_if_final_narration_call_fails(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_1',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_task',
+                                'arguments' => json_encode([
+                                    'title' => 'Buy milk',
+                                    'type' => 'todo',
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push(['error' => ['message' => 'tool_choice is invalid without tools']], 400);
+
+        $token = $this->apiToken('tool-final-fallback@example.com');
+        $user = User::where('email', 'tool-final-fallback@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'add buy milk to my tasks',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I added Buy milk to your tasks.')
+            ->assertJsonFragment(['event_type' => 'assistant.task.created']);
+
+        $this->assertDatabaseHas('tasks', [
+            'user_id' => $user->id,
+            'title' => 'Buy milk',
+        ]);
+    }
 }

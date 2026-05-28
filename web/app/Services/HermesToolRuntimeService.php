@@ -14,6 +14,7 @@ use App\Models\Workspace;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class HermesToolRuntimeService implements HermesRuntimeService
 {
@@ -177,17 +178,43 @@ class HermesToolRuntimeService implements HermesRuntimeService
             }
 
             if ($assistantContent === '' && $actions !== []) {
-                $response = $this->chatCompletion($modelRoute, $messages, false);
-                $responses[] = $response;
-                $finalResponse = $response;
-                $modelRoute['model'] = (string) data_get($response, 'model', $modelRoute['model']);
-                $assistantContent = trim((string) data_get($response, 'choices.0.message.content', ''));
+                try {
+                    $response = $this->chatCompletion($modelRoute, $messages, false);
+                    $responses[] = $response;
+                    $finalResponse = $response;
+                    $modelRoute['model'] = (string) data_get($response, 'model', $modelRoute['model']);
+                    $assistantContent = trim((string) data_get($response, 'choices.0.message.content', ''));
+                } catch (\Throwable $exception) {
+                    Log::warning('Hermes final response call failed after successful tool execution.', [
+                        'session_id' => $session->id,
+                        'message_id' => $userMessage->id,
+                        'exception' => $exception->getMessage(),
+                    ]);
+                }
             }
         } catch (\Throwable $exception) {
-            return $this->toolRuntimeFailed($session, $userMessage, collect([$received, $started]), 'Bean could not complete that request because the agent runtime failed.', [
-                'failure_type' => 'tool_runtime_failed',
-                'exception' => $exception->getMessage(),
-            ]);
+            if ($actions !== []) {
+                Log::warning('Hermes model response failed after successful tool execution.', [
+                    'session_id' => $session->id,
+                    'message_id' => $userMessage->id,
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $modelRoute['model'] ?? null,
+                    'exception' => $exception->getMessage(),
+                ]);
+            } else {
+                Log::error('Hermes tool runtime failed.', [
+                    'session_id' => $session->id,
+                    'message_id' => $userMessage->id,
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $modelRoute['model'] ?? null,
+                    'exception' => $exception->getMessage(),
+                ]);
+
+                return $this->toolRuntimeFailed($session, $userMessage, collect([$received, $started]), 'Bean could not complete that request because the agent runtime failed.', [
+                    'failure_type' => 'tool_runtime_failed',
+                    'exception' => $exception->getMessage(),
+                ]);
+            }
         }
 
         if ($assistantContent === '') {
@@ -251,8 +278,6 @@ class HermesToolRuntimeService implements HermesRuntimeService
         if ($allowTools) {
             $payload['tools'] = $this->nativeToolDefinitions();
             $payload['tool_choice'] = 'auto';
-        } else {
-            $payload['tool_choice'] = 'none';
         }
 
         $response = Http::withToken($this->providerApiKey())
