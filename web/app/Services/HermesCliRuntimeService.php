@@ -260,7 +260,8 @@ class HermesCliRuntimeService implements HermesRuntimeService
 
         $messages = [
             ['role' => 'system', 'content' => $this->toolSystemInstructions()],
-            ['role' => 'user', 'content' => $prompt],
+            ['role' => 'system', 'content' => "Runtime context:\n".json_encode($this->toolContextPayload($session, $userMessage), JSON_THROW_ON_ERROR)],
+            ['role' => 'user', 'content' => $userMessage->content],
         ];
         $responses = [];
         $domainEvents = collect();
@@ -406,6 +407,10 @@ class HermesCliRuntimeService implements HermesRuntimeService
     {
         $name = (string) data_get($toolCall, 'function.name', '');
         $arguments = $this->decodeToolArguments((string) data_get($toolCall, 'function.arguments', '{}'));
+        if ($this->isNativeReadTool($name)) {
+            return [[], collect(), $this->executeNativeReadTool($session, $name, $arguments)];
+        }
+
         $actionType = $this->actionTypeForNativeTool($name);
         if ($actionType === null) {
             $event = $this->recordEvent($session, 'assistant.action.skipped', [
@@ -485,6 +490,227 @@ class HermesCliRuntimeService implements HermesRuntimeService
         ][$name] ?? null;
     }
 
+    private function isNativeReadTool(string $name): bool
+    {
+        return in_array($name, ['search_tasks', 'search_reminders', 'search_calendar_events', 'get_day_context'], true);
+    }
+
+    private function executeNativeReadTool(ConversationSession $session, string $name, array $arguments): array
+    {
+        return match ($name) {
+            'search_tasks' => $this->searchTasksForTool($session, $arguments),
+            'search_reminders' => $this->searchRemindersForTool($session, $arguments),
+            'search_calendar_events' => $this->searchCalendarEventsForTool($session, $arguments),
+            'get_day_context' => $this->dayContextForTool($session, $arguments),
+            default => ['ok' => false, 'error_code' => 'unsupported_read_tool'],
+        };
+    }
+
+    private function searchTasksForTool(ConversationSession $session, array $arguments): array
+    {
+        $workspaceId = $this->toolWorkspaceId($session, $arguments);
+        $query = Task::query()->where('user_id', $session->user_id)->where('workspace_id', $workspaceId);
+        if (! (bool) ($arguments['include_completed'] ?? false)) {
+            $query->where('status', '!=', 'completed');
+        }
+        if (filled($arguments['status'] ?? null)) {
+            $query->where('status', (string) $arguments['status']);
+        }
+        if (filled($arguments['query'] ?? null)) {
+            $this->whereLooseTitle($query, (string) $arguments['query']);
+        }
+        [$from, $to] = $this->toolDateWindow($arguments);
+        if ($from && $to) {
+            $query->where(function ($query) use ($from, $to): void {
+                $query->whereBetween('due_at', [$from, $to])->orWhereNull('due_at');
+            });
+        }
+
+        $items = $query->latest('is_critical')
+            ->orderByRaw('case when due_at is null then 1 else 0 end')
+            ->orderBy('due_at')
+            ->latest('updated_at')
+            ->limit($this->toolLimit($arguments))
+            ->get(['id', 'title', 'type', 'status', 'category', 'color', 'is_critical', 'due_at', 'metadata'])
+            ->map(fn (Task $task): array => [
+                'id' => $task->id,
+                'title' => $task->title,
+                'type' => $task->type,
+                'status' => $task->status,
+                'category' => $task->category,
+                'color' => $task->color,
+                'is_critical' => (bool) $task->is_critical,
+                'due_at' => $task->due_at?->toIso8601String(),
+                'recurrence' => data_get($task->metadata ?? [], 'recurrence'),
+            ])->values()->all();
+
+        return $this->readToolResult('search_tasks', $items, $workspaceId);
+    }
+
+    private function searchRemindersForTool(ConversationSession $session, array $arguments): array
+    {
+        $workspaceId = $this->toolWorkspaceId($session, $arguments);
+        $query = Reminder::query()->where('user_id', $session->user_id)->where('workspace_id', $workspaceId);
+        if (filled($arguments['status'] ?? null)) {
+            $query->where('status', (string) $arguments['status']);
+        }
+        if (filled($arguments['query'] ?? null)) {
+            $this->whereLooseTitle($query, (string) $arguments['query']);
+        }
+        [$from, $to] = $this->toolDateWindow($arguments);
+        if ($from && $to) {
+            $query->whereBetween('remind_at', [$from, $to]);
+        }
+
+        $items = $query->latest('is_critical')
+            ->orderBy('remind_at')
+            ->limit($this->toolLimit($arguments))
+            ->get(['id', 'title', 'status', 'category', 'color', 'is_critical', 'remind_at', 'metadata'])
+            ->map(fn (Reminder $reminder): array => [
+                'id' => $reminder->id,
+                'title' => $reminder->title,
+                'status' => $reminder->status,
+                'category' => $reminder->category,
+                'color' => $reminder->color,
+                'is_critical' => (bool) $reminder->is_critical,
+                'remind_at' => $reminder->remind_at?->toIso8601String(),
+                'recurrence' => data_get($reminder->metadata ?? [], 'recurrence'),
+            ])->values()->all();
+
+        return $this->readToolResult('search_reminders', $items, $workspaceId);
+    }
+
+    private function searchCalendarEventsForTool(ConversationSession $session, array $arguments): array
+    {
+        $workspaceId = $this->toolWorkspaceId($session, $arguments);
+        $query = CalendarEvent::query()->where('user_id', $session->user_id)->where('workspace_id', $workspaceId);
+        if (filled($arguments['status'] ?? null)) {
+            $query->where('status', (string) $arguments['status']);
+        }
+        if (filled($arguments['query'] ?? null)) {
+            $this->whereLooseTitle($query, (string) $arguments['query']);
+        }
+        [$from, $to] = $this->toolDateWindow($arguments);
+        if ($from && $to) {
+            $query->where(function ($query) use ($from, $to): void {
+                $query->whereBetween('starts_at', [$from, $to])
+                    ->orWhereBetween('ends_at', [$from, $to])
+                    ->orWhere(function ($query) use ($from, $to): void {
+                        $query->where('starts_at', '<=', $from)->where('ends_at', '>=', $to);
+                    });
+            });
+        }
+
+        $items = $query->orderBy('starts_at')
+            ->limit($this->toolLimit($arguments))
+            ->get(['id', 'title', 'category', 'color', 'is_critical', 'recurrence', 'status', 'starts_at', 'ends_at', 'metadata'])
+            ->map(fn (CalendarEvent $event): array => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'category' => $event->category,
+                'color' => $event->color,
+                'is_critical' => (bool) $event->is_critical,
+                'recurrence' => $event->recurrence,
+                'status' => $event->status,
+                'starts_at' => $event->starts_at?->toIso8601String(),
+                'ends_at' => $event->ends_at?->toIso8601String(),
+            ])->values()->all();
+
+        return $this->readToolResult('search_calendar_events', $items, $workspaceId);
+    }
+
+    private function dayContextForTool(ConversationSession $session, array $arguments): array
+    {
+        $date = trim((string) ($arguments['date'] ?? ''));
+        if ($date === '') {
+            return ['ok' => false, 'error_code' => 'missing_date', 'message' => 'A YYYY-MM-DD date is required.'];
+        }
+
+        $arguments['from_date'] = $date;
+        $arguments['to_date'] = $date;
+        $arguments['limit'] = 30;
+        $workspaceId = $this->toolWorkspaceId($session, $arguments);
+
+        return [
+            'ok' => true,
+            'tool' => 'get_day_context',
+            'workspace_id' => $workspaceId,
+            'date' => $date,
+            'tasks' => $this->searchTasksForTool($session, [...$arguments, 'include_completed' => false])['items'],
+            'reminders' => $this->searchRemindersForTool($session, $arguments)['items'],
+            'calendar_events' => $this->searchCalendarEventsForTool($session, $arguments)['items'],
+        ];
+    }
+
+    private function readToolResult(string $tool, array $items, int $workspaceId): array
+    {
+        return [
+            'ok' => true,
+            'tool' => $tool,
+            'workspace_id' => $workspaceId,
+            'count' => count($items),
+            'items' => $items,
+        ];
+    }
+
+    private function toolWorkspaceId(ConversationSession $session, array $arguments): int
+    {
+        $workspaceId = (int) ($arguments['workspace_id'] ?? $arguments['target_workspace_id'] ?? $session->workspace_id);
+        $workspace = Workspace::findOrFail($workspaceId);
+        $actor = User::findOrFail($session->user_id);
+        $this->workspaceService->authorizeMember($actor, $workspace);
+
+        return $workspace->id;
+    }
+
+    private function toolDateWindow(array $arguments): array
+    {
+        $date = trim((string) ($arguments['date'] ?? ''));
+        $fromDate = trim((string) ($arguments['from_date'] ?? ''));
+        $toDate = trim((string) ($arguments['to_date'] ?? ''));
+        if ($date !== '') {
+            $fromDate = $date;
+            $toDate = $date;
+        }
+        if ($fromDate === '' && $toDate === '') {
+            return [null, null];
+        }
+        $fromDate = $fromDate !== '' ? $fromDate : $toDate;
+        $toDate = $toDate !== '' ? $toDate : $fromDate;
+
+        return [
+            \Illuminate\Support\Carbon::parse($fromDate)->startOfDay(),
+            \Illuminate\Support\Carbon::parse($toDate)->endOfDay(),
+        ];
+    }
+
+    private function toolLimit(array $arguments): int
+    {
+        return max(1, min(50, (int) ($arguments['limit'] ?? 12)));
+    }
+
+    private function whereLooseTitle(mixed $query, string $text): void
+    {
+        $terms = collect(preg_split('/\s+/u', mb_strtolower($text)) ?: [])
+            ->map(fn (string $term): string => trim($term, " \t\n\r\0\x0B'\".,!?-"))
+            ->filter(fn (string $term): bool => mb_strlen($term) >= 3)
+            ->unique()
+            ->take(6)
+            ->values();
+
+        if ($terms->isEmpty()) {
+            $query->where('title', 'like', '%'.addcslashes($text, '%_\\').'%');
+            return;
+        }
+
+        $query->where(function ($query) use ($terms, $text): void {
+            $query->where('title', 'like', '%'.addcslashes($text, '%_\\').'%');
+            foreach ($terms as $term) {
+                $query->orWhere('title', 'like', '%'.addcslashes($term, '%_\\').'%');
+            }
+        });
+    }
+
     private function providerApiKey(): string
     {
         return (string) config('services.hermes_runtime.api_key', '');
@@ -492,7 +718,75 @@ class HermesCliRuntimeService implements HermesRuntimeService
 
     private function toolPromptFor(ConversationSession $session, ConversationMessage $message, array $modelRoute): string
     {
-        return "Runtime payload:\n".$this->payloadFor($session, $message, $modelRoute);
+        return json_encode([
+            'runtime_context' => $this->toolContextPayload($session, $message),
+            'message' => $message->content,
+            'message_metadata' => $message->metadata,
+            'route' => $modelRoute,
+        ], JSON_THROW_ON_ERROR);
+    }
+
+    private function toolContextPayload(ConversationSession $session, ConversationMessage $message): array
+    {
+        $user = User::find($session->user_id);
+        $workspace = $this->workspaceForSession($session, $user);
+        $profile = $workspace ? $this->agentProfileService->ensureForWorkspace($workspace, $user) : $this->profileForSession($session);
+        if ($user && $profile) {
+            $user = $this->agentProfileService->syncUserOnboardingFlag($user, $profile);
+        }
+        $profileSettings = $profile->settings ?? [];
+
+        return [
+            'session' => [
+                'id' => $session->id,
+                'workspace_id' => $workspace?->id,
+                'title' => $session->title,
+                'runtime_mode' => $session->runtime_mode,
+            ],
+            'user' => [
+                'id' => $user?->id,
+                'email' => $user?->email,
+                'name' => $user?->name,
+                'onboard_complete' => (bool) ($user?->onboard_complete ?? false),
+            ],
+            'workspace' => $workspace ? [
+                'id' => $workspace->id,
+                'name' => $workspace->name,
+                'type' => $workspace->type,
+                'settings' => $workspace->settings,
+            ] : null,
+            'accessible_workspaces' => $user
+                ? $this->workspaceService->accessibleWorkspaces($user)->map(fn (Workspace $workspace): array => [
+                    'id' => $workspace->id,
+                    'name' => $workspace->name,
+                    'type' => $workspace->type,
+                    'role' => $workspace->getAttribute('role'),
+                ])->values()->all()
+                : [],
+            'agent_profile' => $profile ? [
+                'id' => $profile->id,
+                'workspace_id' => $profile->workspace_id,
+                'provider' => $profile->provider,
+                'model' => $profile->model,
+                'settings' => [
+                    'timezone' => data_get($profileSettings, 'timezone'),
+                    'personality_type' => data_get($profileSettings, 'personality_type'),
+                    'personality_prompt' => data_get($profileSettings, 'personality_prompt'),
+                    'onboarding' => data_get($profileSettings, 'onboarding'),
+                    'memory' => [
+                        'user_preferences' => data_get($profileSettings, 'memory.user_preferences'),
+                    ],
+                ],
+            ] : null,
+            'temporal_context' => [
+                'server_now_utc' => now()->utc()->toIso8601String(),
+                'server_today' => now()->toDateString(),
+                'profile_timezone' => data_get($profileSettings, 'timezone'),
+                'client_context' => is_array(data_get($message->metadata ?? [], 'client_context'))
+                    ? data_get($message->metadata ?? [], 'client_context')
+                    : null,
+            ],
+        ];
     }
 
     private function toolSystemInstructions(): string
@@ -500,23 +794,29 @@ class HermesCliRuntimeService implements HermesRuntimeService
         return <<<'PROMPT'
 You are Bean, a capable human-like assistant inside the Hey Bean app.
 
-Use the provided tools for app changes. Do not describe a dashboard change as complete unless you used the matching tool or the tool result confirms an approval was queued. Respond to the user in natural language only; never output JSON, tool arguments, ids, schema text, or debug text.
+You own intent and conversation. Interpret the user's message naturally, including messy wording, typos, shorthand, and voice transcription errors. Decide whether to answer directly, call read tools, call write tools, or ask one concise follow-up.
 
-Low-risk internal app actions may be done directly with tools: tasks, reminders, calendar events, event categories, approvals, blockers, Bean preferences, conversation metadata, and activity notes. Risky external/destructive actions outside the dashboard should not be performed directly; use approval-oriented tools when available or ask a concise follow-up.
+Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded or an approval was queued.
 
-Existing dashboard resources are in runtime payload dashboard_state. Use ids from dashboard_state when updating, deleting, approving, denying, or resolving. If an id is not available but the user gives a clear name, pass match_title/title so the server can validate a unique match. If several resources could match, ask one short clarifying question.
+Laravel owns app mechanics: workspace access, database writes, validation, syncing, and tool results. Trust tool results. If a read/write tool says not found, ambiguous, blocked, failed, or approval queued, respond naturally from that result.
 
 Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no notes unless the user says otherwise. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
 
-If onboarding is incomplete, run a quick onboarding interview and use update_agent_profile when enough preferences are provided. Adapt tone to agent_profile settings and memory.
+Use the current workspace unless the user clearly names another accessible workspace. Adapt tone to agent_profile settings and memory. If onboarding is incomplete, run a quick onboarding interview and use update_agent_profile when enough preferences are provided.
+
+Respond to the user in natural language only. Never output JSON, tool arguments, ids, schema text, routing details, or debug text.
 PROMPT;
     }
 
     private function nativeToolDefinitions(): array
     {
         return [
+            $this->nativeTool('search_tasks', 'Search tasks in the current or specified workspace. Use this before updating a task when the matching item is not already known.', $this->searchTaskProperties()),
+            $this->nativeTool('search_reminders', 'Search reminders in the current or specified workspace.', $this->searchReminderProperties()),
+            $this->nativeTool('search_calendar_events', 'Search calendar events in the current or specified workspace.', $this->searchCalendarEventProperties()),
+            $this->nativeTool('get_day_context', 'Get tasks, reminders, and calendar events for a specific local date.', $this->dayContextProperties(), ['date']),
             $this->nativeTool('create_task', 'Create a visible task in Hey Bean.', $this->taskProperties(), ['title']),
-            $this->nativeTool('update_task', 'Update one existing task. Prefer id from dashboard_state; otherwise use match_title.', $this->taskProperties(requireId: false)),
+            $this->nativeTool('update_task', 'Update one existing task. Prefer id from search_tasks; otherwise use match_title and Laravel will require a unique match.', $this->taskProperties(requireId: false)),
             $this->nativeTool('delete_task', 'Delete one existing task by id.', $this->idProperties(), ['id']),
             $this->nativeTool('create_reminder', 'Create a visible reminder in Hey Bean.', $this->reminderProperties(), ['title', 'remind_at']),
             $this->nativeTool('update_reminder', 'Update one existing reminder by id.', $this->reminderProperties(requireId: true), ['id']),
@@ -583,6 +883,54 @@ PROMPT;
     private function idProperties(): array
     {
         return ['id' => ['type' => 'integer']];
+    }
+
+    private function searchTaskProperties(): array
+    {
+        return [
+            'query' => ['type' => 'string', 'description' => 'Title or natural words to search for.'],
+            'status' => ['type' => 'string'],
+            'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD local date for due tasks.'],
+            'from_date' => ['type' => 'string'],
+            'to_date' => ['type' => 'string'],
+            'include_completed' => ['type' => 'boolean'],
+            'workspace_id' => ['type' => 'integer'],
+            'limit' => ['type' => 'integer'],
+        ];
+    }
+
+    private function searchReminderProperties(): array
+    {
+        return [
+            'query' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD local date for reminders.'],
+            'from_date' => ['type' => 'string'],
+            'to_date' => ['type' => 'string'],
+            'workspace_id' => ['type' => 'integer'],
+            'limit' => ['type' => 'integer'],
+        ];
+    }
+
+    private function searchCalendarEventProperties(): array
+    {
+        return [
+            'query' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD local date for events overlapping that day.'],
+            'from_date' => ['type' => 'string'],
+            'to_date' => ['type' => 'string'],
+            'workspace_id' => ['type' => 'integer'],
+            'limit' => ['type' => 'integer'],
+        ];
+    }
+
+    private function dayContextProperties(): array
+    {
+        return [
+            'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD local date.'],
+            'workspace_id' => ['type' => 'integer'],
+        ];
     }
 
     private function taskProperties(bool $requireId = false): array

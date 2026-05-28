@@ -1124,11 +1124,112 @@ PHP);
         Http::assertSentCount(2);
         Http::assertSent(function ($request): bool {
             $payload = $request->data();
+            $context = json_decode(str_replace("Runtime context:\n", '', (string) $payload['messages'][1]['content']), true, flags: JSON_THROW_ON_ERROR);
+            $tools = $payload['tools'] ?? [];
 
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && $request->hasHeader('Authorization', 'Bearer test-key')
-                && ($payload['tools'][0]['type'] ?? null) === 'function'
-                && collect($payload['tools'])->contains(fn (array $tool): bool => data_get($tool, 'function.name') === 'update_task');
+                && ($payload['messages'][1]['role'] ?? null) === 'system'
+                && ($payload['messages'][2]['role'] ?? null) === 'user'
+                && ($payload['messages'][2]['content'] ?? null) === 'mark litter box complete'
+                && ! array_key_exists('dashboard_state', $context)
+                && isset($context['temporal_context'], $context['workspace'], $context['agent_profile'])
+                && ($tools[0]['type'] ?? null) === 'function'
+                && collect($tools)->contains(fn (array $tool): bool => data_get($tool, 'function.name') === 'search_tasks')
+                && collect($tools)->contains(fn (array $tool): bool => data_get($tool, 'function.name') === 'update_task');
+        });
+    }
+
+    public function test_tool_runtime_supports_read_tool_before_write_tool(): void
+    {
+        config()->set('services.hermes_runtime.mode', 'tools');
+        config()->set('services.hermes_runtime.default_provider', 'openai');
+        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.api_key', 'test-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-search',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_search',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'search_tasks',
+                                'arguments' => json_encode(['query' => 'cat litter'], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-update',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_update',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'update_task',
+                                'arguments' => json_encode(['match_title' => 'Cat litter', 'status' => 'completed'], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => ['role' => 'assistant', 'content' => 'Done, I checked off Cat litter.'],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-read-runtime@example.com');
+        $user = User::where('email', 'tool-read-runtime@example.com')->firstOrFail();
+        $workspace = app(WorkspaceService::class)->resolveWorkspace($user);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Cat litter',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'cat litter is done',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Done, I checked off Cat litter.')
+            ->assertJsonFragment(['event_type' => 'assistant.task.updated']);
+
+        $this->assertDatabaseHas('tasks', [
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'title' => 'Cat litter',
+            'status' => 'completed',
+        ]);
+
+        Http::assertSentCount(3);
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+            $toolMessages = collect($payload['messages'])->where('role', 'tool');
+
+            return $toolMessages->contains(fn (array $message): bool => str_contains((string) $message['content'], '"tool":"search_tasks"')
+                && str_contains((string) $message['content'], '"title":"Cat litter"'));
         });
     }
 
