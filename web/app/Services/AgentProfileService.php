@@ -205,7 +205,9 @@ class AgentProfileService
 
         $apiKey = trim((string) ($data['tts_openai_api_key'] ?? ''));
         if ($apiKey !== '') {
-            $tts['openai_api_key_encrypted'] = Crypt::encryptString($apiKey);
+            if (! preg_match('/^\*{8,}$/', $apiKey)) {
+                $tts['openai_api_key_encrypted'] = Crypt::encryptString($apiKey);
+            }
         }
 
         $settings['tts'] = $tts;

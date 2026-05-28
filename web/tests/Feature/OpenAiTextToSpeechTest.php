@@ -71,6 +71,29 @@ class OpenAiTextToSpeechTest extends TestCase
         });
     }
 
+    public function test_masked_openai_tts_key_does_not_overwrite_saved_key(): void
+    {
+        $token = $this->apiToken('tts-mask@example.com');
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'tts_provider' => 'openai',
+            'tts_openai_api_key' => 'sk-original-key',
+            'tts_openai_voice' => 'marin',
+        ])->assertOk();
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'tts_provider' => 'openai',
+            'tts_openai_api_key' => '****************',
+            'tts_openai_voice' => 'cedar',
+        ])->assertOk()
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.tts.openai_api_key_configured', true)
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.tts.openai_voice', 'cedar');
+
+        $profile = AgentProfile::query()->whereNotNull('workspace_id')->firstOrFail();
+
+        $this->assertSame('sk-original-key', Crypt::decryptString($profile->settings['tts']['openai_api_key_encrypted']));
+    }
+
     public function test_openai_tts_preferences_and_playback_use_current_workspace(): void
     {
         Http::fake([

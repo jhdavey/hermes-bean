@@ -342,6 +342,28 @@ if (mount) {
         return tts.openai_instructions || tts.openaiInstructions || 'Speak naturally, warmly, and concisely as Bean.';
     }
 
+    function openAiKeyMask() {
+        return '****************';
+    }
+
+    function handleMaskedTtsKeyFocus(event) {
+        const input = event.currentTarget;
+        if (input.value === input.dataset.ttsKeyMask) {
+            input.value = '';
+            input.type = 'password';
+            input.placeholder = 'Paste a new key to replace the saved key';
+        }
+    }
+
+    function maskedOpenAiKeyValue(input, value) {
+        const candidate = String(value || '').trim();
+        if (!candidate || (input?.dataset.ttsKeyMask && candidate === input.dataset.ttsKeyMask)) {
+            return null;
+        }
+
+        return candidate;
+    }
+
     function profileOnboardingComplete(profile = currentAgentProfile()) {
         const onboarding = profileOnboarding(profile);
         return onboarding.completed === true || onboarding.completed === 1 || onboarding.completed === 'true';
@@ -1621,6 +1643,7 @@ if (mount) {
         const ttsKeyConfigured = profileTtsOpenAiConfigured(profile);
         const ttsVoice = profileTtsVoice(profile);
         const ttsInstructions = profileTtsInstructions(profile);
+        const ttsKeyMask = ttsKeyConfigured ? openAiKeyMask() : '';
         const options = ['balanced', 'coach', 'organizer', 'creative'];
         const voices = ['coral', 'marin', 'cedar', 'alloy', 'ash', 'ballad', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
         return `
@@ -1642,7 +1665,7 @@ if (mount) {
                         </select></label>
                         <div class="hb-field-row">
                             <label class="hb-label">OpenAI voice<select class="hb-select" name="ttsOpenAiVoice">${voices.map((voice) => `<option value="${voice}" ${voice === ttsVoice ? 'selected' : ''}>${capitalize(voice)}</option>`).join('')}</select></label>
-                            <label class="hb-label">OpenAI API key<input class="hb-input" type="password" name="ttsOpenAiKey" placeholder="${ttsKeyConfigured ? 'Saved - leave blank to keep' : 'sk-...'}" autocomplete="off"></label>
+                            <label class="hb-label">OpenAI API key<input class="hb-input" type="${ttsKeyConfigured ? 'text' : 'password'}" name="ttsOpenAiKey" value="${escapeAttr(ttsKeyMask)}" placeholder="${ttsKeyConfigured ? 'Saved - replace to update' : 'sk-...'}" autocomplete="off" ${ttsKeyConfigured ? `data-tts-key-mask="${escapeAttr(ttsKeyMask)}"` : ''}></label>
                         </div>
                         <label class="hb-label">OpenAI voice style<textarea class="hb-textarea hb-tts-style" name="ttsOpenAiInstructions" placeholder="Example: Warm, natural, concise, and lightly upbeat.">${escapeHtml(ttsInstructions)}</textarea></label>
                         ${ttsKeyConfigured ? '<label class="hb-checkbox-row"><input type="checkbox" name="ttsClearOpenAiKey" value="1"> Remove saved OpenAI API key</label>' : ''}
@@ -1944,6 +1967,7 @@ if (mount) {
         mount.querySelectorAll('[data-category-row]').forEach((form) => form.addEventListener('submit', saveCategoryRow));
         mount.querySelectorAll('[data-delete-category]').forEach((button) => button.addEventListener('click', () => deleteCategory(button.dataset.deleteCategory)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
+        mount.querySelectorAll('[data-tts-key-mask]').forEach((input) => input.addEventListener('focus', handleMaskedTtsKeyFocus, { once: true }));
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventTimeInputs);
         mount.querySelectorAll('[data-primary-workspace-select]').forEach((select) => select.addEventListener('change', handlePrimaryWorkspaceChange));
         mount.querySelectorAll('[data-recurrence-select]').forEach((select) => {
@@ -2144,6 +2168,8 @@ if (mount) {
                 state.user = await api('/auth/me', { method: 'PATCH', body: { email: data.email } });
             } else if (kind === 'agent') {
                 const priorities = Array.from(form.querySelectorAll('input[name="priorities"]:checked')).map((input) => input.value);
+                const ttsKeyInput = form.querySelector('input[name="ttsOpenAiKey"]');
+                const ttsOpenAiKey = maskedOpenAiKeyValue(ttsKeyInput, data.ttsOpenAiKey);
                 state.user = await api('/auth/me', {
                     method: 'PATCH',
                     body: {
@@ -2151,7 +2177,7 @@ if (mount) {
                         onboarding_priorities: priorities,
                         onboarding_context: data.context || null,
                         tts_provider: data.ttsProvider || 'browser',
-                        tts_openai_api_key: data.ttsOpenAiKey || null,
+                        tts_openai_api_key: ttsOpenAiKey || null,
                         tts_clear_openai_key: data.ttsClearOpenAiKey === '1',
                         tts_openai_voice: data.ttsOpenAiVoice || 'coral',
                         tts_openai_instructions: data.ttsOpenAiInstructions || null,
