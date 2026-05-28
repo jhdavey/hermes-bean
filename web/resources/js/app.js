@@ -105,6 +105,7 @@ if (mount) {
     let kioskMicrophoneReady = false;
     let kioskAudioUnlocked = false;
     let kioskAudioContext = null;
+    let kioskLastTtsError = '';
     let chatRequestCounter = 0;
     let activeChatRequestId = 0;
     const cancelledChatRequestIds = new Set();
@@ -876,7 +877,8 @@ if (mount) {
 
     function kioskVoiceToggleMarkup() {
         const enabled = state.kioskVoiceEnabled;
-        return `<button class="hb-icon-button hb-kiosk-toggle ${enabled ? 'hb-icon-button-active' : ''}" type="button" data-toggle-kiosk-voice aria-label="${enabled ? 'Turn off kiosk voice' : 'Turn on kiosk voice'}" title="${enabled ? 'Kiosk voice on' : 'Kiosk voice off'}" aria-pressed="${enabled}">${icons.mic}</button>`;
+        const needsOpenAiAudio = enabled && profileTtsProvider() === 'openai' && !kioskAudioUnlocked;
+        return `<button class="hb-icon-button hb-kiosk-toggle ${enabled ? 'hb-icon-button-active' : ''}" type="button" data-toggle-kiosk-voice aria-label="${needsOpenAiAudio ? 'Enable OpenAI voice audio' : enabled ? 'Turn off kiosk voice' : 'Turn on kiosk voice'}" title="${needsOpenAiAudio ? 'Tap to enable OpenAI voice audio' : enabled ? 'Kiosk voice on' : 'Kiosk voice off'}" aria-pressed="${enabled}">${icons.mic}</button>`;
     }
 
     function todayTasksMarkup() {
@@ -2979,7 +2981,11 @@ if (mount) {
 
         recognition.onstart = () => {
             kioskRecognitionActive = true;
-            setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'say hey bean');
+            const needsOpenAiAudio = profileTtsProvider() === 'openai' && profileTtsOpenAiConfigured() && !kioskAudioUnlocked;
+            setKioskVoiceStatus(
+                kioskConversationActive ? 'listening' : needsOpenAiAudio ? 'error' : 'armed',
+                kioskConversationActive ? 'listening' : needsOpenAiAudio ? 'tap mic to enable OpenAI voice' : 'say hey bean'
+            );
         };
         recognition.onresult = (event) => {
             if (state.busy && kioskCancelRequested(speechTranscript(event, { fromResultIndex: true }))) {
@@ -3248,8 +3254,12 @@ if (mount) {
             } else {
                 const spoken = await speakKioskResponse(assistantContent);
                 if (!spoken) {
-                    setKioskVoiceStatus('responding', 'responded');
-                    await sleep(900);
+                    if (profileTtsProvider() === 'openai' && kioskLastTtsError) {
+                        await sleep(4500);
+                    } else {
+                        setKioskVoiceStatus('responding', 'responded');
+                        await sleep(900);
+                    }
                 }
             }
         } catch (error) {
@@ -3318,27 +3328,22 @@ if (mount) {
         if (profileTtsProvider() === 'openai') {
             if (!profileTtsOpenAiConfigured()) {
                 setKioskVoiceStatus('responding', 'save OpenAI voice key');
-                return sleep(900).then(() => speakBrowserTts(text));
+                return false;
             }
-            return playOpenAiTts(text).then(async (played) => {
-                if (played) return true;
-                await sleep(900);
-                setKioskVoiceStatus('responding', 'browser voice fallback');
-                return speakBrowserTts(text);
-            });
+            return playOpenAiTts(text);
         }
         return speakBrowserTts(text);
-    }
-
-    function openAiTtsEnabled() {
-        return profileTtsProvider() === 'openai' && profileTtsOpenAiConfigured();
     }
 
     async function playOpenAiTts(text) {
         if (!text) return false;
         let url = '';
         try {
-            setKioskVoiceStatus('responding', 'responding');
+            kioskLastTtsError = '';
+            if (!await ensureOpenAiAudioUnlocked()) {
+                throw new Error('audio_not_unlocked');
+            }
+            setKioskVoiceStatus('responding', 'OpenAI voice');
             const response = await fetch('/api/assistant/tts', {
                 method: 'POST',
                 headers: {
@@ -3350,10 +3355,14 @@ if (mount) {
             });
             if (!response.ok) {
                 const payload = await response.json().catch(() => null);
-                setKioskVoiceStatus('responding', payload?.message || 'OpenAI voice unavailable');
+                rememberOpenAiTtsError(payload?.message || 'OpenAI voice unavailable');
                 return false;
             }
             const audioBuffer = await response.arrayBuffer();
+            if (!audioBuffer.byteLength) {
+                rememberOpenAiTtsError('OpenAI voice returned empty audio');
+                return false;
+            }
             if (await playOpenAiAudioBuffer(audioBuffer)) return true;
             const blob = new Blob([audioBuffer], { type: response.headers.get('Content-Type') || 'audio/wav' });
             url = URL.createObjectURL(blob);
@@ -3366,11 +3375,25 @@ if (mount) {
             });
             return true;
         } catch (error) {
-            setKioskVoiceStatus('responding', error?.name === 'NotAllowedError' ? 'tap mic to allow OpenAI voice' : 'OpenAI voice could not play');
+            const message = error?.message === 'audio_not_unlocked' || error?.name === 'NotAllowedError'
+                ? 'tap mic to enable OpenAI voice'
+                : `OpenAI voice playback failed${error?.name ? `: ${error.name}` : ''}`;
+            rememberOpenAiTtsError(message);
             return false;
         } finally {
             if (url) URL.revokeObjectURL(url);
         }
+    }
+
+    async function ensureOpenAiAudioUnlocked() {
+        if (kioskAudioUnlocked && (!kioskAudioContext || kioskAudioContext.state === 'running')) return true;
+        await unlockKioskAudio();
+        return kioskAudioUnlocked && (!kioskAudioContext || kioskAudioContext.state === 'running');
+    }
+
+    function rememberOpenAiTtsError(message) {
+        kioskLastTtsError = message || 'OpenAI voice unavailable';
+        setKioskVoiceStatus('error', kioskLastTtsError);
     }
 
     async function playOpenAiAudioBuffer(arrayBuffer) {
@@ -3403,27 +3426,34 @@ if (mount) {
     async function unlockKioskAudio() {
         if (kioskAudioUnlocked) return true;
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        let webAudioUnlocked = false;
         try {
             if (AudioContextClass) {
                 kioskAudioContext ??= new AudioContextClass();
                 if (kioskAudioContext.state === 'suspended') {
                     await kioskAudioContext.resume();
                 }
-                const source = kioskAudioContext.createBufferSource();
-                const gain = kioskAudioContext.createGain();
-                source.buffer = kioskAudioContext.createBuffer(1, 1, kioskAudioContext.sampleRate);
-                gain.gain.value = 0;
-                source.connect(gain);
-                gain.connect(kioskAudioContext.destination);
-                source.start(0);
+                if (kioskAudioContext.state === 'running') {
+                    const source = kioskAudioContext.createBufferSource();
+                    const gain = kioskAudioContext.createGain();
+                    source.buffer = kioskAudioContext.createBuffer(1, 1, kioskAudioContext.sampleRate);
+                    gain.gain.value = 0;
+                    source.connect(gain);
+                    gain.connect(kioskAudioContext.destination);
+                    source.start(0);
+                    webAudioUnlocked = true;
+                }
             }
             const audio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=');
             audio.muted = true;
             audio.playsInline = true;
-            await audio.play();
+            await audio.play().catch((error) => {
+                if (!webAudioUnlocked) throw error;
+            });
             kioskAudioUnlocked = true;
             return true;
         } catch (error) {
+            kioskAudioUnlocked = false;
             return false;
         }
     }
@@ -3461,7 +3491,16 @@ if (mount) {
         return 'voice paused';
     }
 
-    function toggleKioskVoiceMode() {
+    async function toggleKioskVoiceMode() {
+        if (state.kioskVoiceEnabled && profileTtsProvider() === 'openai' && !kioskAudioUnlocked) {
+            const unlocked = await unlockKioskAudio();
+            setKioskVoiceStatus(unlocked ? 'armed' : 'error', unlocked ? 'OpenAI voice ready' : 'tap mic to enable OpenAI voice');
+            render();
+            if (unlocked && (!kioskRecognition && !kioskRecognitionActive)) {
+                startKioskVoiceMode({ requestPermission: true });
+            }
+            return;
+        }
         state.kioskVoiceEnabled = !state.kioskVoiceEnabled;
         if (state.kioskVoiceEnabled) {
             localStorage.setItem(kioskVoiceKey, 'true');
@@ -3469,7 +3508,7 @@ if (mount) {
             state.kioskVoicePhase = 'idle';
             state.kioskVoiceMessage = '';
             render();
-            unlockKioskAudio();
+            await unlockKioskAudio();
             startKioskVoiceMode({ requestPermission: true });
             return;
         }

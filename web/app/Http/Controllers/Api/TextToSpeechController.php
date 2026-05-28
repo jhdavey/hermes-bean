@@ -65,12 +65,16 @@ class TextToSpeechController extends Controller
             return response()->json([
                 'message' => 'OpenAI text-to-speech failed. Check the saved API key and billing for this workspace.',
                 'code' => 'openai_tts_failed',
+                'status' => $response->status(),
             ], 502);
         }
 
         return response($response->body(), 200, [
-            'Content-Type' => $response->header('Content-Type') ?: 'audio/mpeg',
+            'Content-Type' => $response->header('Content-Type') ?: 'audio/wav',
             'Cache-Control' => 'no-store',
+            'X-HeyBean-TTS-Provider' => 'openai',
+            'X-HeyBean-TTS-Workspace' => (string) $workspace->id,
+            'X-HeyBean-TTS-Voice' => (string) ($data['voice'] ?? $tts['openai_voice'] ?? 'coral'),
         ]);
     }
 }

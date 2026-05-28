@@ -165,8 +165,7 @@ class AuthController extends Controller
                 $profile = $profile->refresh();
             }
             if ($ttsData !== []) {
-                $profiles->updateTextToSpeechSettingsForUser($user->fresh(), $data);
-                $profile = $profiles->ensureForWorkspace($activeWorkspace, $user)->refresh();
+                $profile = $profiles->updateTextToSpeechSettings($profile, $data);
             }
             $user->unsetRelation('agentProfile');
         }
