@@ -67,4 +67,45 @@ class OpenAiTextToSpeechTest extends TestCase
                 && $request['input'] === 'Hello from Bean.';
         });
     }
+
+    public function test_openai_tts_preferences_and_playback_can_target_visible_workspace(): void
+    {
+        Http::fake([
+            'api.openai.com/v1/audio/speech' => Http::response('workspace-mp3', 200, ['Content-Type' => 'audio/mpeg']),
+        ]);
+
+        $token = $this->apiToken('tts-workspace@example.com');
+        $householdId = $this->withToken($token)->postJson('/api/workspaces', [
+            'name' => 'Household',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'workspace_id' => $householdId,
+            'tts_provider' => 'openai',
+            'tts_openai_api_key' => 'sk-household-key',
+            'tts_openai_voice' => 'coral',
+            'tts_openai_instructions' => 'Sound calm and natural.',
+        ])->assertOk();
+
+        $householdProfile = AgentProfile::query()->where('workspace_id', $householdId)->firstOrFail();
+        $personalProfile = AgentProfile::query()->whereNotNull('workspace_id')->where('workspace_id', '!=', $householdId)->firstOrFail();
+        $personalTts = $personalProfile->settings['tts'] ?? [];
+
+        $this->assertSame('openai', $householdProfile->settings['tts']['provider']);
+        $this->assertSame('sk-household-key', Crypt::decryptString($householdProfile->settings['tts']['openai_api_key_encrypted']));
+        $this->assertNotSame('openai', $personalTts['provider'] ?? 'browser');
+
+        $this->withToken($token)->postJson('/api/assistant/tts', [
+            'workspace_id' => $householdId,
+            'text' => 'Hello from the household workspace.',
+        ])->assertOk()
+            ->assertHeader('Content-Type', 'audio/mpeg');
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.openai.com/v1/audio/speech'
+                && $request->hasHeader('Authorization', 'Bearer sk-household-key')
+                && $request['voice'] === 'coral'
+                && $request['instructions'] === 'Sound calm and natural.';
+        });
+    }
 }

@@ -133,6 +133,7 @@ class AuthController extends Controller
             'tts_clear_openai_key' => ['sometimes', 'boolean'],
             'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
             'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
             'notification_preferences' => ['sometimes', 'array'],
             'notification_preferences.reminder_push' => ['sometimes', 'boolean'],
             'notification_preferences.reminder_email' => ['sometimes', 'boolean'],
@@ -155,7 +156,7 @@ class AuthController extends Controller
 
         if ($profileData !== [] || $ttsData !== []) {
             $workspaceService = app(WorkspaceService::class);
-            $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh());
+            $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh(), $data['workspace_id'] ?? null);
             $profile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
             $profiles = app(AgentProfileService::class);
             if ($profileData !== []) {

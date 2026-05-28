@@ -277,8 +277,9 @@ if (mount) {
     }
 
     function currentAgentProfile() {
-        return currentAgentProfileFromUser(state.user)
-            || state.summary?.agent_profile
+        return state.summary?.agent_profile
+            || state.summary?.agentProfile
+            || currentAgentProfileFromUser(state.user)
             || {};
     }
 
@@ -1622,6 +1623,7 @@ if (mount) {
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="agent">
                     ${sectionTitle(icons.tune, 'Edit Bean preferences', 'Review the current settings and save only what you want to change.')}
+                    <input type="hidden" name="workspaceId" value="${escapeAttr(currentWorkspaceId() || '')}">
                     <label class="hb-label">Choose Bean’s personality<select class="hb-select" name="personality">${options.map((option) => `<option value="${option}" ${option === personality ? 'selected' : ''}>${personalityLabel(option)}</option>`).join('')}</select></label>
                     <div class="hb-label">What should Bean prioritize?
                         <div class="hb-tabs">${['Work', 'Family', 'Health', 'Planning', 'Reminders', 'Focus'].map((priority) => `<label class="hb-chip"><input type="checkbox" name="priorities" value="${priority}" ${priorities.has(priority) ? 'checked' : ''}> ${priority}</label>`).join('')}</div>
@@ -2149,11 +2151,10 @@ if (mount) {
                         tts_clear_openai_key: data.ttsClearOpenAiKey === '1',
                         tts_openai_voice: data.ttsOpenAiVoice || 'coral',
                         tts_openai_instructions: data.ttsOpenAiInstructions || null,
+                        workspace_id: data.workspaceId ? Number(data.workspaceId) : null,
                     },
                 });
-                if (state.summary) {
-                    state.summary.agent_profile = currentAgentProfileFromUser(state.user);
-                }
+                await refreshOnly(false);
             } else if (kind === 'workspace-create') {
                 await api('/workspaces', { method: 'POST', body: { name: data.name } });
                 await loadSignedIn();
@@ -3313,12 +3314,7 @@ if (mount) {
     function speakKioskResponse(content) {
         const text = speechTextFromAssistant(content);
         if (openAiTtsEnabled()) {
-            return playOpenAiTts(text).then(async (played) => {
-                if (played) return true;
-                setKioskVoiceStatus('responding', 'browser voice');
-                await sleep(350);
-                return speakBrowserTts(text);
-            });
+            return playOpenAiTts(text);
         }
         return speakBrowserTts(text);
     }
@@ -3339,10 +3335,11 @@ if (mount) {
                     'Content-Type': 'application/json',
                     ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
                 },
-                body: JSON.stringify({ text, voice: profileTtsVoice() }),
+                body: JSON.stringify({ text, voice: profileTtsVoice(), workspace_id: currentWorkspaceId() || null }),
             });
             if (!response.ok) {
-                await response.json().catch(() => null);
+                const payload = await response.json().catch(() => null);
+                setKioskVoiceStatus('responding', payload?.message || 'OpenAI voice unavailable');
                 return false;
             }
             const blob = await response.blob();
@@ -3355,6 +3352,7 @@ if (mount) {
             });
             return true;
         } catch (error) {
+            setKioskVoiceStatus('responding', 'OpenAI voice could not play');
             return false;
         } finally {
             if (url) URL.revokeObjectURL(url);
@@ -4022,7 +4020,7 @@ if (mount) {
     }
 
     function currentWorkspaceId() {
-        return state.user?.active_workspace?.id || state.user?.activeWorkspace?.id || state.summary?.workspace?.id || workspaces().find((workspace) => workspace.active || workspace.is_default || workspace.isDefault)?.id || workspaces()[0]?.id || '';
+        return state.summary?.workspace?.id || state.summary?.workspaceId || state.user?.active_workspace?.id || state.user?.activeWorkspace?.id || workspaces().find((workspace) => workspace.active || workspace.is_default || workspace.isDefault)?.id || workspaces()[0]?.id || '';
     }
 
     function workspaceDisplayName(workspace = {}) {

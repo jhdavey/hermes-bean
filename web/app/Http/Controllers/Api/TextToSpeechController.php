@@ -8,6 +8,7 @@ use App\Services\WorkspaceService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 class TextToSpeechController extends Controller
@@ -17,17 +18,22 @@ class TextToSpeechController extends Controller
         $data = $request->validate([
             'text' => ['required', 'string', 'max:2000'],
             'voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
+            'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
         ]);
 
         $user = $request->user();
-        $workspace = app(WorkspaceService::class)->resolveWorkspace($user);
+        $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $data['workspace_id'] ?? null);
         $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
         $settings = $profile->settings ?? [];
         $tts = is_array($settings['tts'] ?? null) ? $settings['tts'] : [];
         $encryptedKey = (string) ($tts['openai_api_key_encrypted'] ?? '');
 
         if (($tts['provider'] ?? 'browser') !== 'openai' || $encryptedKey === '') {
-            return response()->json(['message' => 'OpenAI text-to-speech is not configured.'], 409);
+            return response()->json([
+                'message' => 'OpenAI text-to-speech is not configured for this workspace.',
+                'code' => 'openai_tts_not_configured',
+                'workspace_id' => $workspace->id,
+            ], 409);
         }
 
         try {
@@ -49,8 +55,16 @@ class TextToSpeechController extends Controller
             ]);
 
         if (! $response->successful()) {
+            Log::warning('OpenAI text-to-speech failed.', [
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'status' => $response->status(),
+                'body' => str($response->body())->limit(500)->toString(),
+            ]);
+
             return response()->json([
-                'message' => 'OpenAI text-to-speech failed. Browser speech will be used instead.',
+                'message' => 'OpenAI text-to-speech failed. Check the saved API key and billing for this workspace.',
+                'code' => 'openai_tts_failed',
             ], 502);
         }
 
