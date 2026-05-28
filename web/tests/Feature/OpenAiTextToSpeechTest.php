@@ -44,7 +44,7 @@ class OpenAiTextToSpeechTest extends TestCase
     public function test_openai_tts_endpoint_uses_saved_user_key(): void
     {
         Http::fake([
-            'api.openai.com/v1/audio/speech' => Http::response('fake-mp3', 200, ['Content-Type' => 'audio/mpeg']),
+            'api.openai.com/v1/audio/speech' => Http::response('fake-wav', 200, ['Content-Type' => 'audio/wav']),
         ]);
 
         $token = $this->apiToken('tts-endpoint@example.com');
@@ -57,21 +57,22 @@ class OpenAiTextToSpeechTest extends TestCase
         $this->withToken($token)->postJson('/api/assistant/tts', [
             'text' => 'Hello from Bean.',
         ])->assertOk()
-            ->assertHeader('Content-Type', 'audio/mpeg');
+            ->assertHeader('Content-Type', 'audio/wav');
 
         Http::assertSent(function ($request): bool {
             return $request->url() === 'https://api.openai.com/v1/audio/speech'
                 && $request->hasHeader('Authorization', 'Bearer sk-endpoint-key')
                 && $request['model'] === 'gpt-4o-mini-tts'
                 && $request['voice'] === 'cedar'
-                && $request['input'] === 'Hello from Bean.';
+                && $request['input'] === 'Hello from Bean.'
+                && $request['response_format'] === 'wav';
         });
     }
 
     public function test_openai_tts_preferences_and_playback_can_target_visible_workspace(): void
     {
         Http::fake([
-            'api.openai.com/v1/audio/speech' => Http::response('workspace-mp3', 200, ['Content-Type' => 'audio/mpeg']),
+            'api.openai.com/v1/audio/speech' => Http::response('workspace-wav', 200, ['Content-Type' => 'audio/wav']),
         ]);
 
         $token = $this->apiToken('tts-workspace@example.com');
@@ -93,13 +94,14 @@ class OpenAiTextToSpeechTest extends TestCase
 
         $this->assertSame('openai', $householdProfile->settings['tts']['provider']);
         $this->assertSame('sk-household-key', Crypt::decryptString($householdProfile->settings['tts']['openai_api_key_encrypted']));
-        $this->assertNotSame('openai', $personalTts['provider'] ?? 'browser');
+        $this->assertSame('openai', $personalTts['provider'] ?? 'browser');
+        $this->assertSame('sk-household-key', Crypt::decryptString($personalTts['openai_api_key_encrypted']));
 
         $this->withToken($token)->postJson('/api/assistant/tts', [
             'workspace_id' => $householdId,
             'text' => 'Hello from the household workspace.',
         ])->assertOk()
-            ->assertHeader('Content-Type', 'audio/mpeg');
+            ->assertHeader('Content-Type', 'audio/wav');
 
         Http::assertSent(function ($request): bool {
             return $request->url() === 'https://api.openai.com/v1/audio/speech'

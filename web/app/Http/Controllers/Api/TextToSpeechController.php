@@ -44,14 +44,14 @@ class TextToSpeechController extends Controller
 
         $response = Http::withToken($apiKey)
             ->asJson()
-            ->accept('audio/mpeg')
+            ->accept('audio/wav')
             ->timeout(25)
             ->post('https://api.openai.com/v1/audio/speech', [
                 'model' => 'gpt-4o-mini-tts',
                 'voice' => (string) ($data['voice'] ?? $tts['openai_voice'] ?? 'coral'),
                 'input' => str($data['text'])->squish()->limit(2000, '')->toString(),
                 'instructions' => (string) ($tts['openai_instructions'] ?? 'Speak naturally, warmly, and concisely as Bean.'),
-                'response_format' => 'mp3',
+                'response_format' => 'wav',
             ]);
 
         if (! $response->successful()) {

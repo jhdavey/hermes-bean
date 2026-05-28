@@ -104,6 +104,7 @@ if (mount) {
     let kioskConversationTimer = 0;
     let kioskMicrophoneReady = false;
     let kioskAudioUnlocked = false;
+    let kioskAudioContext = null;
     let chatRequestCounter = 0;
     let activeChatRequestId = 0;
     const cancelledChatRequestIds = new Set();
@@ -3314,7 +3315,11 @@ if (mount) {
 
     function speakKioskResponse(content) {
         const text = speechTextFromAssistant(content);
-        if (openAiTtsEnabled()) {
+        if (profileTtsProvider() === 'openai') {
+            if (!profileTtsOpenAiConfigured()) {
+                setKioskVoiceStatus('responding', 'save OpenAI voice key');
+                return sleep(900).then(() => speakBrowserTts(text));
+            }
             return playOpenAiTts(text).then(async (played) => {
                 if (played) return true;
                 await sleep(900);
@@ -3337,7 +3342,7 @@ if (mount) {
             const response = await fetch('/api/assistant/tts', {
                 method: 'POST',
                 headers: {
-                    Accept: 'audio/mpeg',
+                    Accept: 'audio/wav',
                     'Content-Type': 'application/json',
                     ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
                 },
@@ -3348,7 +3353,9 @@ if (mount) {
                 setKioskVoiceStatus('responding', payload?.message || 'OpenAI voice unavailable');
                 return false;
             }
-            const blob = await response.blob();
+            const audioBuffer = await response.arrayBuffer();
+            if (await playOpenAiAudioBuffer(audioBuffer)) return true;
+            const blob = new Blob([audioBuffer], { type: response.headers.get('Content-Type') || 'audio/wav' });
             url = URL.createObjectURL(blob);
             const audio = new Audio(url);
             audio.playsInline = true;
@@ -3366,9 +3373,50 @@ if (mount) {
         }
     }
 
+    async function playOpenAiAudioBuffer(arrayBuffer) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass || !arrayBuffer?.byteLength) return false;
+        try {
+            kioskAudioContext ??= new AudioContextClass();
+            if (kioskAudioContext.state === 'suspended') {
+                await kioskAudioContext.resume();
+            }
+            if (kioskAudioContext.state !== 'running') return false;
+            const decoded = await kioskAudioContext.decodeAudioData(arrayBuffer.slice(0));
+            await new Promise((resolve, reject) => {
+                const source = kioskAudioContext.createBufferSource();
+                source.buffer = decoded;
+                source.connect(kioskAudioContext.destination);
+                source.onended = resolve;
+                try {
+                    source.start(0);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
     async function unlockKioskAudio() {
         if (kioskAudioUnlocked) return true;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         try {
+            if (AudioContextClass) {
+                kioskAudioContext ??= new AudioContextClass();
+                if (kioskAudioContext.state === 'suspended') {
+                    await kioskAudioContext.resume();
+                }
+                const source = kioskAudioContext.createBufferSource();
+                const gain = kioskAudioContext.createGain();
+                source.buffer = kioskAudioContext.createBuffer(1, 1, kioskAudioContext.sampleRate);
+                gain.gain.value = 0;
+                source.connect(gain);
+                gain.connect(kioskAudioContext.destination);
+                source.start(0);
+            }
             const audio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=');
             audio.muted = true;
             audio.playsInline = true;

@@ -59,6 +59,10 @@ class AgentProfileService
             $this->defaultsForWorkspace($workspace, $owner)
         );
 
+        if ($profile->wasRecentlyCreated) {
+            $this->inheritTextToSpeechSettings($profile, $owner);
+        }
+
         $this->bootstrapRuntimeHome($profile);
 
         return $profile;
@@ -212,6 +216,37 @@ class AgentProfileService
         $profile->forceFill(['settings' => $settings])->save();
 
         return $profile->refresh();
+    }
+
+    public function updateTextToSpeechSettingsForUser(User $user, array $data): void
+    {
+        $workspaces = app(WorkspaceService::class)->accessibleWorkspaces($user);
+
+        foreach ($workspaces as $workspace) {
+            $this->updateTextToSpeechSettings($this->ensureForWorkspace($workspace, $user), $data);
+        }
+    }
+
+    private function inheritTextToSpeechSettings(AgentProfile $profile, User $user): void
+    {
+        $source = AgentProfile::query()
+            ->where('user_id', $user->id)
+            ->where('workspace_id', '!=', $profile->workspace_id)
+            ->get()
+            ->first(function (AgentProfile $candidate): bool {
+                $tts = data_get($candidate->settings, 'tts', []);
+
+                return is_array($tts) && (($tts['provider'] ?? null) === 'openai' || ! empty($tts['openai_api_key_encrypted']));
+            });
+
+        $tts = data_get($source?->settings, 'tts');
+        if (! is_array($tts) || $tts === []) {
+            return;
+        }
+
+        $settings = $profile->settings ?? [];
+        $settings['tts'] = $tts;
+        $profile->forceFill(['settings' => $settings])->save();
     }
 
     public function publicSettings(array $settings): array
