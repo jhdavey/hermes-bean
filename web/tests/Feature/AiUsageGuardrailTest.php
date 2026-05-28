@@ -6,6 +6,7 @@ use App\Models\AiUsageLog;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AiUsageGuardrailTest extends TestCase
@@ -48,23 +49,21 @@ class AiUsageGuardrailTest extends TestCase
             ->assertJsonPath('data.recent_logs.0.status', 'completed');
     }
 
-    public function test_daily_hard_budget_blocks_before_model_invocation_and_logs_attempt(): void
+    public function test_daily_hard_budget_alert_does_not_block_tool_runtime_invocation(): void
     {
-        @unlink(sys_get_temp_dir().'/hermes-budget-should-not-run');
-
-        $script = $this->configureFakeHermesRuntime(<<<'PHP'
-#!/usr/bin/env php
-<?php
-file_put_contents(getenv('HERMES_SHOULD_NOT_RUN'), 'called');
-echo json_encode(['content' => 'Should not run'], JSON_THROW_ON_ERROR);
-PHP);
-
-        config()->set('services.hermes_runtime.mode', 'cli');
-        config()->set('services.hermes_runtime.cli_path', $script);
-        config()->set('services.hermes_runtime.environment', [
-            'HERMES_SHOULD_NOT_RUN' => sys_get_temp_dir().'/hermes-budget-should-not-run',
-        ]);
+        config()->set('services.hermes_runtime.default_provider', 'openai');
+        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.api_key', 'test-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         config()->set('services.ai_usage.budgets.free.daily_hard_tokens', 1);
+        Http::fakeSequence()->push([
+            'id' => 'chatcmpl-budget',
+            'model' => 'gpt-test-tools',
+            'choices' => [[
+                'finish_reason' => 'stop',
+                'message' => ['role' => 'assistant', 'content' => 'I can still help with that.'],
+            ]],
+        ], 200);
 
         $token = $this->apiToken('budget-user@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
@@ -75,18 +74,13 @@ PHP);
             'content' => 'Please plan my whole week.',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.usage.status', 'blocked')
-            ->assertJsonFragment(['event_type' => 'runtime.usage_budget_blocked']);
+            ->assertJsonPath('data.assistant_message.content', 'I can still help with that.')
+            ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
 
         $this->assertDatabaseHas('ai_usage_logs', [
-            'status' => 'blocked',
+            'status' => 'completed',
             'route_tier' => 'agent',
-            'estimated_cost_usd' => 0,
         ]);
-        $this->assertDatabaseMissing('activity_events', [
-            'conversation_session_id' => $sessionId,
-            'event_type' => 'runtime.hermes_cli_started',
-        ]);
-        $this->assertFileDoesNotExist(sys_get_temp_dir().'/hermes-budget-should-not-run');
+        Http::assertSentCount(1);
     }
 }

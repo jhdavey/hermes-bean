@@ -329,16 +329,8 @@ class AssistantDomainApiTest extends TestCase
 
     public function test_agent_can_update_calendar_event_metadata_and_create_event_reminder(): void
     {
-        $this->configureFakeHermes(<<<'PHP'
-#!/usr/bin/env php
-<?php
-echo json_encode([
-    'message' => 'Updated the event and added a reminder.',
-    'actions' => [
-        [
-            'type' => 'calendar_event.update',
-            'risk' => 'low',
-            'parameters' => [
+        $this->fakeAgentToolCalls([
+            $this->toolCall('call_event', 'update_calendar_event', [
                 'id' => 1,
                 'title' => 'Updated design review',
                 'starts_at' => '2026-05-14T17:00:00Z',
@@ -346,20 +338,13 @@ echo json_encode([
                 'category' => 'Work',
                 'color' => '#FF9500',
                 'recurrence' => 'weekly',
-            ],
-        ],
-        [
-            'type' => 'reminder.create',
-            'risk' => 'low',
-            'parameters' => [
+            ]),
+            $this->toolCall('call_reminder', 'create_reminder', [
                 'calendar_event_id' => 1,
                 'title' => 'Prep for updated design review',
                 'remind_at' => '2026-05-14T16:45:00Z',
-            ],
-        ],
-    ],
-], JSON_THROW_ON_ERROR);
-PHP);
+            ]),
+        ], 'Updated the event and added a reminder.');
 
         $token = $this->apiToken();
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
@@ -392,23 +377,12 @@ PHP);
     public function test_agent_can_move_named_calendar_event_from_relative_source_day_without_id(): void
     {
         Carbon::setTestNow('2026-05-19T19:09:00Z');
-        $this->configureFakeHermes(<<<'PHP'
-#!/usr/bin/env php
-<?php
-echo json_encode([
-    'message' => 'Quick Lunch is moved to next Monday at 12:00 PM.',
-    'actions' => [
-        [
-            'type' => 'calendar_event.update',
-            'risk' => 'low',
-            'parameters' => [
+        $this->fakeAgentToolCalls([
+            $this->toolCall('call_event', 'update_calendar_event', [
                 'match_title' => 'lunch',
                 'starts_at' => '2026-05-25T12:00:00-04:00',
-            ],
-        ],
-    ],
-], JSON_THROW_ON_ERROR);
-PHP);
+            ]),
+        ], 'Quick Lunch is moved to next Monday at 12:00 PM.');
 
         $token = $this->apiToken();
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
@@ -451,24 +425,13 @@ PHP);
     public function test_agent_calendar_update_still_succeeds_when_google_export_fails(): void
     {
         Carbon::setTestNow('2026-05-19T19:09:00Z');
-        $this->configureFakeHermes(<<<'PHP'
-#!/usr/bin/env php
-<?php
-echo json_encode([
-    'message' => 'Quick Lunch is moved to next Monday at 12:00 PM.',
-    'actions' => [
-        [
-            'type' => 'calendar_event.update',
-            'risk' => 'low',
-            'parameters' => [
+        $this->fakeAgentToolCalls([
+            $this->toolCall('call_event', 'update_calendar_event', [
                 'match_title' => 'lunch',
                 'from_date' => '2026-05-20',
                 'starts_at' => '2026-05-25T12:00:00-04:00',
-            ],
-        ],
-    ],
-], JSON_THROW_ON_ERROR);
-PHP);
+            ]),
+        ], 'Quick Lunch is moved to next Monday at 12:00 PM.');
 
         $token = $this->apiToken('google-export-failure@example.com');
         $user = User::where('email', 'google-export-failure@example.com')->firstOrFail();
@@ -490,10 +453,6 @@ PHP);
                 'calendars' => [['id' => 'primary', 'summary' => 'Primary', 'primary' => true, 'access_role' => 'owner']],
             ],
         ]);
-        Http::fake([
-            'https://www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response(['error' => ['message' => 'Forbidden']], 403),
-        ]);
-
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Calendar edits',
         ])->assertCreated()->json('data.id');
@@ -660,87 +619,7 @@ PHP);
     public function test_agent_runtime_handles_100_complex_requests_through_structured_actions(): void
     {
         Carbon::setTestNow('2026-05-19T19:25:00Z');
-        $this->configureFakeHermes(<<<'PHP'
-#!/usr/bin/env php
-<?php
-$prompt = '';
-foreach ($argv as $arg) {
-    if (str_contains($arg, 'Runtime payload:')) {
-        $prompt = $arg;
-        break;
-    }
-}
-$marker = 'Runtime payload:';
-$position = strpos($prompt, $marker);
-$payload = $position === false ? '{}' : trim(substr($prompt, $position + strlen($marker)));
-$data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
-$content = (string) ($data['message']['content'] ?? '');
-preg_match('/REQ-(\d{3})/', $content, $matches);
-$index = (int) ($matches[1] ?? 1);
-$day = 20 + (($index - 1) % 8);
-$hour = 8 + (($index - 1) % 9);
-$minute = (($index * 5) % 60);
-$start = sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour, $minute);
-$end = sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour + 1, $minute);
-$due = sprintf('2026-05-%02dT17:00:00-04:00', $day);
-$remind = sprintf('2026-05-%02dT07:30:00-04:00', $day);
-$actions = [
-    [
-        'type' => 'event_category.create',
-        'risk' => 'low',
-        'parameters' => [
-            'name' => 'Complex Sweep',
-            'color' => '#34C759',
-            'metadata' => ['request_index' => $index],
-        ],
-    ],
-    [
-        'type' => 'calendar_event.create',
-        'risk' => 'low',
-        'parameters' => [
-            'title' => sprintf('REQ-%03d planning block', $index),
-            'description' => $content,
-            'category' => 'Complex Sweep',
-            'color' => '#34C759',
-            'is_critical' => $index % 10 === 0,
-            'starts_at' => $start,
-            'ends_at' => $end,
-            'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
-        ],
-    ],
-    [
-        'type' => 'task.create',
-        'risk' => 'low',
-        'parameters' => [
-            'title' => sprintf('REQ-%03d follow-up task', $index),
-            'type' => $index % 3 === 0 ? 'maintenance' : 'todo',
-            'status' => 'open',
-            'notes' => 'Generated by complex request sweep from the agent response.',
-            'category' => 'Complex Sweep',
-            'color' => '#34C759',
-            'is_critical' => $index % 9 === 0,
-            'due_at' => $due,
-            'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
-        ],
-    ],
-    [
-        'type' => 'reminder.create',
-        'risk' => 'low',
-        'parameters' => [
-            'title' => sprintf('REQ-%03d reminder', $index),
-            'notes' => 'Generated by complex request sweep from the agent response.',
-            'category' => 'Complex Sweep',
-            'color' => '#34C759',
-            'remind_at' => $remind,
-            'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
-        ],
-    ],
-];
-echo json_encode([
-    'message' => sprintf('Handled REQ-%03d with a plan, task, reminder, and calendar block.', $index),
-    'actions' => $actions,
-], JSON_THROW_ON_ERROR);
-PHP);
+        $this->fakeComplexSweepAgent();
 
         config()->set('security.rate_limits.api_per_minute', 500);
         config()->set('services.ai_usage.budgets.free.monthly_ai_actions', 200);
@@ -775,10 +654,10 @@ PHP);
         $this->assertDatabaseCount('conversation_messages', 200);
         $this->assertDatabaseHas('activity_events', [
             'conversation_session_id' => $sessionId,
-            'event_type' => 'runtime.hermes_cli_started',
+            'event_type' => 'runtime.tool_model_started',
             'status' => 'started',
         ]);
-        $this->assertSame(100, ActivityEvent::where('conversation_session_id', $sessionId)->where('event_type', 'runtime.hermes_cli_started')->count());
+        $this->assertSame(100, ActivityEvent::where('conversation_session_id', $sessionId)->where('event_type', 'runtime.tool_model_started')->count());
     }
 
     /**
@@ -809,11 +688,7 @@ PHP);
 
     public function test_activity_events_can_be_polled_for_a_session(): void
     {
-        $this->configureFakeHermes(<<<'PHP'
-#!/usr/bin/env php
-<?php
-echo json_encode(['message' => 'Planning complete.'], JSON_THROW_ON_ERROR);
-PHP);
+        $this->fakeAgentResponse('Planning complete.');
 
         $token = $this->apiToken();
 
@@ -829,18 +704,133 @@ PHP);
             ->assertOk()
             ->assertJsonPath('data.0.event_type', 'runtime.session_started')
             ->assertJsonFragment(['event_type' => 'runtime.message_received'])
-            ->assertJsonFragment(['event_type' => 'runtime.hermes_cli_started'])
-            ->assertJsonFragment(['event_type' => 'runtime.hermes_cli_completed']);
+            ->assertJsonFragment(['event_type' => 'runtime.tool_model_started'])
+            ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
     }
 
-    private function configureFakeHermes(string $contents): void
+    private function fakeAgentResponse(string $content): void
     {
-        $path = $this->tempDir.'/fake-hermes.php';
-        File::put($path, $contents);
-        chmod($path, 0755);
+        $this->configureAgentHttp();
+        Http::fake(fn ($request) => str_contains($request->url(), 'googleapis.com')
+            ? Http::response(['error' => ['message' => 'Forbidden']], 403)
+            : Http::response($this->assistantResponse($content), 200));
+    }
 
-        config()->set('services.hermes_runtime.cli_path', $path);
-        config()->set('services.hermes_runtime.timeout', 5);
-        config()->set('services.hermes_runtime.workdir', $this->tempDir);
+    private function fakeAgentToolCalls(array $toolCalls, string $finalContent): void
+    {
+        $this->configureAgentHttp();
+        Http::fake(function ($request) use ($toolCalls, $finalContent) {
+            if (str_contains($request->url(), 'googleapis.com')) {
+                return Http::response(['error' => ['message' => 'Forbidden']], 403);
+            }
+
+            $hasToolResult = collect($request->data()['messages'] ?? [])->contains(fn (array $message): bool => ($message['role'] ?? null) === 'tool');
+
+            return Http::response($hasToolResult
+                ? $this->assistantResponse($finalContent)
+                : $this->toolCallResponse($toolCalls), 200);
+        });
+    }
+
+    private function fakeComplexSweepAgent(): void
+    {
+        $this->configureAgentHttp();
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), 'googleapis.com')) {
+                return Http::response(['error' => ['message' => 'Forbidden']], 403);
+            }
+
+            $messages = $request->data()['messages'] ?? [];
+            $hasToolResult = collect($messages)->contains(fn (array $message): bool => ($message['role'] ?? null) === 'tool');
+            $content = (string) collect($messages)->firstWhere('role', 'user')['content'];
+            preg_match('/REQ-(\d{3})/', $content, $matches);
+            $index = (int) ($matches[1] ?? 1);
+
+            if ($hasToolResult) {
+                return Http::response($this->assistantResponse(sprintf('Handled REQ-%03d with a plan, task, reminder, and calendar block.', $index)), 200);
+            }
+
+            $day = 20 + (($index - 1) % 8);
+            $hour = 8 + (($index - 1) % 9);
+            $minute = (($index * 5) % 60);
+            $toolCalls = [
+                $this->toolCall('call_category', 'create_event_category', ['name' => 'Complex Sweep', 'color' => '#34C759', 'metadata' => ['request_index' => $index]]),
+                $this->toolCall('call_event', 'create_calendar_event', [
+                    'title' => sprintf('REQ-%03d planning block', $index),
+                    'description' => $content,
+                    'category' => 'Complex Sweep',
+                    'color' => '#34C759',
+                    'is_critical' => $index % 10 === 0,
+                    'starts_at' => sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour, $minute),
+                    'ends_at' => sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour + 1, $minute),
+                    'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
+                ]),
+                $this->toolCall('call_task', 'create_task', [
+                    'title' => sprintf('REQ-%03d follow-up task', $index),
+                    'type' => $index % 3 === 0 ? 'maintenance' : 'todo',
+                    'status' => 'open',
+                    'notes' => 'Generated by complex request sweep from the agent response.',
+                    'category' => 'Complex Sweep',
+                    'color' => '#34C759',
+                    'is_critical' => $index % 9 === 0,
+                    'due_at' => sprintf('2026-05-%02dT17:00:00-04:00', $day),
+                    'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
+                ]),
+                $this->toolCall('call_reminder', 'create_reminder', [
+                    'title' => sprintf('REQ-%03d reminder', $index),
+                    'notes' => 'Generated by complex request sweep from the agent response.',
+                    'category' => 'Complex Sweep',
+                    'color' => '#34C759',
+                    'remind_at' => sprintf('2026-05-%02dT07:30:00-04:00', $day),
+                    'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
+                ]),
+            ];
+
+            return Http::response($this->toolCallResponse($toolCalls), 200);
+        });
+    }
+
+    private function configureAgentHttp(): void
+    {
+        config()->set('services.hermes_runtime.default_provider', 'openai');
+        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.api_key', 'test-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+    }
+
+    private function assistantResponse(string $content): array
+    {
+        return [
+            'id' => 'chatcmpl-test',
+            'model' => 'gpt-test-tools',
+            'choices' => [[
+                'finish_reason' => 'stop',
+                'message' => ['role' => 'assistant', 'content' => $content],
+            ]],
+        ];
+    }
+
+    private function toolCallResponse(array $toolCalls): array
+    {
+        return [
+            'id' => 'chatcmpl-tool-call',
+            'model' => 'gpt-test-tools',
+            'choices' => [[
+                'finish_reason' => 'tool_calls',
+                'message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => $toolCalls],
+            ]],
+        ];
+    }
+
+    private function toolCall(string $id, string $name, array $arguments): array
+    {
+        return [
+            'id' => $id,
+            'type' => 'function',
+            'function' => [
+                'name' => $name,
+                'arguments' => json_encode($arguments, JSON_THROW_ON_ERROR),
+            ],
+        ];
     }
 }

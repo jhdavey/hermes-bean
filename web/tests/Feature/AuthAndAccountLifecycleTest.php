@@ -8,6 +8,7 @@ use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Tests\TestCase;
@@ -196,7 +197,7 @@ class AuthAndAccountLifecycleTest extends TestCase
             'content' => 'Try to write into Alice session',
         ])->assertNotFound();
 
-        $this->configureTaskCreatingHermesRuntime();
+        $this->configureTaskCreatingAgent();
 
         $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Add task Follow up with Sam.',
@@ -244,7 +245,7 @@ class AuthAndAccountLifecycleTest extends TestCase
 
         $aliceSessionId = $this->withToken($aliceToken)->postJson('/api/assistant/sessions', ['title' => 'Alice export'])
             ->assertCreated()->json('data.id');
-        $this->configureTaskCreatingHermesRuntime();
+        $this->configureTaskCreatingAgent();
         $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$aliceSessionId}/messages", [
             'content' => 'Add task Export Alice task.',
         ])->assertCreated();
@@ -276,26 +277,50 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseHas('tasks', ['title' => 'Bob private task']);
     }
 
-    private function configureTaskCreatingHermesRuntime(): void
+    private function configureTaskCreatingAgent(): void
     {
-        $this->configureFakeHermesRuntime(<<<'PHP'
-#!/usr/bin/env php
-<?php
-$prompt = $argv[array_search('-q', $argv, true) + 1] ?? '';
-$payloadJson = trim(substr($prompt, strpos($prompt, "Runtime payload:") + strlen("Runtime payload:")));
-$payload = json_decode($payloadJson, true, flags: JSON_THROW_ON_ERROR);
-$content = $payload['message']['content'] ?? '';
-$title = preg_replace('/^Add task\s+/i', '', $content);
-$title = trim((string) $title, " .\t\n\r\0\x0B");
-echo json_encode([
-    'message' => 'Created task: '.$title,
-    'actions' => [[
-        'type' => 'task.create',
-        'risk' => 'low',
-        'parameters' => ['title' => $title, 'type' => 'todo'],
-    ]],
-], JSON_THROW_ON_ERROR);
-PHP);
+        config()->set('services.hermes_runtime.default_provider', 'openai');
+        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.api_key', 'test-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+
+        Http::fake(function ($request) {
+            $payload = $request->data();
+            $hasToolResult = collect($payload['messages'] ?? [])->contains(fn (array $message): bool => ($message['role'] ?? null) === 'tool');
+            if ($hasToolResult) {
+                return Http::response([
+                    'id' => 'chatcmpl-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => ['role' => 'assistant', 'content' => 'Created the task.'],
+                    ]],
+                ]);
+            }
+
+            $content = (string) data_get($payload, 'messages.2.content', '');
+            $title = trim((string) preg_replace('/^Add task\s+/i', '', $content), " .\t\n\r\0\x0B");
+
+            return Http::response([
+                'id' => 'chatcmpl-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_task',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_task',
+                                'arguments' => json_encode(['title' => $title, 'type' => 'todo'], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]);
+        });
     }
 
     private function registerToken(string $email): string

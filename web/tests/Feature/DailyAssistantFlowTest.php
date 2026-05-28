@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class DailyAssistantFlowTest extends TestCase
@@ -20,30 +21,17 @@ class DailyAssistantFlowTest extends TestCase
             'metadata' => ['intent' => 'daily_planning'],
         ])->assertCreated()->json('data.id');
 
-        $this->configureFakeHermesRuntime(<<<'PHP'
-#!/usr/bin/env php
-<?php
-echo json_encode([
-    'message' => 'Planned your day.',
-    'actions' => [
-        [
-            'type' => 'task.create',
-            'risk' => 'low',
-            'parameters' => ['title' => 'Review launch notes', 'type' => 'todo'],
-        ],
-        [
-            'type' => 'reminder.create',
-            'risk' => 'low',
-            'parameters' => ['title' => 'pack laptop', 'remind_at' => '2026-05-13T09:00:00Z'],
-        ],
-        [
-            'type' => 'calendar_event.create',
-            'risk' => 'low',
-            'parameters' => ['title' => 'Focus block', 'starts_at' => '2026-05-13T09:00:00Z', 'ends_at' => '2026-05-13T10:00:00Z'],
-        ],
-    ],
-], JSON_THROW_ON_ERROR);
-PHP);
+        config()->set('services.hermes_runtime.default_provider', 'openai');
+        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.api_key', 'test-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        Http::fakeSequence()
+            ->push($this->toolCallResponse([
+                $this->toolCall('call_task', 'create_task', ['title' => 'Review launch notes', 'type' => 'todo']),
+                $this->toolCall('call_reminder', 'create_reminder', ['title' => 'pack laptop', 'remind_at' => '2026-05-13T09:00:00Z']),
+                $this->toolCall('call_event', 'create_calendar_event', ['title' => 'Focus block', 'starts_at' => '2026-05-13T09:00:00Z', 'ends_at' => '2026-05-13T10:00:00Z']),
+            ]), 200)
+            ->push($this->assistantResponse('Planned your day.'), 200);
 
         $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Plan my day: add task Review launch notes; remind me tomorrow to pack laptop; schedule Focus block tomorrow at 9am.',
@@ -96,5 +84,41 @@ PHP);
             ->assertJsonPath('data.0.user_id', $bobId)
             ->assertJsonPath('data.0.title', 'Bob private task')
             ->assertJsonMissing(['title' => 'Alice private task']);
+    }
+
+    private function assistantResponse(string $content): array
+    {
+        return [
+            'id' => 'chatcmpl-test',
+            'model' => 'gpt-test-tools',
+            'choices' => [[
+                'finish_reason' => 'stop',
+                'message' => ['role' => 'assistant', 'content' => $content],
+            ]],
+        ];
+    }
+
+    private function toolCallResponse(array $toolCalls): array
+    {
+        return [
+            'id' => 'chatcmpl-tool-call',
+            'model' => 'gpt-test-tools',
+            'choices' => [[
+                'finish_reason' => 'tool_calls',
+                'message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => $toolCalls],
+            ]],
+        ];
+    }
+
+    private function toolCall(string $id, string $name, array $arguments): array
+    {
+        return [
+            'id' => $id,
+            'type' => 'function',
+            'function' => [
+                'name' => $name,
+                'arguments' => json_encode($arguments, JSON_THROW_ON_ERROR),
+            ],
+        ];
     }
 }

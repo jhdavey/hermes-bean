@@ -6,8 +6,8 @@ use App\Models\CalendarEvent;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Observers\DashboardResourceObserver;
-use App\Services\HermesCliRuntimeService;
 use App\Services\HermesRuntimeService;
+use App\Services\HermesToolRuntimeService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -17,7 +17,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(HermesRuntimeService::class, HermesCliRuntimeService::class);
+        $this->app->bind(HermesRuntimeService::class, HermesToolRuntimeService::class);
     }
 
     /**

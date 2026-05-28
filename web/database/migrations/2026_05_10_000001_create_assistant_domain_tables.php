@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             $table->string('title')->nullable();
             $table->string('status')->default('active')->index();
-            $table->string('runtime_mode')->default('cli');
+            $table->string('runtime_mode')->default('tools');
             $table->json('metadata')->nullable();
             $table->timestamp('last_activity_at')->nullable();
             $table->timestamps();
