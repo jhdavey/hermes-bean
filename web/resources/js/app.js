@@ -55,6 +55,7 @@ if (mount) {
         adminUsage: null,
         adminUsageLoading: false,
         issueReportSubmitting: false,
+        ttsPreviewing: false,
         googleStatus: null,
         googleAuthUrl: '',
         messages: [],
@@ -1737,9 +1738,15 @@ if (mount) {
                             <option value="openai" ${ttsProvider === 'openai' ? 'selected' : ''}>OpenAI TTS</option>
                         </select></label>
                         <div class="hb-field-row">
-                            <label class="hb-label">OpenAI voice<select class="hb-select" name="ttsOpenAiVoice">${voices.map((voice) => `<option value="${voice}" ${voice === ttsVoice ? 'selected' : ''}>${capitalize(voice)}</option>`).join('')}</select></label>
+                            <div class="hb-label hb-tts-voice-picker">OpenAI voice
+                                <div class="hb-tts-preview-row">
+                                    <select class="hb-select" name="ttsOpenAiVoice">${voices.map((voice) => `<option value="${voice}" ${voice === ttsVoice ? 'selected' : ''}>${capitalize(voice)}</option>`).join('')}</select>
+                                    <button class="hb-button-secondary hb-tts-preview-button" type="button" data-preview-tts-voice>${state.ttsPreviewing ? 'Playing...' : 'Preview'}</button>
+                                </div>
+                            </div>
                             <label class="hb-label">OpenAI API key<input class="hb-input" type="${ttsKeyConfigured ? 'text' : 'password'}" name="ttsOpenAiKey" value="${escapeAttr(ttsKeyMask)}" placeholder="${ttsKeyConfigured ? 'Saved - replace to update' : 'sk-...'}" autocomplete="off" ${ttsKeyConfigured ? `data-tts-key-mask="${escapeAttr(ttsKeyMask)}"` : ''}></label>
                         </div>
+                        <div class="hb-tts-preview-status" data-tts-preview-status hidden></div>
                         <label class="hb-label">OpenAI voice style<textarea class="hb-textarea hb-tts-style" name="ttsOpenAiInstructions" placeholder="Example: Warm, natural, concise, and lightly upbeat.">${escapeHtml(ttsInstructions)}</textarea></label>
                         ${ttsKeyConfigured ? '<label class="hb-checkbox-row"><input type="checkbox" name="ttsClearOpenAiKey" value="1"> Remove saved OpenAI API key</label>' : ''}
                         <p class="hb-item-meta">OpenAI voices are AI-generated. Your key is encrypted before storage and is never shown back in the app.</p>
@@ -2042,6 +2049,7 @@ if (mount) {
         mount.querySelectorAll('[data-delete-category]').forEach((button) => button.addEventListener('click', () => deleteCategory(button.dataset.deleteCategory)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
         mount.querySelectorAll('[data-tts-key-mask]').forEach((input) => input.addEventListener('focus', handleMaskedTtsKeyFocus, { once: true }));
+        mount.querySelector('[data-preview-tts-voice]')?.addEventListener('click', previewSelectedTtsVoice);
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventTimeInputs);
         mount.querySelectorAll('[data-primary-workspace-select]').forEach((select) => select.addEventListener('change', handlePrimaryWorkspaceChange));
         mount.querySelectorAll('[data-recurrence-select]').forEach((select) => {
@@ -2058,6 +2066,65 @@ if (mount) {
                 render();
             }
         });
+    }
+
+    async function previewSelectedTtsVoice(event) {
+        const button = event.currentTarget;
+        const form = button.closest('form');
+        const status = form?.querySelector('[data-tts-preview-status]');
+        const voice = form?.querySelector('select[name="ttsOpenAiVoice"]')?.value || profileTtsVoice();
+        if (!form || state.ttsPreviewing) return;
+
+        setTtsPreviewStatus(status, '', '');
+        if (profileTtsProvider() !== 'openai' || !profileTtsOpenAiConfigured()) {
+            setTtsPreviewStatus(status, 'Save Bean voice with a voice key before previewing.', 'error');
+            return;
+        }
+
+        state.ttsPreviewing = true;
+        button.disabled = true;
+        button.textContent = 'Playing...';
+        try {
+            setTtsPreviewStatus(status, `Playing ${capitalize(voice)}...`, '');
+            if (!await ensureOpenAiAudioUnlocked()) {
+                throw new Error('audio_not_unlocked');
+            }
+            const response = await fetch('/api/assistant/tts', {
+                method: 'POST',
+                headers: {
+                    Accept: 'audio/wav',
+                    'Content-Type': 'application/json',
+                    ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+                },
+                body: JSON.stringify({
+                    text: "Hi, I'm Bean. This is a quick preview of this voice.",
+                    voice,
+                    workspace_id: currentWorkspaceId() || null,
+                }),
+            });
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null);
+                throw new Error(beanVoiceStatusMessage(payload?.message || "Bean's voice preview failed."));
+            }
+            const audioBuffer = await response.arrayBuffer();
+            const played = await playOpenAiAudioBuffer(audioBuffer) || await playAudioBlobFallback(audioBuffer, response.headers.get('Content-Type') || 'audio/wav');
+            if (!played) throw new Error("Bean's voice needs one click.");
+            setTtsPreviewStatus(status, `${capitalize(voice)} preview played.`, 'success');
+        } catch (error) {
+            setTtsPreviewStatus(status, beanVoiceStatusMessage(error?.message || "Bean's voice preview failed."), 'error');
+        } finally {
+            state.ttsPreviewing = false;
+            button.disabled = false;
+            button.textContent = 'Preview';
+        }
+    }
+
+    function setTtsPreviewStatus(element, message, tone = '') {
+        if (!element) return;
+        element.hidden = !message;
+        element.textContent = message;
+        element.classList.toggle('hb-tts-preview-status-error', tone === 'error');
+        element.classList.toggle('hb-tts-preview-status-success', tone === 'success');
     }
 
     function handlePrimaryWorkspaceChange(event) {
@@ -3489,7 +3556,23 @@ if (mount) {
                 return false;
             }
             if (await playOpenAiAudioBuffer(audioBuffer)) return true;
-            const blob = new Blob([audioBuffer], { type: response.headers.get('Content-Type') || 'audio/wav' });
+            return playAudioBlobFallback(audioBuffer, response.headers.get('Content-Type') || 'audio/wav');
+        } catch (error) {
+            const message = error?.message === 'audio_not_unlocked' || error?.name === 'NotAllowedError'
+                ? "Bean's voice needs one click"
+                : `Bean voice playback failed${error?.name ? `: ${error.name}` : ''}`;
+            rememberOpenAiTtsError(message);
+            return false;
+        } finally {
+            if (url) URL.revokeObjectURL(url);
+        }
+    }
+
+    async function playAudioBlobFallback(arrayBuffer, contentType = 'audio/wav') {
+        if (!arrayBuffer?.byteLength) return false;
+        let url = '';
+        try {
+            const blob = new Blob([arrayBuffer], { type: contentType });
             url = URL.createObjectURL(blob);
             const audio = new Audio(url);
             audio.playsInline = true;
@@ -3500,10 +3583,6 @@ if (mount) {
             });
             return true;
         } catch (error) {
-            const message = error?.message === 'audio_not_unlocked' || error?.name === 'NotAllowedError'
-                ? "Bean's voice needs one click"
-                : `Bean voice playback failed${error?.name ? `: ${error.name}` : ''}`;
-            rememberOpenAiTtsError(message);
             return false;
         } finally {
             if (url) URL.revokeObjectURL(url);
