@@ -2,12 +2,9 @@
 
 $hermesApiKey = (string) env('HERMES_API_KEY', '');
 $openAiKey = (string) env('OPENAI_API_KEY', '');
-$openRouterKey = (string) env('OPENROUTER_API_KEY', '');
-$hermesKeyLooksOpenRouter = str_starts_with($hermesApiKey, 'sk-or-');
-$hermesKeyLooksOpenAi = $hermesApiKey !== '' && str_starts_with($hermesApiKey, 'sk-') && ! $hermesKeyLooksOpenRouter;
-$hermesDefaultProvider = env('HERMES_DEFAULT_PROVIDER', ($openRouterKey !== '' || $hermesKeyLooksOpenRouter) && $openAiKey === '' && ! $hermesKeyLooksOpenAi ? 'openrouter' : 'openai');
-$hermesApiBase = env('HERMES_API_BASE')
-    ?: ($hermesDefaultProvider === 'openrouter' && ! $hermesKeyLooksOpenAi ? 'https://openrouter.ai/api/v1' : 'https://api.openai.com/v1');
+$openAiPublicKey = (string) env('OPENAI_PUBLIC_KEY', '');
+$hermesApiBase = env('HERMES_API_BASE') ?: 'https://api.openai.com/v1';
+$hermesResolvedApiKey = $hermesApiKey !== '' ? $hermesApiKey : ($openAiPublicKey !== '' ? $openAiPublicKey : $openAiKey);
 
 return [
 
@@ -45,9 +42,9 @@ return [
     ],
 
     'hermes_runtime' => [
-        'default_provider' => $hermesDefaultProvider,
+        'default_provider' => 'openai',
         'default_model' => env('HERMES_DEFAULT_MODEL', 'gpt-5.5'),
-        'api_key' => env('HERMES_API_KEY', env('OPENAI_API_KEY', env('OPENROUTER_API_KEY'))),
+        'api_key' => $hermesResolvedApiKey,
         'api_base' => $hermesApiBase,
         'users_home' => env('HERMES_USERS_HOME', storage_path('app/hermes-users')),
         'base_home' => env('HERMES_BASE_HOME'),

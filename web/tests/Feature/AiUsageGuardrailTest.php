@@ -26,7 +26,7 @@ class AiUsageGuardrailTest extends TestCase
         AiUsageLog::create([
             'user_id' => $user->id,
             'workspace_id' => $workspace->id,
-            'provider' => 'openrouter',
+            'provider' => 'openai',
             'model' => 'gpt-5.4-mini',
             'route_tier' => 'simple',
             'status' => 'completed',

@@ -85,7 +85,7 @@ class AgentProfileService
             'slug' => $slug,
             'display_name' => $user->name."'s Hermes",
             'status' => 'active',
-            'provider' => (string) config('services.hermes_runtime.default_provider', 'openrouter'),
+            'provider' => (string) config('services.hermes_runtime.default_provider', 'openai'),
             'model' => (string) config('services.hermes_runtime.default_model', 'gpt-5.5'),
             'router_mode' => 'agent',
             'runtime_home' => rtrim((string) config('services.hermes_runtime.users_home', ''), '/').'/'.$slug,
