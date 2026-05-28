@@ -828,17 +828,16 @@ PHP);
         $this->assertStringContainsString('Do not ask for optional category, color, recurrence, notes, reminders, workspace, or critical/starred status', $prompt);
     }
 
-    public function test_approving_a_queued_structured_action_executes_it_once(): void
+    public function test_internal_dashboard_actions_execute_even_if_model_marks_high_risk(): void
     {
-        $script = $this->writeExecutable('approval-hermes.php', <<<'PHP'
+        $script = $this->writeExecutable('internal-high-risk-hermes.php', <<<'PHP'
 #!/usr/bin/env php
 <?php
 echo json_encode([
-    'message' => 'This needs approval before changing tasks.',
+    'message' => 'I added the task.',
     'actions' => [[
         'type' => 'task.create',
         'risk' => 'high',
-        'title' => 'Approve task creation',
         'parameters' => ['title' => 'Book flights', 'type' => 'todo'],
     ]],
 ], JSON_THROW_ON_ERROR);
@@ -848,27 +847,16 @@ PHP);
         config()->set('services.hermes_runtime.cli_path', $script);
         config()->set('services.hermes_runtime.timeout', 5);
 
-        $token = $this->apiToken('approve-cli@example.com');
+        $token = $this->apiToken('internal-high-risk-cli@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Add a task, but ask me first.',
+            'content' => 'Add a task.',
         ])->assertCreated()
-            ->assertJsonFragment(['event_type' => 'assistant.approval.created']);
-
-        $approval = Approval::where('conversation_session_id', $sessionId)->firstOrFail();
-        $this->assertSame(0, Task::where('conversation_session_id', $sessionId)->where('title', 'Book flights')->count());
-
-        $this->withToken($token)->postJson("/api/approvals/{$approval->id}/approve")
-            ->assertOk()
-            ->assertJsonPath('data.approval.status', 'approved')
             ->assertJsonFragment(['event_type' => 'assistant.task.created']);
 
         $this->assertSame(1, Task::where('conversation_session_id', $sessionId)->where('title', 'Book flights')->count());
-
-        $this->withToken($token)->postJson("/api/approvals/{$approval->id}/approve")
-            ->assertStatus(409);
-        $this->assertSame(1, Task::where('conversation_session_id', $sessionId)->where('title', 'Book flights')->count());
+        $this->assertSame(0, Approval::where('conversation_session_id', $sessionId)->count());
     }
 
     public function test_event_category_creation_is_low_risk_and_available_in_runtime_payload(): void

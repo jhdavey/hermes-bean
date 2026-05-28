@@ -169,17 +169,13 @@ class StructuredHermesActionService
             return false;
         }
 
-        if (in_array($type, ['event_category.create', 'event_category.update'], true)) {
+        if ($this->isLowRiskDashboardAction($type)) {
             return false;
         }
 
         $risk = strtolower((string) ($action['risk'] ?? 'medium'));
         if (! in_array($risk, ['low', 'safe'], true)) {
             return true;
-        }
-
-        if ($this->isLowRiskDashboardAction($type)) {
-            return false;
         }
 
         $category = $this->approvalCategoryFor($type);

@@ -2687,7 +2687,7 @@ if (mount) {
                 state.messages.push(result.assistant_message);
                 assistantContent = result.assistant_message.content || '';
             }
-            state.chatRunState = result.status === 'blocked' ? 'Blocked for approval' : 'Ready';
+            state.chatRunState = result.status === 'blocked' ? 'Blocked' : 'Ready';
             await refreshOnly(false);
             if (wasOnboarding && !needsBeanOnboarding()) {
                 state.onboardingJustCompleted = true;
