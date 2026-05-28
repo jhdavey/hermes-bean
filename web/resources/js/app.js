@@ -103,6 +103,7 @@ if (mount) {
     let kioskHeardTimer = 0;
     let kioskConversationTimer = 0;
     let kioskMicrophoneReady = false;
+    let kioskAudioUnlocked = false;
     let chatRequestCounter = 0;
     let activeChatRequestId = 0;
     const cancelledChatRequestIds = new Set();
@@ -3314,7 +3315,12 @@ if (mount) {
     function speakKioskResponse(content) {
         const text = speechTextFromAssistant(content);
         if (openAiTtsEnabled()) {
-            return playOpenAiTts(text);
+            return playOpenAiTts(text).then(async (played) => {
+                if (played) return true;
+                await sleep(900);
+                setKioskVoiceStatus('responding', 'browser voice fallback');
+                return speakBrowserTts(text);
+            });
         }
         return speakBrowserTts(text);
     }
@@ -3345,6 +3351,7 @@ if (mount) {
             const blob = await response.blob();
             url = URL.createObjectURL(blob);
             const audio = new Audio(url);
+            audio.playsInline = true;
             await new Promise((resolve, reject) => {
                 audio.onended = resolve;
                 audio.onerror = reject;
@@ -3352,10 +3359,24 @@ if (mount) {
             });
             return true;
         } catch (error) {
-            setKioskVoiceStatus('responding', 'OpenAI voice could not play');
+            setKioskVoiceStatus('responding', error?.name === 'NotAllowedError' ? 'tap mic to allow OpenAI voice' : 'OpenAI voice could not play');
             return false;
         } finally {
             if (url) URL.revokeObjectURL(url);
+        }
+    }
+
+    async function unlockKioskAudio() {
+        if (kioskAudioUnlocked) return true;
+        try {
+            const audio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=');
+            audio.muted = true;
+            audio.playsInline = true;
+            await audio.play();
+            kioskAudioUnlocked = true;
+            return true;
+        } catch (error) {
+            return false;
         }
     }
 
@@ -3400,6 +3421,7 @@ if (mount) {
             state.kioskVoicePhase = 'idle';
             state.kioskVoiceMessage = '';
             render();
+            unlockKioskAudio();
             startKioskVoiceMode({ requestPermission: true });
             return;
         }
