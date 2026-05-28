@@ -80,7 +80,7 @@ PHP);
 
         $this->assertDatabaseHas('ai_usage_logs', [
             'status' => 'blocked',
-            'route_tier' => 'complex',
+            'route_tier' => 'agent',
             'estimated_cost_usd' => 0,
         ]);
         $this->assertDatabaseMissing('activity_events', [

@@ -31,7 +31,8 @@ class AiUsageService
         $user = User::findOrFail($session->user_id);
         $inputTokens = $this->estimateTokens($prompt);
         $reservedOutputTokens = (int) config('services.ai_usage.reserve_output_tokens', 1200);
-        $estimatedCost = $this->estimatedCost((string) $modelRoute['model'], $inputTokens, $reservedOutputTokens);
+        $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? config('services.hermes_runtime.default_model', 'gpt-5.5'));
+        $estimatedCost = $this->estimatedCost($billingModel, $inputTokens, $reservedOutputTokens);
         $budget = $this->budgetFor($user);
         $today = now()->startOfDay();
         $month = now()->startOfMonth();
@@ -106,7 +107,9 @@ class AiUsageService
     ): AiUsageLog {
         $inputTokens = $this->estimateTokens($prompt);
         $outputTokens = $this->estimateTokens($stdout);
-        $cost = $this->estimatedCost((string) $modelRoute['model'], $inputTokens, $outputTokens);
+        $displayModel = (string) ($modelRoute['model'] ?? 'agent-routed');
+        $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? config('services.hermes_runtime.default_model', 'gpt-5.5'));
+        $cost = $this->estimatedCost($billingModel, $inputTokens, $outputTokens);
         $actionTypes = $domainEvents
             ->map(fn (ActivityEvent $event): ?string => $event->tool_name ?: $event->event_type)
             ->filter()
@@ -120,7 +123,7 @@ class AiUsageService
             'conversation_session_id' => $session->id,
             'conversation_message_id' => $userMessage->id,
             'provider' => (string) config('services.hermes_runtime.default_provider'),
-            'model' => (string) $modelRoute['model'],
+            'model' => $displayModel,
             'route_tier' => (string) $modelRoute['tier'],
             'status' => $status,
             'input_tokens' => $inputTokens,
@@ -131,6 +134,7 @@ class AiUsageService
             'metadata' => [
                 'assistant_message_id' => $assistantMessage?->id,
                 'model_route' => $modelRoute,
+                'billing_model' => $billingModel,
                 'context_mode' => $modelRoute['context_mode'] ?? null,
             ],
         ]);
@@ -156,7 +160,7 @@ class AiUsageService
             'conversation_session_id' => $session->id,
             'conversation_message_id' => $userMessage->id,
             'provider' => (string) config('services.hermes_runtime.default_provider'),
-            'model' => (string) $modelRoute['model'],
+            'model' => (string) ($modelRoute['model'] ?? 'agent-routed'),
             'route_tier' => (string) $modelRoute['tier'],
             'status' => 'blocked',
             'input_tokens' => $inputTokens,

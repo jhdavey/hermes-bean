@@ -319,84 +319,21 @@ class HermesCliRuntimeService implements HermesRuntimeService
     }
 
     /**
-     * @return array{mode:string,tier:string,model:string,reason:string}
+     * @return array{mode:string,tier:string,model:?string,billing_model:string,context_mode:string,reason:string}
      */
     private function modelRouteFor(ConversationMessage $message): array
     {
-        $mode = (string) config('services.hermes_runtime.router_mode', 'heuristic');
+        $mode = (string) config('services.hermes_runtime.router_mode', 'agent');
         $defaultModel = (string) config('services.hermes_runtime.default_model', 'gpt-5.5');
-
-        if ($mode !== 'heuristic') {
-            return [
-                'mode' => $mode,
-                'tier' => 'fixed',
-                'model' => $defaultModel,
-                'context_mode' => 'focused',
-                'reason' => 'Fixed router mode uses the configured default model.',
-            ];
-        }
-
-        $content = trim(mb_strtolower((string) $message->content));
-        $tier = $this->messageLooksSimpleConversation($content)
-            ? 'simple'
-            : ($this->messageLooksSimpleDashboardCrud($content) ? 'standard' : 'complex');
 
         return [
             'mode' => $mode,
-            'tier' => $tier,
-            'model' => $this->modelForTier($tier, $defaultModel),
-            'context_mode' => $this->contextModeForTier($tier),
-            'reason' => match ($tier) {
-                'simple' => 'Greeting, thanks, or small-talk response with no app mutation requested.',
-                'standard' => 'Straightforward dashboard CRUD request for an internal Bean resource.',
-                default => 'Complex, ambiguous, multi-step, external, or high-risk request.',
-            },
+            'tier' => 'agent',
+            'model' => null,
+            'billing_model' => $defaultModel,
+            'context_mode' => 'focused',
+            'reason' => 'Laravel does not route by keyword; the Hermes runtime/profile chooses the model.',
         ];
-    }
-
-    private function modelForTier(string $tier, string $defaultModel): string
-    {
-        return match ($tier) {
-            'simple' => (string) config('services.hermes_runtime.simple_model', 'gpt-5.4-mini'),
-            'standard' => (string) config('services.hermes_runtime.standard_model', 'gpt-5.4'),
-            default => (string) config('services.hermes_runtime.complex_model', $defaultModel),
-        };
-    }
-
-    private function contextModeForTier(string $tier): string
-    {
-        return match ($tier) {
-            'simple' => 'minimal',
-            'standard' => 'compact',
-            default => 'focused',
-        };
-    }
-
-    private function messageLooksSimpleConversation(string $content): bool
-    {
-        if ($content === '' || mb_strlen($content) > 180 || $this->containsDashboardMutationVerb($content)) {
-            return false;
-        }
-
-        return (bool) preg_match('/\b(hi|hello|hey|yo|good morning|good afternoon|good evening|thanks|thank you|appreciate it|how are you|what can you do|who are you|tell me a joke)\b/u', $content);
-    }
-
-    private function messageLooksSimpleDashboardCrud(string $content): bool
-    {
-        if (! $this->containsDashboardMutationVerb($content)) {
-            return false;
-        }
-
-        if (! (bool) preg_match('/\b(task|todo|reminder|event|calendar|category|blocker|approval)\b/u', $content)) {
-            return false;
-        }
-
-        return ! (bool) preg_match('/\b(plan|organize|optimize|reschedule|move|recurring|repeat|every|sync|google|email|mail|payment|purchase|deploy|delete account|all future|household|shared|if|when|unless|compare|decide|recommend)\b/u', $content);
-    }
-
-    private function containsDashboardMutationVerb(string $content): bool
-    {
-        return (bool) preg_match('/\b(create|add|make|schedule|book|block|put|remind|update|edit|change|rename|delete|remove|complete|mark|set|clear|cancel)\b/u', $content);
     }
 
     private function configuredWorkdir(): ?string

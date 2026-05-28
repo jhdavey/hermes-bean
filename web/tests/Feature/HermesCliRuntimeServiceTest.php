@@ -93,8 +93,8 @@ PHP);
         $assistantMessage = ConversationMessage::where('conversation_session_id', $sessionId)
             ->where('role', 'assistant')
             ->firstOrFail();
-        $this->assertSame('gpt-5.5', $assistantMessage->metadata['model']);
-        $this->assertSame('complex', $assistantMessage->metadata['model_route']['tier']);
+        $this->assertNull($assistantMessage->metadata['model']);
+        $this->assertSame('agent', $assistantMessage->metadata['model_route']['tier']);
         $this->assertSame([
             'runtime.session_started',
             'runtime.message_received',
@@ -109,6 +109,7 @@ PHP);
         $this->assertContains('test-profile', $invocation['argv']);
         $this->assertContains('chat', $invocation['argv']);
         $this->assertContains('-q', $invocation['argv']);
+        $this->assertNotContains('-m', $invocation['argv']);
         $this->assertSame(realpath($this->tempDir), $invocation['cwd']);
         $this->assertSame('Plan my day', $invocation['payload']['message']['content']);
         $this->assertSame('cli-owner@example.com', $invocation['payload']['user']['email']);
@@ -133,7 +134,7 @@ PHP);
         ]);
     }
 
-    public function test_heuristic_router_selects_simple_standard_and_complex_models(): void
+    public function test_agent_router_does_not_force_models_from_laravel(): void
     {
         $script = $this->writeExecutable('router-hermes.php', <<<'PHP'
 #!/usr/bin/env php
@@ -151,10 +152,8 @@ PHP);
         config()->set('services.hermes_runtime.mode', 'cli');
         config()->set('services.hermes_runtime.cli_path', $script);
         config()->set('services.hermes_runtime.timeout', 5);
-        config()->set('services.hermes_runtime.router_mode', 'heuristic');
-        config()->set('services.hermes_runtime.simple_model', 'cheap-fast-model');
-        config()->set('services.hermes_runtime.standard_model', 'capable-cheap-model');
-        config()->set('services.hermes_runtime.complex_model', 'frontier-model');
+        config()->set('services.hermes_runtime.router_mode', 'agent');
+        config()->set('services.hermes_runtime.default_model', 'frontier-model');
         config()->set('services.hermes_runtime.environment', [
             'HERMES_FAKE_LOG' => $this->tempDir.'/router.jsonl',
         ]);
@@ -163,11 +162,11 @@ PHP);
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
         foreach ([
-            'hey Bean' => 'cheap-fast-model',
-            'create a Maintenance category and make it yellow' => 'capable-cheap-model',
-            'Schedule workout on my calendar today from 6 to 7pm' => 'capable-cheap-model',
-            'plan my day around school pickup and move anything that conflicts' => 'frontier-model',
-        ] as $message => $expectedModel) {
+            'hey Bean',
+            'create a Maintenance category and make it yellow',
+            'Schedule workout on my calendar today from 6 to 7pm',
+            'plan my day around school pickup and move anything that conflicts',
+        ] as $message) {
             $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
                 'content' => $message,
             ])->assertCreated();
@@ -176,7 +175,7 @@ PHP);
                 ->map(fn (string $line): array => json_decode($line, true, flags: JSON_THROW_ON_ERROR))
                 ->last();
             $this->assertSame($message, $lastInvocation['content']);
-            $this->assertContains($expectedModel, $lastInvocation['argv']);
+            $this->assertNotContains('-m', $lastInvocation['argv']);
         }
 
         $routes = ActivityEvent::where('conversation_session_id', $sessionId)
@@ -186,7 +185,7 @@ PHP);
             ->map(fn (array $payload): string => $payload['model_route']['tier'])
             ->all();
 
-        $this->assertSame(['simple', 'standard', 'standard', 'complex'], $routes);
+        $this->assertSame(['agent', 'agent', 'agent', 'agent'], $routes);
     }
 
     public function test_household_session_uses_household_agent_profile_runtime_home_and_workspace_payload(): void

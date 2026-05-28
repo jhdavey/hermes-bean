@@ -29,7 +29,7 @@ class AgentProfileTest extends TestCase
         $this->assertSame($response->json('data.user.id'), $profile->user_id);
         $this->assertSame('openrouter', $profile->provider);
         $this->assertSame('gpt-5.5', $profile->model);
-        $this->assertSame('heuristic', $profile->router_mode);
+        $this->assertSame('agent', $profile->router_mode);
         $this->assertStringContainsString($profile->slug, (string) $profile->runtime_home);
         $this->assertTrue($profile->approval_policy['auto_approve_low_risk']);
         $this->assertContains('outgoing_mail', $profile->approval_policy['require_approval_for']);
