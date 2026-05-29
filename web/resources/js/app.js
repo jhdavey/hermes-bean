@@ -3929,7 +3929,7 @@ if (mount) {
     }
 
     function refreshOnlyInBackground(options = {}) {
-        refreshOnly(true, options);
+        refreshOnly(!state.modal, options);
     }
 
     function startDashboardChangeFeed() {
