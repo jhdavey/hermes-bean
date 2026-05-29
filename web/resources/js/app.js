@@ -608,6 +608,7 @@ if (mount) {
         const modalKey = state.modal ? modalIdentity(state.modal) : '';
         const existingModal = modalKey ? mount.querySelector('[data-modal-root]') : null;
         const preservedModal = existingModal?.dataset?.modalKey === modalKey ? existingModal : null;
+        const preservedModalState = preservedModal ? captureModalDomState(preservedModal) : null;
         if (preservedModal) preservedModal.remove();
 
         mount.innerHTML = state.phase === 'signedIn' ? signedInMarkup() : signedOutMarkup();
@@ -616,6 +617,7 @@ if (mount) {
         if (state.modal) {
             if (preservedModal) {
                 mount.appendChild(preservedModal);
+                restoreModalDomState(preservedModalState);
             } else {
                 mount.insertAdjacentHTML('beforeend', `<div data-modal-root data-modal-key="${escapeAttr(modalKey)}">${modalMarkup(state.modal)}</div>`);
                 bindModalActions();
@@ -652,6 +654,52 @@ if (mount) {
             return;
         }
         render();
+    }
+
+    function captureModalDomState(root) {
+        const active = root.contains(document.activeElement) ? document.activeElement : null;
+        return {
+            scrollPositions: modalScrollContainers(root).map((element) => ({
+                element,
+                top: element.scrollTop,
+                left: element.scrollLeft,
+            })),
+            active,
+            selectionStart: active && typeof active.selectionStart === 'number' ? active.selectionStart : null,
+            selectionEnd: active && typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+        };
+    }
+
+    function restoreModalDomState(snapshot) {
+        if (!snapshot) return;
+        const restore = () => {
+            snapshot.scrollPositions.forEach(({ element, top, left }) => {
+                if (!element.isConnected) return;
+                element.scrollTop = top;
+                element.scrollLeft = left;
+            });
+            if (snapshot.active?.isConnected) {
+                try {
+                    snapshot.active.focus({ preventScroll: true });
+                } catch (_) {
+                    snapshot.active.focus();
+                }
+                if (snapshot.selectionStart !== null && typeof snapshot.active.setSelectionRange === 'function') {
+                    try {
+                        snapshot.active.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd ?? snapshot.selectionStart);
+                    } catch (_) {
+                        // Some input types expose selection APIs inconsistently.
+                    }
+                }
+            }
+        };
+        restore();
+        window.requestAnimationFrame(restore);
+    }
+
+    function modalScrollContainers(root) {
+        return [root, ...root.querySelectorAll('.hb-modal, .hb-modal-backdrop')]
+            .filter((element, index, list) => list.indexOf(element) === index);
     }
 
     function modalIdentity(modal = {}) {
