@@ -834,9 +834,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _dashboardChangePollInFlight = false;
   int _dashboardChangePollGeneration = 0;
   int _dashboardChangeLastId = 0;
+  int _dashboardRefreshGeneration = 0;
+  int _dashboardDataVersion = 0;
   int _workspaceRefreshGeneration = 0;
   int? _lastScheduledAppIconBadgeCount;
   final Map<int, _DashboardSnapshot> _workspaceSnapshots = {};
+
+  void _markDashboardDataMutated() {
+    _dashboardDataVersion++;
+    _dashboardRefreshGeneration++;
+  }
 
   @override
   void initState() {
@@ -1839,6 +1846,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _refreshSignedInViews() async {
     final session = _session;
     if (_phase != _AuthPhase.signedIn || session == null) return;
+    final refreshGeneration = ++_dashboardRefreshGeneration;
+    final dataVersion = _dashboardDataVersion;
     try {
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected();
       final results = await Future.wait<Object>([
@@ -1862,7 +1871,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final listedTasks = results[1] as List<HermesTask>;
       final listedReminders = results[2] as List<HermesReminder>;
       final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
-      if (!mounted) return;
+      if (!mounted ||
+          refreshGeneration != _dashboardRefreshGeneration ||
+          dataVersion != _dashboardDataVersion) {
+        return;
+      }
       setState(() {
         _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
         _pastTasks = results[4] as List<HermesTask>;
@@ -1895,6 +1908,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }) async {
     if (_phase != _AuthPhase.signedIn) return;
     final generation = ++_workspaceRefreshGeneration;
+    final refreshGeneration = ++_dashboardRefreshGeneration;
+    final dataVersion = _dashboardDataVersion;
     try {
       final user = await widget.apiClient.me();
       final session = await widget.apiClient.startSession(
@@ -1939,7 +1954,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
-          generation != _workspaceRefreshGeneration) {
+          generation != _workspaceRefreshGeneration ||
+          refreshGeneration != _dashboardRefreshGeneration ||
+          dataVersion != _dashboardDataVersion) {
         return;
       }
       setState(() {
@@ -2064,6 +2081,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             status: 'completed',
             completedAt: DateTime.now().toIso8601String(),
           );
+    _markDashboardDataMutated();
     setState(() {
       if (_tasks.any((candidate) => candidate.id == task.id)) {
         _tasks = _replaceTask(_tasks, optimisticTask);
@@ -2081,6 +2099,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           ? await widget.apiClient.reopenTask(task.id)
           : await widget.apiClient.completeTask(task.id);
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         if (_tasks.any((candidate) => candidate.id == updatedTask.id)) {
           _tasks = _replaceTask(_tasks, updatedTask);
@@ -2093,6 +2112,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       await _refreshSignedInViews();
     } catch (error) {
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         _tasks = previousTasks;
         _pastTasks = previousPastTasks;
@@ -2157,6 +2177,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               syncToWorkspaceIds: syncToWorkspaceIds,
             );
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         final exists = _tasks.any((item) => item.id == saved.id);
         _tasks = exists
@@ -2276,6 +2297,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     List<Object> deleteFromWorkspaceIds = const [],
   }) async {
     final previousTasks = _tasks;
+    _markDashboardDataMutated();
     setState(() => _tasks = _removeTask(_tasks, task.id));
     try {
       await widget.apiClient.deleteTask(
@@ -2286,6 +2308,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       await _refreshSignedInViews();
     } catch (error) {
       if (mounted) {
+        _markDashboardDataMutated();
         setState(() {
           _tasks = previousTasks;
           _error = beanFriendlyErrorMessage(error, action: 'delete that task');
@@ -2342,6 +2365,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               syncToWorkspaceIds: syncToWorkspaceIds,
             );
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         final exists = _reminders.any((item) => item.id == saved.id);
         _reminders = exists
@@ -2370,6 +2394,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final completed = _reminderIsCompleted(reminder);
     final updatedStatus = completed ? 'pending' : 'completed';
     final optimisticReminder = reminder.copyWith(status: updatedStatus);
+    _markDashboardDataMutated();
     setState(() {
       _reminders = _reminders
           .map((item) => item.id == reminder.id ? optimisticReminder : item)
@@ -2382,6 +2407,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         status: updatedStatus,
       );
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         _reminders = _reminders
             .map((item) => item.id == saved.id ? saved : item)
@@ -2391,6 +2417,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       await _refreshSignedInViews();
     } catch (error) {
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         _reminders = previousReminders;
         _error = completed
@@ -2405,6 +2432,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     List<Object> deleteFromWorkspaceIds = const [],
   }) async {
     final previousReminders = _reminders;
+    _markDashboardDataMutated();
     setState(
       () => _reminders = _reminders
           .where((item) => item.id != reminder.id)
@@ -2419,6 +2447,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       await _refreshSignedInViews();
     } catch (error) {
       if (mounted) {
+        _markDashboardDataMutated();
         setState(() {
           _reminders = previousReminders;
           _error = beanFriendlyErrorMessage(
@@ -2443,6 +2472,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             color: color,
           );
     if (!mounted) return saved;
+    _markDashboardDataMutated();
     setState(() {
       final exists = _eventCategories.any((item) => item.id == saved.id);
       _eventCategories = exists
@@ -2464,6 +2494,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       deleteFromWorkspaceIds: deleteFromWorkspaceIds,
     );
     if (!mounted) return;
+    _markDashboardDataMutated();
     setState(() {
       _eventCategories = _eventCategories
           .where((item) => item.id != category.id)
@@ -2557,6 +2588,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         }
       }
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         _calendar = [..._calendar, createdEvent];
         _error = null;
@@ -2610,6 +2642,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       clearColor: false,
       clearRecurrence: recurrence == null,
     );
+    _markDashboardDataMutated();
     setState(() {
       _calendar = _calendar
           .map(
@@ -2656,6 +2689,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         }
       }
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         _calendar = _calendar
             .map(
@@ -2694,6 +2728,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final deleteWorkspaceIdSet = deleteFromWorkspaceIds
         .map((id) => id.toString())
         .toSet();
+    _markDashboardDataMutated();
     setState(() {
       if (isRecurringOccurrenceDelete) {
         _calendar = _calendar
@@ -2734,6 +2769,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       await _refreshSignedInViews();
     } catch (error) {
       if (!mounted) return;
+      _markDashboardDataMutated();
       setState(() {
         _calendar = previousCalendar;
         _error = beanFriendlyErrorMessage(
@@ -2936,29 +2972,39 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _user?.activeWorkspace?.numericId == workspaceId) {
       return;
     }
+    final previousUser = _user;
+    final previousWorkspaceId = _activeWorkspaceId();
+    _cacheCurrentDashboardSnapshot();
+    final previousSnapshot = previousWorkspaceId == null
+        ? null
+        : _workspaceSnapshots[previousWorkspaceId];
+    final cachedSnapshot = _workspaceSnapshots[workspaceId];
+    _markDashboardDataMutated();
     setState(() {
-      _busy = true;
+      if (_user != null) {
+        _user = _userWithActiveWorkspace(_user!, workspace);
+      }
+      if (cachedSnapshot != null) {
+        _restoreDashboardSnapshot(cachedSnapshot);
+      } else {
+        _clearDashboardData();
+      }
+      _busy = false;
       _error = null;
     });
+    _startDashboardChangePolling(resetCursor: true);
     try {
       final selectedWorkspace = await widget.apiClient.setDefaultWorkspace(
         workspaceId,
       );
       if (!mounted) return;
-      final cachedSnapshot = _workspaceSnapshots[workspaceId];
+      _markDashboardDataMutated();
       setState(() {
         if (_user != null) {
           _user = _userWithActiveWorkspace(_user!, selectedWorkspace);
         }
-        if (cachedSnapshot != null) {
-          _restoreDashboardSnapshot(cachedSnapshot);
-        } else {
-          _clearDashboardData();
-        }
-        _busy = false;
         _error = null;
       });
-      _startDashboardChangePolling(resetCursor: true);
       unawaited(
         _refreshWorkspaceDataFromServer(
           syncConnectedCalendar: false,
@@ -2967,14 +3013,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
     } catch (error) {
       if (!mounted) return;
-      setState(
-        () => _error = beanFriendlyErrorMessage(
-          error,
-          action: 'switch workspaces',
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      _markDashboardDataMutated();
+      setState(() {
+        _user = previousUser;
+        if (previousSnapshot != null) {
+          _restoreDashboardSnapshot(previousSnapshot);
+        }
+        _error = beanFriendlyErrorMessage(error, action: 'switch workspaces');
+      });
     }
   }
 

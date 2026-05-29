@@ -76,6 +76,10 @@ if (mount) {
         taskFilter: 'active',
         reminderFilter: 'pending',
         dashboardChangeLastId: 0,
+        pendingTaskUpserts: new Map(),
+        pendingTaskDeletes: new Set(),
+        pendingReminderUpserts: new Map(),
+        pendingReminderDeletes: new Set(),
         expandedTaskIds: new Set(),
         pendingCalendarUpserts: new Map(),
         pendingCalendarDeletes: new Set(),
@@ -95,6 +99,9 @@ if (mount) {
     let dashboardChangeAbort = null;
     let dashboardChangeLoopActive = false;
     let dashboardRefreshTimer = 0;
+    let deferredDashboardRenderPending = false;
+    let deferredDashboardRenderTimer = 0;
+    let dashboardRefreshGeneration = 0;
     let kioskRecognition = null;
     let kioskRecognitionActive = false;
     let kioskRecognitionShouldRestart = false;
@@ -117,6 +124,7 @@ if (mount) {
     bindResponsiveCalendar();
     bindCurrentTimeTicker();
     bindDashboardRealtimeFallbacks();
+    bindDeferredDashboardRenderFlush();
 
     async function boot() {
         if (state.token) {
@@ -160,6 +168,16 @@ if (mount) {
             scheduleDashboardRealtimeRefresh();
             startDashboardChangeFeed();
         }, 120000);
+    }
+
+    function bindDeferredDashboardRenderFlush() {
+        ['focusout', 'pointerup', 'keyup', 'change'].forEach((eventName) => {
+            mount.addEventListener(eventName, () => {
+                if (!deferredDashboardRenderPending) return;
+                window.clearTimeout(deferredDashboardRenderTimer);
+                deferredDashboardRenderTimer = window.setTimeout(flushDeferredDashboardRender, 250);
+            }, true);
+        });
     }
 
     function readToken() {
@@ -250,20 +268,38 @@ if (mount) {
         state.phase = 'loading';
         render();
         try {
-            const [user, summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
-                api('/auth/me'),
-                api('/today'),
-                api('/tasks'),
-                api('/tasks/past'),
-                api('/reminders'),
-                api('/calendar-events?skip_google_sync=1'),
-                api('/event-categories'),
+            const user = await api('/auth/me');
+            let refreshError = null;
+            const recover = async (request, fallback) => {
+                try {
+                    return await request;
+                } catch (error) {
+                    refreshError ??= error;
+                    return fallback;
+                }
+            };
+            state.user = user;
+            state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || 0);
+            const cachedWorkspaceId = currentWorkspaceIdFromUser(user);
+            if (cachedWorkspaceId && applyDashboardCache(cachedWorkspaceId)) {
+                state.phase = 'signedIn';
+                state.error = '';
+                render();
+            }
+
+            const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
+                recover(api('/today'), state.summary || {}),
+                recover(api('/tasks'), state.tasks),
+                recover(api('/tasks/past'), []),
+                recover(api('/reminders'), state.reminders),
+                recover(api('/calendar-events?skip_google_sync=1'), state.calendar),
+                recover(api('/event-categories'), state.categories),
                 api('/google-calendar/status?cached=1').catch(() => null),
             ]);
             state.user = mergeUser(user, summary?.user, summary);
             state.summary = summary;
-            state.tasks = mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks));
-            state.reminders = normalizeList(reminders.length ? reminders : summary?.reminders);
+            state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
+            state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
             state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
             state.categories = normalizeList(categories);
             state.approvals = normalizeList(summary?.approvals);
@@ -271,9 +307,8 @@ if (mount) {
             state.activity = normalizeList(summary?.activity_events);
             state.googleStatus = googleStatus;
             state.session = summary?.session || null;
-            state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || 0);
             state.phase = 'signedIn';
-            state.error = '';
+            state.error = refreshError ? friendlyError(refreshError, 'refresh your latest data') : '';
             if (needsBeanOnboarding()) {
                 state.selected = 'bean';
                 state.chatExpanded = false;
@@ -301,6 +336,14 @@ if (mount) {
 
     function mergeUser(...parts) {
         return Object.assign({}, ...parts.filter(Boolean));
+    }
+
+    function currentWorkspaceIdFromUser(user) {
+        return user?.active_workspace?.id
+            || user?.activeWorkspace?.id
+            || user?.default_workspace_id
+            || user?.defaultWorkspaceId
+            || null;
     }
 
     function dashboardCacheStorageKey(workspaceId = currentWorkspaceId()) {
@@ -364,6 +407,46 @@ if (mount) {
         state.approvals = [];
         state.blockers = [];
         state.activity = [];
+    }
+
+    function snapshotDashboardState() {
+        return {
+            user: state.user,
+            summary: state.summary,
+            tasks: state.tasks,
+            reminders: state.reminders,
+            calendar: state.calendar,
+            categories: state.categories,
+            approvals: state.approvals,
+            blockers: state.blockers,
+            activity: state.activity,
+            googleStatus: state.googleStatus,
+            pendingTaskUpserts: new Map(state.pendingTaskUpserts),
+            pendingTaskDeletes: new Set(state.pendingTaskDeletes),
+            pendingReminderUpserts: new Map(state.pendingReminderUpserts),
+            pendingReminderDeletes: new Set(state.pendingReminderDeletes),
+            pendingCalendarUpserts: new Map(state.pendingCalendarUpserts),
+            pendingCalendarDeletes: new Set(state.pendingCalendarDeletes),
+        };
+    }
+
+    function restoreDashboardState(snapshot) {
+        state.user = snapshot.user;
+        state.summary = snapshot.summary;
+        state.tasks = snapshot.tasks;
+        state.reminders = snapshot.reminders;
+        state.calendar = snapshot.calendar;
+        state.categories = snapshot.categories;
+        state.approvals = snapshot.approvals;
+        state.blockers = snapshot.blockers;
+        state.activity = snapshot.activity;
+        state.googleStatus = snapshot.googleStatus;
+        state.pendingTaskUpserts = snapshot.pendingTaskUpserts;
+        state.pendingTaskDeletes = snapshot.pendingTaskDeletes;
+        state.pendingReminderUpserts = snapshot.pendingReminderUpserts;
+        state.pendingReminderDeletes = snapshot.pendingReminderDeletes;
+        state.pendingCalendarUpserts = snapshot.pendingCalendarUpserts;
+        state.pendingCalendarDeletes = snapshot.pendingCalendarDeletes;
     }
 
     function setActiveWorkspaceLocally(workspaceId) {
@@ -519,6 +602,9 @@ if (mount) {
     }
 
     function render() {
+        deferredDashboardRenderPending = false;
+        window.clearTimeout(deferredDashboardRenderTimer);
+        deferredDashboardRenderTimer = 0;
         const modalKey = state.modal ? modalIdentity(state.modal) : '';
         const existingModal = modalKey ? mount.querySelector('[data-modal-root]') : null;
         const preservedModal = existingModal?.dataset?.modalKey === modalKey ? existingModal : null;
@@ -535,6 +621,37 @@ if (mount) {
                 bindModalActions();
             }
         }
+    }
+
+    function renderDashboardDataUpdate({ deferIfEditing = false } = {}) {
+        if (deferIfEditing && shouldDeferDashboardRender()) {
+            deferredDashboardRenderPending = true;
+            scheduleDeferredDashboardRender();
+            return false;
+        }
+        render();
+        return true;
+    }
+
+    function shouldDeferDashboardRender() {
+        if (state.modal) return true;
+        const active = document.activeElement;
+        if (!active || active === document.body || !mount.contains(active)) return false;
+        return Boolean(active.closest('input, textarea, select, form, [contenteditable="true"], [role="dialog"]'));
+    }
+
+    function scheduleDeferredDashboardRender() {
+        window.clearTimeout(deferredDashboardRenderTimer);
+        deferredDashboardRenderTimer = window.setTimeout(flushDeferredDashboardRender, 900);
+    }
+
+    function flushDeferredDashboardRender() {
+        if (!deferredDashboardRenderPending) return;
+        if (shouldDeferDashboardRender()) {
+            scheduleDeferredDashboardRender();
+            return;
+        }
+        render();
     }
 
     function modalIdentity(modal = {}) {
@@ -2668,18 +2785,35 @@ if (mount) {
     }
 
     function restoreSnapshot(kind, snapshot) {
-        if (kind === 'task') state.tasks = snapshot;
-        if (kind === 'reminder') state.reminders = snapshot;
+        if (kind === 'task') {
+            state.tasks = snapshot;
+            state.pendingTaskUpserts.clear();
+            snapshot.forEach((item) => state.pendingTaskDeletes.delete(String(item.id)));
+        }
+        if (kind === 'reminder') {
+            state.reminders = snapshot;
+            state.pendingReminderUpserts.clear();
+            snapshot.forEach((item) => state.pendingReminderDeletes.delete(String(item.id)));
+        }
         if (kind === 'event') {
             state.calendar = snapshot;
+            state.pendingCalendarUpserts.clear();
             snapshot.forEach((item) => state.pendingCalendarDeletes.delete(String(item.id)));
         }
     }
 
     function cacheSavedItem(kind, item) {
         if (!item) return;
-        if (kind === 'task') state.tasks = upsertById(state.tasks, item);
-        if (kind === 'reminder') state.reminders = upsertById(state.reminders, item);
+        if (kind === 'task') {
+            state.pendingTaskDeletes.delete(String(item.id));
+            state.pendingTaskUpserts.set(String(item.id), item);
+            state.tasks = upsertById(state.tasks, item);
+        }
+        if (kind === 'reminder') {
+            state.pendingReminderDeletes.delete(String(item.id));
+            state.pendingReminderUpserts.set(String(item.id), item);
+            state.reminders = upsertById(state.reminders, item);
+        }
         if (kind === 'event') {
             state.pendingCalendarDeletes.delete(String(item.id));
             state.pendingCalendarUpserts.set(String(item.id), item);
@@ -2688,17 +2822,33 @@ if (mount) {
         saveDashboardCache();
     }
 
+    function reconcileTaskRefresh(items) {
+        return reconcilePendingRefresh(items, state.pendingTaskUpserts, state.pendingTaskDeletes);
+    }
+
+    function reconcileReminderRefresh(items) {
+        return reconcilePendingRefresh(items, state.pendingReminderUpserts, state.pendingReminderDeletes);
+    }
+
     function reconcileCalendarRefresh(items) {
-        const list = normalizeList(items)
-            .filter((item) => !state.pendingCalendarDeletes.has(String(item.id)));
+        return reconcilePendingRefresh(items, state.pendingCalendarUpserts, state.pendingCalendarDeletes);
+    }
+
+    function reconcilePendingRefresh(items, pendingUpserts, pendingDeletes) {
+        const source = normalizeList(items);
+        const sourceIds = new Set(source.map((item) => String(item.id)));
+        const list = source.filter((item) => !pendingDeletes.has(String(item.id)));
         const seenIds = new Set(list.map((item) => String(item.id)));
-        state.pendingCalendarUpserts.forEach((item, id) => {
-            if (state.pendingCalendarDeletes.has(id)) {
-                state.pendingCalendarUpserts.delete(id);
+        pendingDeletes.forEach((id) => {
+            if (!sourceIds.has(id)) pendingDeletes.delete(id);
+        });
+        pendingUpserts.forEach((item, id) => {
+            if (pendingDeletes.has(id)) {
+                pendingUpserts.delete(id);
                 return;
             }
             if (seenIds.has(id)) {
-                state.pendingCalendarUpserts.delete(id);
+                pendingUpserts.delete(id);
                 return;
             }
             list.push(item);
@@ -2717,8 +2867,16 @@ if (mount) {
 
     function removeCachedItem(kind, id) {
         const matches = (item) => String(item.id) === String(id);
-        if (kind === 'task') state.tasks = state.tasks.filter((item) => !matches(item));
-        if (kind === 'reminder') state.reminders = state.reminders.filter((item) => !matches(item));
+        if (kind === 'task') {
+            state.pendingTaskDeletes.add(String(id));
+            state.pendingTaskUpserts.delete(String(id));
+            state.tasks = state.tasks.filter((item) => !matches(item));
+        }
+        if (kind === 'reminder') {
+            state.pendingReminderDeletes.add(String(id));
+            state.pendingReminderUpserts.delete(String(id));
+            state.reminders = state.reminders.filter((item) => !matches(item));
+        }
         if (kind === 'event') {
             state.pendingCalendarDeletes.add(String(id));
             state.pendingCalendarUpserts.delete(String(id));
@@ -2831,6 +2989,7 @@ if (mount) {
             status: completed ? 'pending' : 'completed',
             completed_at: completed ? null : new Date().toISOString(),
         };
+        state.pendingTaskUpserts.set(String(task.id), optimistic);
         state.tasks = upsertById(state.tasks, optimistic);
         state.error = '';
         saveDashboardCache();
@@ -2857,6 +3016,7 @@ if (mount) {
         const completed = reminderCompleted(reminder);
         const snapshot = snapshotLists('reminder');
         const optimistic = { ...reminder, status: completed ? 'pending' : 'completed' };
+        state.pendingReminderUpserts.set(String(reminder.id), optimistic);
         state.reminders = upsertById(state.reminders, optimistic);
         state.error = '';
         saveDashboardCache();
@@ -3918,6 +4078,7 @@ if (mount) {
     }
 
     async function refreshOnly(shouldRender = true, options = {}) {
+        const generation = ++dashboardRefreshGeneration;
         try {
             const calendarPath = options.skipCalendarSync === false ? '/calendar-events' : '/calendar-events?skip_google_sync=1';
             const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
@@ -3929,9 +4090,10 @@ if (mount) {
                 api('/event-categories'),
                 api('/google-calendar/status?cached=1').catch(() => state.googleStatus),
             ]);
+            if (generation !== dashboardRefreshGeneration) return;
             state.summary = summary;
-            state.tasks = mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks));
-            state.reminders = normalizeList(reminders.length ? reminders : summary?.reminders);
+            state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
+            state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
             state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
             state.categories = normalizeList(categories);
             state.approvals = normalizeList(summary?.approvals);
@@ -3940,15 +4102,15 @@ if (mount) {
             state.googleStatus = googleStatus;
             state.user = mergeUser(state.user, summary?.user, summary);
             saveDashboardCache();
-            if (shouldRender) render();
+            if (shouldRender) renderDashboardDataUpdate({ deferIfEditing: options.deferRender === true });
         } catch (error) {
             state.error = friendlyError(error, 'refresh the app');
-            if (shouldRender) render();
+            if (shouldRender) renderDashboardDataUpdate({ deferIfEditing: options.deferRender === true });
         }
     }
 
     function refreshOnlyInBackground(options = {}) {
-        refreshOnly(!state.modal, options);
+        refreshOnly(true, { ...options, deferRender: true });
     }
 
     function startDashboardChangeFeed() {
@@ -4028,10 +4190,13 @@ if (mount) {
     }
 
     function refreshCalendarInBackground() {
+        const generation = ++dashboardRefreshGeneration;
         api('/calendar-events')
             .then((calendar) => {
+                if (generation !== dashboardRefreshGeneration) return;
                 state.calendar = reconcileCalendarRefresh(calendar);
-                render();
+                saveDashboardCache();
+                renderDashboardDataUpdate({ deferIfEditing: true });
             })
             .catch(() => {
                 // Manual refresh surfaces Google sync failures; background import should not interrupt local edits.
@@ -4132,22 +4297,29 @@ if (mount) {
     async function setWorkspace(id) {
         if (!id || String(id) === String(currentWorkspaceId())) return;
         const workspace = findWorkspace(id);
+        const previous = snapshotDashboardState();
+        dashboardRefreshGeneration++;
+        setActiveWorkspaceLocally(id);
+        state.pendingTaskUpserts.clear();
+        state.pendingTaskDeletes.clear();
+        state.pendingReminderUpserts.clear();
+        state.pendingReminderDeletes.clear();
+        state.pendingCalendarUpserts.clear();
+        state.pendingCalendarDeletes.clear();
+        if (!applyDashboardCache(id)) {
+            clearDashboardDataForWorkspace(id);
+        }
+        state.notice = `Switched to ${workspaceDisplayName(workspace)}.`;
+        state.error = '';
+        render();
         try {
             await api('/workspaces/default', { method: 'PATCH', body: { workspace_id: Number(id) } });
-            setActiveWorkspaceLocally(id);
-            state.pendingCalendarUpserts.clear();
-            state.pendingCalendarDeletes.clear();
-            if (!applyDashboardCache(id)) {
-                clearDashboardDataForWorkspace(id);
-            }
-            state.notice = `Switched to ${workspaceDisplayName(workspace)}.`;
-            state.error = '';
-            render();
             refreshOnly(false, { skipCalendarSync: true }).then(() => {
                 state.notice = `Switched to ${workspaceDisplayName(workspace)}.`;
-                render();
+                renderDashboardDataUpdate({ deferIfEditing: true });
             });
         } catch (error) {
+            restoreDashboardState(previous);
             state.error = friendlyError(error, 'switch workspaces');
             render();
         }
