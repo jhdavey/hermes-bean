@@ -519,13 +519,32 @@ if (mount) {
     }
 
     function render() {
+        const modalKey = state.modal ? modalIdentity(state.modal) : '';
+        const existingModal = modalKey ? mount.querySelector('[data-modal-root]') : null;
+        const preservedModal = existingModal?.dataset?.modalKey === modalKey ? existingModal : null;
+        if (preservedModal) preservedModal.remove();
+
         mount.innerHTML = state.phase === 'signedIn' ? signedInMarkup() : signedOutMarkup();
         bindCommonActions();
         if (state.phase === 'signedIn') bindSignedInActions();
         if (state.modal) {
-            mount.insertAdjacentHTML('beforeend', modalMarkup(state.modal));
-            bindModalActions();
+            if (preservedModal) {
+                mount.appendChild(preservedModal);
+            } else {
+                mount.insertAdjacentHTML('beforeend', `<div data-modal-root data-modal-key="${escapeAttr(modalKey)}">${modalMarkup(state.modal)}</div>`);
+                bindModalActions();
+            }
         }
+    }
+
+    function modalIdentity(modal = {}) {
+        return [
+            modal.type || '',
+            modal.mode || '',
+            modal.item?.id || '',
+            modal.parentTask?.id || '',
+            modal.workspace?.id || '',
+        ].map((part) => String(part)).join(':');
     }
 
     function signedOutMarkup() {
