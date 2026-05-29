@@ -494,7 +494,7 @@ void main() {
   );
 
   testWidgets(
-    'workspace switch skips inline progress and shows status under full-screen loader',
+    'workspace switch keeps settings visible while refresh is pending',
     (WidgetTester tester) async {
       final reloadUser = Completer<HermesUser>();
       final api = _WorkspaceFakeHermesApiClient()
@@ -532,12 +532,12 @@ void main() {
         find.byKey(const Key('workspace-calendar-sync-progress')),
         findsNothing,
       );
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(
         find.byKey(const Key('full-screen-loading-message')),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Syncing your calendars...'), findsOneWidget);
+      expect(find.text('Syncing your calendars...'), findsNothing);
+      expect(find.byKey(const Key('settings-view')), findsOneWidget);
 
       reloadUser.complete(await api.currentUser());
       await tester.pumpAndSettle();
@@ -1717,7 +1717,7 @@ void main() {
       );
       expect(
         tester.getTopLeft(find.byKey(const Key('calendar-month-chevron'))).dx,
-        lessThan(
+        greaterThan(
           tester.getTopLeft(find.byKey(const Key('calendar-today-button'))).dx,
         ),
       );
@@ -2001,7 +2001,7 @@ void main() {
     );
     expect(currentTimeLabel.left, greaterThanOrEqualTo(fixedHourColumn.left));
     expect(currentTimeLabel.right, lessThanOrEqualTo(fixedHourColumn.right));
-    expect(fixedHourColumn.height, closeTo(36 + 42 + (16 * 52.5), .1));
+    expect(fixedHourColumn.height, closeTo(36 + 42 + (16 * 80), .1));
     expect(
       tester.getSize(find.byKey(const Key('apple-style-day-timeline'))).height,
       closeTo(fixedHourColumn.height + 1, .1),
@@ -2013,6 +2013,12 @@ void main() {
       scrollingDayColumns.left,
       greaterThanOrEqualTo(fixedHourColumn.right),
     );
+    final dayPageView = tester.widget<PageView>(
+      find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
+    );
+    expect(dayPageView.pageSnapping, isFalse);
+    expect(dayPageView.physics, isA<BouncingScrollPhysics>());
+    expect(dayPageView.physics, isNot(isA<PageScrollPhysics>()));
 
     final headingBeforeSwipe = _activeSelectedDayHeading(tester);
     expect(_topHeaderDayLabelFinder(), findsOneWidget);
@@ -2111,6 +2117,28 @@ void main() {
     expect(laterOverlap.left, closeTo(firstOverlap.left, 1));
     expect(laterOverlap.right, closeTo(firstOverlap.right, 1));
   });
+
+  testWidgets(
+    'short back-to-back calendar events have vertical breathing room',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _BackToBackCalendarFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final firstEvent = tester.getRect(
+        find.byKey(const Key('calendar-event-block-morning-check-in')),
+      );
+      final secondEvent = tester.getRect(
+        find.byKey(const Key('calendar-event-block-morning-follow-up')),
+      );
+
+      expect(firstEvent.bottom, lessThan(secondEvent.top));
+    },
+  );
 
   testWidgets(
     'calendar top header keeps current month label while browsing another month',
@@ -4308,6 +4336,36 @@ void main() {
     expect(find.text('Tomorrow reminder'), findsNothing);
   });
 
+  testWidgets(
+    'calendar task list excludes future and unscheduled tasks while tasks screen keeps them',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _CalendarTaskScopeFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tasks for Today'), findsOneWidget);
+      expect(find.text('Overdue task'), findsOneWidget);
+      expect(find.text('Today task'), findsOneWidget);
+      expect(find.text('Tomorrow task'), findsNothing);
+      expect(find.text('Unscheduled task'), findsNothing);
+      expect(find.text('Future recurring task'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('nav-tasks')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('tasks-view')), findsOneWidget);
+      expect(find.text('Overdue task'), findsOneWidget);
+      expect(find.text('Today task'), findsOneWidget);
+      expect(find.text('Tomorrow task'), findsOneWidget);
+      expect(find.text('Unscheduled task'), findsOneWidget);
+      expect(find.text('Future recurring task'), findsOneWidget);
+    },
+  );
+
   testWidgets('reminder editor keeps controllers alive while opened', (
     WidgetTester tester,
   ) async {
@@ -4427,8 +4485,13 @@ class _MemoryAuthTokenStore implements AuthTokenStore {
 class _StaleTodayPersistedResourcesFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesTask>> listTasks() async => const [
-    HermesTask(id: 901, title: 'Persisted task', status: 'open'),
+  Future<List<HermesTask>> listTasks() async => [
+    HermesTask(
+      id: 901,
+      title: 'Persisted task',
+      status: 'open',
+      dueAt: DateTime.now().toIso8601String(),
+    ),
   ];
 
   @override
@@ -4946,18 +5009,27 @@ class _FakeHermesApiClient extends HermesApiClient {
   }
 
   @override
-  Future<List<HermesTask>> listTasks() async => plannedToday
-      ? const [
-          HermesTask(id: 10, title: 'Generated follow-up task', status: 'open'),
-        ]
-      : const [
-          HermesTask(
-            id: 1,
-            title: 'Plan launch',
-            status: 'open',
-            isCritical: true,
-          ),
-        ];
+  Future<List<HermesTask>> listTasks() async {
+    final today = DateTime.now().toIso8601String();
+    return plannedToday
+        ? [
+            HermesTask(
+              id: 10,
+              title: 'Generated follow-up task',
+              status: 'open',
+              dueAt: today,
+            ),
+          ]
+        : [
+            HermesTask(
+              id: 1,
+              title: 'Plan launch',
+              status: 'open',
+              dueAt: today,
+              isCritical: true,
+            ),
+          ];
+  }
 
   @override
   Future<List<HermesTask>> listPastTasks() async => const [];
@@ -5310,6 +5382,44 @@ class _TomorrowReminderFakeHermesApiClient
   }
 }
 
+class _CalendarTaskScopeFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesTask>> listTasks() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day, 10);
+    final tomorrow = today.add(const Duration(days: 1, hours: 4));
+    return [
+      HermesTask(
+        id: 251,
+        title: 'Overdue task',
+        status: 'open',
+        dueAt: today.subtract(const Duration(days: 1)).toIso8601String(),
+      ),
+      HermesTask(
+        id: 252,
+        title: 'Today task',
+        status: 'open',
+        dueAt: today.toIso8601String(),
+      ),
+      HermesTask(
+        id: 253,
+        title: 'Tomorrow task',
+        status: 'open',
+        dueAt: tomorrow.toIso8601String(),
+      ),
+      const HermesTask(id: 254, title: 'Unscheduled task', status: 'open'),
+      HermesTask(
+        id: 255,
+        title: 'Future recurring task',
+        status: 'open',
+        dueAt: tomorrow.toIso8601String(),
+        metadata: const {'recurrence': 'daily'},
+      ),
+    ];
+  }
+}
+
 class _EditableReminderFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   HermesReminder? updatedReminder;
@@ -5628,6 +5738,37 @@ class _OverlappingCalendarFakeHermesApiClient
           selectedDay.month,
           selectedDay.day,
           12,
+        ).toIso8601String(),
+      ),
+    ];
+  }
+}
+
+class _BackToBackCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final selectedDay = DateTime.now();
+    return [
+      HermesCalendarEvent(
+        id: 1064,
+        title: 'Morning check-in',
+        startsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          10,
+        ).toIso8601String(),
+      ),
+      HermesCalendarEvent(
+        id: 1065,
+        title: 'Morning follow-up',
+        startsAt: DateTime(
+          selectedDay.year,
+          selectedDay.month,
+          selectedDay.day,
+          10,
+          30,
         ).toIso8601String(),
       ),
     ];
@@ -6362,7 +6503,7 @@ String? _headingDaysAfter(String? heading, int days) {
 Finder _topHeaderDayLabelFinder() {
   final now = DateTime.now();
   final label =
-      '${_testShortMonthNames[now.month - 1]} ${_testOrdinalDay(now.day)}';
+      '${_testShortWeekdayNames[now.weekday - 1]} ${_testOrdinalDay(now.day)}';
   return find.descendant(
     of: find.byKey(const Key('calendar-today-button')),
     matching: find.text(label),

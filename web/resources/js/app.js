@@ -6,6 +6,7 @@ if (mount) {
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
     const dashboardChangeKey = 'heybean.dashboard.changeId';
+    const dashboardDataCacheKey = 'heybean.dashboard.data';
     const kioskVoiceKey = 'heybean.kioskVoice';
     const calendarInitialWindowDays = 56;
     const calendarWindowChunkDays = 28;
@@ -74,7 +75,7 @@ if (mount) {
         calendarRefreshing: false,
         taskFilter: 'active',
         reminderFilter: 'pending',
-        dashboardChangeLastId: Number(localStorage.getItem(dashboardChangeKey) || 0),
+        dashboardChangeLastId: 0,
         expandedTaskIds: new Set(),
         pendingCalendarUpserts: new Map(),
         pendingCalendarDeletes: new Set(),
@@ -270,7 +271,7 @@ if (mount) {
             state.activity = normalizeList(summary?.activity_events);
             state.googleStatus = googleStatus;
             state.session = summary?.session || null;
-            state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || state.dashboardChangeLastId || 0);
+            state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || 0);
             state.phase = 'signedIn';
             state.error = '';
             if (needsBeanOnboarding()) {
@@ -286,6 +287,7 @@ if (mount) {
             }
             startDashboardChangeFeed();
             startKioskVoiceMode({ requestPermission: false });
+            saveDashboardCache();
             refreshCalendarInBackground();
         } catch (error) {
             stopDashboardChangeFeed();
@@ -299,6 +301,93 @@ if (mount) {
 
     function mergeUser(...parts) {
         return Object.assign({}, ...parts.filter(Boolean));
+    }
+
+    function dashboardCacheStorageKey(workspaceId = currentWorkspaceId()) {
+        return `${dashboardDataCacheKey}.${state.user?.id || 'anon'}.${workspaceId || 'default'}`;
+    }
+
+    function saveDashboardCache(workspaceId = currentWorkspaceId()) {
+        if (!workspaceId || !state.user) return;
+        try {
+            localStorage.setItem(dashboardCacheStorageKey(workspaceId), JSON.stringify({
+                summary: state.summary,
+                tasks: state.tasks,
+                reminders: state.reminders,
+                calendar: state.calendar,
+                categories: state.categories,
+                approvals: state.approvals,
+                blockers: state.blockers,
+                activity: state.activity,
+                googleStatus: state.googleStatus,
+                savedAt: new Date().toISOString(),
+            }));
+        } catch (_) {
+            // Cache writes are best-effort; API refresh remains the source of truth.
+        }
+    }
+
+    function applyDashboardCache(workspaceId) {
+        try {
+            const cached = JSON.parse(localStorage.getItem(dashboardCacheStorageKey(workspaceId)) || 'null');
+            if (!cached || typeof cached !== 'object') return false;
+            state.summary = cached.summary || state.summary;
+            state.tasks = normalizeList(cached.tasks);
+            state.reminders = normalizeList(cached.reminders);
+            state.calendar = reconcileCalendarRefresh(cached.calendar);
+            state.categories = normalizeList(cached.categories);
+            state.approvals = normalizeList(cached.approvals);
+            state.blockers = normalizeList(cached.blockers);
+            state.activity = normalizeList(cached.activity);
+            state.googleStatus = cached.googleStatus || state.googleStatus;
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function clearDashboardDataForWorkspace(workspaceId) {
+        state.summary = {
+            ...(state.summary || {}),
+            workspace: findWorkspace(workspaceId) || state.summary?.workspace,
+            tasks: [],
+            reminders: [],
+            calendar_events: [],
+            approvals: [],
+            blockers: [],
+            activity_events: [],
+        };
+        state.tasks = [];
+        state.reminders = [];
+        state.calendar = [];
+        state.categories = [];
+        state.approvals = [];
+        state.blockers = [];
+        state.activity = [];
+    }
+
+    function setActiveWorkspaceLocally(workspaceId) {
+        const id = String(workspaceId);
+        const workspace = findWorkspace(id);
+        const nextWorkspaces = workspaces().map((candidate) => ({
+            ...candidate,
+            active: String(candidate.id) === id,
+            is_default: String(candidate.id) === id,
+            isDefault: String(candidate.id) === id,
+        }));
+        state.user = {
+            ...(state.user || {}),
+            default_workspace_id: Number(workspaceId),
+            defaultWorkspaceId: Number(workspaceId),
+            active_workspace: workspace || state.user?.active_workspace,
+            activeWorkspace: workspace || state.user?.activeWorkspace,
+            workspaces: nextWorkspaces,
+        };
+        state.summary = {
+            ...(state.summary || {}),
+            workspace: workspace || state.summary?.workspace,
+            workspaces: nextWorkspaces.length ? nextWorkspaces : state.summary?.workspaces,
+        };
     }
 
     function currentAgentProfile() {
@@ -2577,6 +2666,7 @@ if (mount) {
             state.pendingCalendarUpserts.set(String(item.id), item);
             state.calendar = upsertById(state.calendar, item);
         }
+        saveDashboardCache();
     }
 
     function reconcileCalendarRefresh(items) {
@@ -2615,6 +2705,7 @@ if (mount) {
             state.pendingCalendarUpserts.delete(String(id));
             state.calendar = state.calendar.filter((item) => !matches(item));
         }
+        saveDashboardCache();
     }
 
     function removeCachedRecurringEvents(event, mode) {
@@ -2635,6 +2726,7 @@ if (mount) {
             if (mode === 'future') return candidateDate < selectedDate;
             return true;
         });
+        saveDashboardCache();
     }
 
     function deleteEventPayload(event = null, recurringMode = null) {
@@ -2714,23 +2806,54 @@ if (mount) {
     async function toggleTask(task) {
         if (!task) return;
         const completed = taskCompleted(task);
-        await api(`/tasks/${task.id}`, {
-            method: 'PATCH',
-            body: {
-                status: completed ? 'pending' : 'completed',
-                completed_at: completed ? null : new Date().toISOString(),
-            },
-        });
-        await refreshOnly();
+        const snapshot = snapshotLists('task');
+        const optimistic = {
+            ...task,
+            status: completed ? 'pending' : 'completed',
+            completed_at: completed ? null : new Date().toISOString(),
+        };
+        state.tasks = upsertById(state.tasks, optimistic);
+        state.error = '';
+        saveDashboardCache();
+        render();
+        try {
+            const saved = await api(`/tasks/${task.id}`, {
+                method: 'PATCH',
+                body: {
+                    status: completed ? 'pending' : 'completed',
+                    completed_at: completed ? null : optimistic.completed_at,
+                },
+            });
+            cacheSavedItem('task', saved);
+            refreshOnlyInBackground({ skipCalendarSync: true });
+        } catch (error) {
+            restoreSnapshot('task', snapshot);
+            state.error = friendlyError(error, completed ? 'reopen that task' : 'complete that task');
+            render();
+        }
     }
 
     async function toggleReminder(reminder) {
         if (!reminder) return;
-        await api(`/reminders/${reminder.id}`, {
-            method: 'PATCH',
-            body: { status: reminderCompleted(reminder) ? 'pending' : 'completed' },
-        });
-        await refreshOnly();
+        const completed = reminderCompleted(reminder);
+        const snapshot = snapshotLists('reminder');
+        const optimistic = { ...reminder, status: completed ? 'pending' : 'completed' };
+        state.reminders = upsertById(state.reminders, optimistic);
+        state.error = '';
+        saveDashboardCache();
+        render();
+        try {
+            const saved = await api(`/reminders/${reminder.id}`, {
+                method: 'PATCH',
+                body: { status: completed ? 'pending' : 'completed' },
+            });
+            cacheSavedItem('reminder', saved);
+            refreshOnlyInBackground({ skipCalendarSync: true });
+        } catch (error) {
+            restoreSnapshot('reminder', snapshot);
+            state.error = friendlyError(error, completed ? 'reopen that reminder' : 'complete that reminder');
+            render();
+        }
     }
 
     function handleChatInput(event) {
@@ -3797,6 +3920,7 @@ if (mount) {
             state.activity = normalizeList(summary?.activity_events);
             state.googleStatus = googleStatus;
             state.user = mergeUser(state.user, summary?.user, summary);
+            saveDashboardCache();
             if (shouldRender) render();
         } catch (error) {
             state.error = friendlyError(error, 'refresh the app');
@@ -3844,11 +3968,12 @@ if (mount) {
             const data = payload.data || payload;
             const changes = normalizeList(data.changes);
             const latestId = Number(data.latest_id || data.latestId || 0);
-            if (latestId > state.dashboardChangeLastId) {
+            const previousLastId = state.dashboardChangeLastId;
+            if (latestId !== state.dashboardChangeLastId) {
                 state.dashboardChangeLastId = latestId;
                 localStorage.setItem(dashboardChangeStorageKey(), String(latestId));
             }
-            if (changes.length) {
+            if (changes.length || (latestId > 0 && latestId < previousLastId)) {
                 scheduleDashboardRealtimeRefresh(changes);
             }
         } catch (error) {
@@ -3990,9 +4115,19 @@ if (mount) {
         const workspace = findWorkspace(id);
         try {
             await api('/workspaces/default', { method: 'PATCH', body: { workspace_id: Number(id) } });
-            await loadSignedIn();
+            setActiveWorkspaceLocally(id);
+            state.pendingCalendarUpserts.clear();
+            state.pendingCalendarDeletes.clear();
+            if (!applyDashboardCache(id)) {
+                clearDashboardDataForWorkspace(id);
+            }
             state.notice = `Switched to ${workspaceDisplayName(workspace)}.`;
+            state.error = '';
             render();
+            refreshOnly(false, { skipCalendarSync: true }).then(() => {
+                state.notice = `Switched to ${workspaceDisplayName(workspace)}.`;
+                render();
+            });
         } catch (error) {
             state.error = friendlyError(error, 'switch workspaces');
             render();

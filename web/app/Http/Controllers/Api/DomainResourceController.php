@@ -394,7 +394,9 @@ class DomainResourceController extends Controller
         }
 
         $eventsByWorkspace = $this->linkedCalendarEventsByWorkspace($event, $accessibleWorkspaceIds);
-        $eventsToDelete = $eventsByWorkspace->only($workspaceIds)->values();
+        $eventsToDelete = $eventsByWorkspace
+            ->filter(fn (CalendarEvent $event): bool => in_array((int) $event->workspace_id, $workspaceIds, true))
+            ->values();
         if ($eventsToDelete->isEmpty() && in_array((int) $event->workspace_id, $workspaceIds, true)) {
             $eventsToDelete = collect([$event]);
         }
@@ -898,6 +900,21 @@ class DomainResourceController extends Controller
      */
     private function linkedCalendarEventsByWorkspace(CalendarEvent $event, array $accessibleWorkspaceIds)
     {
+        if ($this->recurringCalendarEvents->isGeneratedOccurrence($event)) {
+            $occurrenceDate = $this->recurringCalendarEvents->occurrenceDate($event);
+            if ($occurrenceDate) {
+                return $this->linkedCalendarEventsByWorkspace(
+                    $this->recurringCalendarEvents->sourceEventFor($event),
+                    $accessibleWorkspaceIds
+                )
+                    ->map(
+                        fn (CalendarEvent $sourceEvent): CalendarEvent => $this->recurringCalendarEvents
+                            ->generatedOccurrenceFor($sourceEvent, $occurrenceDate) ?? $sourceEvent
+                    )
+                    ->keyBy(fn (CalendarEvent $event): int => (int) $event->workspace_id);
+            }
+        }
+
         $relatedIds = collect([(int) $event->id]);
         $links = $this->calendarEventLinksFor($event);
         $sourcePairs = collect();

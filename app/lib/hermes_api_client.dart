@@ -136,6 +136,23 @@ class HermesApiClient {
     return _expectMap(data['data']);
   }
 
+  Future<HermesDashboardChangeFeed> dashboardChanges({
+    required int after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/dashboard-changes', {
+        'after': after.toString(),
+        'wait': waitSeconds.toString(),
+        'limit': limit.toString(),
+      }),
+      responseTimeout: Duration(seconds: waitSeconds + 10),
+    );
+    return HermesDashboardChangeFeed.fromJson(_expectMap(data['data']));
+  }
+
   Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
     final data = await _sendJson(
       'GET',
@@ -856,6 +873,56 @@ class HermesAuthResult {
         token: _expectString(json['token']),
         user: HermesUser.fromJson(_expectMap(json['user'])),
       );
+}
+
+class HermesDashboardChangeFeed {
+  const HermesDashboardChangeFeed({
+    required this.changes,
+    required this.latestId,
+  });
+
+  final List<HermesDashboardChange> changes;
+  final int latestId;
+
+  factory HermesDashboardChangeFeed.fromJson(Map<String, Object?> json) =>
+      HermesDashboardChangeFeed(
+        changes: _expectList(json['changes'] ?? const [])
+            .map((change) => HermesDashboardChange.fromJson(_expectMap(change)))
+            .toList(),
+        latestId: _readIntOrNull(json['latest_id'] ?? json['latestId']) ?? 0,
+      );
+}
+
+class HermesDashboardChange {
+  const HermesDashboardChange({
+    required this.id,
+    required this.resourceType,
+    required this.action,
+    this.userId,
+    this.workspaceId,
+    this.resourceId,
+    this.payload = const {},
+  });
+
+  final int id;
+  final int? userId;
+  final int? workspaceId;
+  final String resourceType;
+  final String action;
+  final int? resourceId;
+  final Map<String, Object?> payload;
+
+  factory HermesDashboardChange.fromJson(
+    Map<String, Object?> json,
+  ) => HermesDashboardChange(
+    id: _expectInt(json['id']),
+    userId: _readIntOrNull(json['user_id'] ?? json['userId']),
+    workspaceId: _readIntOrNull(json['workspace_id'] ?? json['workspaceId']),
+    resourceType: _expectString(json['resource_type'] ?? json['resourceType']),
+    action: _expectString(json['action']),
+    resourceId: _readIntOrNull(json['resource_id'] ?? json['resourceId']),
+    payload: _expectMapOrNull(json['payload']) ?? const {},
+  );
 }
 
 class HermesNotificationPreferences {

@@ -744,6 +744,30 @@ enum _AuthPhase { loading, signedOut, signedIn }
 
 enum _HomeDestination { today, tasks, bean, reminders, settings }
 
+const _dashboardChangePollInterval = Duration(seconds: 15);
+
+class _DashboardSnapshot {
+  const _DashboardSnapshot({
+    required this.tasks,
+    required this.pastTasks,
+    required this.reminders,
+    required this.calendar,
+    required this.eventCategories,
+    required this.approvals,
+    required this.events,
+    this.googleCalendarStatus,
+  });
+
+  final List<HermesTask> tasks;
+  final List<HermesTask> pastTasks;
+  final List<HermesReminder> reminders;
+  final List<HermesCalendarEvent> calendar;
+  final List<HermesEventCategory> eventCategories;
+  final List<HermesApproval> approvals;
+  final List<HermesActivityEvent> events;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
+}
+
 class CommandCenterShell extends StatefulWidget {
   const CommandCenterShell({
     super.key,
@@ -806,7 +830,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final _ReminderNotificationService _reminderNotifications =
       _ReminderNotificationService();
   Timer? _reminderDueTimer;
+  Timer? _dashboardChangeTimer;
+  bool _dashboardChangePollInFlight = false;
+  int _dashboardChangePollGeneration = 0;
+  int _dashboardChangeLastId = 0;
+  int _workspaceRefreshGeneration = 0;
   int? _lastScheduledAppIconBadgeCount;
+  final Map<int, _DashboardSnapshot> _workspaceSnapshots = {};
 
   @override
   void initState() {
@@ -824,6 +854,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _reminderDueTimer?.cancel();
+    _stopDashboardChangePolling();
     super.dispose();
   }
 
@@ -831,6 +862,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _scheduleAppIconBadgeSync(_criticalItemCountForToday());
+      unawaited(_pollDashboardChanges());
     }
   }
 
@@ -910,6 +942,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final rememberedToken = await widget.tokenStore.loadToken();
     widget.apiClient.bearerToken ??= rememberedToken;
     if (widget.apiClient.bearerToken == null) {
+      _stopDashboardChangePolling();
       setState(() => _phase = _AuthPhase.signedOut);
       return;
     }
@@ -944,6 +977,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     bool launchedFromRememberedToken = false,
     String? loadingStatusText,
   }) async {
+    _stopDashboardChangePolling();
+    _workspaceRefreshGeneration++;
     setState(() {
       _phase = _AuthPhase.loading;
       _loadingStatusText = loadingStatusText;
@@ -1060,7 +1095,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             : 'You are signed in. ${beanFriendlyErrorMessage(refreshError!, action: 'refresh your latest data')}';
       });
       _syncReminderNotifications();
+      _cacheCurrentDashboardSnapshot();
+      _startDashboardChangePolling(resetCursor: true);
     } catch (error) {
+      _stopDashboardChangePolling();
       if (!mounted) return;
       final invalidToken = _isInvalidTokenError(error);
       if (invalidToken) {
@@ -1688,6 +1726,116 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     unawaited(_persistCalendarPreferences());
   }
 
+  int? _activeWorkspaceId() =>
+      _user?.activeWorkspace?.numericId ?? _user?.defaultWorkspaceId;
+
+  void _cacheCurrentDashboardSnapshot({int? workspaceId}) {
+    final id = workspaceId ?? _activeWorkspaceId();
+    if (id == null || id <= 0) return;
+    _workspaceSnapshots[id] = _DashboardSnapshot(
+      tasks: List<HermesTask>.unmodifiable(_tasks),
+      pastTasks: List<HermesTask>.unmodifiable(_pastTasks),
+      reminders: List<HermesReminder>.unmodifiable(_reminders),
+      calendar: List<HermesCalendarEvent>.unmodifiable(_calendar),
+      eventCategories: List<HermesEventCategory>.unmodifiable(_eventCategories),
+      approvals: List<HermesApproval>.unmodifiable(_approvals),
+      events: List<HermesActivityEvent>.unmodifiable(_events),
+      googleCalendarStatus: _googleCalendarStatus,
+    );
+  }
+
+  void _restoreDashboardSnapshot(_DashboardSnapshot snapshot) {
+    _tasks = snapshot.tasks;
+    _pastTasks = snapshot.pastTasks;
+    _reminders = snapshot.reminders;
+    _calendar = snapshot.calendar;
+    _eventCategories = snapshot.eventCategories;
+    _approvals = snapshot.approvals;
+    _events = snapshot.events;
+    _googleCalendarStatus = snapshot.googleCalendarStatus;
+  }
+
+  void _clearDashboardData() {
+    _tasks = const [];
+    _pastTasks = const [];
+    _reminders = const [];
+    _calendar = const [];
+    _eventCategories = const [];
+    _approvals = const [];
+    _events = const [];
+  }
+
+  HermesUser _userWithActiveWorkspace(
+    HermesUser user,
+    HermesWorkspace workspace,
+  ) {
+    final workspaceId = workspace.numericId;
+    return user.copyWith(
+      defaultWorkspaceId: workspaceId ?? user.defaultWorkspaceId,
+      activeWorkspace: workspace.copyWith(active: true, isDefault: true),
+      workspaces: user.workspaces
+          .map(
+            (candidate) => candidate.copyWith(
+              active: candidate.id == workspace.id,
+              isDefault: candidate.id == workspace.id,
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  void _startDashboardChangePolling({bool resetCursor = false}) {
+    _dashboardChangeTimer?.cancel();
+    _dashboardChangePollGeneration++;
+    if (resetCursor) _dashboardChangeLastId = 0;
+    if (_phase != _AuthPhase.signedIn) return;
+
+    unawaited(_pollDashboardChanges(markCurrent: true));
+    _dashboardChangeTimer = Timer.periodic(
+      _dashboardChangePollInterval,
+      (_) => unawaited(_pollDashboardChanges()),
+    );
+  }
+
+  void _stopDashboardChangePolling() {
+    _dashboardChangeTimer?.cancel();
+    _dashboardChangeTimer = null;
+    _dashboardChangePollInFlight = false;
+    _dashboardChangePollGeneration++;
+  }
+
+  Future<void> _pollDashboardChanges({bool markCurrent = false}) async {
+    if (_phase != _AuthPhase.signedIn || _dashboardChangePollInFlight) return;
+    _dashboardChangePollInFlight = true;
+    final generation = _dashboardChangePollGeneration;
+    final previousLatestId = _dashboardChangeLastId;
+    try {
+      final feed = await widget.apiClient.dashboardChanges(
+        after: previousLatestId,
+      );
+      if (!mounted ||
+          _phase != _AuthPhase.signedIn ||
+          generation != _dashboardChangePollGeneration) {
+        return;
+      }
+
+      if (feed.latestId != _dashboardChangeLastId) {
+        _dashboardChangeLastId = feed.latestId;
+      }
+
+      if (!markCurrent &&
+          (feed.changes.isNotEmpty ||
+              feed.latestId > previousLatestId ||
+              (feed.latestId > 0 && feed.latestId < previousLatestId))) {
+        await _refreshSignedInViews();
+      }
+    } catch (_) {
+      // Realtime refresh is opportunistic; manual pull-to-refresh still works.
+    } finally {
+      _dashboardChangePollInFlight = false;
+    }
+  }
+
   Future<void> _refreshSignedInViews() async {
     final session = _session;
     if (_phase != _AuthPhase.signedIn || session == null) return;
@@ -1729,6 +1877,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _error = null;
       });
       _syncReminderNotifications();
+      _cacheCurrentDashboardSnapshot();
     } catch (error) {
       if (!mounted) return;
       setState(
@@ -1736,6 +1885,88 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           error,
           action: 'refresh your latest data',
         ),
+      );
+    }
+  }
+
+  Future<void> _refreshWorkspaceDataFromServer({
+    bool syncConnectedCalendar = false,
+    String errorAction = 'refresh your latest data',
+  }) async {
+    if (_phase != _AuthPhase.signedIn) return;
+    final generation = ++_workspaceRefreshGeneration;
+    try {
+      final user = await widget.apiClient.me();
+      final session = await widget.apiClient.startSession(
+        title: _userNeedsBeanIntroduction(user)
+            ? 'Welcome to Bean'
+            : 'Workspace chat',
+        runtimeMode: _userNeedsBeanIntroduction(user) ? 'onboarding' : 'chat',
+        workspaceId: user.activeWorkspace?.numericId,
+        metadata: {'source': 'flutter', 'reason': 'workspace_refresh'},
+      );
+      final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
+        fallback:
+            _googleCalendarStatus ??
+            const GoogleCalendarSyncStatus(
+              connected: false,
+              status: 'not_connected',
+            ),
+        syncConnected: syncConnectedCalendar,
+      );
+      final results = await Future.wait<Object>([
+        widget.apiClient.todaySummary(),
+        widget.apiClient.listTasks().catchError((_) => const <HermesTask>[]),
+        widget.apiClient.listReminders().catchError(
+          (_) => const <HermesReminder>[],
+        ),
+        widget.apiClient.listCalendarEvents().catchError(
+          (_) => const <HermesCalendarEvent>[],
+        ),
+        widget.apiClient.listPastTasks().catchError(
+          (_) => const <HermesTask>[],
+        ),
+        widget.apiClient.listEventCategories().catchError(
+          (_) => const <HermesEventCategory>[],
+        ),
+        widget.apiClient
+            .pollActivityEvents(session.id)
+            .catchError((_) => const <HermesActivityEvent>[]),
+      ]);
+      final summary = results[0] as HermesTodaySummary;
+      final listedTasks = results[1] as List<HermesTask>;
+      final listedReminders = results[2] as List<HermesReminder>;
+      final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
+      if (!mounted ||
+          _phase != _AuthPhase.signedIn ||
+          generation != _workspaceRefreshGeneration) {
+        return;
+      }
+      setState(() {
+        _user = user;
+        _session = session;
+        _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
+        _pastTasks = results[4] as List<HermesTask>;
+        _eventCategories = results[5] as List<HermesEventCategory>;
+        _googleCalendarStatus = googleCalendarStatus;
+        _reminders = listedReminders.isEmpty
+            ? summary.reminders
+            : listedReminders;
+        _calendar = listedCalendarEvents;
+        _approvals = summary.approvals;
+        _events = results[6] as List<HermesActivityEvent>;
+        _error = null;
+      });
+      _syncReminderNotifications();
+      _cacheCurrentDashboardSnapshot();
+    } catch (error) {
+      if (!mounted ||
+          _phase != _AuthPhase.signedIn ||
+          generation != _workspaceRefreshGeneration) {
+        return;
+      }
+      setState(
+        () => _error = beanFriendlyErrorMessage(error, action: errorAction),
       );
     }
   }
@@ -1858,6 +2089,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _pastTasks = _replaceTask(_pastTasks, updatedTask);
         }
       });
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (!mounted) return;
@@ -1932,6 +2164,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             : [..._tasks, saved];
         _error = null;
       });
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (mounted) {
@@ -2049,6 +2282,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         task.id,
         deleteFromWorkspaceIds: deleteFromWorkspaceIds,
       );
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (mounted) {
@@ -2117,6 +2351,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             : [..._reminders, saved];
         _error = null;
       });
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (mounted) {
@@ -2152,6 +2387,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             .map((item) => item.id == saved.id ? saved : item)
             .toList();
       });
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (!mounted) return;
@@ -2179,6 +2415,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         reminder.id,
         deleteFromWorkspaceIds: deleteFromWorkspaceIds,
       );
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (mounted) {
@@ -2214,6 +2451,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 .toList()
           : [..._eventCategories, saved];
     });
+    _cacheCurrentDashboardSnapshot();
     return saved;
   }
 
@@ -2261,6 +2499,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           )
           .toList();
     });
+    _cacheCurrentDashboardSnapshot();
   }
 
   Future<void> _createCalendarEvent({
@@ -2322,6 +2561,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _calendar = [..._calendar, createdEvent];
         _error = null;
       });
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (mounted) {
@@ -2424,6 +2664,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             )
             .toList();
       });
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (!mounted) return;
@@ -2489,6 +2730,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         recurringDeleteMode: recurringDeleteMode,
         recurringOccurrenceDate: recurringOccurrenceDate,
       );
+      _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
       if (!mounted) return;
@@ -2504,81 +2746,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _reloadSignedInViewsFromSettings() async {
     if (_phase != _AuthPhase.signedIn) return;
-    setState(() {
-      _phase = _AuthPhase.loading;
-      _loadingStatusText = 'Syncing your calendars...';
-      _error = null;
-    });
-    try {
-      final user = await widget.apiClient.me();
-      final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
-        fallback:
-            _googleCalendarStatus ??
-            const GoogleCalendarSyncStatus(
-              connected: false,
-              status: 'not_connected',
-            ),
-      );
-      final session = await widget.apiClient.startSession(
-        title: _userNeedsBeanIntroduction(user)
-            ? 'Welcome to Bean'
-            : 'Workspace chat',
-        runtimeMode: _userNeedsBeanIntroduction(user) ? 'onboarding' : 'chat',
-        workspaceId: user.activeWorkspace?.numericId,
-        metadata: {'source': 'flutter', 'reason': 'workspace_refresh'},
-      );
-      final results = await Future.wait<Object>([
-        widget.apiClient.todaySummary(),
-        widget.apiClient.listTasks().catchError((_) => const <HermesTask>[]),
-        widget.apiClient.listReminders().catchError(
-          (_) => const <HermesReminder>[],
-        ),
-        widget.apiClient.listCalendarEvents().catchError(
-          (_) => const <HermesCalendarEvent>[],
-        ),
-        widget.apiClient.listPastTasks().catchError(
-          (_) => const <HermesTask>[],
-        ),
-        widget.apiClient.listEventCategories().catchError(
-          (_) => const <HermesEventCategory>[],
-        ),
-        widget.apiClient
-            .pollActivityEvents(session.id)
-            .catchError((_) => const <HermesActivityEvent>[]),
-      ]);
-      final summary = results[0] as HermesTodaySummary;
-      final listedTasks = results[1] as List<HermesTask>;
-      final listedReminders = results[2] as List<HermesReminder>;
-      final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
-      if (!mounted) return;
-      setState(() {
-        _user = user;
-        _session = session;
-        _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
-        _pastTasks = results[4] as List<HermesTask>;
-        _eventCategories = results[5] as List<HermesEventCategory>;
-        _googleCalendarStatus = googleCalendarStatus;
-        _reminders = listedReminders.isEmpty
-            ? summary.reminders
-            : listedReminders;
-        _calendar = listedCalendarEvents;
-        _approvals = summary.approvals;
-        _events = results[6] as List<HermesActivityEvent>;
-        _phase = _AuthPhase.signedIn;
-        _loadingStatusText = null;
-        _error = null;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _phase = _AuthPhase.signedIn;
-        _loadingStatusText = null;
-        _error = beanFriendlyErrorMessage(
-          error,
-          action: 'refresh your workspace',
-        );
-      });
-    }
+    setState(() => _error = null);
+    await _refreshWorkspaceDataFromServer(
+      syncConnectedCalendar: true,
+      errorAction: 'refresh your workspace',
+    );
   }
 
   Future<void> _updateAccountEmail(String email) async {
@@ -2700,6 +2872,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _logout() async {
     if (_busy) return;
+    _stopDashboardChangePolling();
     setState(() => _busy = true);
     try {
       await widget.apiClient.logout();
@@ -2724,6 +2897,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _deleteAccount() async {
     if (_busy) return;
+    _stopDashboardChangePolling();
     setState(() => _busy = true);
     try {
       await widget.apiClient.deleteAccount();
@@ -2741,6 +2915,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         });
       }
     } catch (error) {
+      _startDashboardChangePolling();
       if (mounted) {
         setState(() {
           _busy = false;
@@ -2766,10 +2941,29 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _error = null;
     });
     try {
-      await widget.apiClient.setDefaultWorkspace(workspaceId);
+      final selectedWorkspace = await widget.apiClient.setDefaultWorkspace(
+        workspaceId,
+      );
       if (!mounted) return;
-      await _loadSignedIn(
-        loadingStatusText: 'Switching to ${_workspaceDisplayName(workspace)}…',
+      final cachedSnapshot = _workspaceSnapshots[workspaceId];
+      setState(() {
+        if (_user != null) {
+          _user = _userWithActiveWorkspace(_user!, selectedWorkspace);
+        }
+        if (cachedSnapshot != null) {
+          _restoreDashboardSnapshot(cachedSnapshot);
+        } else {
+          _clearDashboardData();
+        }
+        _busy = false;
+        _error = null;
+      });
+      _startDashboardChangePolling(resetCursor: true);
+      unawaited(
+        _refreshWorkspaceDataFromServer(
+          syncConnectedCalendar: false,
+          errorAction: 'refresh your workspace',
+        ),
       );
     } catch (error) {
       if (!mounted) return;
@@ -4222,7 +4416,7 @@ class _CommandCenterContent extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final activeTasks = _visibleSortedTasks(tasks);
-        final selectedDayTasks = _tasksForDay(activeTasks, DateTime.now());
+        final selectedDayTasks = _tasksForTodayAgenda(tasks, DateTime.now());
         final beanPanel = _HeroChatCard(
           messages: messages,
           busy: busy,
@@ -5723,7 +5917,7 @@ const _calendarStartHourPreferenceKey = 'calendar_start_hour';
 const _calendarEndHourPreferenceKey = 'calendar_end_hour';
 const _defaultCalendarStartHour = 7;
 const _defaultCalendarEndHour = 22;
-const _calendarHourHeight = 52.5;
+const _calendarHourHeight = 80.0;
 const _calendarTimeColumnWidth = 48.0;
 const _calendarDayHeaderHeight = 36.0;
 const _calendarAllDayRowHeight = 42.0;
@@ -5973,9 +6167,8 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                               'apple-style-day-page-view',
                             ),
                             controller: _dayPageController,
-                            physics: const BouncingScrollPhysics(
-                              parent: PageScrollPhysics(),
-                            ),
+                            pageSnapping: false,
+                            physics: const BouncingScrollPhysics(),
                             allowImplicitScrolling: true,
                             onPageChanged: _handlePageChanged,
                             itemBuilder: (context, page) => _TwoDayTimelinePage(
@@ -13683,6 +13876,19 @@ List<HermesTask> _tasksForDay(List<HermesTask> tasks, DateTime day) {
     final dueAt = _parseTaskDueDate(task);
     if (dueAt == null) return _sameCalendarDay(selectedDay, today);
     return _sameCalendarDay(_dateOnly(dueAt), selectedDay);
+  }).toList();
+  visible.sort(_compareTasksByCompletionAndDueDate);
+  return visible;
+}
+
+List<HermesTask> _tasksForTodayAgenda(List<HermesTask> tasks, DateTime day) {
+  final today = _dateOnly(day);
+  final visible = tasks.where((task) {
+    final dueAt = _parseTaskDueDate(task);
+    if (dueAt == null) return false;
+    final dueDay = _dateOnly(dueAt);
+    if (_taskIsCompleted(task)) return _sameCalendarDay(dueDay, today);
+    return _taskIsOverdue(task) || _sameCalendarDay(dueDay, today);
   }).toList();
   visible.sort(_compareTasksByCompletionAndDueDate);
   return visible;

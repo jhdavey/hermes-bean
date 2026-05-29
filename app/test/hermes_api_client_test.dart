@@ -57,6 +57,50 @@ void main() {
     expect(requests, hasLength(1));
   });
 
+  test('polls dashboard changes for realtime refreshes', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'GET');
+        expect(request.path, '/dashboard-changes?after=41&wait=0&limit=100');
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'latest_id': 42,
+              'changes': [
+                {
+                  'id': 42,
+                  'user_id': 7,
+                  'workspace_id': 3,
+                  'resource_type': 'task',
+                  'action': 'updated',
+                  'resource_id': 9,
+                  'payload': {
+                    'title': 'Buy milk',
+                    'changed_fields': ['status'],
+                  },
+                },
+              ],
+            },
+          }),
+        );
+      },
+    );
+
+    final feed = await client.dashboardChanges(after: 41);
+
+    expect(requests, hasLength(1));
+    expect(feed.latestId, 42);
+    expect(feed.changes.single.resourceType, 'task');
+    expect(feed.changes.single.workspaceId, 3);
+    expect(feed.changes.single.payload['title'], 'Buy milk');
+  });
+
   test(
     'registers, logs in, sends bearer token, exports, and deletes account',
     () async {

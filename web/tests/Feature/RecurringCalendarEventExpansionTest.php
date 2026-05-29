@@ -139,6 +139,59 @@ class RecurringCalendarEventExpansionTest extends TestCase
         CarbonImmutable::setTestNow();
     }
 
+    public function test_deleting_a_linked_generated_occurrence_removes_that_date_from_selected_workspaces(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
+        $token = $this->apiToken('recurring-delete-linked-single@example.com');
+        $user = User::where('email', 'recurring-delete-linked-single@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+
+        $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'Weekly lesson',
+            'starts_at' => '2026-05-26T14:00:00Z',
+            'ends_at' => '2026-05-26T15:00:00Z',
+            'recurrence' => 'weekly',
+            'sync_to_workspace_ids' => [$family->id],
+        ])->assertCreated()->json('data.id');
+
+        $familySource = CalendarEvent::query()
+            ->where('workspace_id', $family->id)
+            ->where('title', 'Weekly lesson')
+            ->where('recurrence', 'weekly')
+            ->firstOrFail();
+        $personalOccurrence = CalendarEvent::query()
+            ->where('workspace_id', $personalWorkspaceId)
+            ->where('starts_at', '2026-06-02 14:00:00')
+            ->whereNull('recurrence')
+            ->firstOrFail();
+        $familyOccurrence = CalendarEvent::query()
+            ->where('workspace_id', $family->id)
+            ->where('starts_at', '2026-06-02 14:00:00')
+            ->whereNull('recurrence')
+            ->firstOrFail();
+
+        $listed = $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$personalWorkspaceId.'&skip_google_sync=1')
+            ->assertOk()
+            ->json('data');
+        $listedOccurrence = collect($listed)->firstWhere('id', $personalOccurrence->id);
+        $this->assertSame([$personalWorkspaceId, $family->id], $listedOccurrence['linked_workspace_ids']);
+
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$personalOccurrence->id, [
+            'delete_from_workspace_ids' => [$personalWorkspaceId, $family->id],
+            'recurring_delete_mode' => 'single',
+            'recurring_occurrence_date' => '2026-06-02',
+        ])->assertNoContent();
+
+        $this->assertDatabaseMissing('calendar_events', ['id' => $personalOccurrence->id]);
+        $this->assertDatabaseMissing('calendar_events', ['id' => $familyOccurrence->id]);
+        $this->assertSame(['2026-06-02'], CalendarEvent::findOrFail($sourceId)->metadata['recurring_exception_dates']);
+        $this->assertSame(['2026-06-02'], $familySource->refresh()->metadata['recurring_exception_dates']);
+
+        CarbonImmutable::setTestNow();
+    }
+
     public function test_deleting_generated_occurrence_future_removes_that_and_following_events(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));

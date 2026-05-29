@@ -3,16 +3,18 @@
 namespace App\Services;
 
 use App\Models\CalendarEvent;
-use Carbon\CarbonInterface;
 use Carbon\CarbonImmutable;
-use DateInterval;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
 class RecurringCalendarEventService
 {
     private const GENERATED_METADATA_KEY = 'recurrence_generated';
+
     private const PARENT_METADATA_KEY = 'recurrence_parent_event_id';
+
     private const OCCURRENCE_DATE_METADATA_KEY = 'recurrence_occurrence_date';
+
     private const MATERIALIZED_UNTIL_METADATA_KEY = 'recurrence_materialized_until';
 
     public function materializeAll(?CarbonInterface $horizon = null): int
@@ -139,6 +141,12 @@ class RecurringCalendarEventService
         $occurrences->each(fn (CalendarEvent $occurrence): ?bool => $occurrence->delete());
 
         return $occurrences->count();
+    }
+
+    public function generatedOccurrenceFor(CalendarEvent $event, string $occurrenceDate): ?CalendarEvent
+    {
+        return $this->generatedOccurrences($event)
+            ->first(fn (CalendarEvent $occurrence): bool => $this->occurrenceDate($occurrence) === $occurrenceDate);
     }
 
     public function deleteGeneratedOccurrencesFrom(CalendarEvent $event, string $occurrenceDate): int
