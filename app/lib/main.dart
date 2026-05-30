@@ -6977,7 +6977,7 @@ class _AllDayEventRow extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 180),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: .80),
+              color: color.withValues(alpha: .60),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: color.withValues(alpha: .35)),
             ),
@@ -7184,7 +7184,7 @@ class _TimelineEventBlock extends StatelessWidget {
           height: eventHeight,
           padding: eventPadding,
           decoration: BoxDecoration(
-            color: _calendarEventColor(event).withValues(alpha: .80),
+            color: _calendarEventColor(event).withValues(alpha: .60),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
               color: _calendarEventColor(event).withValues(alpha: .35),
