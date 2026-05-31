@@ -196,9 +196,13 @@
 
 .hb-header-pill {
     font-size: 22px;
-    font-weight: 900;
+    font-weight: 950;
     letter-spacing: -.02em;
     line-height: 1;
+}
+
+.hb-header-pill span {
+    font-weight: 950;
 }
 
 .hb-header-pill svg {
@@ -2983,9 +2987,13 @@
         transform: translateX(-50%);
     }
 
+    .hb-top-workspace-switcher-mobile {
+        display: none;
+    }
+
     .hb-top-nav {
         min-width: 0;
-        max-width: min(560px, 42vw);
+        max-width: min(680px, 48vw);
         display: flex;
         align-items: center;
         gap: 4px;
@@ -3005,6 +3013,18 @@
         border: 1px solid transparent;
         border-radius: 999px;
         padding: 8px 12px;
+    }
+
+    .hb-top-nav .hb-top-workspace-switcher {
+        min-height: 38px;
+        flex: 0 0 auto;
+        max-width: 168px;
+        padding-left: 12px;
+    }
+
+    .hb-top-nav .hb-top-workspace-switcher select {
+        max-width: 112px;
+        font-size: 12px;
     }
 
     .hb-top-nav .hb-nav-item-active {
