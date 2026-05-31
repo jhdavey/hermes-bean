@@ -1426,6 +1426,24 @@
     border-color: transparent;
 }
 
+.hb-month-cell-adjacent {
+    background: rgba(255, 255, 255, .42);
+    border-color: rgba(105, 116, 137, .18);
+}
+
+.hb-month-cell-adjacent .hb-month-date {
+    color: var(--hb-muted);
+}
+
+.hb-month-cell-adjacent .hb-month-date strong {
+    min-width: 0;
+    height: 22px;
+    padding: 0 7px;
+    background: rgba(105, 116, 137, .09);
+    color: var(--hb-muted);
+    font-size: 11px;
+}
+
 .hb-month-cell-active {
     background: rgba(22, 163, 74, .12);
     border-color: rgba(22, 163, 74, .34);
@@ -1466,6 +1484,11 @@
 .hb-month-cell-active .hb-month-date strong {
     background: var(--hb-accent);
     color: #fff;
+}
+
+.hb-month-cell-adjacent .hb-month-event,
+.hb-month-cell-adjacent .hb-month-all-day-event {
+    opacity: .82;
 }
 
 .hb-month-all-day-list {

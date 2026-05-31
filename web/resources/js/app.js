@@ -1484,26 +1484,29 @@ if (mount) {
                 <div class="hb-month-grid" style="--hb-month-week-count:${weekCount}">
                     ${Array.from({ length: 7 }, (_, index) => `<div class="hb-month-weekday">${weekdayShort(new Date(2026, 1, index + 1))}</div>`).join('')}
                     ${Array.from({ length: totalCells }, (_, index) => {
-                        const dayNumber = index - leading + 1;
-                        if (dayNumber < 1 || dayNumber > daysInMonth) return '<div class="hb-month-cell hb-month-cell-empty"></div>';
-                        const day = new Date(selected.getFullYear(), selected.getMonth(), dayNumber);
-                        return monthCellMarkup(day, dayNumber);
+                        const day = addDays(first, index - leading);
+                        return monthCellMarkup(day, sameMonth(day, first));
                     }).join('')}
                 </div>
             </div>`;
     }
 
-    function monthCellMarkup(day, dayNumber) {
+    function monthCellMarkup(day, isCurrentMonth = true) {
         const events = eventsForDay(day);
         const allDayEvents = events.filter((event) => eventAllDay(event));
         const multiDayEvents = events.filter((event) => eventMultiDayTimed(event));
         const timedEvents = events.filter((event) => !eventAllDay(event) && !eventMultiDayTimed(event));
         const today = new Date();
+        const cellClasses = [
+            'hb-month-cell',
+            sameDate(day, today) ? 'hb-month-cell-active' : '',
+            isCurrentMonth ? '' : 'hb-month-cell-adjacent',
+        ].filter(Boolean).join(' ');
         return `
-            <div class="hb-month-cell ${sameDate(day, today) ? 'hb-month-cell-active' : ''}">
+            <div class="${cellClasses}">
                 <div class="hb-month-cell-head">
                     <button class="hb-month-date" type="button" data-select-day="${dateOnly(day)}" aria-label="${escapeAttr(dayLabel(day))}">
-                        <strong>${dayNumber}</strong>
+                        <strong>${escapeHtml(isCurrentMonth ? String(day.getDate()) : monthDayLabel(day))}</strong>
                     </button>
                     ${multiDayEvents.length ? `<div class="hb-month-all-day-list">${multiDayEvents.map((event) => monthMultiDayEventMarkup(event, day)).join('')}</div>` : ''}
                     ${allDayEvents.length ? `<div class="hb-month-all-day-list">${allDayEvents.map((event) => monthAllDayEventMarkup(event)).join('')}</div>` : ''}
