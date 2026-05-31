@@ -152,7 +152,9 @@ if (mount) {
 
     function bindCurrentTimeTicker() {
         window.setInterval(() => {
-            if (state.phase !== 'signedIn' || state.selected !== 'today' || state.showMonth || state.modal) return;
+            if (state.phase !== 'signedIn') return;
+            updateTopbarCurrentTime();
+            if (state.selected !== 'today' || state.showMonth || state.modal) return;
             updateCurrentTimeMarker();
         }, 30000);
     }
@@ -779,12 +781,14 @@ if (mount) {
         const addTitle = state.selected === 'tasks' ? 'Add task' : state.selected === 'reminders' ? 'Add reminder' : 'Create event';
         const showAdd = ['today', 'tasks', 'reminders'].includes(state.selected);
         const showRefresh = ['today', 'tasks', 'reminders', 'admin'].includes(state.selected);
+        const now = new Date();
         return `
             <div class="hb-app">
                 ${betaBannerMarkup()}
                 <header class="hb-topbar">
-                    <button class="hb-header-pill" data-today type="button">${escapeHtml(topbarTodayLabel(new Date()))}</button>
-                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(new Date()))}</span></button>
+                    <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTime(now))}</time>
+                    <button class="hb-header-pill" data-today type="button">${escapeHtml(topbarTodayLabel(now))}</button>
+                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(now))}</span></button>
                     ${state.selected === 'today' && state.showMonth ? monthSwitcherMarkup(parseLocalDate(state.selectedDay)) : ''}
                     ${topWorkspaceSwitcherMarkup()}
                     <span class="hb-spacer"></span>
@@ -5383,6 +5387,14 @@ if (mount) {
         marker.style.setProperty('--hb-now-top', `${top.toFixed(2)}px`);
         marker.setAttribute('aria-label', `Current time ${formatTime(now)}`);
         if (label) label.textContent = formatTime(now);
+    }
+
+    function updateTopbarCurrentTime() {
+        const time = mount.querySelector('[data-current-time]');
+        if (!time) return;
+        const now = new Date();
+        time.dateTime = now.toISOString();
+        time.textContent = formatTime(now);
     }
 
     function friendlyError(error, action) {

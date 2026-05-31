@@ -163,6 +163,15 @@
     border-radius: 8px;
 }
 
+.hb-topbar-current-time {
+    color: var(--hb-text);
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: -.02em;
+    line-height: 1;
+    white-space: nowrap;
+}
+
 .hb-header-pill,
 .hb-critical {
     min-height: 32px;
@@ -3197,6 +3206,10 @@
         max-width: 44vw;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    .hb-topbar-current-time {
+        font-size: 20px;
     }
 
     .hb-month-pill {
