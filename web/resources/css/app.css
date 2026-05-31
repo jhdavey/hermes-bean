@@ -113,6 +113,13 @@
     backdrop-filter: blur(18px);
 }
 
+.hb-topbar-month-cluster {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
 .hb-beta-banner {
     position: sticky;
     top: 0;
@@ -184,9 +191,20 @@
     background: rgba(255, 255, 255, .72);
     color: var(--hb-text);
     padding: 7px 10px;
-    font-size: 13px;
-    font-weight: 800;
     white-space: nowrap;
+}
+
+.hb-header-pill {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: -.02em;
+    line-height: 1;
+}
+
+.hb-header-pill svg {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
 }
 
 .hb-critical {
@@ -196,6 +214,7 @@
     border: 0;
     background: var(--hb-accent);
     color: #fff;
+    font-size: 13px;
     font-weight: 900;
 }
 
@@ -1333,7 +1352,7 @@
 }
 
 .hb-month-current {
-    min-height: 32px;
+    min-height: 36px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1341,9 +1360,10 @@
     border-radius: 999px;
     background: rgba(255, 255, 255, .72);
     color: var(--hb-text);
-    padding: 7px 10px;
-    font-size: 13px;
-    font-weight: 800;
+    padding: 7px 12px;
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: -.02em;
     line-height: 1;
     white-space: nowrap;
     cursor: pointer;
@@ -2957,6 +2977,12 @@
         padding: 8px 12px;
     }
 
+    .hb-topbar-month-cluster {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+
     .hb-top-nav {
         min-width: 0;
         max-width: min(560px, 42vw);
@@ -3231,7 +3257,9 @@
         text-overflow: ellipsis;
     }
 
-    .hb-topbar-current-time {
+    .hb-topbar-current-time,
+    .hb-header-pill,
+    .hb-month-current {
         font-size: 20px;
     }
 
