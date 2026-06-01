@@ -4108,9 +4108,8 @@ if (mount) {
                 setKioskVoiceStatus('error', 'no response');
                 await sleep(1200);
             } else {
-                const finalVoiceText = finalVoiceTextForTurn(content, quickReplyText, assistantContent, {
+                const finalVoiceText = finalVoiceTextForTurn(quickReplyText, assistantContent, {
                     wantsDetailedChat,
-                    likelyNeedsAgentWork,
                 });
                 const spoken = finalVoiceText
                     ? await speakKioskResponse(finalVoiceText, { pendingMessage: 'working in background' })
@@ -4348,12 +4347,12 @@ if (mount) {
         return speakBrowserTts(text);
     }
 
-    function finalVoiceTextForTurn(userContent, quickReplyText, assistantContent, options = {}) {
+    function finalVoiceTextForTurn(quickReplyText, assistantContent, options = {}) {
         const text = speechTextFromAssistant(assistantContent);
         if (!text) return '';
         if (!quickReplyText) return text;
         if (options.wantsDetailedChat || finalResponseIsDetailed(assistantContent, text)) {
-            return finalDetailNotice(userContent);
+            return '';
         }
         if (quickReplyCoversFinal(quickReplyText, text)) {
             return '';
@@ -4367,20 +4366,6 @@ if (mount) {
             || raw.length > 700
             || /(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S/.test(raw)
             || (raw.match(/\n/g) || []).length >= 3;
-    }
-
-    function finalDetailNotice(userContent) {
-        const command = String(userContent || '').toLowerCase();
-        if (/\b(?:workout|exercise|routine|training|stretch|stretches)\b/.test(command)) {
-            return 'I put the full workout in chat.';
-        }
-        if (/\b(?:recipe|cook|meal)\b/.test(command)) {
-            return 'I put the full recipe in chat.';
-        }
-        if (/\b(?:plan|guide|steps|instructions)\b/.test(command)) {
-            return 'I put the full plan in chat.';
-        }
-        return 'I put the full details in chat.';
     }
 
     function quickReplyCoversFinal(quickReplyText, finalText) {

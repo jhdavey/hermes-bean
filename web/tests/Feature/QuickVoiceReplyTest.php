@@ -59,6 +59,7 @@ class QuickVoiceReplyTest extends TestCase
                 && data_get($payload, 'messages.0.role') === 'system'
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'normal conversational question')
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'compact complete answer')
+                && str_contains((string) data_get($payload, 'messages.0.content'), 'do not ask whether they want you to create')
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'Finish complete thoughts')
                 && data_get($payload, 'messages.1.role') === 'system'
                 && str_contains((string) data_get($payload, 'messages.1.content'), 'America/New_York')
