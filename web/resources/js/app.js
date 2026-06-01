@@ -134,6 +134,12 @@ if (mount) {
     let kioskActiveAudioSource = null;
     let kioskActiveAudioElement = null;
     let kioskLastTtsError = '';
+    let kioskRealtime = null;
+    let kioskRealtimeStarting = false;
+    let kioskRealtimeUnavailable = false;
+    let kioskRealtimePendingUser = null;
+    let kioskRealtimeAssistantDraft = null;
+    const kioskRealtimeProcessedCalls = new Set();
     let chatRequestCounter = 0;
     let activeChatRequestId = 0;
     const cancelledChatRequestIds = new Set();
@@ -3308,6 +3314,9 @@ if (mount) {
         state.voiceStatusTone = '';
         kioskConversationActive = false;
         kioskCommandText = '';
+        if (kioskRealtime?.dataChannel?.readyState === 'open') {
+            try { kioskRealtime.dataChannel.send(JSON.stringify({ type: 'response.cancel' })); } catch (_) {}
+        }
         stopKioskSpeechPlayback();
         setKioskVoiceStatus(state.kioskVoiceEnabled ? 'armed' : 'idle', state.kioskVoiceEnabled ? 'say hey bean' : '');
         render();
@@ -3646,8 +3655,371 @@ if (mount) {
         return 'Chrome could not request microphone access. Check browser and system microphone permissions.';
     }
 
+    function shouldUseRealtimeKioskVoice() {
+        return !kioskRealtimeUnavailable
+            && window.isSecureContext
+            && Boolean(window.RTCPeerConnection)
+            && Boolean(navigator.mediaDevices?.getUserMedia);
+    }
+
+    function kioskRealtimeConnected() {
+        return Boolean(kioskRealtime?.connected && kioskRealtime?.peerConnection);
+    }
+
+    async function startKioskRealtimeVoiceMode(options = {}) {
+        if (kioskRealtimeConnected() || kioskRealtimeStarting) return true;
+        if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token || state.voiceListening) return false;
+        kioskRealtimeStarting = true;
+        setKioskVoiceStatus('working', 'connecting voice');
+        let stream = null;
+        let peerConnection = null;
+        try {
+            if (!await requestKioskMicrophoneAccess(Boolean(options.requestPermission))) return false;
+            stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                },
+            });
+            kioskMicrophoneReady = true;
+            await ensureRealtimeChatSession();
+            const sessionData = await api('/ai/realtime/session', {
+                method: 'POST',
+                body: {
+                    title: currentChatTitle(),
+                    runtime_mode: 'realtime',
+                    workspace_id: currentWorkspaceId() || null,
+                    session_id: state.session?.id || null,
+                    voice: profileTtsVoice(),
+                    metadata: {
+                        source: 'web_realtime_voice',
+                        client_context: clientContextPayload(),
+                    },
+                },
+            });
+            state.session = sessionData.session || state.session;
+            const clientSecret = realtimeClientSecretValue(sessionData.client_secret);
+            if (!clientSecret) throw new Error('Realtime voice secret was empty.');
+
+            peerConnection = new RTCPeerConnection();
+            const remoteAudio = new Audio();
+            remoteAudio.autoplay = true;
+            remoteAudio.playsInline = true;
+            peerConnection.ontrack = (event) => {
+                remoteAudio.srcObject = event.streams[0];
+                remoteAudio.play().catch(() => {});
+            };
+            stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+            const dataChannel = peerConnection.createDataChannel('oai-events');
+            const realtimeState = {
+                peerConnection,
+                dataChannel,
+                stream,
+                remoteAudio,
+                connected: false,
+                sessionId: state.session?.id || sessionData.session?.id || null,
+            };
+            kioskRealtime = realtimeState;
+            dataChannel.onopen = () => {
+                realtimeState.connected = true;
+                kioskRealtimeUnavailable = false;
+                setKioskVoiceStatus('armed', 'say hey bean');
+                render();
+            };
+            dataChannel.onmessage = (event) => handleKioskRealtimeEvent(event);
+            dataChannel.onerror = () => setKioskVoiceStatus('error', 'voice connection issue');
+            dataChannel.onclose = () => {
+                if (kioskRealtime === realtimeState) {
+                    stopKioskRealtimeVoiceMode({ preserveStatus: true });
+                    if (state.kioskVoiceEnabled) setKioskVoiceStatus('error', 'voice disconnected');
+                }
+            };
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            const sdpResponse = await fetch('https://api.openai.com/v1/realtime/calls', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${clientSecret}`,
+                    'Content-Type': 'application/sdp',
+                },
+                body: offer.sdp,
+            });
+            if (!sdpResponse.ok) {
+                throw new Error(`Realtime voice failed (${sdpResponse.status}).`);
+            }
+            await peerConnection.setRemoteDescription({ type: 'answer', sdp: await sdpResponse.text() });
+            return true;
+        } catch (error) {
+            stopKioskRealtimeVoiceMode({ preserveStatus: true });
+            if (stream) stream.getTracks().forEach((track) => track.stop());
+            try { peerConnection?.close(); } catch (_) {}
+            setKioskVoiceStatus('error', 'voice fallback');
+            kioskRealtimeUnavailable = true;
+            return false;
+        } finally {
+            kioskRealtimeStarting = false;
+        }
+    }
+
+    function realtimeClientSecretValue(secret) {
+        if (typeof secret === 'string') return secret;
+        return secret?.value || secret?.client_secret?.value || secret?.client_secret || '';
+    }
+
+    async function ensureRealtimeChatSession() {
+        if (state.session?.id) return state.session;
+        const onboarding = needsBeanOnboarding();
+        state.session = await api('/assistant/sessions', {
+            method: 'POST',
+            body: chatSessionPayload(onboarding),
+        });
+        await loadChatSessions({ resumeToday: false, shouldRender: false });
+        return state.session;
+    }
+
+    function stopKioskRealtimeVoiceMode(options = {}) {
+        const realtime = kioskRealtime;
+        kioskRealtime = null;
+        kioskRealtimeStarting = false;
+        kioskRealtimePendingUser = null;
+        kioskRealtimeAssistantDraft = null;
+        kioskRealtimeProcessedCalls.clear();
+        if (realtime?.dataChannel?.readyState === 'open') {
+            try { realtime.dataChannel.close(); } catch (_) {}
+        }
+        try { realtime?.peerConnection?.close(); } catch (_) {}
+        realtime?.stream?.getTracks().forEach((track) => track.stop());
+        if (realtime?.remoteAudio) {
+            try {
+                realtime.remoteAudio.pause();
+                realtime.remoteAudio.srcObject = null;
+            } catch (_) {}
+        }
+        if (!options.preserveStatus) {
+            state.kioskVoicePhase = 'idle';
+            state.kioskVoiceMessage = '';
+        }
+    }
+
+    function handleKioskRealtimeEvent(event) {
+        let payload = null;
+        try {
+            payload = JSON.parse(event.data);
+        } catch (_) {
+            return;
+        }
+        const type = payload?.type || '';
+        if (type === 'input_audio_buffer.speech_started') {
+            setKioskVoiceStatus('listening', 'listening');
+            return;
+        }
+        if (type === 'input_audio_buffer.speech_stopped') {
+            setKioskVoiceStatus('working', 'thinking');
+            return;
+        }
+        if (type === 'conversation.item.input_audio_transcription.completed') {
+            handleRealtimeUserTranscript(payload);
+            return;
+        }
+        if (type === 'response.created') {
+            setKioskVoiceStatus('responding', "Bean's voice");
+            return;
+        }
+        if (type === 'response.audio_transcript.delta' || type === 'response.output_text.delta') {
+            appendRealtimeAssistantDelta(payload);
+            return;
+        }
+        if (type === 'response.audio_transcript.done' || type === 'response.output_text.done') {
+            finishRealtimeAssistantTranscript(payload);
+            return;
+        }
+        if (type === 'response.function_call_arguments.done') {
+            processRealtimeFunctionCall(payload.name, payload.call_id, payload.arguments);
+            return;
+        }
+        if (type === 'response.done') {
+            processRealtimeResponseDone(payload);
+            return;
+        }
+        if (type === 'error') {
+            setKioskVoiceStatus('error', payload?.error?.message || 'voice error');
+        }
+    }
+
+    function handleRealtimeUserTranscript(payload) {
+        const raw = String(payload.transcript || '').trim();
+        if (!raw) return;
+        const command = commandAfterWakePhrase(raw);
+        const content = (command === null ? raw : command).trim();
+        if (!content) return;
+        kioskRealtimePendingUser = {
+            itemId: payload.item_id || `rt-user-${Date.now()}`,
+            content,
+            persisted: false,
+        };
+        upsertRealtimeLocalMessage({
+            id: `rt-user-${kioskRealtimePendingUser.itemId}`,
+            role: 'user',
+            content,
+            metadata: { local_realtime_turn: true },
+        });
+    }
+
+    function appendRealtimeAssistantDelta(payload) {
+        const delta = String(payload.delta || '');
+        if (!delta) return;
+        const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
+        draft.content += delta;
+        upsertRealtimeLocalMessage(draft);
+        setKioskVoiceStatus('responding', "Bean's voice");
+    }
+
+    function finishRealtimeAssistantTranscript(payload) {
+        const text = String(payload.transcript || payload.text || '').trim();
+        if (!text) return;
+        const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
+        draft.content = text;
+        upsertRealtimeLocalMessage(draft);
+    }
+
+    function ensureRealtimeAssistantDraft(id = '') {
+        const draftId = id || kioskRealtimeAssistantDraft?.itemId || `rt-assistant-${Date.now()}`;
+        if (!kioskRealtimeAssistantDraft || kioskRealtimeAssistantDraft.itemId !== draftId) {
+            kioskRealtimeAssistantDraft = {
+                id: `rt-assistant-${draftId}`,
+                itemId: draftId,
+                role: 'assistant',
+                content: '',
+                metadata: { local_realtime_turn: true },
+            };
+        }
+        return kioskRealtimeAssistantDraft;
+    }
+
+    function upsertRealtimeLocalMessage(message) {
+        const index = state.messages.findIndex((item) => String(item.id) === String(message.id));
+        if (index >= 0) {
+            state.messages[index] = { ...state.messages[index], ...message };
+        } else {
+            state.messages.push(message);
+        }
+        if (state.phase === 'signedIn') render();
+        scrollChatToBottom();
+    }
+
+    function processRealtimeResponseDone(payload) {
+        const output = normalizeList(payload?.response?.output);
+        output
+            .filter((item) => item?.type === 'function_call')
+            .forEach((item) => processRealtimeFunctionCall(item.name, item.call_id, item.arguments));
+        const hasFunctionCall = output.some((item) => item?.type === 'function_call');
+        if (!hasFunctionCall) {
+            persistRealtimeConversationTurn();
+        } else {
+            kioskRealtimePendingUser = null;
+        }
+        if (state.kioskVoiceEnabled && kioskRealtimeConnected()) {
+            setKioskVoiceStatus('armed', 'say hey bean');
+        }
+    }
+
+    async function processRealtimeFunctionCall(name, callId, rawArguments = '{}') {
+        const callKey = callId || `${name}-${rawArguments}`;
+        if (!name || kioskRealtimeProcessedCalls.has(callKey)) return;
+        kioskRealtimeProcessedCalls.add(callKey);
+        let args = {};
+        try {
+            args = typeof rawArguments === 'string' ? JSON.parse(rawArguments || '{}') : (rawArguments || {});
+        } catch (_) {
+            args = {};
+        }
+        setKioskVoiceStatus('working', 'working in background');
+        try {
+            const result = await api('/assistant/realtime/tool-calls', {
+                method: 'POST',
+                body: {
+                    session_id: kioskRealtime?.sessionId || state.session?.id,
+                    tool_name: name,
+                    call_id: callId || null,
+                    arguments: {
+                        ...args,
+                        client_context: {
+                            ...(args.client_context || {}),
+                            ...clientContextPayload(),
+                        },
+                    },
+                },
+            });
+            sendRealtimeFunctionOutput(callId, result);
+            await loadChatSessions({ resumeToday: false, shouldRender: false }).catch(() => {});
+            scheduleDashboardRealtimeRefresh([{ type: 'realtime_tool_call' }]);
+        } catch (error) {
+            sendRealtimeFunctionOutput(callId, {
+                ok: false,
+                message: friendlyError(error, 'start that background work'),
+            });
+            setKioskVoiceStatus('error', 'work failed');
+        }
+    }
+
+    function sendRealtimeFunctionOutput(callId, result) {
+        const dataChannel = kioskRealtime?.dataChannel;
+        if (!callId || dataChannel?.readyState !== 'open') return;
+        dataChannel.send(JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+                type: 'function_call_output',
+                call_id: callId,
+                output: JSON.stringify(result),
+            },
+        }));
+        dataChannel.send(JSON.stringify({ type: 'response.create' }));
+    }
+
+    async function persistRealtimeConversationTurn() {
+        const sessionId = kioskRealtime?.sessionId || state.session?.id;
+        const userTurn = kioskRealtimePendingUser;
+        const assistantTurn = kioskRealtimeAssistantDraft;
+        kioskRealtimePendingUser = null;
+        kioskRealtimeAssistantDraft = null;
+        if (!sessionId) return;
+        try {
+            if (userTurn?.content && !userTurn.persisted) {
+                await api('/assistant/realtime/messages', {
+                    method: 'POST',
+                    body: {
+                        session_id: sessionId,
+                        role: 'user',
+                        content: userTurn.content,
+                        metadata: { realtime: { item_id: userTurn.itemId } },
+                    },
+                });
+            }
+            if (assistantTurn?.content) {
+                await api('/assistant/realtime/messages', {
+                    method: 'POST',
+                    body: {
+                        session_id: sessionId,
+                        role: 'assistant',
+                        content: assistantTurn.content,
+                        metadata: { realtime: { item_id: assistantTurn.itemId } },
+                    },
+                });
+            }
+            loadChatSessions({ resumeToday: false, shouldRender: false }).catch(() => {});
+        } catch (_) {
+            // Local realtime messages stay visible even if persistence races a page unload.
+        }
+    }
+
     async function startKioskVoiceMode(options = {}) {
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return;
+        if (options.forceLegacy !== true && shouldUseRealtimeKioskVoice()) {
+            const started = await startKioskRealtimeVoiceMode(options);
+            if (started) return;
+        }
         if (kioskRecognition || kioskRecognitionActive || state.voiceListening) {
             return;
         }
@@ -3781,6 +4153,7 @@ if (mount) {
     }
 
     function kioskVoiceReady() {
+        if (kioskRealtimeConnected()) return state.kioskVoiceEnabled;
         return state.kioskVoiceEnabled &&
             kioskMicrophoneReady &&
             (profileTtsProvider() !== 'openai' || kioskAudioUnlocked);
@@ -3882,6 +4255,7 @@ if (mount) {
     }
 
     function stopKioskVoiceMode() {
+        stopKioskRealtimeVoiceMode();
         pauseKioskVoiceListening();
         stopKioskBargeInListening();
         window.clearTimeout(kioskAutoCloseTimer);
@@ -3900,6 +4274,7 @@ if (mount) {
     function restartKioskVoiceListeningSoon(delay = 900) {
         window.clearTimeout(kioskRestartTimer);
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn') return;
+        if (kioskRealtimeConnected() || kioskRealtimeStarting) return;
         kioskRestartTimer = window.setTimeout(() => {
             kioskRestartTimer = 0;
             startKioskVoiceMode();
@@ -4604,7 +4979,7 @@ if (mount) {
     }
 
     async function toggleKioskVoiceMode() {
-        if (state.kioskVoiceEnabled && profileTtsProvider() === 'openai' && !kioskAudioUnlocked) {
+        if (!kioskRealtimeConnected() && state.kioskVoiceEnabled && profileTtsProvider() === 'openai' && !kioskAudioUnlocked) {
             const unlocked = await unlockKioskAudio();
             setKioskVoiceStatus(unlocked ? 'armed' : 'error', unlocked ? "Bean's voice ready" : "Bean's voice needs one click");
             render();
@@ -4613,13 +4988,14 @@ if (mount) {
             }
             return;
         }
-        if (state.kioskVoiceEnabled && !kioskVoiceReady()) {
+        if (!kioskRealtimeConnected() && state.kioskVoiceEnabled && !kioskVoiceReady()) {
             await startKioskVoiceMode({ requestPermission: true });
             render();
             return;
         }
         state.kioskVoiceEnabled = !state.kioskVoiceEnabled;
         if (state.kioskVoiceEnabled) {
+            kioskRealtimeUnavailable = false;
             localStorage.setItem(kioskVoiceKey, 'true');
             kioskConversationActive = false;
             state.kioskVoicePhase = 'idle';

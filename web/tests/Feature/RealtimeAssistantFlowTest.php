@@ -63,9 +63,69 @@ class RealtimeAssistantFlowTest extends TestCase
             && data_get($request->data(), 'session.audio.input.turn_detection.type') === 'server_vad'
             && data_get($request->data(), 'session.audio.input.turn_detection.silence_duration_ms') === 350
             && data_get($request->data(), 'session.audio.input.turn_detection.create_response') === true
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Only respond when the user is clearly talking to Bean')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Yes, I can hear you.')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'current time/date questions')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'read current app data')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'timezone_offset'));
+    }
+
+    public function test_realtime_session_can_reuse_existing_daily_chat_session(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/realtime/client_secrets' => Http::response([
+                'value' => 'ek_existing_session_secret',
+                'expires_at' => now()->addMinute()->timestamp,
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('realtime-existing-session@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Today with Bean',
+            'runtime_mode' => 'chat',
+            'metadata' => ['daily_date' => '2026-06-01'],
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/ai/realtime/session', [
+            'session_id' => $sessionId,
+            'metadata' => [
+                'source' => 'test-realtime',
+                'client_context' => ['timezone_offset' => '-04:00'],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.session.id', $sessionId)
+            ->assertJsonPath('data.session.runtime_mode', 'chat')
+            ->assertJsonPath('data.session.metadata.realtime', true)
+            ->assertJsonPath('data.client_secret.value', 'ek_existing_session_secret');
+
+        $this->assertDatabaseHas('conversation_sessions', [
+            'id' => $sessionId,
+            'runtime_mode' => 'chat',
+        ]);
+    }
+
+    public function test_realtime_messages_can_be_appended_without_running_agent(): void
+    {
+        $token = $this->apiToken('realtime-message@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'chat',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/assistant/realtime/messages', [
+            'session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Yes, I can hear you.',
+            'metadata' => ['realtime' => ['item_id' => 'item_123']],
+        ])->assertCreated()
+            ->assertJsonPath('data.role', 'assistant')
+            ->assertJsonPath('data.content', 'Yes, I can hear you.')
+            ->assertJsonPath('data.metadata.runtime', 'realtime');
+
+        $this->assertDatabaseHas('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Yes, I can hear you.',
+        ]);
     }
 
     public function test_realtime_tool_call_queues_background_laravel_agent_run(): void

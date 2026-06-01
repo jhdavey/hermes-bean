@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AssistantRun;
+use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
@@ -30,23 +31,41 @@ class RealtimeSessionController extends Controller
             'title' => ['nullable', 'string', 'max:255'],
             'runtime_mode' => ['nullable', 'string', 'max:50'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'session_id' => ['nullable', 'integer', 'exists:conversation_sessions,id'],
             'metadata' => ['nullable', 'array'],
             'voice' => ['nullable', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
         ]);
 
         $user = $request->user();
-        $workspace = $this->workspaces->resolveWorkspace($user, $data['workspace_id'] ?? null);
+        $localSession = null;
+        if (! empty($data['session_id'])) {
+            $localSession = ConversationSession::where('user_id', $user->id)->findOrFail($data['session_id']);
+        }
+
+        $workspace = $localSession?->workspace ?: $this->workspaces->resolveWorkspace($user, $data['workspace_id'] ?? null);
         $profile = $this->profiles->ensureForWorkspace($workspace, $user);
-        $localSession = $this->runtime->startSession([
-            'user_id' => $user->id,
-            'workspace_id' => $workspace->id,
-            'title' => $data['title'] ?? 'Realtime chat',
-            'runtime_mode' => $data['runtime_mode'] ?? 'realtime',
-            'metadata' => [
-                ...($data['metadata'] ?? []),
-                'realtime' => true,
-            ],
-        ]);
+        if ($localSession) {
+            $localSession->update([
+                'metadata' => [
+                    ...($localSession->metadata ?? []),
+                    ...($data['metadata'] ?? []),
+                    'realtime' => true,
+                ],
+                'last_activity_at' => now(),
+            ]);
+            $localSession = $localSession->refresh();
+        } else {
+            $localSession = $this->runtime->startSession([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => $data['title'] ?? 'Realtime chat',
+                'runtime_mode' => $data['runtime_mode'] ?? 'realtime',
+                'metadata' => [
+                    ...($data['metadata'] ?? []),
+                    'realtime' => true,
+                ],
+            ]);
+        }
 
         $apiKey = (string) config('services.hermes_realtime.api_key', '');
         if ($apiKey === '') {
@@ -130,6 +149,36 @@ class RealtimeSessionController extends Controller
         ]], 201);
     }
 
+    public function message(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
+            'role' => ['required', 'string', Rule::in(['user', 'assistant'])],
+            'content' => ['required', 'string', 'max:20000'],
+            'metadata' => ['nullable', 'array'],
+        ]);
+
+        $session = ConversationSession::where('user_id', $request->user()->id)->findOrFail($data['session_id']);
+
+        $message = ConversationMessage::create([
+            'user_id' => $request->user()->id,
+            'conversation_session_id' => $session->id,
+            'role' => $data['role'],
+            'content' => trim((string) $data['content']),
+            'metadata' => [
+                ...($data['metadata'] ?? []),
+                'runtime' => 'realtime',
+            ],
+        ]);
+
+        $session->update([
+            'status' => 'active',
+            'last_activity_at' => now(),
+        ]);
+
+        return response()->json(['data' => $message], 201);
+    }
+
     public function toolCall(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -197,11 +246,12 @@ class RealtimeSessionController extends Controller
 You are Bean, the realtime voice interface for HeyBean.
 
 Speak naturally and briefly. Use realtime conversation for clarification, acknowledgement, and fast answers.
+Only respond when the user is clearly talking to Bean, usually by saying "Hey Bean" or continuing an active Bean conversation. If speech is not addressed to Bean, stay silent.
 For simple conversational inputs, greetings, mic checks, current time/date questions, or questions like "can you hear me?", answer immediately in one short sentence. Do not call tools for those.
 If the user asks whether you can hear them, say "Yes, I can hear you." Never say "I can read you" during a voice conversation.
 If the user asks what time it is, answer from the client temporal context below. Do not call tools for current time/date questions.
-Only call queue_bean_work when the user asks Bean to create, update, delete, plan, remember, schedule, or otherwise change app data.
-Tell the user the work has started in the background. Do not claim the task is complete until the app sends completion context later.
+Call queue_bean_work when the user asks Bean to read current app data, check calendar/tasks/reminders, use live external data, or create, update, delete, plan, remember, schedule, or otherwise change app data.
+When queue_bean_work is needed, first acknowledge naturally in one short sentence, then call the tool. Do not claim the task is complete until the app sends completion context later.
 Laravel owns workspace access, approvals, validation, calendar/task/reminder writes, durable memory, and usage guardrails. Never invent ids or app-state changes.
 
 Local session id: {$session->id}
@@ -216,7 +266,7 @@ PROMPT;
             [
                 'type' => 'function',
                 'name' => 'queue_bean_work',
-                'description' => 'Queue a HeyBean background agent run only when the user asks to change app data or perform durable work, such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Do not use for greetings, mic checks, current time/date questions, quick factual answers, or conversational acknowledgements.',
+                'description' => 'Queue a HeyBean background agent run when the user asks to read current app data, check calendar/tasks/reminders, use live external data, change app data, or perform durable work such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Do not use for greetings, mic checks, current time/date questions, quick factual answers, or conversational acknowledgements.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
