@@ -136,8 +136,6 @@ class AuthController extends Controller
             'onboarding_priorities.*' => ['string', 'max:80'],
             'onboarding_context' => ['sometimes', 'nullable', 'string', 'max:500'],
             'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
-            'tts_openai_api_key' => ['sometimes', 'nullable', 'string', 'max:1000'],
-            'tts_clear_openai_key' => ['sometimes', 'boolean'],
             'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
             'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
@@ -147,7 +145,7 @@ class AuthController extends Controller
         ]);
 
         $profileKeys = ['agent_personality', 'onboarding_priorities', 'onboarding_context'];
-        $ttsKeys = ['tts_provider', 'tts_openai_api_key', 'tts_clear_openai_key', 'tts_openai_voice', 'tts_openai_instructions'];
+        $ttsKeys = ['tts_provider', 'tts_openai_voice', 'tts_openai_instructions'];
         $profileData = collect($data)->only($profileKeys)->all();
         $ttsData = collect($data)->only($ttsKeys)->all();
         $userData = collect($data)->only(['name', 'email'])->all();

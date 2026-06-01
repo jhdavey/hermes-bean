@@ -579,19 +579,6 @@ if (mount) {
         return localStorage.getItem('heybean-debug-browser-voice') === 'true';
     }
 
-    function profileTtsOpenAiConfigured(profile = currentAgentProfile()) {
-        const tts = profileTtsSettings(profile);
-        return tts.openai_api_key_configured === true || tts.openaiApiKeyConfigured === true;
-    }
-
-    function profileTtsOpenAiPlayable(profile = currentAgentProfile()) {
-        const tts = profileTtsSettings(profile);
-        return profileTtsProvider(profile) === 'openai'
-            || profileTtsOpenAiConfigured(profile)
-            || tts.openai_app_key_configured === true
-            || tts.openaiAppKeyConfigured === true;
-    }
-
     function profileTtsVoice(profile = currentAgentProfile()) {
         const tts = profileTtsSettings(profile);
         return supportedOpenAiVoice(tts.openai_voice || tts.openaiVoice || 'coral');
@@ -608,28 +595,6 @@ if (mount) {
     function profileTtsInstructions(profile = currentAgentProfile()) {
         const tts = profileTtsSettings(profile);
         return tts.openai_instructions || tts.openaiInstructions || 'Speak naturally, warmly, and concisely as Bean.';
-    }
-
-    function openAiKeyMask() {
-        return '****************';
-    }
-
-    function handleMaskedTtsKeyFocus(event) {
-        const input = event.currentTarget;
-        if (input.value === input.dataset.ttsKeyMask) {
-            input.value = '';
-            input.type = 'password';
-            input.placeholder = 'Paste a new key to replace the saved key';
-        }
-    }
-
-    function maskedOpenAiKeyValue(input, value) {
-        const candidate = String(value || '').trim();
-        if (!candidate || (input?.dataset.ttsKeyMask && candidate === input.dataset.ttsKeyMask)) {
-            return null;
-        }
-
-        return candidate;
     }
 
     function profileOnboardingComplete(profile = currentAgentProfile()) {
@@ -2135,10 +2100,8 @@ if (mount) {
         const profile = currentAgentProfile();
         const priorities = new Set(profilePriorities(profile));
         const personality = profilePersonality(profile);
-        const ttsKeyConfigured = profileTtsOpenAiConfigured(profile);
         const ttsVoice = profileTtsVoice(profile);
         const ttsInstructions = profileTtsInstructions(profile);
-        const ttsKeyMask = ttsKeyConfigured ? openAiKeyMask() : '';
         const options = ['balanced', 'coach', 'organizer', 'creative'];
         const voices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
         return `
@@ -2153,7 +2116,7 @@ if (mount) {
                     <label class="hb-label">Anything Bean should know?<textarea class="hb-textarea" name="context" placeholder="Example: I work nights, protect family time, and need gentle nudges.">${escapeHtml(profileOnboardingContext(profile))}</textarea></label>
                     <div class="hb-surface-soft hb-card-pad hb-tts-settings">
                         <strong>Voice responses</strong>
-                        <p class="hb-item-meta">OpenAI speech gives Bean a more natural voice. The app key is used automatically; a workspace key is optional.</p>
+                        <p class="hb-item-meta">Bean uses the app OpenAI voice connection automatically.</p>
                         <div class="hb-field-row">
                             <div class="hb-label hb-tts-voice-picker">OpenAI voice
                                 <div class="hb-tts-preview-row">
@@ -2161,12 +2124,10 @@ if (mount) {
                                     <button class="hb-button-secondary hb-tts-preview-button" type="button" data-preview-tts-voice>${state.ttsPreviewing ? 'Playing...' : 'Preview'}</button>
                                 </div>
                             </div>
-                            <label class="hb-label">Optional workspace OpenAI key<input class="hb-input" type="${ttsKeyConfigured ? 'text' : 'password'}" name="ttsOpenAiKey" value="${escapeAttr(ttsKeyMask)}" placeholder="${ttsKeyConfigured ? 'Saved - replace to update' : 'Uses app key by default'}" autocomplete="off" ${ttsKeyConfigured ? `data-tts-key-mask="${escapeAttr(ttsKeyMask)}"` : ''}></label>
                         </div>
                         <div class="hb-tts-preview-status" data-tts-preview-status hidden></div>
                         <label class="hb-label">OpenAI voice style<textarea class="hb-textarea hb-tts-style" name="ttsOpenAiInstructions" placeholder="Example: Warm, natural, concise, and lightly upbeat.">${escapeHtml(ttsInstructions)}</textarea></label>
-                        ${ttsKeyConfigured ? '<label class="hb-checkbox-row"><input type="checkbox" name="ttsClearOpenAiKey" value="1"> Remove saved OpenAI API key</label>' : ''}
-                        <p class="hb-item-meta">OpenAI voices are AI-generated. Workspace keys are encrypted before storage and never shown back in the app.</p>
+                        <p class="hb-item-meta">OpenAI voices are AI-generated.</p>
                     </div>
                     <div class="hb-modal-actions"><button class="hb-button-secondary" type="button" data-close-modal>Cancel</button><button class="hb-button" type="submit">Save</button></div>
                 </form>
@@ -2513,7 +2474,6 @@ if (mount) {
         mount.querySelectorAll('[data-category-row]').forEach((form) => form.addEventListener('submit', saveCategoryRow));
         mount.querySelectorAll('[data-delete-category]').forEach((button) => button.addEventListener('click', () => deleteCategory(button.dataset.deleteCategory)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
-        mount.querySelectorAll('[data-tts-key-mask]').forEach((input) => input.addEventListener('focus', handleMaskedTtsKeyFocus, { once: true }));
         mount.querySelector('[data-preview-tts-voice]')?.addEventListener('click', previewSelectedTtsVoice);
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventTimeInputs);
         mount.querySelectorAll('[data-primary-workspace-select]').forEach((select) => select.addEventListener('change', handlePrimaryWorkspaceChange));
@@ -2773,16 +2733,12 @@ if (mount) {
                 return;
             } else if (kind === 'agent') {
                 const priorities = Array.from(form.querySelectorAll('input[name="priorities"]:checked')).map((input) => input.value);
-                const ttsKeyInput = form.querySelector('input[name="ttsOpenAiKey"]');
-                const ttsOpenAiKey = maskedOpenAiKeyValue(ttsKeyInput, data.ttsOpenAiKey);
                 state.user = await api('/auth/me', {
                     method: 'PATCH',
                     body: {
                         agent_personality: data.personality,
                         onboarding_priorities: priorities,
                         onboarding_context: data.context || null,
-                        tts_openai_api_key: ttsOpenAiKey || null,
-                        tts_clear_openai_key: data.ttsClearOpenAiKey === '1',
                         tts_openai_voice: data.ttsOpenAiVoice || 'coral',
                         tts_openai_instructions: data.ttsOpenAiInstructions || null,
                         workspace_id: data.workspaceId ? Number(data.workspaceId) : null,

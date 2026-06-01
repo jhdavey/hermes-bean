@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Services\AgentProfileService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -34,18 +33,16 @@ class TextToSpeechController extends Controller
         $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
         $settings = $profile->settings ?? [];
         $tts = is_array($settings['tts'] ?? null) ? $settings['tts'] : [];
-        $keyCandidates = $this->apiKeyCandidates($tts);
+        $apiKey = trim((string) config('services.openai.server_api_key', ''));
 
-        if ($keyCandidates === []) {
+        if ($apiKey === '') {
             return response()->json([
-                'message' => 'OpenAI text-to-speech is not configured for this workspace.',
+                'message' => 'OpenAI text-to-speech is not configured for this app.',
                 'code' => 'openai_tts_not_configured',
                 'workspace_id' => $workspace->id,
             ], 409);
         }
 
-        $response = null;
-        $keySource = '';
         $payload = [
             'model' => 'gpt-4o-mini-tts',
             'voice' => $this->openAiVoice((string) ($data['voice'] ?? $tts['openai_voice'] ?? 'coral')),
@@ -54,32 +51,25 @@ class TextToSpeechController extends Controller
             'response_format' => 'wav',
         ];
 
-        foreach ($keyCandidates as $candidate) {
-            $keySource = $candidate['source'];
-            $response = Http::withToken($candidate['key'])
-                ->asJson()
-                ->accept('audio/wav')
-                ->timeout(25)
-                ->post('https://api.openai.com/v1/audio/speech', $payload);
+        $response = Http::withToken($apiKey)
+            ->asJson()
+            ->accept('audio/wav')
+            ->timeout(25)
+            ->post('https://api.openai.com/v1/audio/speech', $payload);
 
-            if ($response->successful()) {
-                break;
-            }
-
+        if (! $response->successful()) {
             Log::warning('OpenAI text-to-speech failed.', [
                 'user_id' => $user->id,
                 'workspace_id' => $workspace->id,
-                'key_source' => $keySource,
+                'key_source' => 'app',
                 'status' => $response->status(),
                 'body' => str($response->body())->limit(500)->toString(),
             ]);
-        }
 
-        if (! $response?->successful()) {
             return response()->json([
-                'message' => 'OpenAI text-to-speech failed. Check the saved API key, app API key, or billing.',
+                'message' => 'OpenAI text-to-speech failed. Check the app OpenAI key or billing.',
                 'code' => 'openai_tts_failed',
-                'status' => $response?->status(),
+                'status' => $response->status(),
             ], 502);
         }
 
@@ -89,38 +79,8 @@ class TextToSpeechController extends Controller
             'X-HeyBean-TTS-Provider' => 'openai',
             'X-HeyBean-TTS-Workspace' => (string) $workspace->id,
             'X-HeyBean-TTS-Voice' => $payload['voice'],
-            'X-HeyBean-TTS-Key-Source' => $keySource,
+            'X-HeyBean-TTS-Key-Source' => 'app',
         ]);
-    }
-
-    /**
-     * @param  array<string, mixed>  $tts
-     * @return array<int, array{source:string,key:string}>
-     */
-    private function apiKeyCandidates(array $tts): array
-    {
-        $candidates = [];
-        $seen = [];
-        $encryptedKey = (string) ($tts['openai_api_key_encrypted'] ?? '');
-
-        if ($encryptedKey !== '') {
-            try {
-                $workspaceKey = trim(Crypt::decryptString($encryptedKey));
-                if ($workspaceKey !== '') {
-                    $candidates[] = ['source' => 'workspace', 'key' => $workspaceKey];
-                    $seen[$workspaceKey] = true;
-                }
-            } catch (\Throwable) {
-                Log::warning('Saved OpenAI text-to-speech key could not be decrypted.');
-            }
-        }
-
-        $appKey = trim((string) config('services.openai.server_api_key', ''));
-        if ($appKey !== '' && ! isset($seen[$appKey])) {
-            $candidates[] = ['source' => 'app', 'key' => $appKey];
-        }
-
-        return $candidates;
     }
 
     private function openAiVoice(string $voice): string
