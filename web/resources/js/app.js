@@ -4916,16 +4916,16 @@ if (mount) {
         const command = normalizedVoiceCommand(content);
         if (/\b(?:weather|forecast)\b/.test(command)) {
             const location = fallbackLocationHint(command);
-            return location ? `I'll check ${location}'s weather now.` : "I'll check the weather now.";
+            return location ? `Sure, I'll check ${location}'s weather now.` : "Sure, I'll check the weather now.";
         }
-        if (/\b(?:flight|flights|airfare|ticket|tickets)\b/.test(command)) return "I'll check the latest flight info now.";
-        if (/\b(?:hotel|hotels|reservation|booking|bookings)\b/.test(command)) return "I'll check the current availability now.";
-        if (/\b(?:traffic|delay|delays)\b/.test(command)) return "I'll check traffic now.";
-        if (/\b(?:news|stock|stocks|sports|score|scores)\b/.test(command)) return "I'll check the latest now.";
-        if (/\b(?:calendar|calendars|event|events|agenda|google calendar)\b/.test(command)) return "I'll check your calendar now.";
-        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return "I'll check your tasks now.";
-        if (/\b(?:reminder|reminders)\b/.test(command)) return "I'll check your reminders now.";
-        return "I'll check now.";
+        if (/\b(?:flight|flights|airfare|ticket|tickets)\b/.test(command)) return "Absolutely, I'll check the latest flight info now.";
+        if (/\b(?:hotel|hotels|reservation|booking|bookings)\b/.test(command)) return "Sure, I'll check the current availability now.";
+        if (/\b(?:traffic|delay|delays)\b/.test(command)) return "Yeah, I'll check traffic now.";
+        if (/\b(?:news|stock|stocks|sports|score|scores)\b/.test(command)) return "Sure, I'll check the latest now.";
+        if (/\b(?:calendar|calendars|event|events|agenda|google calendar)\b/.test(command)) return "Absolutely, I'll check your calendar now.";
+        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return "Sure, I'll check your tasks now.";
+        if (/\b(?:reminder|reminders)\b/.test(command)) return "Absolutely, I'll check your reminders now.";
+        return "Sure, I'll check now.";
     }
 
     function fallbackLocationHint(command) {
