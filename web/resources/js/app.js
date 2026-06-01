@@ -3983,27 +3983,31 @@ if (mount) {
         const quickReplyGeneration = ++kioskQuickReplyGeneration;
         const turnStartedAt = Date.now();
         const spokenSegments = [];
+        const voiceTurn = { lastSpeech: Promise.resolve(false) };
         setKioskVoiceStatus('working', 'thinking');
         const quickReplyTask = fetchKioskQuickReply(content, quickReplyGeneration);
-        const quickReplyText = await timeoutPromise(quickReplyTask, 2200, '');
+        const quickReplyText = await timeoutPromise(quickReplyTask, 900, '');
         let finalResponseReady = false;
         let quickReplySpeech = quickReplyText
             ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments)
             : Promise.resolve(false);
+        voiceTurn.lastSpeech = quickReplySpeech;
         if (!quickReplyText) {
             quickReplyTask.then((lateQuickReplyText) => {
                 if (!lateQuickReplyText || finalResponseReady) return false;
                 quickReplySpeech = speakKioskVoiceSegment(lateQuickReplyText, quickReplyGeneration, spokenSegments);
+                voiceTurn.lastSpeech = quickReplySpeech;
                 return quickReplySpeech;
             });
         }
         startKioskBargeInListening();
-        const bridgeReply = scheduleKioskBridgeReply(
+        const bridgeReply = runKioskBridgeReplies(
             content,
             quickReplyGeneration,
             spokenSegments,
             turnStartedAt,
             () => finalResponseReady,
+            voiceTurn,
         );
         try {
             const response = await sendChatContent(content, {
@@ -4013,6 +4017,7 @@ if (mount) {
             finalResponseReady = true;
             bridgeReply.cancel();
             await quickReplySpeech;
+            await voiceTurn.lastSpeech;
             await bridgeReply.promise;
             kioskQuickReplyGeneration += 1;
             if (!kioskConversationActive) return;
@@ -4057,11 +4062,11 @@ if (mount) {
         });
     }
 
-    function scheduleKioskBridgeReply(content, generation, spokenSegments, startedAt, finalReady) {
+    function runKioskBridgeReplies(content, generation, spokenSegments, startedAt, finalReady, voiceTurn) {
         window.clearTimeout(kioskBridgeTimer);
         let resolveBridge = () => {};
         let settled = false;
-        let speechStarted = false;
+        let cancelled = false;
         const resolveOnce = (value) => {
             if (settled) return;
             settled = true;
@@ -4069,29 +4074,31 @@ if (mount) {
         };
         const promise = new Promise((resolve) => {
             resolveBridge = resolve;
-            kioskBridgeTimer = window.setTimeout(async () => {
-                kioskBridgeTimer = 0;
-                if (finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration || spokenSegments.length === 0) {
-                    resolveOnce(false);
-                    return;
+            (async () => {
+                let spokeBridge = false;
+                for (let bridgeCount = 0; bridgeCount < 3; bridgeCount += 1) {
+                    await sleep(bridgeCount === 0 ? 3600 : 5200);
+                    if (cancelled) break;
+                    await voiceTurn.lastSpeech;
+                    if (cancelled || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) break;
+                    if (spokenSegments.length === 0) continue;
+                    const bridgeText = await fetchKioskQuickReply(content, generation, {
+                        stage: 'bridge',
+                        spokenSegments,
+                        elapsedMs: Date.now() - startedAt,
+                    });
+                    if (!bridgeText || cancelled || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) break;
+                    const speech = speakKioskVoiceSegment(bridgeText, generation, spokenSegments);
+                    voiceTurn.lastSpeech = speech;
+                    spokeBridge = await speech || spokeBridge;
                 }
-                const bridgeText = await fetchKioskQuickReply(content, generation, {
-                    stage: 'bridge',
-                    spokenSegments,
-                    elapsedMs: Date.now() - startedAt,
-                });
-                if (!bridgeText || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) {
-                    resolveOnce(false);
-                    return;
-                }
-                speechStarted = true;
-                resolveOnce(await speakKioskVoiceSegment(bridgeText, generation, spokenSegments));
-            }, 3400);
+                resolveOnce(spokeBridge);
+            })();
         });
         return {
             promise,
             cancel: () => {
-                if (speechStarted) return;
+                cancelled = true;
                 window.clearTimeout(kioskBridgeTimer);
                 kioskBridgeTimer = 0;
                 resolveOnce(false);

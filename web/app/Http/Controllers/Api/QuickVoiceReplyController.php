@@ -43,7 +43,7 @@ class QuickVoiceReplyController extends Controller
 
         $payload = [
             'model' => $model,
-            'max_completion_tokens' => (int) config('services.hermes_runtime.quick_reply_max_completion_tokens', 64),
+            'max_completion_tokens' => (int) config('services.hermes_runtime.quick_reply_max_completion_tokens', 40),
             'messages' => [
                 [
                     'role' => 'system',
@@ -143,11 +143,12 @@ class QuickVoiceReplyController extends Controller
 You are Bean's live voice layer in the Hey Bean app.
 
 Bean already gave an initial spoken response and the main answer is still being prepared.
-Generate one brief, natural bridge sentence so the pause feels intentional.
-Do not answer the user's request. Do not add new advice, facts, calendar details, or task results.
+Generate one brief, natural bridge sentence that is specific to the user's request and makes the pause feel intentional.
+Do not answer the user's request. Do not invent facts, calendar details, task results, or completed actions.
 Do not repeat or paraphrase anything in voice_turn.spoken_segments.
+Avoid generic filler like "Got it", "one second", "still working", "just a moment", or "I'll be right back".
 Do not mention tools, models, background jobs, or internal work.
-Sound conversational, not scripted. Keep it under 14 words.
+Sound conversational and connected to the request. Keep it under 18 words.
 PROMPT;
         }
 
@@ -158,6 +159,7 @@ The user has just finished speaking. Give the first natural spoken reply immedia
 Do not use canned support-agent phrases. Do not mention tools, models, background jobs, or internal work.
 If the user asks a normal conversational question, answer with a useful first thought right away.
 For casual questions, do not start with "Got it"; answer directly.
+For casual questions, give one compact first thought rather than the full answer, leaving room to continue.
 If the user asks for current app data or an app change, respond naturally with what you are about to check or do, without claiming it is already done.
 Keep it to one sentence under 24 words.
 PROMPT;

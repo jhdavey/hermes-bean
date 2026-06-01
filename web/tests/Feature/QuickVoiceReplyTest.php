@@ -53,7 +53,7 @@ class QuickVoiceReplyTest extends TestCase
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && $request->hasHeader('Authorization', 'Bearer test-key')
                 && $payload['model'] === 'gpt-quick-test'
-                && $payload['max_completion_tokens'] === 64
+                && $payload['max_completion_tokens'] === 40
                 && ! array_key_exists('tools', $payload)
                 && data_get($payload, 'messages.0.role') === 'system'
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'normal conversational question')
@@ -108,7 +108,7 @@ class QuickVoiceReplyTest extends TestCase
             $payload = $request->data();
             $context = (string) data_get($payload, 'messages.1.content');
 
-            return str_contains((string) data_get($payload, 'messages.0.content'), 'bridge sentence')
+            return str_contains((string) data_get($payload, 'messages.0.content'), 'specific to the user')
                 && str_contains($context, '"stage":"bridge"')
                 && str_contains($context, 'Tacos could be easy tonight')
                 && str_contains($context, '"elapsed_ms":5200');
