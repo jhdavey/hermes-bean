@@ -47,8 +47,12 @@ export function voiceAcknowledgementForCommand(transcript) {
         && /\b(?:calendar|event|events|schedule|task|tasks|reminder|reminders|today|tomorrow|this week|agenda)\b/.test(command)) {
         return 'Let me check that real quick.';
     }
-    if (/\b(?:move|reschedule|schedule|create|add|update|change|delete|cancel|complete|finish|remind|remember|plan)\b/.test(command)) {
+    if (/^(?:please\s+)?(?:move|reschedule|schedule|create|add|update|change|delete|cancel|complete|finish|remind|remember|plan)\b/.test(command)
+        || /^(?:can|could|would)\s+you\s+(?:please\s+)?(?:move|reschedule|schedule|create|add|update|change|delete|cancel|complete|finish|remind|remember|plan)\b/.test(command)) {
         return "I'm on it.";
     }
-    return '';
+    if (/\b(?:what|when|where|who|why|how|can you|could you|would you|should i|tell me|show me|look up|find)\b/.test(command)) {
+        return 'Let me think about that for a second.';
+    }
+    return 'Got it.';
 }

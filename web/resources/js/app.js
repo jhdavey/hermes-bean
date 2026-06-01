@@ -3592,7 +3592,6 @@ if (mount) {
                 setKioskVoiceStatus('listening', 'listening');
                 if (kioskCommandText.trim()) {
                     showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
-                    maybeSpeakKioskCommandAcknowledgement(kioskCommandText);
                     armKioskCommandSubmit();
                 }
                 return;
@@ -3613,7 +3612,6 @@ if (mount) {
                     return;
                 }
                 showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
-                maybeSpeakKioskCommandAcknowledgement(kioskCommandText);
                 armKioskCommandSubmit();
             }
         };
@@ -3866,15 +3864,6 @@ if (mount) {
         setKioskVoiceStatus('armed', message || 'say hey bean');
     }
 
-    function maybeSpeakKioskCommandAcknowledgement(command) {
-        if (kioskAcknowledgementSpoken) return '';
-        const acknowledgement = voiceAcknowledgementForCommand(command);
-        if (!acknowledgement) return '';
-        kioskAcknowledgementSpoken = true;
-        speakFastKioskPhrase(acknowledgement);
-        return acknowledgement;
-    }
-
     function cancelKioskVoiceCapture() {
         stopKioskBargeInListening();
         stopKioskSpeechPlayback();
@@ -3909,7 +3898,7 @@ if (mount) {
 
     function armKioskCommandSubmit() {
         window.clearTimeout(kioskCommandTimer);
-        kioskCommandTimer = window.setTimeout(finishKioskVoiceCommand, 1800);
+        kioskCommandTimer = window.setTimeout(finishKioskVoiceCommand, 900);
     }
 
     async function finishKioskVoiceCommand() {
@@ -3928,7 +3917,7 @@ if (mount) {
         setKioskVoiceStatus('working', acknowledgement || 'working');
         if (acknowledgement && !kioskAcknowledgementSpoken) {
             kioskAcknowledgementSpoken = true;
-            speakFastKioskPhrase(acknowledgement);
+            speakKioskAcknowledgement(acknowledgement);
         }
         startKioskBargeInListening();
         try {
@@ -4017,19 +4006,13 @@ if (mount) {
         }, delay);
     }
 
-    function speakFastKioskPhrase(text) {
-        if (!text || !window.speechSynthesis || !window.SpeechSynthesisUtterance) return false;
-        try {
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 1.04;
-            utterance.pitch = 1;
-            utterance.volume = 1;
-            window.speechSynthesis.speak(utterance);
-            return true;
-        } catch (error) {
-            return false;
+    function speakKioskAcknowledgement(text) {
+        if (!text) return;
+        if (profileTtsProvider() === 'openai' && profileTtsOpenAiConfigured()) {
+            playOpenAiTts(text, { status: 'responding' });
+            return;
         }
+        speakBrowserTts(text);
     }
 
     function stopKioskSpeechPlayback() {
@@ -4059,7 +4042,7 @@ if (mount) {
         return speakBrowserTts(text);
     }
 
-    async function playOpenAiTts(text) {
+    async function playOpenAiTts(text, options = {}) {
         if (!text) return false;
         let url = '';
         try {
@@ -4068,7 +4051,7 @@ if (mount) {
             if (!await ensureOpenAiAudioUnlocked()) {
                 throw new Error('audio_not_unlocked');
             }
-            setKioskVoiceStatus('responding', "Bean's voice");
+            setKioskVoiceStatus(options.status || 'responding', "Bean's voice");
             const response = await fetch('/api/assistant/tts', {
                 method: 'POST',
                 headers: {
