@@ -167,12 +167,16 @@ class RealtimeSessionController extends Controller
         $requestedVoice = (string) ($data['voice'] ?? data_get($profile->settings ?? [], 'tts.openai_voice', config('services.hermes_realtime.voice', 'marin')));
         $voice = $this->realtimeVoice($requestedVoice);
         $sessionConfig = $this->realtimeSessionConfig($localSession, $user->id, $workspace->id, $voice);
-        $sdp = trim((string) $data['sdp']);
+        $sdp = $this->normalizeSdp((string) $data['sdp']);
         $sessionJson = json_encode($sessionConfig, JSON_UNESCAPED_SLASHES);
+        $boundary = 'heybean-realtime-'.bin2hex(random_bytes(12));
+        $body = $this->multipartBody($boundary, [
+            'sdp' => $sdp,
+            'session' => (string) $sessionJson,
+        ]);
 
         $response = Http::withToken($apiKey)
-            ->attach('sdp', $sdp)
-            ->attach('session', $sessionJson)
+            ->withBody($body, 'multipart/form-data; boundary='.$boundary)
             ->timeout(20)
             ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/realtime/calls');
 
@@ -401,6 +405,29 @@ PROMPT;
                 ],
             ],
         ];
+    }
+
+    /**
+     * @param  array<string, string>  $fields
+     */
+    private function multipartBody(string $boundary, array $fields): string
+    {
+        $body = '';
+        foreach ($fields as $name => $contents) {
+            $body .= "--{$boundary}\r\n";
+            $body .= 'Content-Disposition: form-data; name="'.$name."\"\r\n\r\n";
+            $body .= $contents."\r\n";
+        }
+
+        return $body."--{$boundary}--\r\n";
+    }
+
+    private function normalizeSdp(string $sdp): string
+    {
+        $normalized = str_replace(["\r\n", "\r"], "\n", $sdp);
+        $normalized = rtrim($normalized, "\n");
+
+        return str_replace("\n", "\r\n", $normalized)."\r\n";
     }
 
     private function realtimeTools(): array
