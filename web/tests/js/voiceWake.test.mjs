@@ -50,6 +50,7 @@ assert.equal(voiceCommandNeedsAgentWork('move my task from 7pm to 5pm'), true);
 assert.equal(voiceCommandNeedsAgentWork('plan my day'), true);
 assert.equal(voiceCommandNeedsAgentWork('plan dinner'), false);
 assert.equal(voiceCommandNeedsAgentWork('cheapest flights from MCO to Dublin tomorrow one way'), true);
+assert.equal(voiceCommandNeedsAgentWork('what is the weather in Orlando Florida right now'), true);
 assert.equal(voiceCommandNeedsAgentWork('when does my local store close today'), true);
 assert.equal(voiceCommandNeedsAgentWork('is the place near me open tonight'), true);
 assert.equal(voiceCommandNeedsAgentWork('can you give me a taco recipe'), false);

@@ -1,5 +1,6 @@
 import {
     commandAfterWakePhrase,
+    normalizedVoiceCommand,
     voiceCommandNeedsAgentWork,
     voiceCommandWantsDetailedChat,
     voiceCancelRequested,
@@ -4649,7 +4650,7 @@ if (mount) {
         const quickReply = likelyNeedsAgentWork
             ? await timeoutPromise(quickReplyTask, 900, null)
             : await quickReplyTask;
-        const quickReplyText = quickReply?.text || '';
+        const quickReplyText = quickReply?.text || fallbackKioskQuickReply(content, likelyNeedsAgentWork);
         let shouldContinueAgent = quickReply ? quickReply.continueAgent !== false : likelyNeedsAgentWork || wantsDetailedChat;
         if (quickReplyText && wantsDetailedChat) {
             shouldContinueAgent = true;
@@ -4908,6 +4909,20 @@ if (mount) {
         } catch (_) {
             return null;
         }
+    }
+
+    function fallbackKioskQuickReply(content, likelyNeedsAgentWork) {
+        if (!likelyNeedsAgentWork) return '';
+        const command = normalizedVoiceCommand(content);
+        if (/\b(?:weather|forecast)\b/.test(command)) return 'I will check the current weather.';
+        if (/\b(?:flight|flights|airfare|ticket|tickets)\b/.test(command)) return 'I will check the current flight information.';
+        if (/\b(?:hotel|hotels|reservation|booking|bookings)\b/.test(command)) return 'I will check the current availability.';
+        if (/\b(?:traffic|delay|delays)\b/.test(command)) return 'I will check the current traffic information.';
+        if (/\b(?:news|stock|stocks|sports|score|scores)\b/.test(command)) return 'I will check the latest information.';
+        if (/\b(?:calendar|calendars|event|events|agenda|google calendar)\b/.test(command)) return 'I will check your calendar.';
+        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return 'I will check your tasks.';
+        if (/\b(?:reminder|reminders)\b/.test(command)) return 'I will check your reminders.';
+        return 'I will check that.';
     }
 
     function timeoutPromise(promise, timeoutMs, fallback) {

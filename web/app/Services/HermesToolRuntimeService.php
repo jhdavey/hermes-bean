@@ -143,6 +143,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $responses = [];
         $domainEvents = collect();
         $actions = [];
+        $toolOutputs = [];
         $assistantContent = '';
         $finalResponse = null;
 
@@ -180,6 +181,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     }
                     [$toolActions, $toolEvents, $toolOutput] = $this->executeNativeToolCall($session, $toolCall);
                     $actions = array_merge($actions, $toolActions);
+                    $toolOutputs[] = $toolOutput;
                     $domainEvents = $domainEvents->concat($toolEvents);
                     $messages[] = [
                         'role' => 'tool',
@@ -209,7 +211,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 }
             }
         } catch (\Throwable $exception) {
-            if ($actions !== []) {
+            if ($actions !== [] || $toolOutputs !== []) {
                 Log::warning('Hermes model response failed after successful tool execution.', [
                     'session_id' => $session->id,
                     'message_id' => $userMessage->id,
@@ -234,7 +236,9 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         if ($assistantContent === '') {
-            $assistantContent = $actions !== [] ? $this->nativeActionFallbackContent($actions) : 'Done.';
+            $assistantContent = $actions !== []
+                ? $this->nativeActionFallbackContent($actions)
+                : $this->nativeReadFallbackContent($toolOutputs);
         }
 
         return DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse): array {
@@ -401,14 +405,29 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     private function executeNativeReadTool(ConversationSession $session, string $name, array $arguments): array
     {
-        return match ($name) {
-            'search_tasks' => $this->searchTasksForTool($session, $arguments),
-            'search_reminders' => $this->searchRemindersForTool($session, $arguments),
-            'search_calendar_events' => $this->searchCalendarEventsForTool($session, $arguments),
-            'get_day_context' => $this->dayContextForTool($session, $arguments),
-            'external_lookup' => $this->externalLookupForTool($session, $arguments),
-            default => ['ok' => false, 'error_code' => 'unsupported_read_tool'],
-        };
+        try {
+            return match ($name) {
+                'search_tasks' => $this->searchTasksForTool($session, $arguments),
+                'search_reminders' => $this->searchRemindersForTool($session, $arguments),
+                'search_calendar_events' => $this->searchCalendarEventsForTool($session, $arguments),
+                'get_day_context' => $this->dayContextForTool($session, $arguments),
+                'external_lookup' => $this->externalLookupForTool($session, $arguments),
+                default => ['ok' => false, 'tool' => $name, 'error_code' => 'unsupported_read_tool'],
+            };
+        } catch (\Throwable $exception) {
+            Log::warning('Hermes native read tool failed.', [
+                'session_id' => $session->id,
+                'tool' => $name,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return [
+                'ok' => false,
+                'tool' => $name,
+                'error_code' => 'read_tool_failed',
+                'message' => 'The lookup failed before it could return a usable result.',
+            ];
+        }
     }
 
     private function searchTasksForTool(ConversationSession $session, array $arguments): array
@@ -1267,6 +1286,33 @@ PROMPT;
             'event_category.create' => $name !== '' ? "I created {$name}." : 'I created that.',
             default => 'Done.',
         };
+    }
+
+    private function nativeReadFallbackContent(array $toolOutputs): string
+    {
+        $last = collect($toolOutputs)->reverse()->first(fn (mixed $output): bool => is_array($output));
+        if (! is_array($last)) {
+            return 'Done.';
+        }
+
+        if (($last['tool'] ?? null) === 'external_lookup') {
+            if (($last['ok'] ?? false) && filled($last['text'] ?? null)) {
+                return (string) $last['text'];
+            }
+
+            return 'I tried to check that live information, but the lookup did not return a usable result.';
+        }
+
+        if (($last['ok'] ?? false) && array_key_exists('count', $last)) {
+            $count = (int) ($last['count'] ?? 0);
+            $tool = str_replace('_', ' ', (string) ($last['tool'] ?? 'records'));
+
+            return $count === 0
+                ? "I checked {$tool}, but I did not find anything matching that."
+                : "I found {$count} matching ".str($tool)->after('search ')->toString().'.';
+        }
+
+        return 'I checked, but I could not get a usable result.';
     }
 
     private function recordEvent(ConversationSession $session, string $type, array $payload = [], ?string $toolName = null, string $status = 'recorded'): ActivityEvent

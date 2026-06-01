@@ -352,6 +352,130 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_external_lookup_result_falls_back_if_final_model_call_fails(): void
+    {
+        $chatCalls = 0;
+        Http::fake(function ($request) use (&$chatCalls) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-weather-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_weather',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'current weather in Orlando Florida right now',
+                                            'location' => 'Orlando, FL',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                return Http::response(['error' => ['message' => 'temporary final model failure']], 500);
+            }
+
+            if ($request->url() === 'https://api.openai.test/v1/responses') {
+                return Http::response([
+                    'id' => 'resp_weather',
+                    'model' => 'gpt-lookup-test',
+                    'output_text' => 'It is 82 degrees and partly cloudy in Orlando right now.',
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request'], 500);
+        });
+
+        $token = $this->apiToken('tool-external-fallback@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'It is 82 degrees and partly cloudy in Orlando right now.')
+            ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
+
+        Http::assertSentCount(3);
+    }
+
+    public function test_external_lookup_failure_does_not_fail_agent_runtime(): void
+    {
+        $chatCalls = 0;
+        Http::fake(function ($request) use (&$chatCalls) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-weather-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_weather',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'current weather in Orlando Florida right now',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
+
+                return Http::response([
+                    'id' => 'chatcmpl-weather-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($lookupResult, 'message'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://api.openai.test/v1/responses') {
+                return Http::response(['error' => ['message' => 'web search unavailable']], 503);
+            }
+
+            return Http::response(['error' => 'Unexpected request'], 500);
+        });
+
+        $token = $this->apiToken('tool-external-failure@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'The external lookup failed.');
+    }
+
     public function test_budget_alerts_do_not_block_tool_runtime_request(): void
     {
         config()->set('services.ai_usage.budgets.free.daily_hard_tokens', 1);

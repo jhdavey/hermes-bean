@@ -93,6 +93,31 @@ class QuickVoiceReplyTest extends TestCase
             ->assertJsonPath('data.continue_agent', true);
     }
 
+    public function test_quick_voice_reply_continues_to_agent_for_current_weather_requests(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-weather',
+                'model' => 'gpt-quick-test',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I will check the current weather in Orlando.',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('quick-voice-weather@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
+            'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
+        ])->assertOk()
+            ->assertJsonPath('data.text', 'I will check the current weather in Orlando.')
+            ->assertJsonPath('data.continue_agent', true);
+    }
+
     public function test_quick_voice_reply_continues_to_agent_for_generic_live_external_requests(): void
     {
         Http::fake([
