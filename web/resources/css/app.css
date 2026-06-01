@@ -320,8 +320,8 @@
 
 .hb-top-workspace-switcher {
     position: relative;
-    width: 36px;
-    min-width: 36px;
+    width: 44px;
+    min-width: 44px;
     min-height: 36px;
     display: inline-flex;
     align-items: center;
@@ -3098,8 +3098,8 @@
 
     .hb-top-nav .hb-top-workspace-switcher {
         min-height: 38px;
-        width: 38px;
-        min-width: 38px;
+        width: 46px;
+        min-width: 46px;
         flex: 0 0 auto;
     }
 
