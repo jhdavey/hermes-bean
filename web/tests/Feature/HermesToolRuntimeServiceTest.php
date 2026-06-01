@@ -68,6 +68,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 && ! array_key_exists('dashboard_state', $context)
                 && isset($context['temporal_context'], $context['workspace'], $context['agent_profile'])
                 && $toolNames->contains('search_tasks')
+                && $toolNames->contains('external_lookup')
                 && $toolNames->contains('update_task')
                 && ! $toolNames->contains('create_approval');
         });
@@ -236,6 +237,119 @@ class HermesToolRuntimeServiceTest extends TestCase
         ]);
 
         Http::assertSentCount(2);
+    }
+
+    public function test_tool_runtime_executes_external_lookup_tool_call(): void
+    {
+        config()->set('services.hermes_runtime.external_lookup_model', 'gpt-lookup-test');
+
+        $chatCalls = 0;
+        Http::fake(function ($request) use (&$chatCalls) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-external-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_lookup',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'Ace Hardware Orlando closing time today',
+                                            'context' => 'User wants to know when their local Ace Hardware closes today.',
+                                            'location' => 'Orlando, FL',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
+
+                return Http::response([
+                    'id' => 'chatcmpl-external-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($lookupResult, 'text'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://api.openai.test/v1/responses') {
+                return Http::response([
+                    'id' => 'resp_lookup',
+                    'model' => 'gpt-lookup-test',
+                    'output_text' => 'The local Ace Hardware closes at 8 PM today.',
+                    'output' => [[
+                        'type' => 'message',
+                        'content' => [[
+                            'type' => 'output_text',
+                            'text' => 'The local Ace Hardware closes at 8 PM today.',
+                            'annotations' => [[
+                                'type' => 'url_citation',
+                                'url' => 'https://www.acehardware.com/store-details/example',
+                                'title' => 'Ace Hardware store details',
+                            ]],
+                        ]],
+                    ]],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request'], 500);
+        });
+
+        $token = $this->apiToken('tool-external@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'can you tell me when my local Ace Hardware closes today',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'The local Ace Hardware closes at 8 PM today.');
+
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+
+            return $request->url() === 'https://api.openai.test/v1/responses'
+                && $request->hasHeader('Authorization', 'Bearer test-key')
+                && data_get($payload, 'model') === 'gpt-lookup-test'
+                && data_get($payload, 'tools.0.type') === 'web_search'
+                && str_contains((string) data_get($payload, 'instructions'), 'concise live lookup helper')
+                && str_contains((string) data_get($payload, 'input'), 'Ace Hardware Orlando closing time today')
+                && str_contains((string) data_get($payload, 'input'), 'Orlando, FL');
+        });
+
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+            $toolMessage = collect($payload['messages'] ?? [])->firstWhere('role', 'tool');
+            if (! $toolMessage) {
+                return false;
+            }
+            $toolOutput = json_decode((string) data_get($toolMessage, 'content'), true, flags: JSON_THROW_ON_ERROR);
+
+            return $request->url() === 'https://api.openai.test/v1/chat/completions'
+                && data_get($toolOutput, 'tool') === 'external_lookup'
+                && data_get($toolOutput, 'text') === 'The local Ace Hardware closes at 8 PM today.'
+                && data_get($toolOutput, 'citations.0.url') === 'https://www.acehardware.com/store-details/example';
+        });
+
+        Http::assertSentCount(3);
     }
 
     public function test_budget_alerts_do_not_block_tool_runtime_request(): void

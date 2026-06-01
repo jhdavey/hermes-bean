@@ -396,7 +396,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     private function isNativeReadTool(string $name): bool
     {
-        return in_array($name, ['search_tasks', 'search_reminders', 'search_calendar_events', 'get_day_context'], true);
+        return in_array($name, ['search_tasks', 'search_reminders', 'search_calendar_events', 'get_day_context', 'external_lookup'], true);
     }
 
     private function executeNativeReadTool(ConversationSession $session, string $name, array $arguments): array
@@ -406,6 +406,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'search_reminders' => $this->searchRemindersForTool($session, $arguments),
             'search_calendar_events' => $this->searchCalendarEventsForTool($session, $arguments),
             'get_day_context' => $this->dayContextForTool($session, $arguments),
+            'external_lookup' => $this->externalLookupForTool($session, $arguments),
             default => ['ok' => false, 'error_code' => 'unsupported_read_tool'],
         };
     }
@@ -544,6 +545,175 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'reminders' => $this->searchRemindersForTool($session, $arguments)['items'],
             'calendar_events' => $this->searchCalendarEventsForTool($session, $arguments)['items'],
         ];
+    }
+
+    private function externalLookupForTool(ConversationSession $session, array $arguments): array
+    {
+        $query = trim((string) ($arguments['query'] ?? ''));
+        if ($query === '') {
+            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'missing_query', 'message' => 'A lookup query is required.'];
+        }
+
+        $context = trim((string) ($arguments['context'] ?? ''));
+        $location = trim((string) ($arguments['location'] ?? ''));
+        $toolType = (string) config('services.hermes_runtime.external_lookup_tool', 'web_search');
+        $payload = [
+            'model' => (string) config('services.hermes_runtime.external_lookup_model', 'gpt-5-mini'),
+            'tools' => [
+                ['type' => $toolType],
+            ],
+            'tool_choice' => 'auto',
+            'instructions' => 'You are a concise live lookup helper for Bean. Search the web when needed, answer only from current external results, and include citations in the response annotations when available. If results are incomplete or uncertain, say so plainly.',
+            'input' => $this->externalLookupPrompt($session, $query, $context, $location),
+        ];
+
+        $response = Http::withToken($this->providerApiKey())
+            ->acceptJson()
+            ->asJson()
+            ->timeout((float) config('services.hermes_runtime.external_lookup_timeout', 20))
+            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/responses', $payload);
+
+        if (! $response->successful()) {
+            Log::warning('Hermes external lookup failed.', [
+                'session_id' => $session->id,
+                'status' => $response->status(),
+                'body' => mb_substr($response->body(), 0, 1000),
+            ]);
+
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'error_code' => 'external_lookup_failed',
+                'status' => $response->status(),
+                'message' => 'The external lookup failed.',
+            ];
+        }
+
+        $decoded = $response->json();
+        if (! is_array($decoded)) {
+            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'external_lookup_non_json', 'message' => 'The external lookup returned an unreadable response.'];
+        }
+
+        $text = $this->extractResponseText($decoded);
+        if ($text === '') {
+            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'external_lookup_empty', 'message' => 'The external lookup did not return an answer.'];
+        }
+
+        return [
+            'ok' => true,
+            'tool' => 'external_lookup',
+            'query' => $query,
+            'context' => $context !== '' ? $context : null,
+            'location' => $location !== '' ? $location : null,
+            'text' => $text,
+            'citations' => $this->extractResponseCitations($decoded),
+            'sources' => $this->extractResponseSources($decoded),
+            'model' => data_get($decoded, 'model'),
+        ];
+    }
+
+    private function externalLookupPrompt(ConversationSession $session, string $query, string $context, string $location): string
+    {
+        $user = User::find($session->user_id);
+        $profile = $this->profileForSession($session);
+        $profileSettings = $profile?->settings ?? [];
+        $timezone = (string) data_get($profileSettings, 'timezone', config('app.timezone'));
+        $now = now($timezone);
+        $parts = [
+            "Lookup query: {$query}",
+            'Current date/time: '.$now->toIso8601String(),
+            'Timezone: '.$timezone,
+        ];
+        if ($location !== '') {
+            $parts[] = "User/location hint: {$location}";
+        }
+        if ($context !== '') {
+            $parts[] = "Additional context: {$context}";
+        }
+        if ($user?->name) {
+            $parts[] = "User name: {$user->name}";
+        }
+
+        return implode("\n", $parts);
+    }
+
+    private function extractResponseText(array $response): string
+    {
+        $outputText = trim((string) data_get($response, 'output_text', ''));
+        if ($outputText !== '') {
+            return $outputText;
+        }
+
+        $segments = [];
+        foreach ((array) data_get($response, 'output', []) as $item) {
+            foreach ((array) data_get($item, 'content', []) as $content) {
+                $text = trim((string) data_get($content, 'text', ''));
+                if ($text !== '') {
+                    $segments[] = $text;
+                }
+            }
+        }
+
+        return trim(implode("\n\n", $segments));
+    }
+
+    private function extractResponseCitations(array $response): array
+    {
+        $citations = [];
+        $this->collectUrlReferences($response, $citations, true);
+
+        return collect($citations)
+            ->unique('url')
+            ->take(8)
+            ->values()
+            ->all();
+    }
+
+    private function extractResponseSources(array $response): array
+    {
+        $sources = [];
+        foreach ((array) data_get($response, 'output', []) as $item) {
+            foreach ((array) data_get($item, 'action.sources', []) as $source) {
+                if (is_array($source)) {
+                    $url = trim((string) ($source['url'] ?? ''));
+                    if ($url !== '') {
+                        $sources[] = [
+                            'url' => $url,
+                            'title' => trim((string) ($source['title'] ?? '')) ?: null,
+                        ];
+                    }
+                }
+            }
+        }
+        $this->collectUrlReferences($response, $sources, false);
+
+        return collect($sources)
+            ->unique('url')
+            ->take(12)
+            ->values()
+            ->all();
+    }
+
+    private function collectUrlReferences(mixed $value, array &$references, bool $citationsOnly): void
+    {
+        if (! is_array($value)) {
+            return;
+        }
+
+        $type = (string) ($value['type'] ?? '');
+        $url = trim((string) ($value['url'] ?? ''));
+        if ($url !== '' && (! $citationsOnly || $type === 'url_citation')) {
+            $references[] = [
+                'url' => $url,
+                'title' => trim((string) ($value['title'] ?? '')) ?: null,
+            ];
+        }
+
+        foreach ($value as $child) {
+            if (is_array($child)) {
+                $this->collectUrlReferences($child, $references, $citationsOnly);
+            }
+        }
     }
 
     private function readToolResult(string $tool, array $items, int $workspaceId): array
@@ -739,7 +909,7 @@ When a user asks what/when/where about an item and the type is ambiguous, search
 Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded.
 
 Laravel owns app mechanics: workspace access, database writes, validation, syncing, and tool results. Trust tool results. If a read/write tool says not found, ambiguous, or failed, respond naturally from that result.
-You do not currently have a live web browser, local business lookup, maps, travel, weather, news, market, or sports data tool. For live external-data requests like store hours, flights, hotel prices, weather, traffic, news, stock prices, or sports scores, do not claim you checked. Say plainly that Bean does not have live browsing for that yet, and ask for any details needed or suggest checking the source directly.
+Use external_lookup for live information outside HeyBean, including current store hours, flights, hotel prices, weather, traffic, news, prices, availability, sports scores, or other current web facts. Do not invent current external facts. When external_lookup returns sources or citations, use them to answer concisely, include a brief source title or URL when useful, and mention uncertainty when results are incomplete.
 
 Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no notes unless the user says otherwise. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
 When setting recurrence, always use recurrence as one of: none, daily, weekly, monthly, yearly, specific_days, or interval. For custom intervals like "every 3 days", set recurrence to interval and put interval plus interval_unit in metadata. Never put an object in recurrence.
@@ -761,6 +931,7 @@ PROMPT;
             $this->nativeTool('search_reminders', 'Search reminders in the current or specified workspace.', $this->searchReminderProperties()),
             $this->nativeTool('search_calendar_events', 'Search calendar events in the current or specified workspace.', $this->searchCalendarEventProperties()),
             $this->nativeTool('get_day_context', 'Get tasks, reminders, and calendar events for a specific local date.', $this->dayContextProperties(), ['date']),
+            $this->nativeTool('external_lookup', 'Look up current external information outside HeyBean, such as live web facts, store hours, travel, weather, prices, traffic, news, sports, or current availability. Use this instead of guessing when the answer depends on current outside data.', $this->externalLookupProperties(), ['query']),
             $this->nativeTool('create_task', 'Create a visible task in Hey Bean.', $this->taskProperties(), ['title']),
             $this->nativeTool('update_task', 'Update one existing task. Prefer id from search_tasks; otherwise use match_title and Laravel will require a unique match.', $this->taskProperties(requireId: false)),
             $this->nativeTool('delete_task', 'Delete one existing task by id.', $this->idProperties(), ['id']),
@@ -865,6 +1036,15 @@ PROMPT;
         return [
             'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD local date.'],
             'workspace_id' => ['type' => 'integer'],
+        ];
+    }
+
+    private function externalLookupProperties(): array
+    {
+        return [
+            'query' => ['type' => 'string', 'description' => 'Specific external lookup query. Include relevant names, dates, route, city, or domain details from the user request.'],
+            'context' => ['type' => 'string', 'description' => 'Short reason or constraints for the lookup, such as one-way flights tomorrow or store closing time today.'],
+            'location' => ['type' => 'string', 'description' => 'Optional user-provided or inferred location hint.'],
         ];
     }
 

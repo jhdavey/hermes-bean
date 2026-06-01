@@ -52,6 +52,9 @@ return [
         'users_home' => env('HERMES_USERS_HOME', storage_path('app/hermes-users')),
         'base_home' => env('HERMES_BASE_HOME'),
         'timeout' => (float) env('HERMES_AGENT_TIMEOUT', 120),
+        'external_lookup_model' => env('HERMES_EXTERNAL_LOOKUP_MODEL', 'gpt-5-mini'),
+        'external_lookup_timeout' => (float) env('HERMES_EXTERNAL_LOOKUP_TIMEOUT', 20),
+        'external_lookup_tool' => env('HERMES_EXTERNAL_LOOKUP_TOOL', 'web_search'),
     ],
 
     'hermes_realtime' => [
