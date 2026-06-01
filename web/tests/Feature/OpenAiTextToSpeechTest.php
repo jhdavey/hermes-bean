@@ -108,6 +108,39 @@ class OpenAiTextToSpeechTest extends TestCase
         });
     }
 
+    public function test_openai_tts_endpoint_uses_app_key_without_saved_workspace_key(): void
+    {
+        config(['services.openai.server_api_key' => 'sk-app-tts-key']);
+        Http::fake([
+            'api.openai.com/v1/audio/speech' => Http::response('app-wav', 200, ['Content-Type' => 'audio/wav']),
+        ]);
+
+        $token = $this->apiToken('tts-app-key@example.com');
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'tts_provider' => 'openai',
+            'tts_openai_voice' => 'marin',
+            'tts_openai_instructions' => 'Warm and friendly.',
+        ])->assertOk()
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.tts.provider', 'openai')
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.tts.openai_api_key_configured', false)
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.tts.openai_app_key_configured', true);
+
+        $this->withToken($token)->postJson('/api/assistant/tts', [
+            'text' => 'Hello from Bean.',
+        ])->assertOk()
+            ->assertHeader('Content-Type', 'audio/wav')
+            ->assertHeader('X-HeyBean-TTS-Key-Source', 'app')
+            ->assertHeader('X-HeyBean-TTS-Voice', 'marin')
+            ->assertContent('app-wav');
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.openai.com/v1/audio/speech'
+                && $request->hasHeader('Authorization', 'Bearer sk-app-tts-key')
+                && $request['voice'] === 'marin'
+                && $request['instructions'] === 'Warm and friendly.';
+        });
+    }
+
     public function test_masked_openai_tts_key_does_not_overwrite_saved_key(): void
     {
         $token = $this->apiToken('tts-mask@example.com');

@@ -560,7 +560,10 @@ if (mount) {
 
     function profileTtsOpenAiPlayable(profile = currentAgentProfile()) {
         const tts = profileTtsSettings(profile);
-        return profileTtsOpenAiConfigured(profile) || tts.openai_app_key_configured === true || tts.openaiAppKeyConfigured === true;
+        return profileTtsProvider(profile) === 'openai'
+            || profileTtsOpenAiConfigured(profile)
+            || tts.openai_app_key_configured === true
+            || tts.openaiAppKeyConfigured === true;
     }
 
     function profileTtsVoice(profile = currentAgentProfile()) {
@@ -2117,7 +2120,7 @@ if (mount) {
                     <label class="hb-label">Anything Bean should know?<textarea class="hb-textarea" name="context" placeholder="Example: I work nights, protect family time, and need gentle nudges.">${escapeHtml(profileOnboardingContext(profile))}</textarea></label>
                     <div class="hb-surface-soft hb-card-pad hb-tts-settings">
                         <strong>Voice responses</strong>
-                        <p class="hb-item-meta">Browser speech is free. OpenAI speech uses your own OpenAI API key and gives Bean a more natural voice.</p>
+                        <p class="hb-item-meta">OpenAI speech gives Bean a more natural voice. The app key is used automatically; a workspace key is optional.</p>
                         <label class="hb-label">Speech engine<select class="hb-select" name="ttsProvider">
                             <option value="browser" ${ttsProvider === 'browser' ? 'selected' : ''}>Browser TTS</option>
                             <option value="openai" ${ttsProvider === 'openai' ? 'selected' : ''}>OpenAI TTS</option>
@@ -2129,12 +2132,12 @@ if (mount) {
                                     <button class="hb-button-secondary hb-tts-preview-button" type="button" data-preview-tts-voice>${state.ttsPreviewing ? 'Playing...' : 'Preview'}</button>
                                 </div>
                             </div>
-                            <label class="hb-label">OpenAI API key<input class="hb-input" type="${ttsKeyConfigured ? 'text' : 'password'}" name="ttsOpenAiKey" value="${escapeAttr(ttsKeyMask)}" placeholder="${ttsKeyConfigured ? 'Saved - replace to update' : 'sk-...'}" autocomplete="off" ${ttsKeyConfigured ? `data-tts-key-mask="${escapeAttr(ttsKeyMask)}"` : ''}></label>
+                            <label class="hb-label">Optional workspace OpenAI key<input class="hb-input" type="${ttsKeyConfigured ? 'text' : 'password'}" name="ttsOpenAiKey" value="${escapeAttr(ttsKeyMask)}" placeholder="${ttsKeyConfigured ? 'Saved - replace to update' : 'Uses app key by default'}" autocomplete="off" ${ttsKeyConfigured ? `data-tts-key-mask="${escapeAttr(ttsKeyMask)}"` : ''}></label>
                         </div>
                         <div class="hb-tts-preview-status" data-tts-preview-status hidden></div>
                         <label class="hb-label">OpenAI voice style<textarea class="hb-textarea hb-tts-style" name="ttsOpenAiInstructions" placeholder="Example: Warm, natural, concise, and lightly upbeat.">${escapeHtml(ttsInstructions)}</textarea></label>
                         ${ttsKeyConfigured ? '<label class="hb-checkbox-row"><input type="checkbox" name="ttsClearOpenAiKey" value="1"> Remove saved OpenAI API key</label>' : ''}
-                        <p class="hb-item-meta">OpenAI voices are AI-generated. Your key is encrypted before storage and is never shown back in the app.</p>
+                        <p class="hb-item-meta">OpenAI voices are AI-generated. Workspace keys are encrypted before storage and never shown back in the app.</p>
                     </div>
                     <div class="hb-modal-actions"><button class="hb-button-secondary" type="button" data-close-modal>Cancel</button><button class="hb-button" type="submit">Save</button></div>
                 </form>
@@ -2509,8 +2512,8 @@ if (mount) {
         if (!form || state.ttsPreviewing) return;
 
         setTtsPreviewStatus(status, '', '');
-        if (profileTtsProvider() !== 'openai' || !profileTtsOpenAiConfigured()) {
-            setTtsPreviewStatus(status, 'Save Bean voice with a voice key before previewing.', 'error');
+        if (profileTtsProvider() !== 'openai') {
+            setTtsPreviewStatus(status, 'Choose OpenAI TTS before previewing Bean voice.', 'error');
             return;
         }
 
@@ -4948,7 +4951,7 @@ if (mount) {
 
     function speakKioskAcknowledgement(text, options = {}) {
         if (!text) return Promise.resolve(false);
-        if (profileTtsProvider() === 'openai' && profileTtsOpenAiPlayable()) {
+        if (profileTtsProvider() === 'openai') {
             return playOpenAiTts(text, { status: 'responding', shouldPlay: options.shouldPlay, quietFailure: true }).then((spoken) => (
                 spoken || speakBrowserTts(text)
             ));
@@ -4986,12 +4989,9 @@ if (mount) {
 
     function speakKioskResponseText(text, options = {}) {
         if (profileTtsProvider() === 'openai') {
-            if (profileTtsOpenAiPlayable()) {
-                return playOpenAiTts(text, { ...options, quietFailure: true }).then((spoken) => (
-                    spoken || speakBrowserTts(text)
-                ));
-            }
-            return speakBrowserTts(text);
+            return playOpenAiTts(text, { ...options, quietFailure: true }).then((spoken) => (
+                spoken || speakBrowserTts(text)
+            ));
         }
         return speakBrowserTts(text);
     }
