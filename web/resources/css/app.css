@@ -100,6 +100,7 @@
 }
 
 .hb-topbar {
+    --hb-topbar-date-font-size: 22px;
     position: sticky;
     top: 0;
     z-index: 20;
@@ -177,9 +178,9 @@
 
 .hb-topbar-current-time {
     color: var(--hb-text);
-    font-size: 22px;
+    font-size: var(--hb-topbar-date-font-size, 22px);
     font-weight: 900;
-    letter-spacing: -.02em;
+    letter-spacing: 0;
     line-height: 1;
     white-space: nowrap;
 }
@@ -200,9 +201,9 @@
 }
 
 .hb-header-pill {
-    font-size: 22px;
+    font-size: var(--hb-topbar-date-font-size, 22px);
     font-weight: 950;
-    letter-spacing: -.02em;
+    letter-spacing: 0;
     line-height: 1;
 }
 
@@ -1450,9 +1451,9 @@
     background: rgba(255, 255, 255, .72);
     color: var(--hb-text);
     padding: 7px 12px;
-    font-size: 22px;
+    font-size: var(--hb-topbar-date-font-size, 22px);
     font-weight: 900;
-    letter-spacing: -.02em;
+    letter-spacing: 0;
     line-height: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3570,6 +3571,10 @@
 }
 
 @media (max-width: 1120px) {
+    .hb-topbar {
+        --hb-topbar-date-font-size: 20px;
+    }
+
     .hb-top-nav,
     .hb-topbar-action,
     .hb-top-workspace-switcher-nav,
@@ -3601,6 +3606,7 @@
 
 @media (max-width: 700px) {
     .hb-topbar {
+        --hb-topbar-date-font-size: 18px;
         padding-left: 12px;
         padding-right: 12px;
     }
@@ -3623,11 +3629,6 @@
 
     .hb-topbar-current-time {
         display: none;
-    }
-
-    .hb-header-pill,
-    .hb-month-current {
-        font-size: 20px;
     }
 
     .hb-month-pill {
