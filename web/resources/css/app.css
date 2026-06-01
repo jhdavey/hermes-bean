@@ -3621,7 +3621,10 @@
         text-overflow: ellipsis;
     }
 
-    .hb-topbar-current-time,
+    .hb-topbar-current-time {
+        display: none;
+    }
+
     .hb-header-pill,
     .hb-month-current {
         font-size: 20px;
@@ -3640,7 +3643,7 @@
     }
 
     .hb-kiosk-voice-pill-topbar {
-        max-width: 36vw;
+        max-width: 52vw;
         padding: 7px 9px;
         font-size: 11px;
     }
