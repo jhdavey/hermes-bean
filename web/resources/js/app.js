@@ -818,9 +818,10 @@ if (mount) {
                     <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
                     <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(now))}</span></button>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
-                    ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-mobile')}
-                    <span class="hb-spacer"></span>
                     ${topNavMarkup()}
+                    ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')}
+                    <span class="hb-spacer"></span>
+                    ${topBeanControlsMarkup()}
                     ${showAdd ? `<button class="hb-icon-button hb-topbar-action" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
                     ${showRefresh ? `<button class="hb-icon-button hb-topbar-action" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
@@ -832,8 +833,6 @@ if (mount) {
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
                 ${bottomMenuMarkup()}
-                ${state.selected === 'bean' ? '' : floatingBeanButtonMarkup()}
-                ${kioskVoicePillMarkup({ standalone: state.selected === 'bean' })}
                 ${state.chatExpanded && state.selected !== 'bean' ? desktopChatMarkup({ expanded: true }) : ''}
             </div>`;
     }
@@ -1148,6 +1147,16 @@ if (mount) {
             </button>`;
     }
 
+    function topBeanControlsMarkup() {
+        return `
+            <div class="hb-topbar-bean-controls">
+                ${kioskVoicePillMarkup({ topbar: true })}
+                <button class="hb-bean-button hb-topbar-bean-button ${state.chatExpanded || state.selected === 'bean' ? 'hb-bean-button-active' : ''}" type="button" data-toggle-chat-expand aria-label="${state.chatExpanded ? 'Close Bean chat' : 'Open Bean chat'}" title="Bean chat">
+                    <img src="${escapeAttr(logoUrl)}" alt="">
+                </button>
+            </div>`;
+    }
+
     function kioskVoicePillMarkup(options = {}) {
         const requested = state.kioskVoiceEnabled;
         const ready = kioskVoiceReady();
@@ -1155,7 +1164,7 @@ if (mount) {
         const label = kioskVoicePillLabel({ requested, ready, phase });
         const actionLabel = ready ? 'Turn off kiosk voice' : label;
         return `
-            <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(phase)} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}" aria-pressed="${ready}">
+            <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(phase)} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''} ${options.topbar ? 'hb-kiosk-voice-pill-topbar' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}" aria-pressed="${ready}">
                 <span class="hb-kiosk-voice-pill-icon" aria-hidden="true">${icons.mic}</span>
                 <span>${escapeHtml(label)}</span>
             </button>`;
@@ -1445,7 +1454,6 @@ if (mount) {
         return `
             <nav class="hb-top-nav" aria-label="App navigation">
                 ${nav.slice(0, 3).map((item) => navButton(item, { iconOnly: true })).join('')}
-                ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')}
                 ${nav.slice(3).map((item) => navButton(item, { iconOnly: true })).join('')}
             </nav>`;
     }
