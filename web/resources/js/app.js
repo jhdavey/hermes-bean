@@ -3339,13 +3339,22 @@ if (mount) {
         state.voiceStatusTone = '';
         kioskConversationActive = false;
         kioskCommandText = '';
+        kioskRealtimePendingUser = null;
+        kioskRealtimeAssistantDraft = null;
+        kioskRealtimeSuppressNextAssistantPersist = false;
+        kioskRealtimeVoiceOnlyAssistant = false;
+        window.clearTimeout(kioskRealtimeResponseTimer);
+        kioskRealtimeResponseTimer = 0;
+        clearRealtimeToolFallback();
+        kioskRealtimeRunWatchTimers.forEach((timer) => window.clearTimeout(timer));
+        kioskRealtimeRunWatchTimers.clear();
         if (kioskRealtime?.dataChannel?.readyState === 'open') {
             try { kioskRealtime.dataChannel.send(JSON.stringify({ type: 'response.cancel' })); } catch (_) {}
         }
         stopKioskSpeechPlayback();
         setKioskVoiceStatus(
             state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'armed' : 'working') : 'idle',
-            state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'Bean voice ready' : 'Reconnecting') : ''
+            state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'say hey bean' : 'Reconnecting') : ''
         );
         render();
         scrollChatToBottom();
@@ -4076,8 +4085,8 @@ if (mount) {
             setKioskVoiceStatus('armed', 'Bean voice ready');
             return;
         }
-        if (conversationEndRequested(raw)) {
-            endKioskConversation('done');
+        if (conversationEndRequested(raw) || (isWakeTurn && voiceCancelRequested(command))) {
+            cancelBeanTurn();
             return;
         }
         if (isWakeTurn) {
@@ -4372,6 +4381,7 @@ if (mount) {
     function deliverRealtimeBackgroundResult(content, runId = null) {
         const text = speechTextFromAssistant(content);
         if (!text) return;
+        if (!kioskConversationActive) return;
         if (!kioskRealtimeConnected()) {
             upsertRealtimeLocalMessage({
                 id: `rt-run-${runId || Date.now()}`,
@@ -4740,6 +4750,10 @@ if (mount) {
         kioskRealtimeResponseTimer = 0;
         clearRealtimeToolFallback();
         kioskConversationActive = false;
+        kioskRealtimePendingUser = null;
+        kioskRealtimeAssistantDraft = null;
+        kioskRealtimeSuppressNextAssistantPersist = false;
+        kioskRealtimeVoiceOnlyAssistant = false;
         kioskQuickReplyGeneration += 1;
         kioskCommandText = '';
         setKioskVoiceStatus('armed', message || 'say hey bean');
@@ -4758,7 +4772,8 @@ if (mount) {
     }
 
     function conversationEndRequested(transcript) {
-        return /\b(?:thanks|thank you|that'?s all|stop listening|cancel)\s+(?:bean|been|beam|being)\b/i.test(transcript)
+        return voiceCancelRequested(transcript)
+            || /\b(?:thanks|thank you|that'?s all|stop listening|cancel)\s+(?:bean|been|beam|being)\b/i.test(transcript)
             || /\b(?:thanks|thank you),?\s*(?:that'?s all|we'?re done)\b/i.test(transcript);
     }
 

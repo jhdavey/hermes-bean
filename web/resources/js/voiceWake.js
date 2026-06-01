@@ -34,10 +34,10 @@ export function normalizedVoiceCommand(transcript) {
 export function voiceCancelRequested(transcript) {
     const command = normalizedVoiceCommand(transcript);
     if (!command) return false;
-    if (/^(?:stop|stop it|stop talking|be quiet|quiet|cancel|cancel that|cancel this|cancel response|cancel request|never\s*mind|nevermind|forget it|that's all|that is all)$/.test(command)) {
+    if (/^(?:stop|stop it|stop talking|be quiet|quiet|cancel|cancel that|cancel this|cancel response|cancel request|never\s*mind|nevermind|forget it|that's all|that is all|stop listening|we'?re done|we are done)$/.test(command)) {
         return true;
     }
-    return /\b(?:stop talking|be quiet|never\s*mind|nevermind|forget it)\b/.test(command);
+    return /\b(?:stop talking|be quiet|never\s*mind|nevermind|forget it|stop listening)\b/.test(command);
 }
 
 export function voiceCommandNeedsAgentWork(transcript) {

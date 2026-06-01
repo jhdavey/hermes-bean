@@ -42,6 +42,12 @@ for (const transcript of rejected) {
 }
 
 assert.equal(voiceCancelRequested('nevermind'), true);
+assert.equal(voiceCancelRequested('never mind'), true);
+assert.equal(voiceCancelRequested('bean stop'), true);
+assert.equal(voiceCancelRequested('stop bean'), true);
+assert.equal(voiceCancelRequested('hey bean stop'), true);
+assert.equal(voiceCancelRequested('bean cancel'), true);
+assert.equal(voiceCancelRequested('stop listening'), true);
 assert.equal(voiceCancelRequested('stop talking bean'), true);
 assert.equal(voiceCancelRequested('cancel my meeting tomorrow'), false);
 assert.equal(voiceCommandNeedsAgentWork('what should we have for dinner tonight'), false);
