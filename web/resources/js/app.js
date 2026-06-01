@@ -1,4 +1,8 @@
-import { commandAfterWakePhrase } from './voiceWake.js';
+import {
+    commandAfterWakePhrase,
+    voiceAcknowledgementForCommand,
+    voiceCancelRequested,
+} from './voiceWake.js';
 
 const mount = document.getElementById('heybean-web-app');
 
@@ -106,18 +110,24 @@ if (mount) {
     let deferredDashboardRenderTimer = 0;
     let dashboardRefreshGeneration = 0;
     let kioskRecognition = null;
+    let kioskBargeRecognition = null;
     let kioskRecognitionActive = false;
+    let kioskBargeRecognitionActive = false;
     let kioskRecognitionShouldRestart = false;
     let kioskCommandText = '';
     let kioskConversationActive = false;
+    let kioskAcknowledgementSpoken = false;
     let kioskCommandTimer = 0;
     let kioskRestartTimer = 0;
+    let kioskBargeRestartTimer = 0;
     let kioskAutoCloseTimer = 0;
     let kioskHeardTimer = 0;
     let kioskConversationTimer = 0;
     let kioskMicrophoneReady = false;
     let kioskAudioUnlocked = false;
     let kioskAudioContext = null;
+    let kioskActiveAudioSource = null;
+    let kioskActiveAudioElement = null;
     let kioskLastTtsError = '';
     let chatRequestCounter = 0;
     let activeChatRequestId = 0;
@@ -3214,7 +3224,7 @@ if (mount) {
         state.voiceStatusTone = '';
         kioskConversationActive = false;
         kioskCommandText = '';
-        window.speechSynthesis?.cancel();
+        stopKioskSpeechPlayback();
         setKioskVoiceStatus(state.kioskVoiceEnabled ? 'armed' : 'idle', state.kioskVoiceEnabled ? 'say hey bean' : '');
         render();
         scrollChatToBottom();
@@ -3565,7 +3575,7 @@ if (mount) {
             setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'say hey bean');
         };
         recognition.onresult = (event) => {
-            if (state.busy && kioskCancelRequested(speechTranscript(event, { fromResultIndex: true }))) {
+            if (state.busy && voiceCancelRequested(speechTranscript(event, { fromResultIndex: true }))) {
                 cancelKioskVoiceCapture();
                 return;
             }
@@ -3582,13 +3592,14 @@ if (mount) {
                 setKioskVoiceStatus('listening', 'listening');
                 if (kioskCommandText.trim()) {
                     showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
+                    maybeSpeakKioskCommandAcknowledgement(kioskCommandText);
                     armKioskCommandSubmit();
                 }
                 return;
             }
             const transcript = speechTranscript(event);
             if (!transcript) return;
-            if ((kioskConversationActive || state.busy) && kioskCancelRequested(transcript)) {
+            if ((kioskConversationActive || state.busy) && voiceCancelRequested(transcript)) {
                 cancelKioskVoiceCapture();
                 return;
             }
@@ -3602,6 +3613,7 @@ if (mount) {
                     return;
                 }
                 showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
+                maybeSpeakKioskCommandAcknowledgement(kioskCommandText);
                 armKioskCommandSubmit();
             }
         };
@@ -3700,8 +3712,74 @@ if (mount) {
         kioskRecognitionActive = false;
     }
 
+    function startKioskBargeInListening() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!state.kioskVoiceEnabled || !SpeechRecognition || kioskBargeRecognition || kioskRecognitionActive) return;
+        window.clearTimeout(kioskBargeRestartTimer);
+        kioskBargeRestartTimer = 0;
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        kioskBargeRecognition = recognition;
+        recognition.onstart = () => {
+            kioskBargeRecognitionActive = true;
+        };
+        recognition.onresult = (event) => {
+            const transcript = speechTranscript(event, { fromResultIndex: true });
+            if (!voiceCancelRequested(transcript)) return;
+            stopKioskBargeInListening();
+            cancelKioskVoiceCapture();
+        };
+        recognition.onend = () => {
+            kioskBargeRecognition = null;
+            kioskBargeRecognitionActive = false;
+            restartKioskBargeInListeningSoon();
+        };
+        recognition.onerror = () => {
+            kioskBargeRecognition = null;
+            kioskBargeRecognitionActive = false;
+            restartKioskBargeInListeningSoon(700);
+        };
+        try {
+            recognition.start();
+        } catch (error) {
+            kioskBargeRecognition = null;
+            kioskBargeRecognitionActive = false;
+            restartKioskBargeInListeningSoon(350);
+        }
+    }
+
+    function stopKioskBargeInListening() {
+        window.clearTimeout(kioskBargeRestartTimer);
+        kioskBargeRestartTimer = 0;
+        if (!kioskBargeRecognition) {
+            kioskBargeRecognitionActive = false;
+            return;
+        }
+        const recognition = kioskBargeRecognition;
+        kioskBargeRecognition = null;
+        recognition.onend = null;
+        recognition.onerror = null;
+        recognition.onresult = null;
+        try { recognition.stop(); } catch (_) {}
+        kioskBargeRecognitionActive = false;
+    }
+
+    function restartKioskBargeInListeningSoon(delay = 300) {
+        window.clearTimeout(kioskBargeRestartTimer);
+        if (!state.kioskVoiceEnabled || kioskBargeRecognition || kioskRecognitionActive) return;
+        if (!state.busy && !['working', 'responding'].includes(state.kioskVoicePhase)) return;
+        kioskBargeRestartTimer = window.setTimeout(() => {
+            kioskBargeRestartTimer = 0;
+            startKioskBargeInListening();
+        }, delay);
+    }
+
     function stopKioskVoiceMode() {
         pauseKioskVoiceListening();
+        stopKioskBargeInListening();
         window.clearTimeout(kioskAutoCloseTimer);
         window.clearTimeout(kioskHeardTimer);
         window.clearTimeout(kioskConversationTimer);
@@ -3712,7 +3790,7 @@ if (mount) {
         kioskConversationActive = false;
         state.kioskVoicePhase = 'idle';
         state.kioskVoiceMessage = '';
-        window.speechSynthesis?.cancel();
+        stopKioskSpeechPlayback();
     }
 
     function restartKioskVoiceListeningSoon(delay = 900) {
@@ -3762,6 +3840,7 @@ if (mount) {
 
     function beginKioskConversation() {
         kioskConversationActive = true;
+        kioskAcknowledgementSpoken = false;
         window.clearTimeout(kioskConversationTimer);
     }
 
@@ -3782,11 +3861,23 @@ if (mount) {
         kioskCommandTimer = 0;
         kioskHeardTimer = 0;
         kioskConversationActive = false;
+        kioskAcknowledgementSpoken = false;
         kioskCommandText = '';
         setKioskVoiceStatus('armed', message || 'say hey bean');
     }
 
+    function maybeSpeakKioskCommandAcknowledgement(command) {
+        if (kioskAcknowledgementSpoken) return '';
+        const acknowledgement = voiceAcknowledgementForCommand(command);
+        if (!acknowledgement) return '';
+        kioskAcknowledgementSpoken = true;
+        speakFastKioskPhrase(acknowledgement);
+        return acknowledgement;
+    }
+
     function cancelKioskVoiceCapture() {
+        stopKioskBargeInListening();
+        stopKioskSpeechPlayback();
         pauseKioskVoiceListening();
         endKioskConversation('cancelled');
         if (state.busy) {
@@ -3794,10 +3885,6 @@ if (mount) {
             return;
         }
         restartKioskVoiceListeningSoon(650);
-    }
-
-    function kioskCancelRequested(transcript) {
-        return /\b(?:never\s*mind|nevermind|cancel that|forget it)\b/i.test(transcript);
     }
 
     function conversationEndRequested(transcript) {
@@ -3837,9 +3924,16 @@ if (mount) {
             return;
         }
 
-        setKioskVoiceStatus('working', 'working');
+        const acknowledgement = voiceAcknowledgementForCommand(content);
+        setKioskVoiceStatus('working', acknowledgement || 'working');
+        if (acknowledgement && !kioskAcknowledgementSpoken) {
+            kioskAcknowledgementSpoken = true;
+            speakFastKioskPhrase(acknowledgement);
+        }
+        startKioskBargeInListening();
         try {
             const response = await sendChatContent(content);
+            if (!kioskConversationActive) return;
             const assistantContent = response?.assistantContent || '';
             if (!assistantContent) {
                 setKioskVoiceStatus('error', 'no response');
@@ -3858,7 +3952,14 @@ if (mount) {
         } catch (error) {
             setKioskVoiceStatus('error', friendlyError(error, 'send that message'));
             await sleep(1800);
+        } finally {
+            stopKioskBargeInListening();
         }
+        if (!kioskConversationActive) {
+            restartKioskVoiceListeningSoon(650);
+            return;
+        }
+        kioskAcknowledgementSpoken = false;
         setKioskVoiceStatus('listening', 'listening');
         armKioskConversationTimeout();
         restartKioskVoiceListeningSoon(1200);
@@ -3916,6 +4017,36 @@ if (mount) {
         }, delay);
     }
 
+    function speakFastKioskPhrase(text) {
+        if (!text || !window.speechSynthesis || !window.SpeechSynthesisUtterance) return false;
+        try {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.04;
+            utterance.pitch = 1;
+            utterance.volume = 1;
+            window.speechSynthesis.speak(utterance);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function stopKioskSpeechPlayback() {
+        window.speechSynthesis?.cancel();
+        if (kioskActiveAudioSource) {
+            try { kioskActiveAudioSource.stop(0); } catch (_) {}
+            kioskActiveAudioSource = null;
+        }
+        if (kioskActiveAudioElement) {
+            try {
+                kioskActiveAudioElement.pause();
+                kioskActiveAudioElement.currentTime = 0;
+            } catch (_) {}
+            kioskActiveAudioElement = null;
+        }
+    }
+
     function speakKioskResponse(content) {
         const text = speechTextFromAssistant(content);
         if (profileTtsProvider() === 'openai') {
@@ -3933,6 +4064,7 @@ if (mount) {
         let url = '';
         try {
             kioskLastTtsError = '';
+            window.speechSynthesis?.cancel();
             if (!await ensureOpenAiAudioUnlocked()) {
                 throw new Error('audio_not_unlocked');
             }
@@ -3976,6 +4108,7 @@ if (mount) {
             const blob = new Blob([arrayBuffer], { type: contentType });
             url = URL.createObjectURL(blob);
             const audio = new Audio(url);
+            kioskActiveAudioElement = audio;
             audio.playsInline = true;
             await new Promise((resolve, reject) => {
                 audio.onended = resolve;
@@ -3986,6 +4119,7 @@ if (mount) {
         } catch (error) {
             return false;
         } finally {
+            if (kioskActiveAudioElement?.src === url) kioskActiveAudioElement = null;
             if (url) URL.revokeObjectURL(url);
         }
     }
@@ -4021,12 +4155,17 @@ if (mount) {
             const decoded = await kioskAudioContext.decodeAudioData(arrayBuffer.slice(0));
             await new Promise((resolve, reject) => {
                 const source = kioskAudioContext.createBufferSource();
+                kioskActiveAudioSource = source;
                 source.buffer = decoded;
                 source.connect(kioskAudioContext.destination);
-                source.onended = resolve;
+                source.onended = () => {
+                    if (kioskActiveAudioSource === source) kioskActiveAudioSource = null;
+                    resolve();
+                };
                 try {
                     source.start(0);
                 } catch (error) {
+                    if (kioskActiveAudioSource === source) kioskActiveAudioSource = null;
                     reject(error);
                 }
             });

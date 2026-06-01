@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 
-import { commandAfterWakePhrase } from '../../resources/js/voiceWake.js';
+import {
+    commandAfterWakePhrase,
+    voiceAcknowledgementForCommand,
+    voiceCancelRequested,
+} from '../../resources/js/voiceWake.js';
 
 const accepted = new Map([
     ['Hey Bean plan today', 'plan today'],
@@ -35,3 +39,10 @@ const rejected = [
 for (const transcript of rejected) {
     assert.equal(commandAfterWakePhrase(transcript), null, transcript);
 }
+
+assert.equal(voiceAcknowledgementForCommand("what's on my calendar for today"), 'Let me check that real quick.');
+assert.equal(voiceAcknowledgementForCommand('move my task from 7pm to 5pm'), "I'm on it.");
+assert.equal(voiceAcknowledgementForCommand('cancel my meeting tomorrow'), "I'm on it.");
+assert.equal(voiceCancelRequested('nevermind'), true);
+assert.equal(voiceCancelRequested('stop talking bean'), true);
+assert.equal(voiceCancelRequested('cancel my meeting tomorrow'), false);
