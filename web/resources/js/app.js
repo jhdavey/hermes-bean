@@ -814,14 +814,14 @@ if (mount) {
             <div class="hb-app">
                 ${betaBannerMarkup()}
                 <header class="hb-topbar">
+                    ${topBeanControlsMarkup()}
+                    <span class="hb-spacer"></span>
                     <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTime(now))}</time>
                     <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
                     <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(now))}</span></button>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
                     ${topNavMarkup()}
                     ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')}
-                    <span class="hb-spacer"></span>
-                    ${topBeanControlsMarkup()}
                     ${showAdd ? `<button class="hb-icon-button hb-topbar-action" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
                     ${showRefresh ? `<button class="hb-icon-button hb-topbar-action" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
@@ -1150,10 +1150,10 @@ if (mount) {
     function topBeanControlsMarkup() {
         return `
             <div class="hb-topbar-bean-controls">
-                ${kioskVoicePillMarkup({ topbar: true })}
                 <button class="hb-bean-button hb-topbar-bean-button ${state.chatExpanded || state.selected === 'bean' ? 'hb-bean-button-active' : ''}" type="button" data-toggle-chat-expand aria-label="${state.chatExpanded ? 'Close Bean chat' : 'Open Bean chat'}" title="Bean chat">
                     <img src="${escapeAttr(logoUrl)}" alt="">
                 </button>
+                ${kioskVoicePillMarkup({ topbar: true })}
             </div>`;
     }
 
