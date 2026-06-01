@@ -40,14 +40,17 @@ for (const transcript of rejected) {
     assert.equal(commandAfterWakePhrase(transcript), null, transcript);
 }
 
-assert.equal(voiceAcknowledgementForCommand("what's on my calendar for today"), 'Let me check that real quick.');
-assert.equal(voiceAcknowledgementForCommand('move my task from 7pm to 5pm'), "I'm on it.");
-assert.equal(voiceAcknowledgementForCommand('cancel my meeting tomorrow'), "I'm on it.");
-assert.equal(voiceAcknowledgementForCommand('what is the best way to plan my day'), 'Let me think about that for a second.');
-assert.equal(voiceAcknowledgementForCommand('how many tasks do I have next week'), 'Let me check that real quick.');
-assert.equal(voiceAcknowledgementForCommand('can you plan my day'), "I'm on it.");
-assert.equal(voiceAcknowledgementForCommand('tell me a joke'), 'Let me think about that for a second.');
-assert.equal(voiceAcknowledgementForCommand('start a conversation'), 'Got it.');
+assert.match(voiceAcknowledgementForCommand("what's on my calendar for today"), /check|look/i);
+assert.match(voiceAcknowledgementForCommand('move my task from 7pm to 5pm'), /task/i);
+assert.match(voiceAcknowledgementForCommand('add dinner with Lauren to my calendar'), /calendar|event/i);
+assert.match(voiceAcknowledgementForCommand('cancel my meeting tomorrow'), /calendar|meeting/i);
+assert.match(voiceAcknowledgementForCommand('remind me to call Lauren at 5'), /remind|reminder/i);
+assert.match(voiceAcknowledgementForCommand('remember that I prefer morning workouts'), /remember|save|mind/i);
+assert.match(voiceAcknowledgementForCommand('what is the best way to plan my day'), /think|look/i);
+assert.match(voiceAcknowledgementForCommand('how many tasks do I have next week'), /check|look/i);
+assert.match(voiceAcknowledgementForCommand('can you plan my day'), /plan|map|organize/i);
+assert.match(voiceAcknowledgementForCommand('tell me a joke'), /think|look/i);
+assert.match(voiceAcknowledgementForCommand('start a conversation'), /help|look|check/i);
 assert.equal(voiceCancelRequested('nevermind'), true);
 assert.equal(voiceCancelRequested('stop talking bean'), true);
 assert.equal(voiceCancelRequested('cancel my meeting tomorrow'), false);
