@@ -202,7 +202,7 @@
 
 .hb-header-pill {
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 900;
+    font-weight: 950;
     letter-spacing: 0;
     line-height: 1;
 }
@@ -1454,7 +1454,7 @@
     color: var(--hb-text);
     padding: 7px 12px;
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 900;
+    font-weight: 950;
     letter-spacing: 0;
     line-height: 1;
     overflow: hidden;
