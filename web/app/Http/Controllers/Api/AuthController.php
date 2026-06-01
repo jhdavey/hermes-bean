@@ -138,7 +138,7 @@ class AuthController extends Controller
             'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
             'tts_openai_api_key' => ['sometimes', 'nullable', 'string', 'max:1000'],
             'tts_clear_openai_key' => ['sometimes', 'boolean'],
-            'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
+            'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
             'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
             'notification_preferences' => ['sometimes', 'array'],

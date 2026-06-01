@@ -13,11 +13,19 @@ use Illuminate\Validation\Rule;
 
 class TextToSpeechController extends Controller
 {
+    private const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
+
+    private const LEGACY_VOICE_MAP = [
+        'nova' => 'shimmer',
+        'onyx' => 'ash',
+        'fable' => 'ballad',
+    ];
+
     public function store(Request $request): mixed
     {
         $data = $request->validate([
             'text' => ['required', 'string', 'max:2000'],
-            'voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
+            'voice' => ['sometimes', 'string', Rule::in(self::OPENAI_VOICES)],
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
         ]);
 
@@ -40,7 +48,7 @@ class TextToSpeechController extends Controller
         $keySource = '';
         $payload = [
             'model' => 'gpt-4o-mini-tts',
-            'voice' => (string) ($data['voice'] ?? $tts['openai_voice'] ?? 'coral'),
+            'voice' => $this->openAiVoice((string) ($data['voice'] ?? $tts['openai_voice'] ?? 'coral')),
             'input' => str($data['text'])->squish()->limit(2000, '')->toString(),
             'instructions' => (string) ($tts['openai_instructions'] ?? 'Speak naturally, warmly, and concisely as Bean.'),
             'response_format' => 'wav',
@@ -80,7 +88,7 @@ class TextToSpeechController extends Controller
             'Cache-Control' => 'no-store',
             'X-HeyBean-TTS-Provider' => 'openai',
             'X-HeyBean-TTS-Workspace' => (string) $workspace->id,
-            'X-HeyBean-TTS-Voice' => (string) ($data['voice'] ?? $tts['openai_voice'] ?? 'coral'),
+            'X-HeyBean-TTS-Voice' => $payload['voice'],
             'X-HeyBean-TTS-Key-Source' => $keySource,
         ]);
     }
@@ -113,5 +121,13 @@ class TextToSpeechController extends Controller
         }
 
         return $candidates;
+    }
+
+    private function openAiVoice(string $voice): string
+    {
+        $normalized = strtolower(trim($voice));
+        $mapped = self::LEGACY_VOICE_MAP[$normalized] ?? $normalized;
+
+        return in_array($mapped, self::OPENAI_VOICES, true) ? $mapped : 'coral';
     }
 }

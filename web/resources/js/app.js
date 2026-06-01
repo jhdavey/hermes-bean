@@ -594,7 +594,15 @@ if (mount) {
 
     function profileTtsVoice(profile = currentAgentProfile()) {
         const tts = profileTtsSettings(profile);
-        return tts.openai_voice || tts.openaiVoice || 'coral';
+        return supportedOpenAiVoice(tts.openai_voice || tts.openaiVoice || 'coral');
+    }
+
+    function supportedOpenAiVoice(voice) {
+        const normalized = String(voice || '').toLowerCase().trim();
+        const legacyMap = { nova: 'shimmer', onyx: 'ash', fable: 'ballad' };
+        const mapped = legacyMap[normalized] || normalized;
+        const supported = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
+        return supported.includes(mapped) ? mapped : 'coral';
     }
 
     function profileTtsInstructions(profile = currentAgentProfile()) {
@@ -2132,7 +2140,7 @@ if (mount) {
         const ttsInstructions = profileTtsInstructions(profile);
         const ttsKeyMask = ttsKeyConfigured ? openAiKeyMask() : '';
         const options = ['balanced', 'coach', 'organizer', 'creative'];
-        const voices = ['coral', 'marin', 'cedar', 'alloy', 'ash', 'ballad', 'echo', 'sage', 'shimmer', 'verse'];
+        const voices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="agent">

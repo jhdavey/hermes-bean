@@ -105,28 +105,6 @@ class RealtimeAssistantFlowTest extends TestCase
         ]);
     }
 
-    public function test_realtime_session_maps_legacy_tts_voices_to_supported_realtime_voice(): void
-    {
-        Http::fake([
-            'https://api.openai.test/v1/realtime/client_secrets' => Http::response([
-                'value' => 'ek_mapped_voice_secret',
-                'expires_at' => now()->addMinute()->timestamp,
-            ], 200),
-        ]);
-
-        $token = $this->apiToken('realtime-legacy-voice@example.com');
-
-        $this->withToken($token)->postJson('/api/ai/realtime/session', [
-            'title' => 'Realtime voice map',
-            'voice' => 'nova',
-        ])->assertCreated()
-            ->assertJsonPath('data.openai.requested_voice', 'nova')
-            ->assertJsonPath('data.openai.voice', 'shimmer');
-
-        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/realtime/client_secrets'
-            && data_get($request->data(), 'session.audio.output.voice') === 'shimmer');
-    }
-
     public function test_realtime_session_marks_upstream_bad_requests_as_not_retryable(): void
     {
         Http::fake([

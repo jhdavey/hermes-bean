@@ -41,7 +41,7 @@ class RealtimeSessionController extends Controller
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'session_id' => ['nullable', 'integer', 'exists:conversation_sessions,id'],
             'metadata' => ['nullable', 'array'],
-            'voice' => ['nullable', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
+            'voice' => ['nullable', 'string', Rule::in(self::REALTIME_VOICES)],
         ]);
 
         $user = $request->user();
