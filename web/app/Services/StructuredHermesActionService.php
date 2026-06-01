@@ -1171,6 +1171,7 @@ class StructuredHermesActionService
             'day', 'days', 'daily', 'every_day' => 'daily',
             'week', 'weeks', 'weekly', 'every_week' => 'weekly',
             'month', 'months', 'monthly', 'every_month' => 'monthly',
+            'year', 'years', 'yearly', 'annual', 'annually', 'every_year' => 'yearly',
             'specific_day', 'specific_days', 'selected_days', 'days_of_week' => 'specific_days',
             'interval', 'custom', 'custom_interval' => 'interval',
             default => $normalized,
@@ -1185,6 +1186,7 @@ class StructuredHermesActionService
         return match ($normalized) {
             'week', 'weeks', 'weekly' => 'weeks',
             'month', 'months', 'monthly' => 'months',
+            'year', 'years', 'yearly', 'annual', 'annually' => 'years',
             default => 'days',
         };
     }

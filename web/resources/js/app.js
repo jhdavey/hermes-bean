@@ -2165,12 +2165,12 @@ if (mount) {
             </div>
             <div class="hb-field-row" data-recurrence-interval ${recurrence === 'interval' ? '' : 'hidden'}>
                 ${labelInput('Repeat interval', 'interval', 'number', recurrenceMeta.interval || '', 'min="1"')}
-                <label class="hb-label">Interval unit<select class="hb-select" name="intervalUnit"><option value="days">Days</option><option value="weeks" ${unit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${unit === 'months' ? 'selected' : ''}>Months</option></select></label>
+                <label class="hb-label">Interval unit<select class="hb-select" name="intervalUnit"><option value="days">Days</option><option value="weeks" ${unit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${unit === 'months' ? 'selected' : ''}>Months</option><option value="years" ${unit === 'years' ? 'selected' : ''}>Years</option></select></label>
             </div>`;
     }
 
     function recurrenceOptions() {
-        return ['none', 'daily', 'weekly', 'monthly', 'specific_days', 'interval'];
+        return ['none', 'daily', 'weekly', 'monthly', 'yearly', 'specific_days', 'interval'];
     }
 
     function itemRecurrenceValue(item = null) {
@@ -2199,6 +2199,11 @@ if (mount) {
             month: 'monthly',
             months: 'monthly',
             every_month: 'monthly',
+            year: 'yearly',
+            years: 'yearly',
+            annual: 'yearly',
+            annually: 'yearly',
+            every_year: 'yearly',
             specific_day: 'specific_days',
             selected_days: 'specific_days',
             days_of_week: 'specific_days',
@@ -3180,11 +3185,26 @@ if (mount) {
         if (!task) return;
         const completed = taskCompleted(task);
         const snapshot = snapshotLists('task');
-        const optimistic = {
-            ...task,
-            status: completed ? 'pending' : 'completed',
-            completed_at: completed ? null : new Date().toISOString(),
-        };
+        const completedAt = new Date().toISOString();
+        const recurringNextDueAt = !completed && taskIsRecurring(task) ? nextRecurringTaskDueAt(task) : null;
+        const optimistic = recurringNextDueAt
+            ? {
+                ...task,
+                status: 'open',
+                completed_at: null,
+                due_at: recurringNextDueAt.toISOString(),
+                metadata: {
+                    ...(task.metadata || {}),
+                    last_completed_at: completedAt,
+                    ...(task.due_at ? { last_completed_due_at: task.due_at } : {}),
+                    completion_count: taskCompletionCount(task) + 1,
+                },
+            }
+            : {
+                ...task,
+                status: completed ? 'pending' : 'completed',
+                completed_at: completed ? null : completedAt,
+            };
         state.pendingTaskUpserts.set(String(task.id), optimistic);
         state.tasks = upsertById(state.tasks, optimistic);
         state.error = '';
@@ -3195,7 +3215,7 @@ if (mount) {
                 method: 'PATCH',
                 body: {
                     status: completed ? 'pending' : 'completed',
-                    completed_at: completed ? null : optimistic.completed_at,
+                    completed_at: completed ? null : completedAt,
                 },
             });
             cacheSavedItem('task', saved);
@@ -5818,6 +5838,55 @@ if (mount) {
         return recurrence && recurrence !== 'none';
     }
 
+    function taskCompletionCount(task) {
+        const count = Number.parseInt(task?.metadata?.completion_count || 0, 10);
+        return Number.isFinite(count) ? count : 0;
+    }
+
+    function nextRecurringTaskDueAt(task) {
+        if (!task) return null;
+        const recurrence = itemRecurrenceValue(task);
+        if (!recurrence || recurrence === 'none') return null;
+        const metadata = recurrenceMetadata(task.metadata);
+        let cursor = parseLocalDate(task.due_at || task.dueAt || new Date());
+        const now = new Date();
+        for (let guard = 0; guard < 500; guard += 1) {
+            cursor = advanceRecurringDate(cursor, recurrence, metadata);
+            if (!cursor) return null;
+            if (cursor > now) return cursor;
+        }
+        return null;
+    }
+
+    function advanceRecurringDate(date, recurrence, metadata = {}) {
+        if (recurrence === 'daily') return addDays(date, 1);
+        if (recurrence === 'weekly') return addDays(date, 7);
+        if (recurrence === 'monthly') return addMonthsNoOverflow(date, 1);
+        if (recurrence === 'yearly') return addYearsNoOverflow(date, 1);
+        if (recurrence === 'specific_days') return nextSpecificRecurringDay(date, metadata);
+        if (recurrence === 'interval') {
+            const interval = Math.max(1, Number.parseInt(metadata.interval || 1, 10));
+            const unit = String(metadata.unit || metadata.interval_unit || metadata.intervalUnit || 'days').toLowerCase();
+            if (unit === 'week' || unit === 'weeks') return addDays(date, interval * 7);
+            if (unit === 'month' || unit === 'months') return addMonthsNoOverflow(date, interval);
+            if (unit === 'year' || unit === 'years') return addYearsNoOverflow(date, interval);
+            return addDays(date, interval);
+        }
+        return null;
+    }
+
+    function nextSpecificRecurringDay(date, metadata = {}) {
+        const days = recurrenceDays(metadata);
+        if (!days.size) return null;
+        let cursor = addDays(date, 1);
+        for (let guard = 0; guard < 14; guard += 1) {
+            const key = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][cursor.getDay()];
+            if (days.has(key)) return cursor;
+            cursor = addDays(cursor, 1);
+        }
+        return null;
+    }
+
     function recurrenceSummary(item) {
         const recurrence = itemRecurrenceValue(item);
         if (recurrence === 'interval') return intervalRecurrenceSummary(item?.metadata);
@@ -6136,6 +6205,30 @@ if (mount) {
         return next;
     }
 
+    function addMonthsNoOverflow(date, amount) {
+        const source = parseLocalDate(date);
+        const next = new Date(source);
+        const day = source.getDate();
+        next.setDate(1);
+        next.setMonth(next.getMonth() + amount);
+        next.setDate(Math.min(day, daysInMonth(next.getFullYear(), next.getMonth())));
+        return next;
+    }
+
+    function addYearsNoOverflow(date, amount) {
+        const source = parseLocalDate(date);
+        const next = new Date(source);
+        const day = source.getDate();
+        next.setDate(1);
+        next.setFullYear(next.getFullYear() + amount);
+        next.setDate(Math.min(day, daysInMonth(next.getFullYear(), next.getMonth())));
+        return next;
+    }
+
+    function daysInMonth(year, monthIndex) {
+        return new Date(year, monthIndex + 1, 0).getDate();
+    }
+
     function dateOnly(date) {
         const d = parseLocalDate(date);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -6281,6 +6374,7 @@ if (mount) {
             daily: 'Daily',
             weekly: 'Weekly',
             monthly: 'Monthly',
+            yearly: 'Yearly',
             specific_days: 'Specific days',
             interval: 'Every interval',
         }[normalized] || '';

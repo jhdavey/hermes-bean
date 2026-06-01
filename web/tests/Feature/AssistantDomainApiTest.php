@@ -565,6 +565,74 @@ class AssistantDomainApiTest extends TestCase
             ->assertJsonFragment(['title' => 'Archived oil change']);
     }
 
+    public function test_completing_recurring_tasks_advances_due_date_instead_of_archiving(): void
+    {
+        Carbon::setTestNow('2026-06-01T16:00:00Z');
+        $token = $this->apiToken();
+
+        $monthlyTaskId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Replace air filter',
+            'type' => 'maintenance',
+            'status' => 'open',
+            'due_at' => '2026-06-01T09:00:00-04:00',
+            'metadata' => ['recurrence' => 'monthly'],
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->patchJson("/api/tasks/{$monthlyTaskId}", [
+            'status' => 'completed',
+            'completed_at' => now()->toIso8601String(),
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'open')
+            ->assertJsonPath('data.completed_at', null)
+            ->assertJsonPath('data.metadata.recurrence', 'monthly')
+            ->assertJsonPath('data.metadata.completion_count', 1)
+            ->assertJsonPath('data.due_at', fn ($value) => Carbon::parse($value)->utc()->toIso8601String() === '2026-07-01T13:00:00+00:00');
+
+        $this->withToken($token)->getJson('/api/tasks')
+            ->assertOk()
+            ->assertJsonFragment(['title' => 'Replace air filter']);
+
+        $this->withToken($token)->getJson('/api/tasks/past')
+            ->assertOk()
+            ->assertJsonMissing(['title' => 'Replace air filter']);
+    }
+
+    public function test_recurring_tasks_support_multi_month_and_yearly_advancement(): void
+    {
+        Carbon::setTestNow('2026-06-01T16:00:00Z');
+        $token = $this->apiToken();
+
+        $biMonthlyTaskId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Service water filter',
+            'type' => 'maintenance',
+            'status' => 'open',
+            'due_at' => '2026-05-15T08:00:00-04:00',
+            'metadata' => ['recurrence' => 'interval', 'interval' => 2, 'interval_unit' => 'months'],
+        ])->assertCreated()->json('data.id');
+
+        $yearlyTaskId = $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Renew registration',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => '2026-06-01T09:00:00-04:00',
+            'metadata' => ['recurrence' => 'yearly'],
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->patchJson("/api/tasks/{$biMonthlyTaskId}", [
+            'status' => 'completed',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'open')
+            ->assertJsonPath('data.completed_at', null)
+            ->assertJsonPath('data.due_at', fn ($value) => Carbon::parse($value)->utc()->toIso8601String() === '2026-07-15T12:00:00+00:00');
+
+        $this->withToken($token)->patchJson("/api/tasks/{$yearlyTaskId}", [
+            'status' => 'completed',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'open')
+            ->assertJsonPath('data.completed_at', null)
+            ->assertJsonPath('data.due_at', fn ($value) => Carbon::parse($value)->utc()->toIso8601String() === '2027-06-01T13:00:00+00:00');
+    }
+
     public function test_past_tasks_lists_recent_completed_tasks_that_were_due_today(): void
     {
         $token = $this->apiToken();

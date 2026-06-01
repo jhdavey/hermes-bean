@@ -199,7 +199,9 @@ class DomainResourceController extends Controller
 
         if (array_key_exists('status', $validated)) {
             $willBeCompleted = $this->taskStatusIsCompleted($validated['status']);
-            if ($willBeCompleted && $model->completed_at === null && ! array_key_exists('completed_at', $validated)) {
+            if ($willBeCompleted && $this->advanceRecurringTaskCompletion($model, $validated)) {
+                $willBeCompleted = false;
+            } elseif ($willBeCompleted && $model->completed_at === null && ! array_key_exists('completed_at', $validated)) {
                 $validated['completed_at'] = now();
             }
             if (! $willBeCompleted && ! array_key_exists('completed_at', $validated)) {
@@ -1042,6 +1044,177 @@ class DomainResourceController extends Controller
     private function taskStatusIsCompleted(?string $status): bool
     {
         return in_array(strtolower(str_replace('_', '-', (string) $status)), ['completed', 'complete', 'done'], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function advanceRecurringTaskCompletion(Task $task, array &$validated): bool
+    {
+        $metadata = $this->taskRecurrenceMetadata($task, $validated);
+        $recurrence = $this->taskRecurrenceValue($metadata);
+        if ($recurrence === null || $recurrence === 'none') {
+            return false;
+        }
+
+        $nextDueAt = $this->nextRecurringTaskDueAt($task, $metadata, $recurrence);
+        if ($nextDueAt === null) {
+            return false;
+        }
+
+        $completedAt = Carbon::parse($validated['completed_at'] ?? now())->utc();
+        $metadata['recurrence'] = $recurrence;
+        $metadata['last_completed_at'] = $completedAt->toIso8601String();
+        if ($task->due_at !== null) {
+            $metadata['last_completed_due_at'] = $task->due_at->copy()->utc()->toIso8601String();
+        }
+        $metadata['completion_count'] = max(0, (int) ($metadata['completion_count'] ?? 0)) + 1;
+
+        $validated['status'] = 'open';
+        $validated['completed_at'] = null;
+        $validated['due_at'] = $nextDueAt->utc();
+        $validated['metadata'] = $metadata;
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function taskRecurrenceMetadata(Task $task, array $validated): array
+    {
+        $metadata = is_array($task->metadata) ? $task->metadata : [];
+
+        if (array_key_exists('metadata', $validated)) {
+            $metadata = is_array($validated['metadata']) ? $validated['metadata'] : [];
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function taskRecurrenceValue(array $metadata): ?string
+    {
+        $raw = $metadata['recurrence'] ?? $metadata['recurring'] ?? $metadata['rrule'] ?? null;
+
+        if (is_array($raw)) {
+            $raw = $raw['value']
+                ?? $raw['type']
+                ?? $raw['frequency']
+                ?? $raw['freq']
+                ?? $raw['recurrence']
+                ?? $raw['rule']
+                ?? null;
+        }
+
+        if (! is_scalar($raw)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim((string) $raw));
+        $normalized = str_replace(['-', ' '], '_', $normalized);
+        if (str_contains($normalized, 'freq=')) {
+            $normalized = match (true) {
+                str_contains($normalized, 'freq=daily') => 'daily',
+                str_contains($normalized, 'freq=weekly') => 'weekly',
+                str_contains($normalized, 'freq=monthly') => 'monthly',
+                str_contains($normalized, 'freq=yearly') => 'yearly',
+                default => $normalized,
+            };
+        }
+
+        return match ($normalized) {
+            '', 'no', 'none', 'never', 'one_time', 'once' => 'none',
+            'day', 'days', 'daily', 'every_day' => 'daily',
+            'week', 'weeks', 'weekly', 'every_week' => 'weekly',
+            'month', 'months', 'monthly', 'every_month' => 'monthly',
+            'year', 'years', 'yearly', 'annually', 'annual', 'every_year' => 'yearly',
+            'specific_day', 'specific_days', 'selected_days', 'days_of_week' => 'specific_days',
+            'interval', 'custom', 'custom_interval' => 'interval',
+            default => $normalized,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function nextRecurringTaskDueAt(Task $task, array $metadata, string $recurrence): ?Carbon
+    {
+        $cursor = ($task->due_at ?: now())->copy()->utc();
+        $now = now()->utc();
+
+        for ($guard = 0; $guard < 500; $guard++) {
+            $cursor = $this->advanceTaskRecurrenceDate($cursor, $metadata, $recurrence);
+            if ($cursor === null) {
+                return null;
+            }
+            if ($cursor->gt($now)) {
+                return $cursor;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function advanceTaskRecurrenceDate(Carbon $from, array $metadata, string $recurrence): ?Carbon
+    {
+        return match ($recurrence) {
+            'daily' => $from->copy()->addDay(),
+            'weekly' => $from->copy()->addWeek(),
+            'monthly' => $from->copy()->addMonthNoOverflow(),
+            'yearly' => $from->copy()->addYearNoOverflow(),
+            'specific_days' => $this->nextSpecificTaskDay($from, $metadata),
+            'interval' => $this->addTaskRecurrenceInterval($from, $metadata),
+            default => null,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function nextSpecificTaskDay(Carbon $from, array $metadata): ?Carbon
+    {
+        $days = collect($metadata['days'] ?? $metadata['specific_days'] ?? $metadata['specificDays'] ?? [])
+            ->map(fn ($day): string => strtolower(substr(trim((string) $day), 0, 3)))
+            ->filter(fn (string $day): bool => in_array($day, ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], true))
+            ->unique()
+            ->values();
+        if ($days->isEmpty()) {
+            return null;
+        }
+
+        $cursor = $from->copy()->addDay();
+        for ($guard = 0; $guard < 14; $guard++) {
+            $day = strtolower($cursor->format('D'));
+            if ($days->contains($day === 'thu' ? 'thu' : $day)) {
+                return $cursor;
+            }
+            $cursor->addDay();
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function addTaskRecurrenceInterval(Carbon $from, array $metadata): Carbon
+    {
+        $interval = max(1, (int) ($metadata['interval'] ?? 1));
+        $unit = strtolower((string) ($metadata['unit'] ?? $metadata['interval_unit'] ?? $metadata['intervalUnit'] ?? 'days'));
+
+        return match ($unit) {
+            'weeks', 'week' => $from->copy()->addWeeks($interval),
+            'months', 'month' => $from->copy()->addMonthsNoOverflow($interval),
+            'years', 'year' => $from->copy()->addYearsNoOverflow($interval),
+            default => $from->copy()->addDays($interval),
+        };
     }
 
     private function shouldSyncGoogleImmediately(Request $request): bool

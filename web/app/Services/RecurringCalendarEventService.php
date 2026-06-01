@@ -287,6 +287,7 @@ class RecurringCalendarEventService
         return match ($unit) {
             'weeks', 'week' => $from->addWeeks($interval),
             'months', 'month' => $from->addMonthsNoOverflow($interval),
+            'years', 'year' => $from->addYearsNoOverflow($interval),
             default => $from->addDays($interval),
         };
     }
