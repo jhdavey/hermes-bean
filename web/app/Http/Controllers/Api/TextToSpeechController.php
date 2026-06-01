@@ -28,7 +28,7 @@ class TextToSpeechController extends Controller
         $tts = is_array($settings['tts'] ?? null) ? $settings['tts'] : [];
         $keyCandidates = $this->apiKeyCandidates($tts);
 
-        if (($tts['provider'] ?? 'browser') !== 'openai' || $keyCandidates === []) {
+        if ($keyCandidates === []) {
             return response()->json([
                 'message' => 'OpenAI text-to-speech is not configured for this workspace.',
                 'code' => 'openai_tts_not_configured',

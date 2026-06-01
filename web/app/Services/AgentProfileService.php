@@ -193,8 +193,7 @@ class AgentProfileService
         $settings = $profile->settings ?? [];
         $tts = (isset($settings['tts']) && is_array($settings['tts'])) ? $settings['tts'] : [];
 
-        $provider = (string) ($data['tts_provider'] ?? data_get($tts, 'provider', 'browser'));
-        $tts['provider'] = $provider === 'openai' ? 'openai' : 'browser';
+        $tts['provider'] = 'openai';
         $tts['openai_voice'] = (string) ($data['tts_openai_voice'] ?? data_get($tts, 'openai_voice', 'coral'));
         $tts['openai_model'] = 'gpt-4o-mini-tts';
         $tts['openai_instructions'] = trim((string) ($data['tts_openai_instructions'] ?? data_get($tts, 'openai_instructions', 'Speak naturally, warmly, and concisely as Bean.')));

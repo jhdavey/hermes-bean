@@ -550,7 +550,7 @@ if (mount) {
     }
 
     function profileTtsProvider(profile = currentAgentProfile()) {
-        return profileTtsSettings(profile).provider === 'openai' ? 'openai' : 'browser';
+        return 'openai';
     }
 
     function profileTtsOpenAiConfigured(profile = currentAgentProfile()) {
@@ -2101,7 +2101,6 @@ if (mount) {
         const profile = currentAgentProfile();
         const priorities = new Set(profilePriorities(profile));
         const personality = profilePersonality(profile);
-        const ttsProvider = profileTtsProvider(profile);
         const ttsKeyConfigured = profileTtsOpenAiConfigured(profile);
         const ttsVoice = profileTtsVoice(profile);
         const ttsInstructions = profileTtsInstructions(profile);
@@ -2121,10 +2120,6 @@ if (mount) {
                     <div class="hb-surface-soft hb-card-pad hb-tts-settings">
                         <strong>Voice responses</strong>
                         <p class="hb-item-meta">OpenAI speech gives Bean a more natural voice. The app key is used automatically; a workspace key is optional.</p>
-                        <label class="hb-label">Speech engine<select class="hb-select" name="ttsProvider">
-                            <option value="browser" ${ttsProvider === 'browser' ? 'selected' : ''}>Browser TTS</option>
-                            <option value="openai" ${ttsProvider === 'openai' ? 'selected' : ''}>OpenAI TTS</option>
-                        </select></label>
                         <div class="hb-field-row">
                             <div class="hb-label hb-tts-voice-picker">OpenAI voice
                                 <div class="hb-tts-preview-row">
@@ -2512,10 +2507,6 @@ if (mount) {
         if (!form || state.ttsPreviewing) return;
 
         setTtsPreviewStatus(status, '', '');
-        if (profileTtsProvider() !== 'openai') {
-            setTtsPreviewStatus(status, 'Choose OpenAI TTS before previewing Bean voice.', 'error');
-            return;
-        }
 
         state.ttsPreviewing = true;
         button.disabled = true;
@@ -2756,7 +2747,6 @@ if (mount) {
                         agent_personality: data.personality,
                         onboarding_priorities: priorities,
                         onboarding_context: data.context || null,
-                        tts_provider: data.ttsProvider || 'browser',
                         tts_openai_api_key: ttsOpenAiKey || null,
                         tts_clear_openai_key: data.ttsClearOpenAiKey === '1',
                         tts_openai_voice: data.ttsOpenAiVoice || 'coral',
@@ -4401,9 +4391,7 @@ if (mount) {
 
     function kioskVoiceReady() {
         if (kioskRealtimeConnected()) return state.kioskVoiceEnabled;
-        return state.kioskVoiceEnabled &&
-            kioskMicrophoneReady &&
-            (profileTtsProvider() !== 'openai' || kioskAudioUnlocked);
+        return state.kioskVoiceEnabled && kioskMicrophoneReady && kioskAudioUnlocked;
     }
 
     async function microphonePermissionState() {

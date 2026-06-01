@@ -141,6 +141,33 @@ class OpenAiTextToSpeechTest extends TestCase
         });
     }
 
+    public function test_openai_tts_endpoint_ignores_legacy_browser_provider_when_app_key_exists(): void
+    {
+        config(['services.openai.server_api_key' => 'sk-app-tts-key']);
+        Http::fake([
+            'api.openai.com/v1/audio/speech' => Http::response('app-wav', 200, ['Content-Type' => 'audio/wav']),
+        ]);
+
+        $token = $this->apiToken('tts-legacy-browser@example.com');
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'tts_provider' => 'browser',
+            'tts_openai_voice' => 'cedar',
+        ])->assertOk()
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.tts.provider', 'openai');
+
+        $this->withToken($token)->postJson('/api/assistant/tts', [
+            'text' => 'Hello from Bean.',
+        ])->assertOk()
+            ->assertHeader('X-HeyBean-TTS-Key-Source', 'app')
+            ->assertHeader('X-HeyBean-TTS-Voice', 'cedar')
+            ->assertContent('app-wav');
+
+        Http::assertSent(function ($request): bool {
+            return $request->hasHeader('Authorization', 'Bearer sk-app-tts-key')
+                && $request['voice'] === 'cedar';
+        });
+    }
+
     public function test_masked_openai_tts_key_does_not_overwrite_saved_key(): void
     {
         $token = $this->apiToken('tts-mask@example.com');
@@ -189,7 +216,6 @@ class OpenAiTextToSpeechTest extends TestCase
 
         $this->assertSame('openai', $householdProfile->settings['tts']['provider']);
         $this->assertSame('sk-household-key', Crypt::decryptString($householdProfile->settings['tts']['openai_api_key_encrypted']));
-        $this->assertNotSame('openai', $personalTts['provider'] ?? 'browser');
         $this->assertArrayNotHasKey('openai_api_key_encrypted', $personalTts);
 
         $this->withToken($token)->postJson('/api/assistant/tts', [
