@@ -4,8 +4,10 @@ $hermesApiKey = (string) env('HERMES_API_KEY', '');
 $openAiKey = (string) env('OPENAI_API_KEY', '');
 $openAiPublicKey = (string) env('OPENAI_PUBLIC_KEY', '');
 $hermesApiBase = env('HERMES_API_BASE') ?: 'https://api.openai.com/v1';
-$hermesResolvedApiKey = $hermesApiKey !== '' ? $hermesApiKey : $openAiKey;
-$hermesResolvedApiKeySource = $hermesApiKey !== '' ? 'HERMES_API_KEY' : ($openAiKey !== '' ? 'OPENAI_API_KEY' : null);
+$hermesResolvedApiKey = $hermesApiKey !== '' ? $hermesApiKey : ($openAiKey !== '' ? $openAiKey : $openAiPublicKey);
+$hermesResolvedApiKeySource = $hermesApiKey !== ''
+    ? 'HERMES_API_KEY'
+    : ($openAiKey !== '' ? 'OPENAI_API_KEY' : ($openAiPublicKey !== '' ? 'OPENAI_PUBLIC_KEY' : null));
 
 return [
 
@@ -66,7 +68,7 @@ return [
     ],
 
     'openai' => [
-        'server_api_key' => $hermesApiKey !== '' ? $hermesApiKey : $openAiKey,
+        'server_api_key' => $hermesResolvedApiKey,
         'public_key' => $openAiPublicKey,
     ],
 
