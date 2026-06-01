@@ -6060,6 +6060,7 @@ const _calendarTimeColumnWidth = 48.0;
 const _calendarDayHeaderHeight = 36.0;
 const _calendarMultiDayRowHeight = 42.0;
 const _calendarAllDayRowHeight = 42.0;
+const _calendarCurrentTimeLabelHeight = 14.0;
 
 class _AppleStyleTodayTimeline extends StatefulWidget {
   const _AppleStyleTodayTimeline({
@@ -6258,6 +6259,12 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
               visibleHours.length.toDouble(),
             ) *
             _calendarHourHeight;
+    final currentTimeLabelTop = markerOffset
+        .clamp(
+          0.0,
+          math.max(0.0, timelineHeight - _calendarCurrentTimeLabelHeight - 1),
+        )
+        .toDouble();
     final showCurrentTimeMarker =
         _sameCalendarDay(visibleStartDay, today) ||
         _sameCalendarDay(visibleNextDay, today);
@@ -6379,7 +6386,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                       ],
                     ),
                   ),
-                  if (showCurrentTimeMarker)
+                  if (showCurrentTimeMarker) ...[
                     Positioned(
                       key: const Key('calendar-current-time-marker'),
                       top: markerOffset,
@@ -6387,36 +6394,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                       right: 0,
                       child: Row(
                         children: [
-                          SizedBox(
-                            width: _calendarTimeColumnWidth,
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: Container(
-                                key: const Key('calendar-current-time-label'),
-                                margin: const EdgeInsets.only(right: 3),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: HeyBeanTheme.accent,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    _naturalTimeLabel(now),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: _calendarTimeColumnWidth + 4),
                           Expanded(
                             child: Container(
                               height: 2,
@@ -6426,6 +6404,37 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                         ],
                       ),
                     ),
+                    Positioned(
+                      top: currentTimeLabelTop,
+                      left: 0,
+                      width: _calendarTimeColumnWidth,
+                      height: _calendarCurrentTimeLabelHeight,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          key: const Key('calendar-current-time-label'),
+                          height: _calendarCurrentTimeLabelHeight,
+                          margin: const EdgeInsets.only(right: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          decoration: BoxDecoration(
+                            color: HeyBeanTheme.accent,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              _naturalTimeLabel(now),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
