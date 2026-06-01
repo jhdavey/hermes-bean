@@ -596,6 +596,31 @@
     border-color: var(--hb-accent-strong);
 }
 
+.hb-kiosk-toggle {
+    background: rgba(255, 255, 255, .94);
+    color: var(--hb-accent-strong);
+    border-color: rgba(22, 163, 74, .22);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, .08);
+}
+
+.hb-kiosk-toggle:hover {
+    background: #fff;
+    border-color: rgba(22, 163, 74, .34);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, .10);
+}
+
+.hb-kiosk-toggle.hb-icon-button-active {
+    background: var(--hb-accent);
+    color: #fff;
+    border-color: var(--hb-accent);
+    box-shadow: 0 10px 22px rgba(22, 163, 74, .20);
+}
+
+.hb-kiosk-toggle.hb-icon-button-active:hover {
+    background: var(--hb-accent-strong);
+    border-color: var(--hb-accent-strong);
+}
+
 .hb-icon-button:disabled {
     cursor: not-allowed;
     opacity: .58;
@@ -2507,7 +2532,6 @@
     font-size: 12px;
     font-weight: 900;
     line-height: 1;
-    text-transform: lowercase;
     pointer-events: none;
 }
 
@@ -2542,6 +2566,16 @@
     color: var(--hb-destructive);
     border-color: rgba(220, 38, 38, .22);
     background: rgba(255, 247, 247, .96);
+}
+
+.hb-kiosk-voice-pill-disabled {
+    color: var(--hb-muted);
+    border-color: rgba(100, 116, 139, .18);
+}
+
+.hb-kiosk-voice-pill-disabled::before {
+    background: rgba(100, 116, 139, .45);
+    box-shadow: none;
 }
 
 @keyframes hb-bean-glow-pulse {

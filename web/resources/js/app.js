@@ -1106,7 +1106,10 @@ if (mount) {
     }
 
     function kioskVoicePillMarkup() {
-        if (!state.kioskVoiceEnabled || state.kioskVoicePhase === 'idle') return '';
+        if (!state.kioskVoiceEnabled) {
+            return '<div class="hb-kiosk-voice-pill hb-kiosk-voice-pill-disabled" role="status">Enable microphone to chat</div>';
+        }
+        if (state.kioskVoicePhase === 'idle') return '';
         const phase = state.kioskVoicePhase || 'listening';
         const label = state.kioskVoiceMessage || phase;
         return `<div class="hb-kiosk-voice-pill hb-kiosk-voice-pill-${escapeAttr(phase)}" role="status" aria-live="polite">${escapeHtml(label)}</div>`;
