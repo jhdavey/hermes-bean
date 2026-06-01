@@ -126,6 +126,28 @@ class RealtimeAssistantFlowTest extends TestCase
             && data_get($request->data(), 'session.audio.output.voice') === 'shimmer');
     }
 
+    public function test_realtime_session_marks_upstream_bad_requests_as_not_retryable(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/realtime/client_secrets' => Http::response([
+                'error' => [
+                    'message' => 'Invalid realtime session configuration.',
+                    'type' => 'invalid_request_error',
+                ],
+            ], 400),
+        ]);
+
+        $token = $this->apiToken('realtime-upstream-400@example.com');
+
+        $this->withToken($token)->postJson('/api/ai/realtime/session', [
+            'title' => 'Realtime bad request',
+        ])->assertStatus(502)
+            ->assertJsonPath('code', 'openai_realtime_session_failed')
+            ->assertJsonPath('status', 400)
+            ->assertJsonPath('retryable', false)
+            ->assertJsonPath('upstream_message', 'Invalid realtime session configuration.');
+    }
+
     public function test_realtime_messages_can_be_appended_without_running_agent(): void
     {
         $token = $this->apiToken('realtime-message@example.com');

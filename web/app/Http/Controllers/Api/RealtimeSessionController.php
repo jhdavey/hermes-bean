@@ -133,6 +133,9 @@ class RealtimeSessionController extends Controller
             ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/realtime/client_secrets', $payload);
 
         if (! $response->successful()) {
+            $upstreamStatus = $response->status();
+            $retryable = $upstreamStatus === 429 || $upstreamStatus >= 500;
+            $upstreamMessage = (string) ($response->json('error.message') ?: 'OpenAI rejected the realtime session request.');
             Log::warning('OpenAI realtime client secret creation failed.', [
                 'user_id' => $user->id,
                 'workspace_id' => $workspace->id,
@@ -149,7 +152,9 @@ class RealtimeSessionController extends Controller
             return response()->json([
                 'message' => 'Realtime voice could not be started.',
                 'code' => 'openai_realtime_session_failed',
-                'status' => $response->status(),
+                'status' => $upstreamStatus,
+                'upstream_message' => $upstreamMessage,
+                'retryable' => $retryable,
             ], 502);
         }
 

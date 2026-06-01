@@ -3847,6 +3847,7 @@ if (mount) {
                     payload: error?.payload || null,
                 });
                 error.reported = true;
+                error.nonRetryable = error?.payload?.retryable === false;
                 throw error;
             }
             state.session = sessionData.session || state.session;
@@ -3996,11 +3997,22 @@ if (mount) {
                     body: error?.body || '',
                 });
             }
-            setKioskVoiceStatus('error', "Bean voice couldn't connect");
-            scheduleKioskRealtimeReconnect('realtime_start_failure', {
-                name: error?.name || '',
-                message: error?.message || '',
-            });
+            if (error?.nonRetryable) {
+                clearKioskRealtimeReconnect();
+                setKioskVoiceStatus('error', 'Voice unavailable');
+                reportKioskRealtimeIssue('realtime_start_not_retryable', {
+                    name: error?.name || '',
+                    message: error?.message || '',
+                    upstream_message: error?.payload?.upstream_message || '',
+                    upstream_status: error?.payload?.status || null,
+                });
+            } else {
+                setKioskVoiceStatus('error', "Bean voice couldn't connect");
+                scheduleKioskRealtimeReconnect('realtime_start_failure', {
+                    name: error?.name || '',
+                    message: error?.message || '',
+                });
+            }
             return false;
         } finally {
             kioskRealtimeStarting = false;
