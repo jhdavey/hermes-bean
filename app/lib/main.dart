@@ -169,6 +169,16 @@ Future<void> _speakFastRealtimeReply(String text) async {
   }
 }
 
+Future<void> _stopFastRealtimeSpeech() async {
+  try {
+    await _heyBeanPlatformChannel.invokeMethod<void>('stopSpeech');
+  } on PlatformException {
+    // Native speech is best-effort.
+  } on MissingPluginException {
+    // Tests, web, desktop, and stale native shells may not expose this method.
+  }
+}
+
 Map<String, Object?> _clientTemporalContext() {
   final now = DateTime.now();
   final offset = now.timeZoneOffset;
@@ -195,31 +205,98 @@ Map<String, Object?> _flutterChatMetadata({
 };
 
 String? _fastRealtimeReplyForTranscript(String transcript, {DateTime? now}) {
+  final command = _normalizedVoiceCommand(transcript);
+  if (command.isEmpty) return null;
+
+  if (_voiceCommandIsCancel(command)) return null;
+  if (_voiceCommandIsCanYouHearMe(command)) return 'Yes, I can hear you.';
+
+  if (!_voiceCommandAsksTime(command)) return null;
+
+  final localNow = now ?? DateTime.now();
+  return "It's ${_spokenClockTime(localNow)}.";
+}
+
+String? _realtimeAcknowledgementForTranscript(String transcript) {
+  final command = _normalizedVoiceCommand(transcript);
+  if (command.isEmpty ||
+      _voiceCommandIsCancel(command) ||
+      _voiceCommandIsCanYouHearMe(command) ||
+      _voiceCommandAsksTime(command)) {
+    return null;
+  }
+
+  if (_voiceCommandLooksLikeLookup(command)) {
+    return 'Let me check that real quick.';
+  }
+  if (_voiceCommandLooksLikeDurableWork(command)) {
+    return "I'm on it.";
+  }
+  return null;
+}
+
+String _normalizedVoiceCommand(String transcript) {
   final normalized = transcript
       .toLowerCase()
       .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
-  final command = normalized
+  return normalized
       .replaceFirst(RegExp(r'^(hey\s+bean|heybean|bean)\s+'), '')
       .trim();
-  if (command.isEmpty) return null;
+}
 
-  final asksCanHear =
-      RegExp(r"\b(can|do)\s+you\s+hear\s+me\b").hasMatch(command) ||
+bool _voiceCommandIsCancel(String command) {
+  final directCommand = command.replaceFirst(RegExp(r'\s+bean$'), '').trim();
+  if (RegExp(
+    r"^(?:stop|stop it|stop talking|be quiet|quiet|cancel|cancel that|cancel this|cancel response|cancel request|never\s*mind|nevermind|forget it|that's all|that is all)$",
+  ).hasMatch(directCommand)) {
+    return true;
+  }
+  return RegExp(
+    r"\b(?:stop talking|be quiet|never\s*mind|nevermind|forget it)\b",
+  ).hasMatch(command);
+}
+
+bool _voiceCommandIsCanYouHearMe(String command) {
+  return RegExp(r"\b(can|do)\s+you\s+hear\s+me\b").hasMatch(command) ||
       RegExp(r"\bcan\s+you\s+hear\b").hasMatch(command);
-  if (asksCanHear) return 'Yes, I can hear you.';
+}
 
-  final asksTime =
-      RegExp(r"\bwhat'?s?\s+(the\s+)?time\b").hasMatch(command) ||
+bool _voiceCommandAsksTime(String command) {
+  return RegExp(r"\bwhat'?s?\s+(the\s+)?time\b").hasMatch(command) ||
       RegExp(r"\bwhat\s+time\s+is\s+it\b").hasMatch(command) ||
       RegExp(r"\btell\s+me\s+the\s+time\b").hasMatch(command) ||
       RegExp(r"\bcurrent\s+time\b").hasMatch(command);
-  if (!asksTime) return null;
-
-  final localNow = now ?? DateTime.now();
-  return "It's ${_spokenClockTime(localNow)}.";
 }
+
+bool _voiceCommandLooksLikeLookup(String command) {
+  final asksQuestion = RegExp(
+    r"\b(?:what|when|where|who|how many|show|tell me|do i have|what do i have|what's|whats)\b",
+  ).hasMatch(command);
+  final mentionsAppData = RegExp(
+    r"\b(?:calendar|event|events|schedule|task|tasks|reminder|reminders|today|tomorrow|this week|agenda)\b",
+  ).hasMatch(command);
+  return asksQuestion && mentionsAppData;
+}
+
+bool _voiceCommandLooksLikeDurableWork(String command) {
+  return RegExp(
+    r"\b(?:move|reschedule|schedule|create|add|update|change|delete|cancel|complete|finish|remind|remember|plan)\b",
+  ).hasMatch(command);
+}
+
+@visibleForTesting
+String? fastRealtimeReplyForTesting(String transcript, {DateTime? now}) =>
+    _fastRealtimeReplyForTranscript(transcript, now: now);
+
+@visibleForTesting
+String? realtimeAcknowledgementForTesting(String transcript) =>
+    _realtimeAcknowledgementForTranscript(transcript);
+
+@visibleForTesting
+bool realtimeVoiceCancelForTesting(String transcript) =>
+    _voiceCommandIsCancel(_normalizedVoiceCommand(transcript));
 
 String _spokenClockTime(DateTime value) {
   var hour = value.hour % 12;
@@ -937,6 +1014,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 _beanVoiceDraft = _beanVoiceListening
                     ? trimmed
                     : _beanVoiceDraft;
+                final command = _normalizedVoiceCommand(trimmed);
+                if (_beanVoiceListening && _voiceCommandIsCancel(command)) {
+                  _chatRunState = 'Ready';
+                  _beanVoiceListening = false;
+                  _beanVoiceDraft = null;
+                  unawaited(_realtimeConversation.interrupt());
+                  unawaited(_stopFastRealtimeSpeech());
+                  return;
+                }
                 final fastReply = _beanVoiceListening
                     ? _fastRealtimeReplyForTranscript(trimmed)
                     : null;
@@ -963,6 +1049,33 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                   }
                   unawaited(_realtimeConversation.interrupt());
                   unawaited(_speakFastRealtimeReply(fastReply));
+                  return;
+                }
+                final acknowledgement = _beanVoiceListening
+                    ? _realtimeAcknowledgementForTranscript(trimmed)
+                    : null;
+                if (acknowledgement != null) {
+                  _chatRunState = acknowledgement;
+                  final alreadyDisplayed = _messages.any(
+                    (message) =>
+                        message.role != 'user' &&
+                        message.content?.trim() == acknowledgement &&
+                        message.metadata['realtime_ack'] == true,
+                  );
+                  if (!alreadyDisplayed) {
+                    _messages.add(
+                      HermesMessage(
+                        id: _messages.length + 1,
+                        role: 'assistant',
+                        content: acknowledgement,
+                        metadata: const {
+                          'realtime': true,
+                          'realtime_ack': true,
+                        },
+                      ),
+                    );
+                    unawaited(_speakFastRealtimeReply(acknowledgement));
+                  }
                 }
                 return;
               }

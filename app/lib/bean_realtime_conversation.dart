@@ -165,6 +165,9 @@ class BeanRealtimeConversation {
     _dataChannel?.send(
       RTCDataChannelMessage(jsonEncode({'type': 'response.cancel'})),
     );
+    _dataChannel?.send(
+      RTCDataChannelMessage(jsonEncode({'type': 'output_audio_buffer.clear'})),
+    );
     onStatus?.call('Interrupted');
   }
 

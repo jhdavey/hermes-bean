@@ -34,6 +34,8 @@ import UserNotifications
         self.handleSetAppBadge(call, result: result)
       case "speakText":
         self.handleSpeakText(call, result: result)
+      case "stopSpeech":
+        self.handleStopSpeech(result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -123,6 +125,15 @@ import UserNotifications
       utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
       utterance.rate = AVSpeechUtteranceDefaultSpeechRate
       self.speechSynthesizer.speak(utterance)
+      result(nil)
+    }
+  }
+
+  private func handleStopSpeech(result: @escaping FlutterResult) {
+    DispatchQueue.main.async {
+      if self.speechSynthesizer.isSpeaking {
+        self.speechSynthesizer.stopSpeaking(at: .immediate)
+      }
       result(nil)
     }
   }

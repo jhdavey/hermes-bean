@@ -17,6 +17,32 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test('realtime voice classifier handles fast replies and filler', () {
+    expect(
+      fastRealtimeReplyForTesting(
+        'Hey Bean, what time is it?',
+        now: DateTime(2026, 6, 1, 17, 5),
+      ),
+      "It's 5:05 PM.",
+    );
+    expect(
+      fastRealtimeReplyForTesting('Hey Bean, can you hear me?'),
+      'Yes, I can hear you.',
+    );
+    expect(
+      realtimeAcknowledgementForTesting(
+        'Hey Bean, what is on my calendar for today?',
+      ),
+      'Let me check that real quick.',
+    );
+    expect(
+      realtimeAcknowledgementForTesting('Move my task from 7 PM to 5 PM'),
+      "I'm on it.",
+    );
+    expect(realtimeVoiceCancelForTesting('never mind'), isTrue);
+    expect(realtimeVoiceCancelForTesting('stop talking Bean'), isTrue);
+  });
+
   testWidgets(
     'forgot password asks for account email and sends a reset link request',
     (WidgetTester tester) async {
