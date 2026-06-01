@@ -158,8 +158,8 @@ class QuickVoiceReplyController extends Controller
             return true;
         }
 
-        if (preg_match('/\b(store|stores|restaurant|restaurants|business|businesses|hardware|pharmacy|pharmacies|grocery|groceries|bank|banks|office|location|locations|near me|nearby|local)\b/', $command)
-            && preg_match('/\b(open|opens|closed|closes|close|closing|hours|hour|today|tonight|tomorrow|available|availability)\b/', $command)) {
+        if (preg_match('/\b(today|tonight|tomorrow|current|currently|latest|now|right now|near me|nearby|local)\b/', $command)
+            && preg_match('/\b(open|opens|closed|closes|close|closing|hours|hour|available|availability|price|prices|cost|costs|status|delay|delays)\b/', $command)) {
             return true;
         }
 

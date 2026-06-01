@@ -49,8 +49,8 @@ export function voiceCommandNeedsAgentWork(transcript) {
     if (/\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b/.test(command)) {
         return true;
     }
-    if (/\b(?:store|stores|restaurant|restaurants|business|businesses|hardware|pharmacy|pharmacies|grocery|groceries|bank|banks|office|location|locations|near me|nearby|local)\b/.test(command)
-        && /\b(?:open|opens|closed|closes|close|closing|hours|hour|today|tonight|tomorrow|available|availability)\b/.test(command)) {
+    if (/\b(?:today|tonight|tomorrow|current|currently|latest|now|right now|near me|nearby|local)\b/.test(command)
+        && /\b(?:open|opens|closed|closes|close|closing|hours|hour|available|availability|price|prices|cost|costs|status|delay|delays)\b/.test(command)) {
         return true;
     }
     if (/\b(?:trash|garbage|recycling|recycle|pickup|pick up)\b/.test(command)
