@@ -1,5 +1,6 @@
 import {
     commandAfterWakePhrase,
+    voiceCommandNeedsAgentWork,
     voiceCancelRequested,
 } from './voiceWake.js';
 
@@ -3984,17 +3985,22 @@ if (mount) {
         const turnStartedAt = Date.now();
         const spokenSegments = [];
         const voiceTurn = { lastSpeech: Promise.resolve(false) };
+        const likelyNeedsAgentWork = voiceCommandNeedsAgentWork(content);
         setKioskVoiceStatus('working', 'thinking');
         const quickReplyTask = fetchKioskQuickReply(content, quickReplyGeneration);
-        const quickReply = await timeoutPromise(quickReplyTask, 1200, null);
+        const quickReply = await timeoutPromise(quickReplyTask, likelyNeedsAgentWork ? 900 : 3600, null);
         const quickReplyText = quickReply?.text || '';
-        const shouldContinueAgent = quickReply?.continueAgent !== false;
+        let shouldContinueAgent = quickReply ? quickReply.continueAgent !== false : likelyNeedsAgentWork;
+        const allowLateQuickReply = !quickReplyText && likelyNeedsAgentWork;
+        if (!quickReplyText && !likelyNeedsAgentWork) {
+            shouldContinueAgent = true;
+        }
         let finalResponseReady = false;
         let quickReplySpeech = quickReplyText
             ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments)
             : Promise.resolve(false);
         voiceTurn.lastSpeech = quickReplySpeech;
-        if (!quickReplyText) {
+        if (allowLateQuickReply) {
             quickReplyTask.then((lateQuickReply) => {
                 const lateQuickReplyText = lateQuickReply?.text || '';
                 if (!lateQuickReplyText || finalResponseReady) return false;
@@ -4119,8 +4125,8 @@ if (mount) {
             resolveBridge = resolve;
             (async () => {
                 let spokeBridge = false;
-                for (let bridgeCount = 0; bridgeCount < 3; bridgeCount += 1) {
-                    await sleep(bridgeCount === 0 ? 3600 : 5200);
+                for (let bridgeCount = 0; bridgeCount < 1; bridgeCount += 1) {
+                    await sleep(7000);
                     if (cancelled) break;
                     await voiceTurn.lastSpeech;
                     if (cancelled || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) break;

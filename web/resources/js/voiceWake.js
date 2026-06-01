@@ -39,3 +39,19 @@ export function voiceCancelRequested(transcript) {
     }
     return /\b(?:stop talking|be quiet|never\s*mind|nevermind|forget it)\b/.test(command);
 }
+
+export function voiceCommandNeedsAgentWork(transcript) {
+    const command = normalizedVoiceCommand(transcript);
+    if (!command) return false;
+    if (/\b(?:calendar|calendars|event|events|task|tasks|todo|to do|reminder|reminders|agenda|approval|approvals|workspace|workspaces|google calendar)\b/.test(command)) {
+        return true;
+    }
+    if (/\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b/.test(command)) {
+        return true;
+    }
+    if (/\b(?:plan|organize|prioritize)\b/.test(command)
+        && /\b(?:day|today|tomorrow|week|schedule|work|tasks|calendar|morning|afternoon|evening)\b/.test(command)) {
+        return true;
+    }
+    return /\b(?:what do i have|what have i got|do i have anything|anything on|what'?s next|whats next|what is next|next up)\b/.test(command);
+}

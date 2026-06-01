@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import {
     commandAfterWakePhrase,
+    voiceCommandNeedsAgentWork,
     voiceCancelRequested,
 } from '../../resources/js/voiceWake.js';
 
@@ -42,3 +43,8 @@ for (const transcript of rejected) {
 assert.equal(voiceCancelRequested('nevermind'), true);
 assert.equal(voiceCancelRequested('stop talking bean'), true);
 assert.equal(voiceCancelRequested('cancel my meeting tomorrow'), false);
+assert.equal(voiceCommandNeedsAgentWork('what should we have for dinner tonight'), false);
+assert.equal(voiceCommandNeedsAgentWork('what is on my calendar today'), true);
+assert.equal(voiceCommandNeedsAgentWork('move my task from 7pm to 5pm'), true);
+assert.equal(voiceCommandNeedsAgentWork('plan my day'), true);
+assert.equal(voiceCommandNeedsAgentWork('plan dinner'), false);
