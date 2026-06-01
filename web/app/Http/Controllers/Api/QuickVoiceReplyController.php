@@ -132,8 +132,42 @@ class QuickVoiceReplyController extends Controller
             'data' => [
                 'text' => $text,
                 'model' => $model,
+                'continue_agent' => $stage === 'bridge' || $this->shouldContinueAgent($content),
             ],
         ]);
+    }
+
+    private function shouldContinueAgent(string $content): bool
+    {
+        $command = str($content)
+            ->lower()
+            ->replaceMatches('/[^a-z0-9\s\']/', ' ')
+            ->replaceMatches('/\s+/', ' ')
+            ->trim()
+            ->toString();
+
+        if ($command === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(calendar|calendars|event|events|task|tasks|todo|to do|reminder|reminders|agenda|approval|approvals|workspace|workspaces|google calendar)\b/', $command)) {
+            return true;
+        }
+
+        if (preg_match('/\b(add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b/', $command)) {
+            return true;
+        }
+
+        if (preg_match('/\b(plan|organize|prioritize)\b/', $command)
+            && preg_match('/\b(day|today|tomorrow|week|schedule|work|tasks|calendar|morning|afternoon|evening)\b/', $command)) {
+            return true;
+        }
+
+        if (preg_match('/\b(what do i have|what have i got|do i have anything|anything on|what\'?s next|whats next|what is next|next up)\b/', $command)) {
+            return true;
+        }
+
+        return false;
     }
 
     private function systemPrompt(string $stage): string
@@ -159,7 +193,7 @@ The user has just finished speaking. Give the first natural spoken reply immedia
 Do not use canned support-agent phrases. Do not mention tools, models, background jobs, or internal work.
 If the user asks a normal conversational question, answer with a useful first thought right away.
 For casual questions, do not start with "Got it"; answer directly.
-For casual questions, give one compact first thought rather than the full answer, leaving room to continue.
+For casual questions that do not need app data or an app change, give a compact complete answer in one sentence.
 If the user asks for current app data or an app change, respond naturally with what you are about to check or do, without claiming it is already done.
 Keep it to one sentence under 24 words.
 PROMPT;

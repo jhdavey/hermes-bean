@@ -45,7 +45,8 @@ class QuickVoiceReplyTest extends TestCase
             ],
         ])->assertOk()
             ->assertJsonPath('data.text', 'For dinner, I would start with something easy and filling, like tacos or pasta.')
-            ->assertJsonPath('data.model', 'gpt-quick-test');
+            ->assertJsonPath('data.model', 'gpt-quick-test')
+            ->assertJsonPath('data.continue_agent', false);
 
         Http::assertSent(function ($request): bool {
             $payload = $request->data();
@@ -57,11 +58,37 @@ class QuickVoiceReplyTest extends TestCase
                 && ! array_key_exists('tools', $payload)
                 && data_get($payload, 'messages.0.role') === 'system'
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'normal conversational question')
+                && str_contains((string) data_get($payload, 'messages.0.content'), 'compact complete answer')
                 && data_get($payload, 'messages.1.role') === 'system'
                 && str_contains((string) data_get($payload, 'messages.1.content'), 'America/New_York')
                 && data_get($payload, 'messages.2.role') === 'user'
                 && data_get($payload, 'messages.2.content') === 'what should we have for dinner tonight?';
         });
+    }
+
+    public function test_quick_voice_reply_continues_to_agent_for_app_requests(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-calendar',
+                'model' => 'gpt-quick-test',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I will check your calendar for today.',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('quick-voice-calendar@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
+            'content' => 'what is on my calendar today?',
+        ])->assertOk()
+            ->assertJsonPath('data.text', 'I will check your calendar for today.')
+            ->assertJsonPath('data.continue_agent', true);
     }
 
     public function test_quick_voice_reply_failure_returns_502_for_frontend_skip(): void
@@ -102,7 +129,8 @@ class QuickVoiceReplyTest extends TestCase
             'spoken_segments' => ['Tacos could be easy tonight if you want something quick.'],
             'elapsed_ms' => 5200,
         ])->assertOk()
-            ->assertJsonPath('data.text', 'I am narrowing that down now.');
+            ->assertJsonPath('data.text', 'I am narrowing that down now.')
+            ->assertJsonPath('data.continue_agent', true);
 
         Http::assertSent(function ($request): bool {
             $payload = $request->data();

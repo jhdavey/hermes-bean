@@ -3986,20 +3986,42 @@ if (mount) {
         const voiceTurn = { lastSpeech: Promise.resolve(false) };
         setKioskVoiceStatus('working', 'thinking');
         const quickReplyTask = fetchKioskQuickReply(content, quickReplyGeneration);
-        const quickReplyText = await timeoutPromise(quickReplyTask, 900, '');
+        const quickReply = await timeoutPromise(quickReplyTask, 1200, null);
+        const quickReplyText = quickReply?.text || '';
+        const shouldContinueAgent = quickReply?.continueAgent !== false;
         let finalResponseReady = false;
         let quickReplySpeech = quickReplyText
             ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments)
             : Promise.resolve(false);
         voiceTurn.lastSpeech = quickReplySpeech;
         if (!quickReplyText) {
-            quickReplyTask.then((lateQuickReplyText) => {
+            quickReplyTask.then((lateQuickReply) => {
+                const lateQuickReplyText = lateQuickReply?.text || '';
                 if (!lateQuickReplyText || finalResponseReady) return false;
                 quickReplySpeech = speakKioskVoiceSegment(lateQuickReplyText, quickReplyGeneration, spokenSegments);
                 voiceTurn.lastSpeech = quickReplySpeech;
                 return quickReplySpeech;
             });
         }
+
+        if (!shouldContinueAgent) {
+            startKioskBargeInListening();
+            appendKioskLocalVoiceExchange(content, quickReplyText);
+            try {
+                await quickReplySpeech;
+            } finally {
+                stopKioskBargeInListening();
+            }
+            if (!kioskConversationActive) {
+                restartKioskVoiceListeningSoon(650);
+                return;
+            }
+            setKioskVoiceStatus('listening', 'listening');
+            armKioskConversationTimeout();
+            restartKioskVoiceListeningSoon(1200);
+            return;
+        }
+
         startKioskBargeInListening();
         const bridgeReply = runKioskBridgeReplies(
             content,
@@ -4062,6 +4084,27 @@ if (mount) {
         });
     }
 
+    function appendKioskLocalVoiceExchange(userContent, assistantContent) {
+        if (userContent) {
+            state.messages.push({
+                id: `voice-user-${Date.now()}`,
+                role: 'user',
+                content: userContent,
+                metadata: { local_voice_turn: true },
+            });
+        }
+        if (assistantContent) {
+            state.messages.push({
+                id: `voice-assistant-${Date.now()}`,
+                role: 'assistant',
+                content: assistantContent,
+                metadata: { local_voice_turn: true, quick_reply_only: true },
+            });
+        }
+        if (state.phase === 'signedIn') render();
+        scrollChatToBottom();
+    }
+
     function runKioskBridgeReplies(content, generation, spokenSegments, startedAt, finalReady, voiceTurn) {
         window.clearTimeout(kioskBridgeTimer);
         let resolveBridge = () => {};
@@ -4082,11 +4125,12 @@ if (mount) {
                     await voiceTurn.lastSpeech;
                     if (cancelled || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) break;
                     if (spokenSegments.length === 0) continue;
-                    const bridgeText = await fetchKioskQuickReply(content, generation, {
+                    const bridge = await fetchKioskQuickReply(content, generation, {
                         stage: 'bridge',
                         spokenSegments,
                         elapsedMs: Date.now() - startedAt,
                     });
+                    const bridgeText = bridge?.text || '';
                     if (!bridgeText || cancelled || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) break;
                     const speech = speakKioskVoiceSegment(bridgeText, generation, spokenSegments);
                     voiceTurn.lastSpeech = speech;
@@ -4172,10 +4216,13 @@ if (mount) {
                 },
             });
             const text = String(response?.text || '').trim();
-            if (!text || !kioskConversationActive || generation !== kioskQuickReplyGeneration) return '';
-            return text;
+            if (!text || !kioskConversationActive || generation !== kioskQuickReplyGeneration) return null;
+            return {
+                text,
+                continueAgent: response?.continue_agent !== false && response?.continueAgent !== false,
+            };
         } catch (_) {
-            return '';
+            return null;
         }
     }
 
