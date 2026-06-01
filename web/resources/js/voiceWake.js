@@ -58,3 +58,12 @@ export function voiceCommandNeedsAgentWork(transcript) {
     }
     return /\b(?:what do i have|what have i got|do i have anything|anything on|what'?s next|whats next|what is next|next up)\b/.test(command);
 }
+
+export function voiceCommandWantsDetailedChat(transcript) {
+    const command = normalizedVoiceCommand(transcript);
+    if (!command || voiceCommandNeedsAgentWork(command)) return false;
+    return /\b(?:recipe|workout|exercise|routine|training|stretch|stretches|meal plan|instructions|step by step|steps)\b/.test(command)
+        || (/\b(?:give|make|build|write|create)\b/.test(command)
+            && /\b(?:plan|guide|list|schedule)\b/.test(command)
+            && !/\b(?:calendar|event|task|reminder)\b/.test(command));
+}

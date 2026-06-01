@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     commandAfterWakePhrase,
     voiceCommandNeedsAgentWork,
+    voiceCommandWantsDetailedChat,
     voiceCancelRequested,
 } from '../../resources/js/voiceWake.js';
 
@@ -50,3 +51,7 @@ assert.equal(voiceCommandNeedsAgentWork('plan my day'), true);
 assert.equal(voiceCommandNeedsAgentWork('plan dinner'), false);
 assert.equal(voiceCommandNeedsAgentWork('cheapest flights from MCO to Dublin tomorrow one way'), true);
 assert.equal(voiceCommandNeedsAgentWork('can you give me a taco recipe'), false);
+assert.equal(voiceCommandWantsDetailedChat('give me a 30 minute full body workout but I do not have equipment'), true);
+assert.equal(voiceCommandWantsDetailedChat('can you give me a taco recipe'), true);
+assert.equal(voiceCommandWantsDetailedChat('what should we have for dinner tonight'), false);
+assert.equal(voiceCommandWantsDetailedChat('move my task from 7pm to 5pm'), false);

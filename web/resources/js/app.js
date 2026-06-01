@@ -1,6 +1,7 @@
 import {
     commandAfterWakePhrase,
     voiceCommandNeedsAgentWork,
+    voiceCommandWantsDetailedChat,
     voiceCancelRequested,
 } from './voiceWake.js';
 
@@ -3355,6 +3356,7 @@ if (mount) {
                     ? {
                         voice_context: {
                             mode: 'live_voice',
+                            ...(options.voiceDetailedChat ? { detailed_chat: true } : {}),
                             ...(options.voiceQuickReply
                                 ? { quick_reply: String(options.voiceQuickReply).trim().slice(0, 220) }
                                 : { quick_reply_pending: true }),
@@ -4024,13 +4026,19 @@ if (mount) {
         const spokenSegments = [];
         const voiceTurn = { lastSpeech: Promise.resolve(false) };
         const likelyNeedsAgentWork = voiceCommandNeedsAgentWork(content);
+        const wantsDetailedChat = voiceCommandWantsDetailedChat(content);
         setKioskVoiceStatus('working', 'thinking');
         const quickReplyTask = fetchKioskQuickReply(content, quickReplyGeneration);
         const quickReply = likelyNeedsAgentWork
             ? await timeoutPromise(quickReplyTask, 900, null)
             : await quickReplyTask;
         const quickReplyText = quickReply?.text || '';
-        let shouldContinueAgent = quickReply ? quickReply.continueAgent !== false : likelyNeedsAgentWork;
+        let shouldContinueAgent = quickReply ? quickReply.continueAgent !== false : likelyNeedsAgentWork || wantsDetailedChat;
+        if (quickReplyText && wantsDetailedChat) {
+            shouldContinueAgent = true;
+        } else if (quickReplyText && !likelyNeedsAgentWork) {
+            shouldContinueAgent = false;
+        }
         const allowLateQuickReply = !quickReplyText && likelyNeedsAgentWork;
         if (!quickReplyText && !likelyNeedsAgentWork) {
             shouldContinueAgent = true;
@@ -4083,6 +4091,7 @@ if (mount) {
             const response = await sendChatContent(content, {
                 voiceQuickReply: quickReplyText,
                 voiceQuickReplyPending: !quickReplyText,
+                voiceDetailedChat: wantsDetailedChat,
                 onAgentResult: () => {
                     finalResponseReady = true;
                     bridgeReply.cancel();
@@ -4100,7 +4109,13 @@ if (mount) {
                 setKioskVoiceStatus('error', 'no response');
                 await sleep(1200);
             } else {
-                const spoken = await speakKioskResponse(assistantContent);
+                const finalVoiceText = finalVoiceTextForTurn(content, quickReplyText, assistantContent, {
+                    wantsDetailedChat,
+                    likelyNeedsAgentWork,
+                });
+                const spoken = finalVoiceText
+                    ? await speakKioskResponse(finalVoiceText, { pendingMessage: 'working in background' })
+                    : true;
                 if (!spoken) {
                     if (profileTtsProvider() === 'openai' && kioskLastTtsError) {
                         await sleep(4500);
@@ -4318,16 +4333,80 @@ if (mount) {
         }
     }
 
-    function speakKioskResponse(content) {
+    function speakKioskResponse(content, options = {}) {
         const text = speechTextFromAssistant(content);
+        return speakKioskResponseText(text, options);
+    }
+
+    function speakKioskResponseText(text, options = {}) {
         if (profileTtsProvider() === 'openai') {
             if (!profileTtsOpenAiConfigured()) {
                 setKioskVoiceStatus('responding', 'save Bean voice key');
                 return false;
             }
-            return playOpenAiTts(text);
+            return playOpenAiTts(text, options);
         }
         return speakBrowserTts(text);
+    }
+
+    function finalVoiceTextForTurn(userContent, quickReplyText, assistantContent, options = {}) {
+        const text = speechTextFromAssistant(assistantContent);
+        if (!text) return '';
+        if (!quickReplyText) return text;
+        if (options.wantsDetailedChat || finalResponseIsDetailed(assistantContent, text)) {
+            return finalDetailNotice(userContent);
+        }
+        if (quickReplyCoversFinal(quickReplyText, text)) {
+            return '';
+        }
+        return text;
+    }
+
+    function finalResponseIsDetailed(rawContent, spokenText) {
+        const raw = String(rawContent || '');
+        return spokenText.length > 520
+            || raw.length > 700
+            || /(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S/.test(raw)
+            || (raw.match(/\n/g) || []).length >= 3;
+    }
+
+    function finalDetailNotice(userContent) {
+        const command = String(userContent || '').toLowerCase();
+        if (/\b(?:workout|exercise|routine|training|stretch|stretches)\b/.test(command)) {
+            return 'I put the full workout in chat.';
+        }
+        if (/\b(?:recipe|cook|meal)\b/.test(command)) {
+            return 'I put the full recipe in chat.';
+        }
+        if (/\b(?:plan|guide|steps|instructions)\b/.test(command)) {
+            return 'I put the full plan in chat.';
+        }
+        return 'I put the full details in chat.';
+    }
+
+    function quickReplyCoversFinal(quickReplyText, finalText) {
+        const quick = normalizeComparableSpeech(quickReplyText);
+        const final = normalizeComparableSpeech(finalText);
+        return quick.length >= 40 && (final.startsWith(quick.slice(0, 80)) || quickSimilarity(quick, final) > 0.72);
+    }
+
+    function normalizeComparableSpeech(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function quickSimilarity(a, b) {
+        const aWords = new Set(a.split(' ').filter((word) => word.length > 3));
+        const bWords = new Set(b.split(' ').filter((word) => word.length > 3));
+        if (!aWords.size || !bWords.size) return 0;
+        let overlap = 0;
+        aWords.forEach((word) => {
+            if (bWords.has(word)) overlap += 1;
+        });
+        return overlap / Math.min(aWords.size, bWords.size);
     }
 
     async function playOpenAiTts(text, options = {}) {
@@ -4341,7 +4420,11 @@ if (mount) {
                 throw new Error('audio_not_unlocked');
             }
             if (options.shouldPlay && !options.shouldPlay()) return false;
-            setKioskVoiceStatus(options.status || 'responding', "Bean's voice");
+            if (options.pendingMessage) {
+                setKioskVoiceStatus('working', options.pendingMessage);
+            } else {
+                setKioskVoiceStatus(options.status || 'responding', "Bean's voice");
+            }
             const response = await fetch('/api/assistant/tts', {
                 method: 'POST',
                 headers: {
@@ -4362,9 +4445,10 @@ if (mount) {
                 return false;
             }
             if (options.shouldPlay && !options.shouldPlay()) return false;
-            if (await playOpenAiAudioBuffer(audioBuffer)) return true;
+            const onStart = () => setKioskVoiceStatus(options.status || 'responding', "Bean's voice");
+            if (await playOpenAiAudioBuffer(audioBuffer, { onStart })) return true;
             if (options.shouldPlay && !options.shouldPlay()) return false;
-            return playAudioBlobFallback(audioBuffer, response.headers.get('Content-Type') || 'audio/wav');
+            return playAudioBlobFallback(audioBuffer, response.headers.get('Content-Type') || 'audio/wav', { onStart });
         } catch (error) {
             const message = error?.message === 'audio_not_unlocked' || error?.name === 'NotAllowedError'
                 ? "Bean's voice needs one click"
@@ -4376,7 +4460,7 @@ if (mount) {
         }
     }
 
-    async function playAudioBlobFallback(arrayBuffer, contentType = 'audio/wav') {
+    async function playAudioBlobFallback(arrayBuffer, contentType = 'audio/wav', options = {}) {
         if (!arrayBuffer?.byteLength) return false;
         let url = '';
         try {
@@ -4388,7 +4472,9 @@ if (mount) {
             await new Promise((resolve, reject) => {
                 audio.onended = resolve;
                 audio.onerror = reject;
-                audio.play().catch(reject);
+                audio.play().then(() => {
+                    options.onStart?.();
+                }).catch(reject);
             });
             return true;
         } catch (error) {
@@ -4418,7 +4504,7 @@ if (mount) {
             .replace(/API key/gi, 'voice key');
     }
 
-    async function playOpenAiAudioBuffer(arrayBuffer) {
+    async function playOpenAiAudioBuffer(arrayBuffer, options = {}) {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if (!AudioContextClass || !arrayBuffer?.byteLength) return false;
         try {
@@ -4439,6 +4525,7 @@ if (mount) {
                 };
                 try {
                     source.start(0);
+                    options.onStart?.();
                 } catch (error) {
                     if (kioskActiveAudioSource === source) kioskActiveAudioSource = null;
                     reject(error);
