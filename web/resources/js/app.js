@@ -1,3 +1,5 @@
+import { commandAfterWakePhrase } from './voiceWake.js';
+
 const mount = document.getElementById('heybean-web-app');
 
 if (mount) {
@@ -3544,12 +3546,12 @@ if (mount) {
                 return;
             }
             if (!kioskConversationActive) {
-                const wakeTranscript = speechTranscript(event);
-                if (!wakeTranscript) return;
-                const command = commandAfterWakePhrase(wakeTranscript);
-                if (command === null) {
-                    return;
+                let command = null;
+                for (const wakeTranscript of speechTranscriptCandidates(event)) {
+                    command = commandAfterWakePhrase(wakeTranscript);
+                    if (command !== null) break;
                 }
+                if (command === null) return;
                 kioskCommandText = command;
                 beginKioskConversation();
                 window.speechSynthesis?.cancel();
@@ -3711,11 +3713,27 @@ if (mount) {
             .trim();
     }
 
-    function commandAfterWakePhrase(transcript) {
-        const match = transcript.match(/(?:^|\s)(?:hey|hay|hi|okay|ok)\s*,?\s*(?:bean|beans|been|ben|beam|being|bin)\b[\s,.:;!?-]*/i)
-            || transcript.match(/(?:^|\s)(?:hey|hay)\s*b(?:ean|eans|een|en|eam|eing|in)\b[\s,.:;!?-]*/i);
-        if (!match) return null;
-        return transcript.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
+    function speechTranscriptCandidates(event, options = {}) {
+        const results = Array.from(event.results || []);
+        const startIndex = options.fromResultIndex ? Math.max(0, event.resultIndex || 0) : 0;
+        const selectedResults = results.slice(startIndex).filter((result) => !options.finalOnly || result.isFinal);
+        if (!selectedResults.length) return [];
+
+        const primaryParts = selectedResults.map((result) => result[0]?.transcript || '');
+        const candidates = new Set([primaryParts.join(' ')]);
+        selectedResults.forEach((result, index) => {
+            Array.from(result).slice(1, 4).forEach((alternative) => {
+                const transcript = alternative?.transcript || '';
+                if (!transcript.trim()) return;
+                const parts = [...primaryParts];
+                parts[index] = transcript;
+                candidates.add(parts.join(' '));
+            });
+        });
+
+        return Array.from(candidates)
+            .map((candidate) => candidate.replace(/\s+/g, ' ').trim())
+            .filter(Boolean);
     }
 
     function beginKioskConversation() {
