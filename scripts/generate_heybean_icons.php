@@ -96,13 +96,9 @@ function write_icon_png($source, int $minX, int $minY, int $maxX, int $maxY, int
     imagealphablending($canvas, true);
     imagesavealpha($canvas, false);
 
-    // Soft HeyBean cream background, no alpha (App Store-safe).
-    $bg = imagecolorallocate($canvas, 251, 247, 237);
+    // Clean white background, no alpha (App Store-safe).
+    $bg = imagecolorallocate($canvas, 255, 255, 255);
     imagefill($canvas, 0, 0, $bg);
-
-    // Subtle green inset circle keeps the white mascot readable at tiny sizes.
-    $circle = imagecolorallocate($canvas, 232, 248, 238);
-    imagefilledellipse($canvas, (int) ($size / 2), (int) ($size / 2), (int) ($size * 0.92), (int) ($size * 0.92), $circle);
 
     $srcW = $maxX - $minX + 1;
     $srcH = $maxY - $minY + 1;
