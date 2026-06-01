@@ -117,7 +117,7 @@ class RealtimeSessionController extends Controller
                 'tool_choice' => 'auto',
                 'tracing' => [
                     'workflow_name' => 'heybean-realtime',
-                    'group_id' => 'conversation_session:'.$localSession->id,
+                    'group_id' => 'conversation_session_'.$localSession->id,
                     'metadata' => [
                         'user_id' => (string) $user->id,
                         'workspace_id' => (string) $workspace->id,

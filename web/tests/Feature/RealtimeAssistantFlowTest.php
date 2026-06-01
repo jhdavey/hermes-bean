@@ -63,6 +63,7 @@ class RealtimeAssistantFlowTest extends TestCase
             && data_get($request->data(), 'session.audio.input.turn_detection.type') === 'server_vad'
             && data_get($request->data(), 'session.audio.input.turn_detection.silence_duration_ms') === 350
             && data_get($request->data(), 'session.audio.input.turn_detection.create_response') === true
+            && preg_match('/^[A-Za-z0-9_-]+$/', (string) data_get($request->data(), 'session.tracing.group_id')) === 1
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Only respond when the user is clearly talking to Bean')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Yes, I can hear you.')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'current time/date questions')
