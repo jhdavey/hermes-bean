@@ -179,9 +179,10 @@
 .hb-topbar-current-time {
     color: var(--hb-text);
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 900;
+    font-weight: 700;
     letter-spacing: 0;
     line-height: 1;
+    text-shadow: .35px 0 0 currentColor;
     white-space: nowrap;
 }
 
@@ -202,9 +203,10 @@
 
 .hb-header-pill {
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 950;
+    font-weight: 700;
     letter-spacing: 0;
     line-height: 1;
+    text-shadow: .35px 0 0 currentColor;
 }
 
 .hb-header-pill span {
@@ -1454,9 +1456,10 @@
     color: var(--hb-text);
     padding: 7px 12px;
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 950;
+    font-weight: 700;
     letter-spacing: 0;
     line-height: 1;
+    text-shadow: .35px 0 0 currentColor;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
