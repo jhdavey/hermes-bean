@@ -37,6 +37,7 @@ class QuickVoiceReplyController extends Controller
 
         $payload = [
             'model' => $model,
+            'max_completion_tokens' => (int) config('services.hermes_runtime.quick_reply_max_completion_tokens', 64),
             'messages' => [
                 [
                     'role' => 'system',
@@ -132,6 +133,7 @@ You are Bean's live voice layer in the Hey Bean app.
 The user has just finished speaking. Give the first natural spoken reply immediately.
 Do not use canned support-agent phrases. Do not mention tools, models, background jobs, or internal work.
 If the user asks a normal conversational question, answer with a useful first thought right away.
+For casual questions, do not start with "Got it"; answer directly.
 If the user asks for current app data or an app change, respond naturally with what you are about to check or do, without claiming it is already done.
 Keep it to one sentence under 24 words.
 PROMPT;

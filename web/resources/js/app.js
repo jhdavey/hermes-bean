@@ -3313,11 +3313,13 @@ if (mount) {
             }
             const metadata = {
                 client_context: clientContextPayload(),
-                ...(options.voiceQuickReply
+                ...(options.voiceQuickReply || options.voiceQuickReplyPending
                     ? {
                         voice_context: {
                             mode: 'live_voice',
-                            quick_reply: String(options.voiceQuickReply).trim().slice(0, 220),
+                            ...(options.voiceQuickReply
+                                ? { quick_reply: String(options.voiceQuickReply).trim().slice(0, 220) }
+                                : { quick_reply_pending: true }),
                         },
                     }
                     : {}),
@@ -3977,19 +3979,26 @@ if (mount) {
 
         const quickReplyGeneration = ++kioskQuickReplyGeneration;
         setKioskVoiceStatus('working', 'thinking');
-        const quickReplyText = await timeoutPromise(
-            fetchKioskQuickReply(content, quickReplyGeneration),
-            1400,
-            '',
-        );
-        const quickReplySpeech = quickReplyText
-            ? speakKioskAcknowledgement(quickReplyText, {
-                shouldPlay: () => kioskConversationActive && quickReplyGeneration === kioskQuickReplyGeneration,
-            })
+        const quickReplyTask = fetchKioskQuickReply(content, quickReplyGeneration);
+        const quickReplyText = await timeoutPromise(quickReplyTask, 2200, '');
+        let finalResponseReady = false;
+        let quickReplySpeech = quickReplyText
+            ? speakKioskQuickReplyText(quickReplyText, quickReplyGeneration)
             : Promise.resolve(false);
+        if (!quickReplyText) {
+            quickReplyTask.then((lateQuickReplyText) => {
+                if (!lateQuickReplyText || finalResponseReady) return false;
+                quickReplySpeech = speakKioskQuickReplyText(lateQuickReplyText, quickReplyGeneration);
+                return quickReplySpeech;
+            });
+        }
         startKioskBargeInListening();
         try {
-            const response = await sendChatContent(content, { voiceQuickReply: quickReplyText });
+            const response = await sendChatContent(content, {
+                voiceQuickReply: quickReplyText,
+                voiceQuickReplyPending: !quickReplyText,
+            });
+            finalResponseReady = true;
             await quickReplySpeech;
             kioskQuickReplyGeneration += 1;
             if (!kioskConversationActive) return;
@@ -4009,6 +4018,7 @@ if (mount) {
                 }
             }
         } catch (error) {
+            finalResponseReady = true;
             setKioskVoiceStatus('error', friendlyError(error, 'send that message'));
             await sleep(1800);
         } finally {
@@ -4021,6 +4031,12 @@ if (mount) {
         setKioskVoiceStatus('listening', 'listening');
         armKioskConversationTimeout();
         restartKioskVoiceListeningSoon(1200);
+    }
+
+    function speakKioskQuickReplyText(text, generation) {
+        return speakKioskAcknowledgement(text, {
+            shouldPlay: () => kioskConversationActive && generation === kioskQuickReplyGeneration,
+        });
     }
 
     function clientContextPayload() {
