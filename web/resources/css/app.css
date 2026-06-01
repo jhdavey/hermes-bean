@@ -596,31 +596,6 @@
     border-color: var(--hb-accent-strong);
 }
 
-.hb-kiosk-toggle {
-    background: rgba(255, 255, 255, .94);
-    color: var(--hb-accent-strong);
-    border-color: rgba(22, 163, 74, .22);
-    box-shadow: 0 8px 18px rgba(15, 23, 42, .08);
-}
-
-.hb-kiosk-toggle:hover {
-    background: #fff;
-    border-color: rgba(22, 163, 74, .34);
-    box-shadow: 0 10px 22px rgba(15, 23, 42, .10);
-}
-
-.hb-kiosk-toggle.hb-icon-button-active {
-    background: var(--hb-accent);
-    color: #fff;
-    border-color: var(--hb-accent);
-    box-shadow: 0 10px 22px rgba(22, 163, 74, .20);
-}
-
-.hb-kiosk-toggle.hb-icon-button-active:hover {
-    background: var(--hb-accent-strong);
-    border-color: var(--hb-accent-strong);
-}
-
 .hb-icon-button:disabled {
     cursor: not-allowed;
     opacity: .58;
@@ -2663,21 +2638,44 @@
     font-size: 12px;
     font-weight: 900;
     line-height: 1;
-    pointer-events: none;
+    pointer-events: auto;
+    white-space: nowrap;
 }
 
-.hb-kiosk-voice-pill::before {
-    content: "";
-    width: 8px;
-    height: 8px;
+.hb-kiosk-voice-pill-button {
+    appearance: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: transform .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+
+.hb-kiosk-voice-pill-button:hover {
+    transform: translateY(-1px);
+    border-color: rgba(22, 163, 74, .42);
+    box-shadow: 0 16px 34px rgba(15, 23, 42, .14);
+}
+
+.hb-kiosk-voice-pill-button:focus-visible {
+    outline: 3px solid rgba(22, 163, 74, .24);
+    outline-offset: 3px;
+}
+
+.hb-kiosk-voice-pill-icon {
+    width: 18px;
+    height: 18px;
+    display: inline-grid;
+    place-items: center;
     border-radius: 999px;
-    background: currentColor;
-    box-shadow: 0 0 0 4px rgba(22, 163, 74, .10);
 }
 
-.hb-kiosk-voice-pill-armed::before,
-.hb-kiosk-voice-pill-heard::before,
-.hb-kiosk-voice-pill-listening::before {
+.hb-kiosk-voice-pill-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.hb-kiosk-voice-pill-armed .hb-kiosk-voice-pill-icon,
+.hb-kiosk-voice-pill-heard .hb-kiosk-voice-pill-icon,
+.hb-kiosk-voice-pill-listening .hb-kiosk-voice-pill-icon {
     animation: hb-kiosk-listening-pulse 1.15s ease-in-out infinite;
 }
 
@@ -2704,9 +2702,13 @@
     border-color: rgba(100, 116, 139, .18);
 }
 
-.hb-kiosk-voice-pill-disabled::before {
-    background: rgba(100, 116, 139, .45);
-    box-shadow: none;
+.hb-kiosk-voice-pill-disabled:hover {
+    border-color: rgba(22, 163, 74, .28);
+    color: var(--hb-accent-strong);
+}
+
+.hb-kiosk-voice-pill-standalone {
+    right: 24px;
 }
 
 @keyframes hb-bean-glow-pulse {
@@ -3606,5 +3608,10 @@
         right: 96px;
         bottom: 30px;
         max-width: calc(100vw - 124px);
+    }
+
+    .hb-kiosk-voice-pill-standalone {
+        right: 24px;
+        max-width: calc(100vw - 48px);
     }
 }

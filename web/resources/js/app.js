@@ -814,7 +814,6 @@ if (mount) {
                     ${showRefresh ? `<button class="hb-icon-button hb-topbar-action" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
-                    ${kioskVoiceToggleMarkup()}
                     ${topOverflowMenuMarkup()}
                 </header>
                 <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
@@ -823,7 +822,7 @@ if (mount) {
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
                 ${bottomMenuMarkup()}
                 ${state.selected === 'bean' ? '' : floatingBeanButtonMarkup()}
-                ${state.selected === 'bean' ? '' : kioskVoicePillMarkup()}
+                ${kioskVoicePillMarkup({ standalone: state.selected === 'bean' })}
                 ${state.chatExpanded && state.selected !== 'bean' ? desktopChatMarkup({ expanded: true }) : ''}
             </div>`;
     }
@@ -1138,14 +1137,26 @@ if (mount) {
             </button>`;
     }
 
-    function kioskVoicePillMarkup() {
-        if (!kioskVoiceReady()) {
-            return '<div class="hb-kiosk-voice-pill hb-kiosk-voice-pill-disabled" role="status">Enable microphone to chat</div>';
+    function kioskVoicePillMarkup(options = {}) {
+        const requested = state.kioskVoiceEnabled;
+        const ready = kioskVoiceReady();
+        const phase = ready ? (state.kioskVoicePhase === 'idle' ? 'armed' : state.kioskVoicePhase || 'armed') : 'disabled';
+        const label = kioskVoicePillLabel({ requested, ready, phase });
+        const actionLabel = ready ? 'Turn off kiosk voice' : label;
+        return `
+            <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(phase)} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}" aria-pressed="${ready}">
+                <span class="hb-kiosk-voice-pill-icon" aria-hidden="true">${icons.mic}</span>
+                <span>${escapeHtml(label)}</span>
+            </button>`;
+    }
+
+    function kioskVoicePillLabel({ requested, ready, phase }) {
+        if (ready) {
+            if (phase === 'armed' && !state.kioskVoiceMessage) return 'Say hey bean';
+            return state.kioskVoiceMessage || phase;
         }
-        if (state.kioskVoicePhase === 'idle') return '';
-        const phase = state.kioskVoicePhase || 'listening';
-        const label = state.kioskVoiceMessage || phase;
-        return `<div class="hb-kiosk-voice-pill hb-kiosk-voice-pill-${escapeAttr(phase)}" role="status" aria-live="polite">${escapeHtml(label)}</div>`;
+        if (!requested) return 'Enable microphone to chat';
+        return state.kioskVoiceMessage || (profileTtsProvider() === 'openai' && !kioskAudioUnlocked ? 'Enable Bean voice audio' : 'Allow microphone to chat');
     }
 
     function settingsMarkup() {
@@ -1296,18 +1307,6 @@ if (mount) {
                     <button class="hb-profile-action" type="button" data-logout>${icons.user}<span>Sign out</span></button>
                 </div>
             </details>`;
-    }
-
-    function kioskVoiceToggleMarkup() {
-        const requested = state.kioskVoiceEnabled;
-        const ready = kioskVoiceReady();
-        const needsOpenAiAudio = requested && profileTtsProvider() === 'openai' && !kioskAudioUnlocked;
-        const label = needsOpenAiAudio
-            ? 'Enable Bean voice audio'
-            : ready
-                ? 'Turn off kiosk voice'
-                : 'Turn on kiosk voice';
-        return `<button class="hb-icon-button hb-kiosk-toggle ${ready ? 'hb-icon-button-active' : ''}" type="button" data-toggle-kiosk-voice aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}" aria-pressed="${ready}">${icons.mic}</button>`;
     }
 
     function todayTasksMarkup() {
@@ -4613,6 +4612,11 @@ if (mount) {
             if (unlocked && (!kioskRecognition && !kioskRecognitionActive)) {
                 startKioskVoiceMode({ requestPermission: true });
             }
+            return;
+        }
+        if (state.kioskVoiceEnabled && !kioskVoiceReady()) {
+            await startKioskVoiceMode({ requestPermission: true });
+            render();
             return;
         }
         state.kioskVoiceEnabled = !state.kioskVoiceEnabled;
