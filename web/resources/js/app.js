@@ -1106,7 +1106,7 @@ if (mount) {
     }
 
     function kioskVoicePillMarkup() {
-        if (!state.kioskVoiceEnabled) {
+        if (!kioskVoiceReady()) {
             return '<div class="hb-kiosk-voice-pill hb-kiosk-voice-pill-disabled" role="status">Enable microphone to chat</div>';
         }
         if (state.kioskVoicePhase === 'idle') return '';
@@ -1266,9 +1266,15 @@ if (mount) {
     }
 
     function kioskVoiceToggleMarkup() {
-        const enabled = state.kioskVoiceEnabled;
-        const needsOpenAiAudio = enabled && profileTtsProvider() === 'openai' && !kioskAudioUnlocked;
-        return `<button class="hb-icon-button hb-kiosk-toggle ${enabled ? 'hb-icon-button-active' : ''}" type="button" data-toggle-kiosk-voice aria-label="${needsOpenAiAudio ? 'Enable Bean voice audio' : enabled ? 'Turn off kiosk voice' : 'Turn on kiosk voice'}" title="${needsOpenAiAudio ? 'Enable Bean voice audio' : enabled ? 'Kiosk voice on' : 'Kiosk voice off'}" aria-pressed="${enabled}">${icons.mic}</button>`;
+        const requested = state.kioskVoiceEnabled;
+        const ready = kioskVoiceReady();
+        const needsOpenAiAudio = requested && profileTtsProvider() === 'openai' && !kioskAudioUnlocked;
+        const label = needsOpenAiAudio
+            ? 'Enable Bean voice audio'
+            : ready
+                ? 'Turn off kiosk voice'
+                : 'Turn on kiosk voice';
+        return `<button class="hb-icon-button hb-kiosk-toggle ${ready ? 'hb-icon-button-active' : ''}" type="button" data-toggle-kiosk-voice aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}" aria-pressed="${ready}">${icons.mic}</button>`;
     }
 
     function todayTasksMarkup() {
@@ -3719,6 +3725,12 @@ if (mount) {
         } finally {
             stream?.getTracks().forEach((track) => track.stop());
         }
+    }
+
+    function kioskVoiceReady() {
+        return state.kioskVoiceEnabled &&
+            kioskMicrophoneReady &&
+            (profileTtsProvider() !== 'openai' || kioskAudioUnlocked);
     }
 
     async function microphonePermissionState() {
