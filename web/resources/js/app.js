@@ -4062,6 +4062,10 @@ if (mount) {
     function handleRealtimeUserTranscript(payload) {
         const raw = String(payload.transcript || '').trim();
         if (!raw) return;
+        if (realtimeTranscriptLooksSynthetic(raw)) {
+            setKioskVoiceStatus('armed', 'Bean voice ready');
+            return;
+        }
         const command = commandAfterWakePhrase(raw);
         const isWakeTurn = command !== null;
         if (!isWakeTurn && !kioskConversationActive) {
@@ -4095,6 +4099,19 @@ if (mount) {
         armRealtimeToolFallback(content);
         setKioskVoiceStatus('working', 'thinking');
         sendRealtimeResponseCreate();
+    }
+
+    function realtimeTranscriptLooksSynthetic(transcript) {
+        const normalized = String(transcript || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!normalized) return true;
+        if (normalized === 'bean heybean can you hear me calendar tasks reminders') return true;
+        if (normalized === 'hey bean bean heybean can you hear me calendar tasks reminders') return true;
+        if (/^(?:bean\s+)?heybean\s+can you hear me calendar tasks reminders$/.test(normalized)) return true;
+        return false;
     }
 
     function appendRealtimeAssistantDelta(payload) {

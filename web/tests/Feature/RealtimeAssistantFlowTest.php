@@ -60,6 +60,7 @@ class RealtimeAssistantFlowTest extends TestCase
             && $request->hasHeader('Authorization', 'Bearer test-key')
             && data_get($request->data(), 'session.tools.0.name') === 'queue_bean_work'
             && data_get($request->data(), 'session.audio.input.transcription.model') === 'gpt-4o-mini-transcribe'
+            && data_get($request->data(), 'session.audio.input.transcription.prompt') === null
             && data_get($request->data(), 'session.audio.input.turn_detection.type') === 'server_vad'
             && data_get($request->data(), 'session.audio.input.turn_detection.silence_duration_ms') === 350
             && data_get($request->data(), 'session.audio.input.turn_detection.create_response') === false

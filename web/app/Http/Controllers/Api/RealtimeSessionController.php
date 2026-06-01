@@ -379,7 +379,6 @@ PROMPT;
                     'transcription' => [
                         'model' => 'gpt-4o-mini-transcribe',
                         'language' => 'en',
-                        'prompt' => 'Hey Bean, Bean, HeyBean, can you hear me, calendar, tasks, reminders.',
                     ],
                     'turn_detection' => [
                         'type' => 'server_vad',
