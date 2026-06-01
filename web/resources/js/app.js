@@ -37,6 +37,7 @@ if (mount) {
         refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.2 6.5L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.2 5.5L21 8"/><path d="M21 3v5h-5"/></svg>',
         chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
         chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+        history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>',
     };
 
     const state = {
@@ -68,6 +69,8 @@ if (mount) {
         googleAuthUrl: '',
         messages: [],
         session: null,
+        chatSessions: [],
+        chatHistoryOpen: false,
         chatRunState: 'Ready',
         voiceListening: false,
         voiceRecognition: null,
@@ -322,7 +325,8 @@ if (mount) {
             state.blockers = normalizeList(summary?.blockers);
             state.activity = normalizeList(summary?.activity_events);
             state.googleStatus = googleStatus;
-            state.session = summary?.session || null;
+            state.session = null;
+            state.messages = [];
             state.phase = 'signedIn';
             state.error = refreshError ? friendlyError(refreshError, 'refresh your latest data') : '';
             if (needsBeanOnboarding()) {
@@ -333,9 +337,7 @@ if (mount) {
             if (state.selected === 'admin') {
                 loadAdminUsage();
             }
-            if (state.session?.id) {
-                resumeSession(state.session.id);
-            }
+            await loadChatSessions({ resumeToday: true });
             startDashboardChangeFeed();
             startKioskVoiceMode({ requestPermission: false });
             saveDashboardCache();
@@ -1043,14 +1045,18 @@ if (mount) {
             { id: 'intro', role: 'assistant', content: needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey, I’m Bean. Tell me what you need planned, captured, moved, or remembered.' },
         ];
         const expandLabel = state.chatExpanded ? 'Close' : 'Expand';
+        const title = currentChatTitle();
         return `
             <section class="hb-chat">
                 <div class="hb-chat-top">
                     <span class="hb-run-pill ${working ? 'hb-run-pill-working' : ''}">${escapeHtml(state.chatRunState)}</span>
+                    <strong class="hb-chat-session-title">${escapeHtml(title)}</strong>
                     <span class="hb-spacer"></span>
+                    <button class="hb-button-ghost hb-chat-history-toggle ${state.chatHistoryOpen ? 'hb-chat-history-toggle-active' : ''}" type="button" data-toggle-chat-history aria-expanded="${state.chatHistoryOpen ? 'true' : 'false'}">${icons.history}<span>History</span></button>
                     ${options.expandable ? `<button class="hb-button-secondary hb-chat-expand-action" type="button" data-toggle-chat-expand aria-label="${escapeAttr(expandLabel)}">${escapeHtml(expandLabel)}</button>` : ''}
-                    <button class="hb-button-ghost" type="button" data-new-session>${icons.add} /new</button>
+                    <button class="hb-button-ghost hb-chat-new-session" type="button" data-new-session ${state.busy ? 'disabled' : ''}>${icons.add}<span>New</span></button>
                 </div>
+                ${state.chatHistoryOpen ? chatHistoryMarkup() : ''}
                 <div class="hb-chat-messages" id="hb-chat-messages">
                     ${onboardingInterviewIntroMarkup()}
                     ${messages.map((message, index) => messageMarkup(message, index, messages)).join('')}
@@ -1065,6 +1071,31 @@ if (mount) {
                     <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-voice-button" type="button" ${state.busy ? 'data-cancel-turn' : 'data-voice-hold'} aria-label="${state.busy ? 'Stop Bean' : 'Hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
                 </form>
             </section>`;
+    }
+
+    function chatHistoryMarkup() {
+        const sessions = normalizeList(state.chatSessions);
+        return `
+            <div class="hb-chat-history" aria-label="Previous Bean conversations">
+                ${sessions.length
+                    ? sessions.map((session) => chatHistoryItemMarkup(session)).join('')
+                    : '<div class="hb-chat-history-empty">No previous conversations yet.</div>'}
+            </div>`;
+    }
+
+    function chatHistoryItemMarkup(session) {
+        const active = String(session.id || '') === String(state.session?.id || '');
+        const latest = session.latest_message || session.latestMessage || null;
+        const preview = latest?.content || 'No messages yet';
+        const count = Number(session.messages_count || session.messagesCount || 0);
+        return `
+            <button class="hb-chat-history-item ${active ? 'hb-chat-history-item-active' : ''}" type="button" data-resume-session="${escapeAttr(session.id)}" ${active || state.busy ? 'disabled' : ''}>
+                <span>
+                    <strong>${escapeHtml(chatSessionTitle(session))}</strong>
+                    <small>${escapeHtml(chatSessionMeta(session, count))}</small>
+                </span>
+                <em>${escapeHtml(preview)}</em>
+            </button>`;
     }
 
     function onboardingInterviewIntroMarkup() {
@@ -2374,6 +2405,11 @@ if (mount) {
         });
         mount.querySelectorAll('[data-cancel-turn]').forEach((button) => button.addEventListener('click', cancelBeanTurn));
         bindTimelineHorizontalScroll();
+        mount.querySelector('[data-toggle-chat-history]')?.addEventListener('click', () => {
+            state.chatHistoryOpen = !state.chatHistoryOpen;
+            render();
+        });
+        mount.querySelectorAll('[data-resume-session]').forEach((button) => button.addEventListener('click', () => resumeSession(button.dataset.resumeSession)));
         mount.querySelectorAll('[data-new-session]').forEach((button) => button.addEventListener('click', newSession));
         scrollTimelineToSelected();
         scrollChatToBottom();
@@ -3310,7 +3346,7 @@ if (mount) {
                 const onboarding = needsBeanOnboarding();
                 state.session = await api('/assistant/sessions', {
                     method: 'POST',
-                    body: { title: onboarding ? 'Welcome to Bean' : 'Workspace chat', runtime_mode: onboarding ? 'onboarding' : 'chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },
+                    body: chatSessionPayload(onboarding),
                 });
             }
             const metadata = {
@@ -3350,6 +3386,7 @@ if (mount) {
             if (wasOnboarding && !needsBeanOnboarding()) {
                 state.onboardingJustCompleted = true;
             }
+            loadChatSessions({ resumeToday: false, shouldRender: false }).then(() => render()).catch(() => {});
         } catch (error) {
             if (!cancelledChatRequestIds.has(requestId)) {
                 assistantContent = friendlyError(error, 'send that message');
@@ -4525,15 +4562,18 @@ if (mount) {
     }
 
     async function newSession() {
+        if (state.busy) return;
         try {
             const onboarding = needsBeanOnboarding();
             state.onboardingJustCompleted = false;
+            state.chatHistoryOpen = false;
             state.session = await api('/assistant/sessions', {
                 method: 'POST',
-                body: { title: onboarding ? 'Welcome to Bean' : 'Workspace chat', runtime_mode: onboarding ? 'onboarding' : 'chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },
+                body: chatSessionPayload(onboarding),
             });
             state.messages = [];
             state.chatRunState = 'Ready';
+            await loadChatSessions({ resumeToday: false, shouldRender: false });
             render();
         } catch (error) {
             state.error = friendlyError(error, 'start a new chat');
@@ -4541,13 +4581,50 @@ if (mount) {
         }
     }
 
-    async function resumeSession(id) {
+    function chatSessionPayload(onboarding = needsBeanOnboarding()) {
+        const today = dateOnly(new Date());
+        return {
+            title: onboarding ? 'Welcome to Bean' : `${monthDayLabel(today)} with Bean`,
+            runtime_mode: onboarding ? 'onboarding' : 'chat',
+            workspace_id: currentWorkspaceId() || null,
+            metadata: { daily_date: today, source: 'web_chat' },
+        };
+    }
+
+    async function loadChatSessions(options = {}) {
+        if (!state.token || state.phase !== 'signedIn') return;
+        const params = new URLSearchParams({
+            date: dateOnly(new Date()),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            limit: '30',
+        });
+        const workspaceId = currentWorkspaceId();
+        if (workspaceId) params.set('workspace_id', workspaceId);
+
+        const result = await api(`/assistant/sessions?${params.toString()}`);
+        state.chatSessions = normalizeList(result.sessions);
+
+        if (options.resumeToday && !state.busy) {
+            const todaySession = result.today_session || result.todaySession || null;
+            if (todaySession?.id) {
+                await resumeSession(todaySession.id, { keepHistoryOpen: true });
+            }
+        }
+
+        if (options.shouldRender !== false) render();
+    }
+
+    async function resumeSession(id, options = {}) {
+        if (state.busy) return;
         try {
             const session = await api(`/assistant/sessions/${id}`);
             state.session = session.session || session;
             state.messages = normalizeList(session.messages);
+            state.chatRunState = 'Ready';
             state.activity = normalizeList(session.activity_events || session.events).length ? normalizeList(session.activity_events || session.events) : state.activity;
+            if (!options.keepHistoryOpen) state.chatHistoryOpen = false;
             render();
+            scrollChatToBottom();
         } catch (_) {
             // A missing old session should not block the rest of the app.
         }
@@ -5515,6 +5592,32 @@ if (mount) {
     function formatDateTime(value) {
         if (!value) return '';
         return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+
+    function currentChatTitle() {
+        return state.session ? chatSessionTitle(state.session) : 'Today with Bean';
+    }
+
+    function chatSessionTitle(session) {
+        const title = String(session?.title || '').trim();
+        if (title && title !== 'Workspace chat') return title;
+        const created = session?.created_at || session?.createdAt || session?.last_activity_at || session?.lastActivityAt;
+        if (!created) return 'Today with Bean';
+        const date = new Date(created);
+        if (sameDate(date, new Date())) return 'Today with Bean';
+        return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} with Bean`;
+    }
+
+    function chatSessionMeta(session, messageCount = 0) {
+        const value = session?.last_activity_at || session?.lastActivityAt || session?.updated_at || session?.updatedAt || session?.created_at || session?.createdAt;
+        const date = value ? new Date(value) : null;
+        const when = date
+            ? sameDate(date, new Date())
+                ? `Today ${date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+                : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+            : 'No activity';
+        const count = Number(messageCount || 0);
+        return `${when} · ${count} ${count === 1 ? 'message' : 'messages'}`;
     }
 
     function formatCurrency(value) {

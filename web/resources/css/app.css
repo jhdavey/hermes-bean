@@ -2105,7 +2105,7 @@
     min-height: 0;
     margin: 0 auto;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
     gap: 8px;
 }
 
@@ -2119,8 +2119,117 @@
     gap: 8px;
 }
 
+.hb-chat-session-title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--hb-ink);
+    font-size: 14px;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .hb-chat-expand-action {
     white-space: nowrap;
+}
+
+.hb-chat-history-toggle,
+.hb-chat-new-session {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.hb-chat-history-toggle svg,
+.hb-chat-new-session svg {
+    width: 16px;
+    height: 16px;
+}
+
+.hb-chat-history-toggle-active {
+    border-color: rgba(21, 128, 61, .22);
+    background: rgba(22, 163, 74, .10);
+    color: var(--hb-accent-strong);
+}
+
+.hb-chat-history {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 8px;
+    scrollbar-width: thin;
+}
+
+.hb-chat-history-item {
+    width: min(260px, 78vw);
+    min-width: min(260px, 78vw);
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+    background: var(--hb-surface);
+    color: var(--hb-ink);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.hb-chat-history-item:hover {
+    border-color: rgba(21, 128, 61, .30);
+    background: rgba(240, 253, 244, .70);
+    transform: translateY(-1px);
+}
+
+.hb-chat-history-item:disabled {
+    cursor: default;
+    transform: none;
+}
+
+.hb-chat-history-item-active {
+    border-color: rgba(21, 128, 61, .34);
+    background: rgba(240, 253, 244, .86);
+}
+
+.hb-chat-history-item span {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+
+.hb-chat-history-item strong,
+.hb-chat-history-item small,
+.hb-chat-history-item em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-chat-history-item strong {
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.hb-chat-history-item small {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 750;
+}
+
+.hb-chat-history-item em {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-style: normal;
+}
+
+.hb-chat-history-empty {
+    padding: 10px 12px;
+    border: 1px dashed var(--hb-border);
+    border-radius: 14px;
+    color: var(--hb-muted);
+    font-size: 13px;
+    font-weight: 750;
 }
 
 .hb-run-pill {

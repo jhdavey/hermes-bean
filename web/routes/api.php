@@ -43,6 +43,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/workspaces/{source}/sync-all', [WorkspaceController::class, 'syncAll']);
         Route::patch('/workspaces/{workspace}/google-calendars', [WorkspaceController::class, 'calendars']);
 
+        Route::get('/assistant/sessions', [ConversationSessionController::class, 'index']);
         Route::post('/assistant/sessions', [ConversationSessionController::class, 'store']);
         Route::get('/assistant/sessions/{session}', [ConversationSessionController::class, 'show']);
         Route::post('/assistant/sessions/{session}/cancel', [ConversationSessionController::class, 'cancel']);

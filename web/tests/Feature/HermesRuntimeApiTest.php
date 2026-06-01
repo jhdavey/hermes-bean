@@ -3,12 +3,14 @@
 namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
+use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -75,6 +77,53 @@ class HermesRuntimeApiTest extends TestCase
             'runtime.tool_model_completed',
             'runtime.message_completed',
         ], collect($events)->pluck('event_type')->all());
+    }
+
+    public function test_runtime_lists_previous_sessions_and_returns_today_session(): void
+    {
+        $token = $this->apiToken('history@example.com');
+        $user = User::where('email', 'history@example.com')->firstOrFail();
+        $workspaceId = $user->default_workspace_id;
+
+        $oldSession = ConversationSession::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Yesterday with Bean',
+            'status' => 'active',
+            'runtime_mode' => 'chat',
+            'last_activity_at' => now()->subDay(),
+        ]);
+        DB::table('conversation_sessions')->where('id', $oldSession->id)->update([
+            'created_at' => now()->subDay(),
+            'updated_at' => now()->subDay(),
+        ]);
+        $oldSession->refresh();
+
+        $todaySession = ConversationSession::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Today with Bean',
+            'status' => 'active',
+            'runtime_mode' => 'chat',
+            'last_activity_at' => now(),
+        ]);
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $todaySession->id,
+            'role' => 'assistant',
+            'content' => 'Latest today message.',
+        ]);
+
+        $this->withToken($token)->getJson("/api/assistant/sessions?workspace_id={$workspaceId}&date=2026-05-13&timezone=America/New_York")
+            ->assertOk()
+            ->assertJsonPath('data.today_session.id', $todaySession->id)
+            ->assertJsonPath('data.sessions.0.id', $todaySession->id)
+            ->assertJsonPath('data.sessions.0.latest_message.content', 'Latest today message.')
+            ->assertJsonPath('data.sessions.0.messages_count', 1)
+            ->assertJsonPath('data.sessions.1.id', $oldSession->id);
     }
 
     public function test_runtime_persists_tool_created_events_tasks_and_reminders_to_domain_tables(): void
