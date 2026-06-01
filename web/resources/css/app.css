@@ -2969,10 +2969,6 @@
         max-width: min(244px, 22vw);
     }
 
-    .hb-topbar:has(.hb-topbar-month-cluster) .hb-month-pill {
-        display: none;
-    }
-
     .hb-top-workspace-switcher-mobile {
         display: none;
     }
