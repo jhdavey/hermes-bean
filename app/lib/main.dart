@@ -882,7 +882,29 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           onTranscript: (role, text) {
             if (!mounted || text.trim().isEmpty) return;
             setState(() {
-              _beanVoiceDraft = role == 'user' ? text.trim() : _beanVoiceDraft;
+              final trimmed = text.trim();
+              if (role == 'user') {
+                _beanVoiceDraft = _beanVoiceListening
+                    ? trimmed
+                    : _beanVoiceDraft;
+                return;
+              }
+              final alreadyDisplayed = _messages.any(
+                (message) =>
+                    message.role != 'user' &&
+                    message.content?.trim() == trimmed &&
+                    message.metadata['realtime'] == true,
+              );
+              if (alreadyDisplayed) return;
+              _messages.add(
+                HermesMessage(
+                  id: _messages.length + 1,
+                  role: 'assistant',
+                  content: trimmed,
+                  metadata: const {'realtime': true},
+                ),
+              );
+              _chatRunState = 'Ready';
             });
           },
           onRunQueued: (runId) {
@@ -1448,6 +1470,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final realtimeSession = await _realtimeConversation.start(
         workspaceId: _user?.activeWorkspace?.numericId,
         metadata: _flutterChatMetadata(),
+        microphoneEnabled: true,
       );
       if (!mounted || !_beanVoiceListening) return;
       _realtimeConversation.setMicrophoneEnabled(true);
@@ -1525,7 +1548,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _sendChat(String content) async {
     final trimmed = content.trim();
-    final session = _session;
+    var session = _session;
     if (trimmed.isEmpty || session == null) return;
     final runToken = ++_chatRunToken;
     setState(() {
@@ -1536,6 +1559,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
     });
     try {
+      final sentRealtime = await _trySendRealtimeText(trimmed);
+      if (!mounted || runToken != _chatRunToken) return;
+      if (sentRealtime) {
+        setState(() {
+          _busy = false;
+          _chatRunState = 'Bean is responding...';
+        });
+        return;
+      }
+      session = _session ?? session;
       final result = await widget.apiClient.queueMessage(
         sessionId: session.id,
         content: trimmed,
@@ -1637,6 +1670,28 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
+    }
+  }
+
+  Future<bool> _trySendRealtimeText(String trimmed) async {
+    try {
+      if (!_realtimeConversation.active) {
+        final realtimeSession = await _realtimeConversation.start(
+          workspaceId: _user?.activeWorkspace?.numericId,
+          metadata: _flutterChatMetadata(),
+          microphoneEnabled: false,
+        );
+        if (!mounted) return false;
+        _realtimeConversation.setMicrophoneEnabled(false);
+        setState(() => _session = realtimeSession);
+      }
+      await _realtimeConversation.sendText(
+        trimmed,
+        audioResponse: _beanVoiceListening,
+      );
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

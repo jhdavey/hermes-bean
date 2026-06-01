@@ -1272,6 +1272,59 @@ void main() {
     expect(realtime.microphoneEnabled, isFalse);
   });
 
+  testWidgets('typed Bean chat uses realtime text when available', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FakeBeanRealtimeConversation(api);
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('chat-input')), 'Plan today');
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle();
+
+    expect(realtime.started, isTrue);
+    expect(realtime.startMicrophoneValues, [false]);
+    expect(realtime.microphoneEnabled, isFalse);
+    expect(realtime.sentTexts, ['Plan today']);
+    expect(api.sentMessages, isEmpty);
+    expect(find.text('Plan today'), findsOneWidget);
+  });
+
+  testWidgets('typed Bean chat falls back to queued work if realtime fails', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FailingBeanRealtimeConversation(api);
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('chat-input')), 'Plan today');
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle();
+
+    expect(realtime.started, isTrue);
+    expect(api.sentMessages, ['Plan today']);
+    expect(find.text('Done — I updated your day.'), findsOneWidget);
+  });
+
   testWidgets('chat stop cancels an in-flight Bean request', (
     WidgetTester tester,
   ) async {
@@ -5203,35 +5256,29 @@ class _FakeHermesApiClient extends HermesApiClient {
 
   @override
   Future<List<HermesReminder>> listReminders() async {
+    final now = DateTime.now();
     if (plannedToday) {
       return [
         HermesReminder(
           id: 20,
           title: 'Stretch and hydrate',
-          dueAt: DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
+          dueAt: now.add(const Duration(hours: 1)).toIso8601String(),
           category: 'Health',
           color: '#34C759',
         ),
       ];
     }
+    final dueAt = showDueReminderBanner
+        ? now.subtract(const Duration(hours: 1))
+        : now
+              .subtract(const Duration(days: 1))
+              .copyWith(hour: 9, minute: 0, second: 0, millisecond: 0);
     return [
       HermesReminder(
         id: 2,
         title: 'Stand up',
         isCritical: true,
-        dueAt: DateTime.now()
-            .subtract(
-              showDueReminderBanner
-                  ? const Duration(hours: 1)
-                  : const Duration(days: 1),
-            )
-            .copyWith(
-              hour: showDueReminderBanner ? DateTime.now().hour : 9,
-              minute: 0,
-              second: 0,
-              millisecond: 0,
-            )
-            .toIso8601String(),
+        dueAt: dueAt.toIso8601String(),
         status: bannerUpdatedReminder?.status ?? 'pending',
       ),
     ];
@@ -6837,15 +6884,24 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   bool started = false;
   bool stopped = false;
   bool microphoneEnabled = false;
+  final startMicrophoneValues = <bool>[];
+  final sentTexts = <String>[];
 
   @override
   Future<HermesSession> start({
     int? workspaceId,
     Map<String, Object?> metadata = const {},
+    bool microphoneEnabled = true,
   }) async {
     started = true;
-    microphoneEnabled = true;
+    startMicrophoneValues.add(microphoneEnabled);
+    this.microphoneEnabled = microphoneEnabled;
     return const HermesSession(id: 42, status: 'active', title: 'Realtime');
+  }
+
+  @override
+  Future<void> sendText(String text, {bool audioResponse = false}) async {
+    sentTexts.add(text);
   }
 
   @override
@@ -6857,6 +6913,21 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   Future<void> stop() async {
     stopped = true;
     microphoneEnabled = false;
+  }
+}
+
+class _FailingBeanRealtimeConversation extends _FakeBeanRealtimeConversation {
+  _FailingBeanRealtimeConversation(super.apiClient);
+
+  @override
+  Future<HermesSession> start({
+    int? workspaceId,
+    Map<String, Object?> metadata = const {},
+    bool microphoneEnabled = true,
+  }) async {
+    started = true;
+    startMicrophoneValues.add(microphoneEnabled);
+    throw StateError('Realtime unavailable');
   }
 }
 

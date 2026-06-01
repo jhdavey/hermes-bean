@@ -25,6 +25,7 @@ class BeanRealtimeConversation {
 
   RTCPeerConnection? _peerConnection;
   RTCDataChannel? _dataChannel;
+  Completer<void>? _dataChannelOpen;
   MediaStream? _localStream;
   HermesRealtimeSession? _session;
   bool _active = false;
@@ -35,9 +36,17 @@ class BeanRealtimeConversation {
   Future<HermesSession> start({
     int? workspaceId,
     Map<String, Object?> metadata = const {},
+    bool microphoneEnabled = true,
   }) async {
-    if (_active && _session != null) return _session!.session;
-    onStatus?.call('Starting realtime voice...');
+    if (_active && _session != null) {
+      if (!microphoneEnabled || _localStreamHasAudioTrack) {
+        return _session!.session;
+      }
+      await stop();
+    }
+    onStatus?.call(
+      microphoneEnabled ? 'Starting realtime voice...' : 'Starting realtime...',
+    );
 
     final realtimeSession = await apiClient.startRealtimeSession(
       title: 'Realtime chat',
@@ -50,22 +59,26 @@ class BeanRealtimeConversation {
     }
     _session = realtimeSession;
 
-    final stream = await navigator.mediaDevices.getUserMedia({
-      'audio': true,
-      'video': false,
-    });
-    _localStream = stream;
-
     final pc = await createPeerConnection({
       'sdpSemantics': 'unified-plan',
       'iceServers': const <Map<String, Object>>[],
     });
     _peerConnection = pc;
 
-    for (final track in stream.getAudioTracks()) {
-      await pc.addTrack(track, stream);
+    if (microphoneEnabled) {
+      final stream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': false,
+      });
+      _localStream = stream;
+
+      for (final track in stream.getAudioTracks()) {
+        track.enabled = true;
+        await pc.addTrack(track, stream);
+      }
     }
 
+    _dataChannelOpen = Completer<void>();
     final channel = await pc.createDataChannel(
       'oai-events',
       RTCDataChannelInit()..ordered = true,
@@ -74,6 +87,9 @@ class BeanRealtimeConversation {
     channel.onMessage = _handleDataChannelMessage;
     channel.onDataChannelState = (state) {
       if (state == RTCDataChannelState.RTCDataChannelOpen) {
+        if (!(_dataChannelOpen?.isCompleted ?? true)) {
+          _dataChannelOpen?.complete();
+        }
         onStatus?.call('Listening');
       }
     };
@@ -93,17 +109,24 @@ class BeanRealtimeConversation {
       offerSdp: offer.sdp ?? '',
     );
     await pc.setRemoteDescription(RTCSessionDescription(answer, 'answer'));
+    if (channel.state == RTCDataChannelState.RTCDataChannelOpen &&
+        !(_dataChannelOpen?.isCompleted ?? true)) {
+      _dataChannelOpen?.complete();
+    }
 
     _active = true;
-    onStatus?.call('Listening');
+    onStatus?.call(microphoneEnabled ? 'Listening' : 'Ready');
     return realtimeSession.session;
   }
 
-  Future<void> sendText(String text) async {
+  Future<void> sendText(String text, {bool audioResponse = false}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final channel = _dataChannel;
-    if (channel == null) return;
+    if (channel == null) {
+      throw StateError('Realtime data channel is not connected.');
+    }
+    await _waitForDataChannelOpen(channel);
 
     channel.send(
       RTCDataChannelMessage(
@@ -120,7 +143,14 @@ class BeanRealtimeConversation {
       ),
     );
     channel.send(
-      RTCDataChannelMessage(jsonEncode({'type': 'response.create'})),
+      RTCDataChannelMessage(
+        jsonEncode({
+          'type': 'response.create',
+          'response': {
+            'modalities': audioResponse ? ['text', 'audio'] : ['text'],
+          },
+        }),
+      ),
     );
   }
 
@@ -144,9 +174,27 @@ class BeanRealtimeConversation {
     await _peerConnection?.close();
     _localStream?.getTracks().forEach((track) => track.stop());
     _dataChannel = null;
+    _dataChannelOpen = null;
     _peerConnection = null;
     _localStream = null;
     onStatus?.call('Ready');
+  }
+
+  bool get _localStreamHasAudioTrack =>
+      (_localStream?.getAudioTracks() ?? const <MediaStreamTrack>[]).isNotEmpty;
+
+  Future<void> _waitForDataChannelOpen(RTCDataChannel channel) async {
+    if (channel.state == RTCDataChannelState.RTCDataChannelOpen) return;
+    final open = _dataChannelOpen;
+    if (open == null) {
+      throw StateError('Realtime data channel is not ready.');
+    }
+    await open.future.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () {
+        throw TimeoutException('Realtime data channel did not open.');
+      },
+    );
   }
 
   Future<String> _createOpenAiWebRtcCall({
@@ -189,9 +237,9 @@ class BeanRealtimeConversation {
     if (decoded is! Map<String, Object?>) return;
     final type = decoded['type']?.toString() ?? '';
 
-    final transcript = _transcriptText(decoded);
+    final transcript = _transcriptText(type, decoded);
     if (transcript != null && transcript.isNotEmpty) {
-      final role = type.contains('input') ? 'user' : 'assistant';
+      final role = _transcriptRole(type, decoded);
       onTranscript?.call(role, transcript);
     }
 
@@ -204,10 +252,28 @@ class BeanRealtimeConversation {
     }
   }
 
-  String? _transcriptText(Map<String, Object?> event) {
-    for (final key in const ['transcript', 'delta', 'text']) {
+  String _transcriptRole(String type, Map<String, Object?> event) {
+    if (type.contains('input')) return 'user';
+    final item = event['item'];
+    if (item is Map && item['role'] != null) return item['role'].toString();
+    return 'assistant';
+  }
+
+  String? _transcriptText(String type, Map<String, Object?> event) {
+    if (type.endsWith('.delta')) return null;
+    for (final key in const ['transcript', 'text']) {
       final value = event[key];
       if (value is String && value.trim().isNotEmpty) return value.trim();
+    }
+    final item = event['item'];
+    if (item is Map && item['content'] is List) {
+      final parts = <String>[];
+      for (final content in item['content'] as List) {
+        if (content is! Map) continue;
+        final text = content['text'] ?? content['transcript'];
+        if (text is String && text.trim().isNotEmpty) parts.add(text.trim());
+      }
+      if (parts.isNotEmpty) return parts.join('\n');
     }
     return null;
   }
