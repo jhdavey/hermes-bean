@@ -1357,14 +1357,14 @@ if (mount) {
         if (userIsAdmin()) nav.push(['admin', 'Admin', icons.activity]);
         return `
             <nav class="hb-top-nav" aria-label="App navigation">
-                ${nav.slice(0, 3).map(navButton).join('')}
+                ${nav.slice(0, 3).map((item) => navButton(item, { iconOnly: true })).join('')}
                 ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')}
-                ${nav.slice(3).map(navButton).join('')}
+                ${nav.slice(3).map((item) => navButton(item, { iconOnly: true })).join('')}
             </nav>`;
     }
 
-    function navButton([key, label, icon]) {
-        return `<button class="hb-nav-item ${state.selected === key ? 'hb-nav-item-active' : ''}" type="button" data-nav="${key}" aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}">${icon}<span>${label}</span></button>`;
+    function navButton([key, label, icon], options = {}) {
+        return `<button class="hb-nav-item ${state.selected === key ? 'hb-nav-item-active' : ''}" type="button" data-nav="${key}" aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}">${icon}${options.iconOnly ? '' : `<span>${label}</span>`}</button>`;
     }
 
     function criticalMenuMarkup(tasks, reminders, events) {

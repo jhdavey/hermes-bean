@@ -2985,7 +2985,7 @@
     }
 
     .hb-top-nav .hb-nav-item {
-        min-width: 92px;
+        min-width: 42px;
         min-height: 38px;
         display: inline-flex;
         flex: 0 0 auto;
@@ -2994,7 +2994,7 @@
         gap: 7px;
         border: 1px solid transparent;
         border-radius: 999px;
-        padding: 8px 12px;
+        padding: 8px 10px;
     }
 
     .hb-top-nav .hb-top-workspace-switcher {
@@ -3012,10 +3012,6 @@
     .hb-top-nav .hb-nav-item-active {
         border-color: rgba(22, 163, 74, .22);
         background: rgba(22, 163, 74, .10);
-    }
-
-    .hb-top-nav .hb-nav-item span {
-        font-size: 12px;
     }
 
     .hb-top-nav .hb-nav-item svg {
@@ -3234,15 +3230,6 @@
         max-width: min(440px, 46vw);
     }
 
-    .hb-top-nav .hb-nav-item {
-        min-width: 42px;
-        padding-left: 10px;
-        padding-right: 10px;
-    }
-
-    .hb-top-nav .hb-nav-item span {
-        display: none;
-    }
 }
 
 @media (min-width: 720px) {
