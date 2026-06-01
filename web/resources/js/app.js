@@ -4019,11 +4019,15 @@ if (mount) {
         }
         const type = payload?.type || '';
         if (type === 'input_audio_buffer.speech_started') {
-            setKioskVoiceStatus('listening', 'listening');
+            if (kioskConversationActive) {
+                setKioskVoiceStatus('listening', 'listening');
+            }
             return;
         }
         if (type === 'input_audio_buffer.speech_stopped') {
-            setKioskVoiceStatus('working', 'thinking');
+            if (kioskConversationActive) {
+                setKioskVoiceStatus('working', 'thinking');
+            }
             return;
         }
         if (type === 'conversation.item.input_audio_transcription.completed') {
@@ -4059,8 +4063,24 @@ if (mount) {
         const raw = String(payload.transcript || '').trim();
         if (!raw) return;
         const command = commandAfterWakePhrase(raw);
-        const content = (command === null ? raw : command).trim();
-        if (!content) return;
+        const isWakeTurn = command !== null;
+        if (!isWakeTurn && !kioskConversationActive) {
+            setKioskVoiceStatus('armed', 'Bean voice ready');
+            return;
+        }
+        if (conversationEndRequested(raw)) {
+            endKioskConversation('done');
+            return;
+        }
+        if (isWakeTurn) {
+            beginKioskConversation();
+        }
+        const content = (isWakeTurn ? command : raw).trim();
+        if (!content) {
+            setKioskVoiceStatus('listening', 'listening');
+            armKioskConversationTimeout();
+            return;
+        }
         kioskRealtimePendingUser = {
             itemId: payload.item_id || `rt-user-${Date.now()}`,
             content,
@@ -4073,6 +4093,8 @@ if (mount) {
             metadata: { local_realtime_turn: true },
         });
         armRealtimeToolFallback(content);
+        setKioskVoiceStatus('working', 'thinking');
+        sendRealtimeResponseCreate();
     }
 
     function appendRealtimeAssistantDelta(payload) {
@@ -4133,7 +4155,12 @@ if (mount) {
             kioskRealtimePendingUser = null;
         }
         if (state.kioskVoiceEnabled && kioskRealtimeConnected()) {
-            setKioskVoiceStatus('armed', 'Bean voice ready');
+            if (kioskConversationActive) {
+                setKioskVoiceStatus('listening', 'listening');
+                armKioskConversationTimeout();
+            } else {
+                setKioskVoiceStatus('armed', 'Bean voice ready');
+            }
         }
     }
 
@@ -4237,7 +4264,14 @@ if (mount) {
                 output: JSON.stringify(result),
             },
         }));
-        dataChannel.send(JSON.stringify({ type: 'response.create' }));
+        sendRealtimeResponseCreate();
+    }
+
+    function sendRealtimeResponseCreate(options = {}) {
+        const dataChannel = kioskRealtime?.dataChannel;
+        if (dataChannel?.readyState !== 'open') return false;
+        dataChannel.send(JSON.stringify({ type: 'response.create', ...options }));
+        return true;
     }
 
     function watchRealtimeAssistantRun(runId, attempt = 0) {
@@ -4323,7 +4357,7 @@ if (mount) {
                 }],
             },
         }));
-        dataChannel.send(JSON.stringify({ type: 'response.create' }));
+        sendRealtimeResponseCreate();
     }
 
     async function persistRealtimeConversationTurn() {

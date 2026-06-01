@@ -386,7 +386,7 @@ PROMPT;
                         'threshold' => 0.45,
                         'prefix_padding_ms' => 250,
                         'silence_duration_ms' => 350,
-                        'create_response' => true,
+                        'create_response' => false,
                         'interrupt_response' => true,
                     ],
                 ],
