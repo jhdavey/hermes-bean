@@ -167,14 +167,14 @@ class RealtimeSessionController extends Controller
         $requestedVoice = (string) ($data['voice'] ?? data_get($profile->settings ?? [], 'tts.openai_voice', config('services.hermes_realtime.voice', 'marin')));
         $voice = $this->realtimeVoice($requestedVoice);
         $sessionConfig = $this->realtimeSessionConfig($localSession, $user->id, $workspace->id, $voice);
+        $sdp = trim((string) $data['sdp']);
+        $sessionJson = json_encode($sessionConfig, JSON_UNESCAPED_SLASHES);
 
         $response = Http::withToken($apiKey)
-            ->asMultipart()
+            ->attach('sdp', $sdp)
+            ->attach('session', $sessionJson)
             ->timeout(20)
-            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/realtime/calls', [
-                ['name' => 'sdp', 'contents' => $data['sdp']],
-                ['name' => 'session', 'contents' => json_encode($sessionConfig, JSON_UNESCAPED_SLASHES)],
-            ]);
+            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/realtime/calls');
 
         if (! $response->successful()) {
             $upstreamStatus = $response->status();
@@ -190,6 +190,8 @@ class RealtimeSessionController extends Controller
                 'voice' => $voice,
                 'requested_voice' => $requestedVoice,
                 'key_source' => 'OPENAI_PUBLIC_KEY',
+                'sdp_length' => strlen($sdp),
+                'session_length' => strlen((string) $sessionJson),
                 'status' => $upstreamStatus,
                 'body' => str($response->body())->limit(500)->toString(),
             ]);
