@@ -1555,7 +1555,7 @@ if (mount) {
 
     function monthMultiDayEventMarkup(event, day) {
         const color = safeColor(event.color);
-        const time = multiDayEventDayTime(event, day);
+        const time = multiDayEventDayTime(event, day, { showEndTime: false });
         return `
             <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 ${time ? `<span class="hb-month-event-time">${escapeHtml(time)}</span>` : ''}
@@ -4898,10 +4898,12 @@ if (mount) {
         return dateOnly(start) !== dateOnly(end);
     }
 
-    function multiDayEventDayTime(event, day) {
+    function multiDayEventDayTime(event, day, options = {}) {
         const dayValue = dateOnly(day);
         if (dateOnly(event.starts_at || event.startsAt) === dayValue) return eventStartTime(event);
-        if (dateOnly(event.ends_at || event.endsAt) === dayValue) return eventEndTime(event);
+        if (dateOnly(event.ends_at || event.endsAt) === dayValue) {
+            return options.showEndTime === false ? '' : eventEndTime(event);
+        }
         return '';
     }
 
