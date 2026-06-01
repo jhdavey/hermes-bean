@@ -3330,6 +3330,7 @@ if (mount) {
                 method: 'POST',
                 body: { content, metadata },
             });
+            options.onAgentResult?.(result);
             if (cancelledChatRequestIds.has(requestId)) {
                 state.session = result.session || state.session;
                 state.activity = normalizeList(result.events).length ? result.events : state.activity;
@@ -3988,7 +3989,9 @@ if (mount) {
         const likelyNeedsAgentWork = voiceCommandNeedsAgentWork(content);
         setKioskVoiceStatus('working', 'thinking');
         const quickReplyTask = fetchKioskQuickReply(content, quickReplyGeneration);
-        const quickReply = await timeoutPromise(quickReplyTask, likelyNeedsAgentWork ? 900 : 3600, null);
+        const quickReply = likelyNeedsAgentWork
+            ? await timeoutPromise(quickReplyTask, 900, null)
+            : await quickReplyTask;
         const quickReplyText = quickReply?.text || '';
         let shouldContinueAgent = quickReply ? quickReply.continueAgent !== false : likelyNeedsAgentWork;
         const allowLateQuickReply = !quickReplyText && likelyNeedsAgentWork;
@@ -4041,6 +4044,10 @@ if (mount) {
             const response = await sendChatContent(content, {
                 voiceQuickReply: quickReplyText,
                 voiceQuickReplyPending: !quickReplyText,
+                onAgentResult: () => {
+                    finalResponseReady = true;
+                    bridgeReply.cancel();
+                },
             });
             finalResponseReady = true;
             bridgeReply.cancel();
