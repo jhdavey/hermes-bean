@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
+use App\Models\ConversationMessage;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\WorkspaceService;
@@ -113,6 +114,59 @@ class HermesToolRuntimeServiceTest extends TestCase
                 && data_get($context, 'voice_context.mode') === 'live_voice'
                 && data_get($context, 'voice_context.quick_reply') === 'Got it, a quick easy dinner could be tacos or pasta.'
                 && data_get($context, 'temporal_context.client_context.timezone') === 'America/New_York';
+        });
+    }
+
+    public function test_tool_runtime_sends_recent_conversation_history_for_followups(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-history',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I will check tasks for take out the trash.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-history@example.com');
+        $user = User::where('email', 'tool-history@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'what am I supposed to take out the trash',
+        ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'I do not see a trash reminder.',
+        ]);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'it should be a task not a reminder',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'I will check tasks for take out the trash.');
+
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+            $prompt = (string) data_get($payload, 'messages.0.content');
+
+            return str_contains($prompt, 'recent conversation turns')
+                && data_get($payload, 'messages.2.role') === 'user'
+                && data_get($payload, 'messages.2.content') === 'what am I supposed to take out the trash'
+                && data_get($payload, 'messages.3.role') === 'assistant'
+                && data_get($payload, 'messages.3.content') === 'I do not see a trash reminder.'
+                && data_get($payload, 'messages.4.role') === 'user'
+                && data_get($payload, 'messages.4.content') === 'it should be a task not a reminder';
         });
     }
 

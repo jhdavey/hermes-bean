@@ -138,7 +138,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $messages = [
             ['role' => 'system', 'content' => $this->toolSystemInstructions()],
             ['role' => 'system', 'content' => "Runtime context:\n".json_encode($this->toolContextPayload($session, $userMessage), JSON_THROW_ON_ERROR)],
-            ['role' => 'user', 'content' => $userMessage->content],
+            ...$this->modelConversationMessages($session, $userMessage),
         ];
         $responses = [];
         $domainEvents = collect();
@@ -625,10 +625,39 @@ class HermesToolRuntimeService implements HermesRuntimeService
     {
         return json_encode([
             'runtime_context' => $this->toolContextPayload($session, $message),
+            'conversation' => $this->modelConversationMessages($session, $message),
             'message' => $message->content,
             'message_metadata' => $message->metadata,
             'route' => $modelRoute,
         ], JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * @return array<int, array{role:string, content:string}>
+     */
+    private function modelConversationMessages(ConversationSession $session, ConversationMessage $currentMessage): array
+    {
+        $history = $session->messages()
+            ->where('id', '<', $currentMessage->id)
+            ->whereIn('role', ['user', 'assistant'])
+            ->latest('id')
+            ->limit(12)
+            ->get()
+            ->sortBy('id')
+            ->map(fn (ConversationMessage $message): array => [
+                'role' => $message->role === 'assistant' ? 'assistant' : 'user',
+                'content' => str($message->content)->squish()->limit(4000, '')->toString(),
+            ])
+            ->filter(fn (array $message): bool => $message['content'] !== '')
+            ->values()
+            ->all();
+
+        $history[] = [
+            'role' => 'user',
+            'content' => str($currentMessage->content)->squish()->limit(4000, '')->toString(),
+        ];
+
+        return $history;
     }
 
     private function toolContextPayload(ConversationSession $session, ConversationMessage $message): array
@@ -703,6 +732,9 @@ class HermesToolRuntimeService implements HermesRuntimeService
 You are Bean, a capable human-like assistant inside the Hey Bean app.
 
 You own intent and conversation. Interpret the user's message naturally, including messy wording, typos, shorthand, and voice transcription errors. Decide whether to answer directly, call read tools, call write tools, or ask one concise follow-up.
+
+Use recent conversation turns to resolve follow-ups, corrections, and pronouns. If the user corrects the entity type, such as "task, not reminder", apply that correction to the prior request and search/use the corrected tool type.
+When a user asks what/when/where about an item and the type is ambiguous, search the relevant app records before saying it is not found. For task-like words or chores, search tasks; for reminder-like alarms, search reminders; if unclear, search both.
 
 Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded.
 
