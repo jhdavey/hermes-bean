@@ -147,6 +147,8 @@ if (mount) {
     let kioskRealtimeToolFallbackContent = '';
     let kioskRealtimeReconnectTimer = 0;
     let kioskRealtimeReconnectAttempts = 0;
+    const kioskRealtimeMaxReconnectAttempts = 5;
+    const kioskRealtimeConnectTimeoutMs = 15000;
     const kioskRealtimeProcessedCalls = new Set();
     const kioskRealtimeRunWatchTimers = new Map();
     let chatRequestCounter = 0;
@@ -256,6 +258,20 @@ if (mount) {
         return view === 'admin' ? '/admin' : '/app';
     }
 
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 0) {
+        if (!timeoutMs || !window.AbortController) return fetch(url, options);
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, {
+                ...options,
+                signal: options.signal || controller.signal,
+            });
+        } finally {
+            window.clearTimeout(timer);
+        }
+    }
+
     async function api(path, options = {}) {
         const headers = {
             Accept: 'application/json',
@@ -263,11 +279,11 @@ if (mount) {
             ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
             ...(options.headers || {}),
         };
-        const response = await fetch(`/api${path}`, {
+        const response = await fetchWithTimeout(`/api${path}`, {
             method: options.method || 'GET',
             headers,
             body: options.body ? JSON.stringify(options.body) : undefined,
-        });
+        }, options.timeoutMs || 0);
         if (response.status === 204) return null;
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -2116,7 +2132,7 @@ if (mount) {
         const ttsInstructions = profileTtsInstructions(profile);
         const ttsKeyMask = ttsKeyConfigured ? openAiKeyMask() : '';
         const options = ['balanced', 'coach', 'organizer', 'creative'];
-        const voices = ['coral', 'marin', 'cedar', 'alloy', 'ash', 'ballad', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
+        const voices = ['coral', 'marin', 'cedar', 'alloy', 'ash', 'ballad', 'echo', 'sage', 'shimmer', 'verse'];
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="agent">
@@ -3735,7 +3751,7 @@ if (mount) {
             console.warn('Bean realtime voice issue', payload);
         }
         if (!state.token) return;
-        fetch('/api/assistant/realtime/client-events', {
+        fetchWithTimeout('/api/assistant/realtime/client-events', {
             method: 'POST',
             headers: {
                 Accept: 'application/json',
@@ -3743,7 +3759,7 @@ if (mount) {
                 Authorization: `Bearer ${state.token}`,
             },
             body: JSON.stringify(payload),
-        }).catch(() => {});
+        }, 5000).catch(() => {});
     }
 
     function clearKioskRealtimeReconnect() {
@@ -3754,7 +3770,18 @@ if (mount) {
     function scheduleKioskRealtimeReconnect(reason, details = {}, delay = null) {
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return;
         clearKioskRealtimeReconnect();
-        kioskRealtimeReconnectAttempts += 1;
+        const nextAttempt = kioskRealtimeReconnectAttempts + 1;
+        if (nextAttempt > kioskRealtimeMaxReconnectAttempts) {
+            setKioskVoiceStatus('error', 'Voice unavailable');
+            reportKioskRealtimeIssue('realtime_reconnect_exhausted', {
+                reason,
+                attempt: kioskRealtimeReconnectAttempts,
+                max_attempts: kioskRealtimeMaxReconnectAttempts,
+                ...details,
+            });
+            return;
+        }
+        kioskRealtimeReconnectAttempts = nextAttempt;
         const wait = delay ?? Math.min(1000 * (2 ** Math.min(kioskRealtimeReconnectAttempts - 1, 4)), 15000);
         setKioskVoiceStatus('working', 'Reconnecting');
         reportKioskRealtimeIssue('realtime_reconnect_scheduled', {
@@ -3800,6 +3827,7 @@ if (mount) {
             try {
                 sessionData = await api('/ai/realtime/session', {
                     method: 'POST',
+                    timeoutMs: kioskRealtimeConnectTimeoutMs,
                     body: {
                         title: currentChatTitle(),
                         runtime_mode: 'realtime',
@@ -3843,25 +3871,73 @@ if (mount) {
                 dataChannel,
                 stream,
                 remoteAudio,
+                disconnectTimer: 0,
                 connected: false,
                 sessionId: state.session?.id || sessionData.session?.id || null,
             };
             const reconnectFromFailure = (type, details = {}) => {
                 if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled) return;
+                window.clearTimeout(realtimeState.disconnectTimer);
+                realtimeState.disconnectTimer = 0;
                 reportKioskRealtimeIssue(type, details);
                 stopKioskRealtimeVoiceMode({ preserveStatus: true, preserveReconnect: true });
                 scheduleKioskRealtimeReconnect(type, details);
             };
+            const waitForTransientDisconnect = (type, details = {}) => {
+                if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled || realtimeState.disconnectTimer) return;
+                setKioskVoiceStatus('working', 'Reconnecting');
+                reportKioskRealtimeIssue(`${type}_transient`, details);
+                realtimeState.disconnectTimer = window.setTimeout(() => {
+                    realtimeState.disconnectTimer = 0;
+                    if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled) return;
+                    const connectionState = peerConnection.connectionState || '';
+                    const iceConnectionState = peerConnection.iceConnectionState || '';
+                    if (
+                        ['failed', 'closed', 'disconnected'].includes(connectionState)
+                        || ['failed', 'closed', 'disconnected'].includes(iceConnectionState)
+                        || dataChannel.readyState !== 'open'
+                    ) {
+                        reconnectFromFailure(type, {
+                            ...details,
+                            connection_state: connectionState,
+                            ice_connection_state: iceConnectionState,
+                            data_channel_state: dataChannel.readyState,
+                        });
+                        return;
+                    }
+                    setKioskVoiceStatus('armed', 'Bean voice ready');
+                }, 5000);
+            };
             peerConnection.onconnectionstatechange = () => {
                 const connectionState = peerConnection.connectionState || '';
-                if (['failed', 'disconnected', 'closed'].includes(connectionState)) {
+                if (['failed', 'closed'].includes(connectionState)) {
                     reconnectFromFailure('webrtc_connection_failure', { connection_state: connectionState });
+                    return;
+                }
+                if (connectionState === 'disconnected') {
+                    waitForTransientDisconnect('webrtc_connection_disconnected', { connection_state: connectionState });
+                    return;
+                }
+                if (connectionState === 'connected') {
+                    window.clearTimeout(realtimeState.disconnectTimer);
+                    realtimeState.disconnectTimer = 0;
+                    setKioskVoiceStatus('armed', 'Bean voice ready');
                 }
             };
             peerConnection.oniceconnectionstatechange = () => {
                 const iceConnectionState = peerConnection.iceConnectionState || '';
-                if (['failed', 'disconnected', 'closed'].includes(iceConnectionState)) {
+                if (['failed', 'closed'].includes(iceConnectionState)) {
                     reconnectFromFailure('ice_webrtc_connection_failure', { ice_connection_state: iceConnectionState });
+                    return;
+                }
+                if (iceConnectionState === 'disconnected') {
+                    waitForTransientDisconnect('ice_webrtc_connection_disconnected', { ice_connection_state: iceConnectionState });
+                    return;
+                }
+                if (['connected', 'completed'].includes(iceConnectionState)) {
+                    window.clearTimeout(realtimeState.disconnectTimer);
+                    realtimeState.disconnectTimer = 0;
+                    setKioskVoiceStatus('armed', 'Bean voice ready');
                 }
             };
             kioskRealtime = realtimeState;
@@ -3886,14 +3962,14 @@ if (mount) {
 
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            const sdpResponse = await fetch('https://api.openai.com/v1/realtime/calls', {
+            const sdpResponse = await fetchWithTimeout('https://api.openai.com/v1/realtime/calls', {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${clientSecret}`,
                     'Content-Type': 'application/sdp',
                 },
                 body: offer.sdp,
-            });
+            }, kioskRealtimeConnectTimeoutMs);
             const sdpBody = await sdpResponse.text();
             if (!sdpResponse.ok) {
                 reportKioskRealtimeIssue('openai_realtime_calls_failure', {
@@ -5316,6 +5392,7 @@ if (mount) {
     async function toggleKioskVoiceMode() {
         if (state.kioskVoiceEnabled && !kioskRealtimeConnected()) {
             clearKioskRealtimeReconnect();
+            kioskRealtimeReconnectAttempts = 0;
             setKioskVoiceStatus('working', 'Connecting Bean voice');
             render();
             await unlockKioskAudio();

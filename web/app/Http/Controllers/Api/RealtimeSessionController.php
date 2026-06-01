@@ -18,6 +18,14 @@ use Illuminate\Validation\Rule;
 
 class RealtimeSessionController extends Controller
 {
+    private const REALTIME_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
+
+    private const LEGACY_VOICE_MAP = [
+        'nova' => 'shimmer',
+        'onyx' => 'ash',
+        'fable' => 'ballad',
+    ];
+
     public function __construct(
         private readonly HermesRuntimeService $runtime,
         private readonly AssistantRunService $runs,
@@ -75,7 +83,8 @@ class RealtimeSessionController extends Controller
             ], 409);
         }
 
-        $voice = (string) ($data['voice'] ?? data_get($profile->settings ?? [], 'tts.openai_voice', config('services.hermes_realtime.voice', 'marin')));
+        $requestedVoice = (string) ($data['voice'] ?? data_get($profile->settings ?? [], 'tts.openai_voice', config('services.hermes_realtime.voice', 'marin')));
+        $voice = $this->realtimeVoice($requestedVoice);
         $payload = [
             'session' => [
                 'type' => 'realtime',
@@ -131,6 +140,7 @@ class RealtimeSessionController extends Controller
                 'api_base' => rtrim((string) config('services.hermes_runtime.api_base'), '/'),
                 'model' => $payload['session']['model'],
                 'voice' => $voice,
+                'requested_voice' => $requestedVoice,
                 'key_source' => 'OPENAI_PUBLIC_KEY',
                 'status' => $response->status(),
                 'body' => str($response->body())->limit(500)->toString(),
@@ -149,6 +159,7 @@ class RealtimeSessionController extends Controller
             'openai' => [
                 'model' => $payload['session']['model'],
                 'voice' => $voice,
+                'requested_voice' => $requestedVoice,
             ],
             'tools' => collect($this->realtimeTools())->map(fn (array $tool): ?string => data_get($tool, 'name'))->filter()->values()->all(),
         ]], 201);
@@ -292,6 +303,16 @@ Local session id: {$session->id}
 Workspace id: {$session->workspace_id}
 Client temporal context: {$clientContext}
 PROMPT;
+    }
+
+    private function realtimeVoice(string $voice): string
+    {
+        $normalized = strtolower(trim($voice));
+        $mapped = self::LEGACY_VOICE_MAP[$normalized] ?? $normalized;
+
+        return in_array($mapped, self::REALTIME_VOICES, true)
+            ? $mapped
+            : (string) config('services.hermes_realtime.voice', 'marin');
     }
 
     private function realtimeTools(): array
