@@ -143,6 +143,7 @@ if (mount) {
     let kioskRealtimeAssistantDraft = null;
     let kioskRealtimeSuppressNextAssistantPersist = false;
     let kioskRealtimeVoiceOnlyAssistant = false;
+    const kioskRealtimeUserTranscriptDrafts = new Map();
     let kioskRealtimeResponseTimer = 0;
     let kioskRealtimeToolFallbackTimer = 0;
     let kioskRealtimeToolFallbackContent = '';
@@ -3343,6 +3344,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeUserTranscriptDrafts.clear();
         window.clearTimeout(kioskRealtimeResponseTimer);
         kioskRealtimeResponseTimer = 0;
         clearRealtimeToolFallback();
@@ -3998,6 +4000,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeUserTranscriptDrafts.clear();
         window.clearTimeout(kioskRealtimeResponseTimer);
         kioskRealtimeResponseTimer = 0;
         window.clearTimeout(kioskRealtimeToolFallbackTimer);
@@ -4043,6 +4046,14 @@ if (mount) {
             }
             return;
         }
+        if (type === 'conversation.item.input_audio_transcription.delta') {
+            handleRealtimeUserTranscriptDelta(payload);
+            return;
+        }
+        if (type === 'conversation.item.input_audio_transcription.segment') {
+            handleRealtimeUserTranscriptSegment(payload);
+            return;
+        }
         if (type === 'conversation.item.input_audio_transcription.completed') {
             handleRealtimeUserTranscript(payload);
             return;
@@ -4075,6 +4086,8 @@ if (mount) {
     function handleRealtimeUserTranscript(payload) {
         const raw = String(payload.transcript || '').trim();
         if (!raw) return;
+        const key = realtimeTranscriptDraftKey(payload);
+        if (key) kioskRealtimeUserTranscriptDrafts.delete(key);
         if (realtimeTranscriptLooksSynthetic(raw)) {
             setKioskVoiceStatus('armed', 'Bean voice ready');
             return;
@@ -4115,6 +4128,55 @@ if (mount) {
             metadata: { local_realtime_turn: true },
         });
         scheduleRealtimeResponseCreate();
+    }
+
+    function handleRealtimeUserTranscriptDelta(payload) {
+        const delta = String(payload.delta || '').trim();
+        if (!delta) return;
+        const key = realtimeTranscriptDraftKey(payload);
+        const previous = key ? (kioskRealtimeUserTranscriptDrafts.get(key) || '') : '';
+        const draft = mergeRealtimeTranscriptDelta(previous, delta);
+        if (key) kioskRealtimeUserTranscriptDrafts.set(key, draft);
+        showRealtimeHeardTranscript(draft);
+    }
+
+    function handleRealtimeUserTranscriptSegment(payload) {
+        const text = String(payload.text || '').trim();
+        if (!text) return;
+        showRealtimeHeardTranscript(text);
+    }
+
+    function realtimeTranscriptDraftKey(payload) {
+        const itemId = String(payload?.item_id || payload?.itemId || '').trim();
+        if (!itemId) return '';
+        const contentIndex = Number.isFinite(Number(payload?.content_index)) ? Number(payload.content_index) : 0;
+        return `${itemId}:${contentIndex}`;
+    }
+
+    function mergeRealtimeTranscriptDelta(previous, delta) {
+        const prior = String(previous || '');
+        const next = String(delta || '');
+        if (!prior) return next.replace(/\s+/g, ' ').trim();
+        if (!next) return prior.replace(/\s+/g, ' ').trim();
+        if (next.toLowerCase().startsWith(prior.toLowerCase())) {
+            return next.replace(/\s+/g, ' ').trim();
+        }
+        if (prior.toLowerCase().endsWith(next.toLowerCase())) {
+            return prior.replace(/\s+/g, ' ').trim();
+        }
+        return `${prior}${/^\s|[,.!?;:]/.test(next) ? '' : ' '}${next}`.replace(/\s+/g, ' ').trim();
+    }
+
+    function showRealtimeHeardTranscript(transcript) {
+        const raw = String(transcript || '').trim();
+        if (!raw || realtimeTranscriptLooksSynthetic(raw)) return;
+        const command = commandAfterWakePhrase(raw);
+        if (!kioskConversationActive && command === null) return;
+        showKioskHeardTranscript(raw, {
+            allowArmed: command !== null,
+            phase: command !== null || kioskConversationActive ? 'heard' : 'armed',
+            force: true,
+        });
     }
 
     function realtimeTranscriptLooksSynthetic(transcript) {
@@ -4754,6 +4816,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeUserTranscriptDrafts.clear();
         kioskQuickReplyGeneration += 1;
         kioskCommandText = '';
         setKioskVoiceStatus('armed', message || 'say hey bean');
@@ -4778,15 +4841,15 @@ if (mount) {
     }
 
     function showKioskHeardTranscript(transcript, options = {}) {
-        if (!transcript || ['working', 'responding'].includes(state.kioskVoicePhase)) return;
-        if (!kioskConversationActive) return;
+        if (!transcript || state.kioskVoicePhase === 'responding' || (state.kioskVoicePhase === 'working' && !options.force)) return;
+        if (!kioskConversationActive && !options.allowArmed) return;
         const preview = transcript.length > 44 ? `${transcript.slice(0, 41)}...` : transcript;
         const phase = options.phase || (kioskConversationActive ? 'heard' : 'armed');
-        setKioskVoiceStatus(phase, `heard "${preview}"`);
+        setKioskVoiceStatus(phase, `Heard: "${preview}"`);
         window.clearTimeout(kioskHeardTimer);
         kioskHeardTimer = window.setTimeout(() => {
             kioskHeardTimer = 0;
-            if (state.kioskVoiceEnabled && kioskRecognitionActive && ['armed', 'heard'].includes(state.kioskVoicePhase)) {
+            if (state.kioskVoiceEnabled && ['armed', 'heard'].includes(state.kioskVoicePhase)) {
                 setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'say hey bean');
             }
         }, 1600);
