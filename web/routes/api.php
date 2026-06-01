@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\ActivityEventController;
 use App\Http\Controllers\Api\AdminUsageController;
+use App\Http\Controllers\Api\AssistantRunController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ConversationMessageController;
 use App\Http\Controllers\Api\ConversationSessionController;
@@ -9,6 +10,7 @@ use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\IssueReportController;
+use App\Http\Controllers\Api\RealtimeSessionController;
 use App\Http\Controllers\Api\TextToSpeechController;
 use App\Http\Controllers\Api\TodaySummaryController;
 use App\Http\Controllers\Api\WorkspaceController;
@@ -44,7 +46,13 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/assistant/sessions/{session}', [ConversationSessionController::class, 'show']);
         Route::post('/assistant/sessions/{session}/cancel', [ConversationSessionController::class, 'cancel']);
         Route::post('/assistant/sessions/{session}/messages', [ConversationMessageController::class, 'store']);
+        Route::post('/assistant/sessions/{session}/runs', [AssistantRunController::class, 'store']);
         Route::get('/assistant/sessions/{session}/events', [ActivityEventController::class, 'index']);
+        Route::get('/assistant/runs/{run}', [AssistantRunController::class, 'show']);
+        Route::post('/assistant/runs/{run}/cancel', [AssistantRunController::class, 'cancel']);
+        Route::post('/assistant/realtime/sessions', [RealtimeSessionController::class, 'store']);
+        Route::post('/assistant/realtime/tool-calls', [RealtimeSessionController::class, 'toolCall']);
+        Route::post('/ai/realtime/session', [RealtimeSessionController::class, 'store']);
         Route::post('/assistant/tts', [TextToSpeechController::class, 'store']);
 
         Route::get('/today', [TodaySummaryController::class, 'show']);

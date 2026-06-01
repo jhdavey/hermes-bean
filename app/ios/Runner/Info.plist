@@ -38,9 +38,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>HeyBean uses the microphone to turn your held chat button speech into text.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>HeyBean uses speech recognition to transcribe your spoken chat request before sending it to Bean.</string>
+	<string>HeyBean uses the microphone for realtime voice conversations with Bean.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

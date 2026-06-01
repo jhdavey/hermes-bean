@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:hermes_bean_app/bean_realtime_conversation.dart';
 import 'package:hermes_bean_app/hermes_api_client.dart';
 import 'package:hermes_bean_app/main.dart';
 
@@ -1240,44 +1242,35 @@ void main() {
     },
   );
 
-  testWidgets(
-    'holding the Bean chat button transcribes speech and sends on release',
-    (WidgetTester tester) async {
-      final api = _SignedInFakeHermesApiClient();
-      final transcriber = _FakeBeanVoiceTranscriber(
-        'Move lunch tomorrow to noon',
-      );
-      await tester.pumpWidget(
-        HermesBeanApp(
-          apiClient: api,
-          tokenStore: _MemoryAuthTokenStore(),
-          voiceTranscriber: transcriber,
-        ),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('holding the Bean chat button starts realtime voice', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FakeBeanRealtimeConversation(api);
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byKey(const Key('nav-bean'))),
-      );
-      await tester.pump(const Duration(milliseconds: 650));
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('nav-bean'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
 
-      expect(transcriber.started, isTrue);
-      expect(find.byKey(const Key('chat-view')), findsOneWidget);
-      expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
-      expect(find.text('Listening…'), findsWidgets);
-      final voiceInput = tester.widget<TextField>(
-        find.byKey(const Key('chat-input')),
-      );
-      expect(voiceInput.controller?.text, 'Move lunch tomorrow to noon');
+    expect(realtime.started, isTrue);
+    expect(find.byKey(const Key('chat-view')), findsOneWidget);
+    expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
+    expect(find.text('Listening...'), findsWidgets);
 
-      await gesture.up();
-      await tester.pumpAndSettle();
+    await gesture.up();
+    await tester.pump();
 
-      expect(transcriber.stopped, isTrue);
-      expect(api.sentMessages, contains('Move lunch tomorrow to noon'));
-      expect(find.text('Done — I updated your day.'), findsOneWidget);
-    },
-  );
+    expect(realtime.microphoneEnabled, isFalse);
+  });
 
   testWidgets('chat stop cancels an in-flight Bean request', (
     WidgetTester tester,
@@ -1723,30 +1716,7 @@ void main() {
       );
       expect(
         find.byKey(const Key('apple-style-week-date-header')),
-        findsOneWidget,
-      );
-      expect(
-        _datePillColor(tester, 'week-date-pill-selected'),
-        HeyBeanTheme.accent,
-      );
-      expect(
-        _datePillColor(tester, 'week-date-pill-next-visible'),
-        const Color(0xFFE5E7EB),
-      );
-      for (var index = 0; index < 5; index++) {
-        expect(_datePillColor(tester, 'week-date-pill-neutral-$index'), isNull);
-      }
-      for (var index = 0; index < 7; index++) {
-        expect(find.byKey(Key('week-date-cell-$index')), findsOneWidget);
-      }
-      expect(
-        tester.getTopLeft(find.byKey(const Key('week-date-cell-0'))).dx,
-        closeTo(
-          tester
-              .getTopLeft(find.byKey(const Key('apple-style-week-date-header')))
-              .dx,
-          1,
-        ),
+        findsNothing,
       );
       expect(find.byKey(const Key('apple-style-day-timeline')), findsOneWidget);
       expect(
@@ -1757,22 +1727,13 @@ void main() {
         find.byKey(const Key('calendar-current-time-label')),
         findsOneWidget,
       );
-      final selectedWeekDateText = tester.widget<Text>(
-        find
-            .descendant(
-              of: find.byKey(const Key('week-date-pill-selected')),
-              matching: find.byType(Text),
-            )
-            .first,
-      );
-      expect(selectedWeekDateText.style?.fontWeight, FontWeight.w400);
       final selectedDayHeadingText = tester.widget<Text>(
         find.descendant(
           of: find.byKey(const Key('day-column-heading-selected')),
           matching: find.byType(Text),
         ),
       );
-      expect(selectedDayHeadingText.style?.fontWeight, FontWeight.w400);
+      expect(selectedDayHeadingText.style?.fontWeight, FontWeight.w800);
       expect(
         tester
             .getSize(find.byKey(const Key('day-column-heading-selected')))
@@ -1980,7 +1941,7 @@ void main() {
     final eventBlockDecoration =
         eventBlockContainer.decoration! as BoxDecoration;
     expect(eventBlockDecoration.borderRadius, BorderRadius.circular(6));
-    expect(eventBlockDecoration.color?.a, closeTo(.90, .01));
+    expect(eventBlockDecoration.color?.a, closeTo(.60, .01));
     expect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
       findsOneWidget,
@@ -2001,7 +1962,7 @@ void main() {
     );
     expect(currentTimeLabel.left, greaterThanOrEqualTo(fixedHourColumn.left));
     expect(currentTimeLabel.right, lessThanOrEqualTo(fixedHourColumn.right));
-    expect(fixedHourColumn.height, closeTo(36 + 42 + (16 * 80), .1));
+    expect(fixedHourColumn.height, closeTo(42 + (16 * 80), .1));
     expect(
       tester.getSize(find.byKey(const Key('apple-style-day-timeline'))).height,
       closeTo(fixedHourColumn.height + 1, .1),
@@ -2039,10 +2000,73 @@ void main() {
     await tester.pumpAndSettle();
     final headingAfterSwipe = _activeSelectedDayHeading(tester);
 
-    expect(headingAfterSwipe, _headingDaysAfter(headingBeforeSwipe, 2));
+    expect(headingAfterSwipe, _headingDaysAfter(headingBeforeSwipe, 1));
     expect(_topHeaderDayLabelFinder(), findsOneWidget);
     expect(_topHeaderMonthLabelFinder(), findsOneWidget);
   });
+
+  testWidgets(
+    'half-page calendar scroll advances the visible column headings by one day',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _TwoDayCalendarFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final headingBeforeSwipe = _activeSelectedDayHeading(tester);
+      final pageViewFinder = find.byKey(
+        const PageStorageKey<String>('apple-style-day-page-view'),
+      );
+      final pageViewWidth = tester.getSize(pageViewFinder).width;
+
+      await _dragCalendarDayPage(tester, Offset(-pageViewWidth / 2, 0));
+      await tester.pumpAndSettle();
+
+      expect(
+        _activeSelectedDayHeading(tester),
+        _headingDaysAfter(headingBeforeSwipe, 1),
+      );
+    },
+  );
+
+  testWidgets(
+    'calendar day column headers stay visible while scrolling hours',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _TwoDayCalendarFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final selectedHeading = find.byKey(
+        const Key('day-column-heading-selected'),
+      );
+      final nextHeading = find.byKey(const Key('day-column-heading-next'));
+      final initialSelectedTop = tester.getTopLeft(selectedHeading).dy;
+      final initialNextTop = tester.getTopLeft(nextHeading).dy;
+
+      await tester.drag(
+        find.byKey(const Key('apple-style-day-timeline-scroll')),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('calendar-sticky-day-header')),
+        findsOneWidget,
+      );
+      expect(
+        tester.getTopLeft(selectedHeading).dy,
+        closeTo(initialSelectedTop, 1),
+      );
+      expect(tester.getTopLeft(nextHeading).dy, closeTo(initialNextTop, 1));
+    },
+  );
 
   testWidgets('calendar bottom nav returns to the current day pair', (
     WidgetTester tester,
@@ -2254,31 +2278,6 @@ void main() {
       tester.getTopLeft(time).dy,
       greaterThan(tester.getTopLeft(title).dy),
     );
-  });
-
-  testWidgets('week header horizontal scroll jumps by whole weeks', (
-    WidgetTester tester,
-  ) async {
-    await tester.pumpWidget(
-      HermesBeanApp(
-        apiClient: _TwoDayCalendarFakeHermesApiClient(),
-        tokenStore: _MemoryAuthTokenStore(),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final before = _activeSelectedDayHeading(tester);
-    final headerTopLeft = tester.getTopLeft(
-      find.byKey(const Key('apple-style-week-date-header')),
-    );
-    await tester.dragFrom(
-      headerTopLeft + const Offset(360, 24),
-      const Offset(-420, 0),
-    );
-    await tester.pumpAndSettle();
-    final after = _activeSelectedDayHeading(tester);
-
-    expect(after, _headingDaysAfter(before, 7));
   });
 
   testWidgets(
@@ -3080,12 +3079,12 @@ void main() {
     final criticalCount = tester.getRect(
       find.byKey(const Key('critical-task-count')),
     );
-    final weekHeader = tester.getRect(
-      find.byKey(const Key('apple-style-week-date-header')),
+    final dayHeader = tester.getRect(
+      find.byKey(const Key('calendar-sticky-day-header')),
     );
     expect(addButton.left, greaterThan(criticalCount.right));
     expect(addButton.center.dy, closeTo(criticalCount.center.dy, 2));
-    expect(addButton.bottom, lessThan(weekHeader.top));
+    expect(addButton.bottom, lessThan(dayHeader.top));
     await tester.tap(find.byKey(const Key('calendar-add-event-action')));
     await tester.pumpAndSettle();
 
@@ -3460,6 +3459,63 @@ void main() {
   });
 
   testWidgets(
+    'calendar event edit keeps new end time when immediate refresh is stale',
+    (WidgetTester tester) async {
+      final today = DateTime.now();
+      final staleEvent = HermesCalendarEvent(
+        id: 3,
+        title: 'Design review',
+        startsAt: DateTime(
+          today.year,
+          today.month,
+          today.day,
+          14,
+          30,
+        ).toIso8601String(),
+        category: 'Personal',
+        color: '#34C759',
+        recurrence: 'none',
+      );
+      final api = _StaleCalendarRefreshAfterEditFakeHermesApiClient(staleEvent);
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      const eventKey = Key('calendar-event-block-design-review');
+      await Scrollable.ensureVisible(
+        tester.element(find.byKey(eventKey)),
+        alignment: .3,
+      );
+      await tester.pumpAndSettle();
+      await _moveCalendarEventBelowHeader(tester, find.byKey(eventKey));
+      final initialEventHeight = tester.getRect(find.byKey(eventKey)).height;
+
+      await tester.tap(find.byKey(eventKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('event-end-field')), '5 PM');
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      expect(
+        api.updatedEvent?.endsAt,
+        DateTime(
+          today.year,
+          today.month,
+          today.day,
+          17,
+        ).toUtc().toIso8601String(),
+      );
+      await tester.ensureVisible(find.byKey(eventKey));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byKey(eventKey)).height,
+        greaterThan(initialEventHeight),
+      );
+    },
+  );
+
+  testWidgets(
     'calendar events open an editable detail page with friendly date times category color recurrence and event reminders',
     (WidgetTester tester) async {
       final api = _EditableCalendarFakeHermesApiClient();
@@ -3791,10 +3847,81 @@ void main() {
 
     expect(find.byKey(const Key('calendar-all-day-label')), findsOneWidget);
     expect(find.byKey(const Key('calendar-all-day-event-901')), findsOneWidget);
+    expect(find.byKey(const Key('calendar-multi-day-label')), findsNothing);
     expect(find.text('All Day'), findsOneWidget);
     expect(find.text('Google holiday'), findsOneWidget);
     expect(
       find.byKey(const Key('calendar-event-block-google-holiday')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('multi-day timed events render in the multi-day row only', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _WeekendMultiDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final multiDayEvent = find.byKey(const Key('calendar-multi-day-event-904'));
+    expect(find.byKey(const Key('calendar-multi-day-label')), findsOneWidget);
+    expect(find.text('Multi-Day'), findsOneWidget);
+    expect(multiDayEvent, findsOneWidget);
+    expect(
+      tester.getSize(multiDayEvent).width,
+      greaterThan(
+        tester
+                .getSize(
+                  find.byKey(
+                    const PageStorageKey<String>('apple-style-day-page-view'),
+                  ),
+                )
+                .width /
+            2,
+      ),
+    );
+    expect(
+      find.descendant(
+        of: multiDayEvent.first,
+        matching: find.text('1pm Anniversary Trip'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: multiDayEvent.first,
+        matching: find.text('Anniversary Trip'),
+      ),
+      findsWidgets,
+    );
+    expect(
+      find.descendant(
+        of: multiDayEvent.first,
+        matching: find.text('Anniversary Trip 8pm'),
+      ),
+      findsOneWidget,
+    );
+    final selectedHeading = find.byKey(
+      const Key('day-column-heading-selected'),
+    );
+    final headingBeforeDrag = tester.getRect(selectedHeading);
+    final eventBeforeDrag = tester.getRect(multiDayEvent);
+    await _dragCalendarDayPage(tester, const Offset(-120, 0));
+    await tester.pumpAndSettle();
+    final headingDuringDrag = tester.getRect(selectedHeading);
+    final eventDuringDrag = tester.getRect(multiDayEvent);
+    final headingTravel = headingBeforeDrag.left - headingDuringDrag.left;
+    final eventTravel = eventBeforeDrag.left - eventDuringDrag.left;
+    expect(headingTravel, greaterThan(40));
+    expect(eventTravel, greaterThan(40));
+    expect(eventTravel, closeTo(headingTravel, 8));
+    expect(find.byKey(const Key('calendar-all-day-event-904')), findsNothing);
+    expect(
+      find.byKey(const Key('calendar-event-block-anniversary-trip')),
       findsNothing,
     );
   });
@@ -3825,81 +3952,76 @@ void main() {
     },
   );
 
-  testWidgets(
-    'multi-day event end edits render through the rest of the start day and next morning',
-    (WidgetTester tester) async {
-      final api = _MultiDayEditableCalendarFakeHermesApiClient();
-      await tester.pumpWidget(
-        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('week-date-pill-next-visible')));
-      await tester.pumpAndSettle();
+  testWidgets('multi-day event end edits move the event to the multi-day row', (
+    WidgetTester tester,
+  ) async {
+    final api = _MultiDayEditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
 
-      final eventBlock = find.byKey(
-        const Key('calendar-event-block-conference'),
-      );
-      await tester.ensureVisible(eventBlock);
-      await tester.pumpAndSettle();
-      final initialHeight = tester.getRect(eventBlock).height;
+    final eventBlock = find.byKey(const Key('calendar-event-block-conference'));
+    await tester.ensureVisible(eventBlock);
+    await tester.pumpAndSettle();
 
-      await tester.tap(eventBlock);
-      await tester.pumpAndSettle();
-      final end = DateTime.now().add(const Duration(days: 2));
-      const monthNames = [
-        'January',
-        'February',
-        'March',
-        'April',
-        'May',
-        'June',
-        'July',
-        'August',
-        'September',
-        'October',
-        'November',
-        'December',
-      ];
-      await tester.enterText(
-        find.byKey(const Key('event-end-field')),
-        '${monthNames[end.month - 1]} ${end.day} at 1pm',
-      );
-      await tester.tap(find.byKey(const Key('event-save-action')));
-      await tester.pumpAndSettle();
+    await tester.tap(eventBlock);
+    await tester.pumpAndSettle();
+    final end = DateTime.now().add(const Duration(days: 2));
+    const monthNames = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    await tester.enterText(
+      find.byKey(const Key('event-end-field')),
+      '${monthNames[end.month - 1]} ${end.day} at 1pm',
+    );
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
 
-      expect(
-        api.updatedEvent?.endsAt,
-        DateTime(end.year, end.month, end.day, 13).toUtc().toIso8601String(),
-      );
-      expect(eventBlock, findsNWidgets(2));
-      final startDayHeight = tester.getRect(eventBlock.first).height;
-      expect(startDayHeight, greaterThan(initialHeight * 6));
-
-      final nextMorningSegment = tester.getRect(eventBlock.last).height;
-      expect(nextMorningSegment, greaterThan(initialHeight * 5));
-      expect(nextMorningSegment, lessThan(startDayHeight));
-    },
-  );
+    expect(
+      api.updatedEvent?.endsAt,
+      DateTime(end.year, end.month, end.day, 13).toUtc().toIso8601String(),
+    );
+    expect(
+      find.byKey(const Key('calendar-multi-day-event-40')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('calendar-all-day-event-40')), findsNothing);
+    expect(eventBlock, findsNothing);
+  });
 
   testWidgets('UTC calendar event timestamps render in the device timezone', (
     WidgetTester tester,
   ) async {
     final now = DateTime.now();
-    final tomorrow = now.add(const Duration(days: 1));
     final wallClockStart = DateTime.utc(
       now.year,
       now.month,
       now.day,
       14,
     ).toLocal();
+    final tomorrow = now.add(const Duration(days: 1));
     final wallClockEnd = DateTime.utc(
       tomorrow.year,
       tomorrow.month,
       tomorrow.day,
       15,
     ).toLocal();
-    final expectedTimeLabel =
-        '${_testNaturalTimeLabel(wallClockStart)} – ${_testNaturalTimeLabel(wallClockEnd)}';
+    final expectedStartLabel =
+        '${_testNaturalTimeLabel(wallClockStart)} App project focus block';
+    final expectedEndLabel =
+        'App project focus block ${_testNaturalTimeLabel(wallClockEnd)}';
 
     await tester.pumpWidget(
       HermesBeanApp(
@@ -3909,28 +4031,34 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final eventBlock = find.byKey(
-      const Key('calendar-event-block-app-project-focus-block'),
-    );
-    expect(eventBlock, findsWidgets);
+    final multiDayEvent = find.byKey(const Key('calendar-multi-day-event-31'));
+    expect(multiDayEvent, findsOneWidget);
     expect(
       find.descendant(
-        of: eventBlock.first,
-        matching: find.text(expectedTimeLabel),
+        of: multiDayEvent.first,
+        matching: find.text(expectedStartLabel),
       ),
       findsOneWidget,
     );
+    expect(
+      find.descendant(
+        of: multiDayEvent.first,
+        matching: find.text(expectedEndLabel),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('calendar-all-day-event-31')), findsNothing);
+    expect(
+      find.byKey(const Key('calendar-event-block-app-project-focus-block')),
+      findsNothing,
+    );
 
-    await tester.ensureVisible(eventBlock.first);
+    await tester.drag(
+      find.byKey(const Key('apple-style-day-timeline-scroll')),
+      const Offset(0, 2000),
+    );
     await tester.pumpAndSettle();
-    if (eventBlock.hitTestable().evaluate().isEmpty) {
-      await tester.drag(
-        find.byKey(const Key('apple-style-day-timeline-scroll')),
-        const Offset(0, 500),
-      );
-      await tester.pumpAndSettle();
-    }
-    await tester.tap(eventBlock.hitTestable().first);
+    await tester.tap(multiDayEvent.hitTestable().first);
     await tester.pumpAndSettle();
     final startEditor = tester.widget<EditableText>(
       find.descendant(
@@ -3944,40 +4072,54 @@ void main() {
     );
   });
 
-  testWidgets('offset calendar event timestamps render in the device timezone', (
-    WidgetTester tester,
-  ) async {
-    final now = DateTime.now();
-    final tomorrow = now.add(const Duration(days: 1));
-    final wallClockStart = DateTime.parse(
-      _testIsoWithOffset(now, hour: 13, offset: '-04:00'),
-    ).toLocal();
-    final wallClockEnd = DateTime.parse(
-      _testIsoWithOffset(tomorrow, hour: 17, offset: '-04:00'),
-    ).toLocal();
-    final expectedTimeLabel =
-        '${_testNaturalTimeLabel(wallClockStart)} – ${_testNaturalTimeLabel(wallClockEnd)}';
+  testWidgets(
+    'offset calendar event timestamps render in the device timezone',
+    (WidgetTester tester) async {
+      final now = DateTime.now();
+      final wallClockStart = DateTime.parse(
+        _testIsoWithOffset(now, hour: 13, offset: '-04:00'),
+      ).toLocal();
+      final tomorrow = now.add(const Duration(days: 1));
+      final wallClockEnd = DateTime.parse(
+        _testIsoWithOffset(tomorrow, hour: 17, offset: '-04:00'),
+      ).toLocal();
+      final expectedStartLabel =
+          '${_testNaturalTimeLabel(wallClockStart)} Google afternoon block';
+      final expectedEndLabel =
+          'Google afternoon block ${_testNaturalTimeLabel(wallClockEnd)}';
 
-    await tester.pumpWidget(
-      HermesBeanApp(
-        apiClient: _OffsetCalendarFakeHermesApiClient(),
-        tokenStore: _MemoryAuthTokenStore(),
-      ),
-    );
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _OffsetCalendarFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    final eventBlock = find.byKey(
-      const Key('calendar-event-block-google-afternoon-block'),
-    );
-    expect(eventBlock, findsWidgets);
-    expect(
-      find.descendant(
-        of: eventBlock.first,
-        matching: find.text(expectedTimeLabel),
-      ),
-      findsOneWidget,
-    );
-  });
+      final multiDayEvent = find.byKey(
+        const Key('calendar-multi-day-event-32'),
+      );
+      expect(multiDayEvent, findsOneWidget);
+      expect(
+        find.descendant(
+          of: multiDayEvent.first,
+          matching: find.text(expectedStartLabel),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: multiDayEvent.first,
+          matching: find.text(expectedEndLabel),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('calendar-event-block-google-afternoon-block')),
+        findsNothing,
+      );
+    },
+  );
 
   testWidgets(
     'saving an edited event preserves local times as UTC wire values',
@@ -4326,7 +4468,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const Key('week-date-pill-next-visible')));
+    await _dragCalendarDayPage(tester, const Offset(-400, 0));
     await tester.pumpAndSettle();
 
     expect(find.text('Tasks for Today'), findsOneWidget);
@@ -4525,6 +4667,31 @@ class _StaleTodayPersistedResourcesFakeHermesApiClient
       approvals: const [],
       blockers: const [],
     );
+  }
+}
+
+class _WeekendMultiDayCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final start = DateTime.now();
+    final end = start.add(const Duration(days: 3));
+    return [
+      HermesCalendarEvent(
+        id: 904,
+        title: 'Anniversary Trip',
+        startsAt: DateTime(
+          start.year,
+          start.month,
+          start.day,
+          13,
+        ).toIso8601String(),
+        endsAt: DateTime(end.year, end.month, end.day, 20).toIso8601String(),
+        category: 'Travel',
+        color: '#FF2AD4',
+        recurrence: 'none',
+      ),
+    ];
   }
 }
 
@@ -5301,6 +5468,20 @@ class _FakeHermesApiClient extends HermesApiClient {
   }
 
   @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) {
+    return sendMessage(
+      sessionId: sessionId,
+      content: content,
+      metadata: metadata,
+    );
+  }
+
+  @override
   Future<void> deleteAccount() async {
     deletedAccount = true;
     bearerToken = null;
@@ -5320,6 +5501,20 @@ class _SlowChatFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     sentMessages.add(content);
     sentMessageMetadata.add(metadata);
     return _messageCompleter.future;
+  }
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) {
+    return sendMessage(
+      sessionId: sessionId,
+      content: content,
+      metadata: metadata,
+    );
   }
 
   void completeMessage() {
@@ -6146,6 +6341,17 @@ class _EditableCalendarFakeHermesApiClient
   ];
 }
 
+class _StaleCalendarRefreshAfterEditFakeHermesApiClient
+    extends _EditableCalendarFakeHermesApiClient {
+  _StaleCalendarRefreshAfterEditFakeHermesApiClient(this.staleEvent)
+    : super(initialEvent: staleEvent);
+
+  final HermesCalendarEvent staleEvent;
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [staleEvent];
+}
+
 class _LinkedWorkspaceEditableCalendarFakeHermesApiClient
     extends _EditableCalendarFakeHermesApiClient {
   static const _personal = HermesWorkspace(
@@ -6473,18 +6679,51 @@ String _testIsoWithOffset(
   return '$year-$month-${day}T$hourText:00:00$offset';
 }
 
-Color? _datePillColor(WidgetTester tester, String key) {
-  final container = tester.widget<Container>(find.byKey(Key(key)));
-  final decoration = container.decoration as BoxDecoration?;
-  return decoration?.color;
-}
-
 String? _activeSelectedDayHeading(WidgetTester tester) {
   final headingText = find.descendant(
     of: find.byKey(const Key('day-column-heading-selected')),
     matching: find.byType(Text),
   );
   return tester.widget<Text>(headingText).data;
+}
+
+Future<void> _dragCalendarDayPage(WidgetTester tester, Offset offset) async {
+  final pageViewRect = tester.getRect(
+    find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
+  );
+  final timelineScrollRect = tester.getRect(
+    find.byKey(const Key('apple-style-day-timeline-scroll')),
+  );
+  final minY = math.max(pageViewRect.top + 24, timelineScrollRect.top + 24);
+  final maxY = math.min(
+    pageViewRect.bottom - 24,
+    timelineScrollRect.bottom - 24,
+  );
+  final startY = math.min(math.max(timelineScrollRect.top + 96, minY), maxY);
+  await tester.dragFrom(
+    Offset(pageViewRect.left + (pageViewRect.width * .75), startY),
+    offset,
+  );
+}
+
+Future<void> _moveCalendarEventBelowHeader(
+  WidgetTester tester,
+  Finder eventFinder,
+) async {
+  final eventCenter = tester.getCenter(eventFinder);
+  final headerBottom = tester
+      .getRect(find.byKey(const Key('calendar-sticky-day-header')))
+      .bottom;
+  if (eventCenter.dy > headerBottom + 24) return;
+
+  final timelineScrollRect = tester.getRect(
+    find.byKey(const Key('apple-style-day-timeline-scroll')),
+  );
+  final dragDistance = (headerBottom + 48 - eventCenter.dy)
+      .clamp(40.0, 160.0)
+      .toDouble();
+  await tester.dragFrom(timelineScrollRect.center, Offset(0, dragDistance));
+  await tester.pumpAndSettle();
 }
 
 String? _headingDaysAfter(String? heading, int days) {
@@ -6591,28 +6830,34 @@ const _testCompactWeekdayNames = [
   'Sun',
 ];
 
-class _FakeBeanVoiceTranscriber implements BeanVoiceTranscriber {
-  _FakeBeanVoiceTranscriber(this.transcript);
+class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
+  _FakeBeanRealtimeConversation(HermesApiClient apiClient)
+    : super(apiClient: apiClient);
 
-  final String transcript;
   bool started = false;
   bool stopped = false;
+  bool microphoneEnabled = false;
 
   @override
-  Future<bool> start({required ValueChanged<String> onTranscript}) async {
+  Future<HermesSession> start({
+    int? workspaceId,
+    Map<String, Object?> metadata = const {},
+  }) async {
     started = true;
-    onTranscript(transcript);
-    return true;
+    microphoneEnabled = true;
+    return const HermesSession(id: 42, status: 'active', title: 'Realtime');
   }
 
   @override
-  Future<String> stop() async {
+  void setMicrophoneEnabled(bool enabled) {
+    microphoneEnabled = enabled;
+  }
+
+  @override
+  Future<void> stop() async {
     stopped = true;
-    return transcript;
+    microphoneEnabled = false;
   }
-
-  @override
-  Future<void> cancel() async {}
 }
 
 class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {

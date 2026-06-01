@@ -712,6 +712,69 @@ class HermesApiClient {
     return HermesMessageResult.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    final body = <String, Object?>{'content': content, 'source': source};
+    if (metadata != null) body['metadata'] = metadata;
+
+    final data = await _sendJson(
+      'POST',
+      '/assistant/sessions/$sessionId/runs',
+      body: body,
+    );
+    return HermesMessageResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesRealtimeSession> startRealtimeSession({
+    String? title,
+    String? runtimeMode,
+    int? workspaceId,
+    Map<String, Object?>? metadata,
+    String? voice,
+  }) async {
+    final body = <String, Object?>{};
+    if (title != null) body['title'] = title;
+    if (runtimeMode != null) body['runtime_mode'] = runtimeMode;
+    if (workspaceId != null) body['workspace_id'] = workspaceId;
+    if (metadata != null) body['metadata'] = metadata;
+    if (voice != null) body['voice'] = voice;
+
+    final data = await _sendJson(
+      'POST',
+      '/assistant/realtime/sessions',
+      body: body,
+    );
+    return HermesRealtimeSession.fromJson(_expectMap(data['data']));
+  }
+
+  Future<Map<String, Object?>> submitRealtimeToolCall({
+    required int sessionId,
+    required String toolName,
+    String? callId,
+    Map<String, Object?> arguments = const {},
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/assistant/realtime/tool-calls',
+      body: {
+        'session_id': sessionId,
+        'tool_name': toolName,
+        if (callId != null) 'call_id': callId,
+        'arguments': arguments,
+      },
+    );
+    return _expectMap(data['data']);
+  }
+
+  Future<HermesAssistantRun> getAssistantRun(int runId) async {
+    final data = await _sendJson('GET', '/assistant/runs/$runId');
+    return HermesAssistantRun.fromJson(_expectMap(data['data']));
+  }
+
   Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async {
     final data = await _sendJson(
       'GET',
@@ -1844,6 +1907,7 @@ class HermesMessageResult {
     required this.events,
     this.userMessage,
     this.assistantMessage,
+    this.run,
     this.blocker,
   });
 
@@ -1852,6 +1916,7 @@ class HermesMessageResult {
   final List<HermesActivityEvent> events;
   final HermesMessage? userMessage;
   final HermesMessage? assistantMessage;
+  final HermesAssistantRun? run;
   final Map<String, Object?>? blocker;
 
   factory HermesMessageResult.fromJson(Map<String, Object?> json) =>
@@ -1864,11 +1929,72 @@ class HermesMessageResult {
         assistantMessage: json['assistant_message'] == null
             ? null
             : HermesMessage.fromJson(_expectMap(json['assistant_message'])),
+        run: json['run'] == null
+            ? null
+            : HermesAssistantRun.fromJson(_expectMap(json['run'])),
         events: _expectList(json['events'])
             .map((event) => HermesActivityEvent.fromJson(_expectMap(event)))
             .toList(),
         blocker: json['blocker'] == null ? null : _expectMap(json['blocker']),
       );
+}
+
+class HermesAssistantRun {
+  const HermesAssistantRun({
+    required this.id,
+    required this.status,
+    required this.source,
+    this.assistantMessageId,
+    this.assistantMessage,
+  });
+
+  final int id;
+  final String status;
+  final String source;
+  final int? assistantMessageId;
+  final HermesMessage? assistantMessage;
+
+  factory HermesAssistantRun.fromJson(Map<String, Object?> json) =>
+      HermesAssistantRun(
+        id: _expectInt(json['id']),
+        status: _expectString(json['status']),
+        source: _expectString(json['source']),
+        assistantMessageId: _readIntOrNull(json['assistant_message_id']),
+        assistantMessage: json['assistant_message'] == null
+            ? null
+            : HermesMessage.fromJson(_expectMap(json['assistant_message'])),
+      );
+}
+
+class HermesRealtimeSession {
+  const HermesRealtimeSession({
+    required this.session,
+    required this.clientSecret,
+    this.model,
+    this.voice,
+  });
+
+  final HermesSession session;
+  final String clientSecret;
+  final String? model;
+  final String? voice;
+
+  factory HermesRealtimeSession.fromJson(Map<String, Object?> json) {
+    final secret = json['client_secret'];
+    final secretValue = secret is Map
+        ? (secret['value'] ?? secret['client_secret'])?.toString()
+        : secret?.toString();
+    final openai = json['openai'] is Map
+        ? Map<String, Object?>.from(json['openai'] as Map)
+        : const <String, Object?>{};
+
+    return HermesRealtimeSession(
+      session: HermesSession.fromJson(_expectMap(json['session'])),
+      clientSecret: secretValue ?? '',
+      model: openai['model']?.toString(),
+      voice: openai['voice']?.toString(),
+    );
+  }
 }
 
 class HermesMessage {

@@ -33,6 +33,11 @@ class ConversationSession extends Model
         return $this->hasMany(ActivityEvent::class);
     }
 
+    public function assistantRuns(): HasMany
+    {
+        return $this->hasMany(AssistantRun::class);
+    }
+
     public function blockers(): HasMany
     {
         return $this->hasMany(Blocker::class);

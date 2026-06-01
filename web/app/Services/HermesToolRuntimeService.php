@@ -11,6 +11,7 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -79,21 +80,24 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     public function sendMessage(ConversationSession $session, string $content, array $metadata = []): array
     {
-        [$userMessage, $received] = DB::transaction(function () use ($session, $content, $metadata): array {
-            $userMessage = ConversationMessage::create([
+        $userMessage = DB::transaction(function () use ($session, $content, $metadata): ConversationMessage {
+            return ConversationMessage::create([
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'user',
                 'content' => $content,
                 'metadata' => $metadata ?: null,
             ]);
-
-            $received = $this->recordEvent($session, 'runtime.message_received', [
-                'message_id' => $userMessage->id,
-            ]);
-
-            return [$userMessage, $received];
         });
+
+        return $this->sendExistingMessage($session, $userMessage);
+    }
+
+    public function sendExistingMessage(ConversationSession $session, ConversationMessage $userMessage): array
+    {
+        $received = $this->recordEvent($session, 'runtime.message_received', [
+            'message_id' => $userMessage->id,
+        ]);
 
         $modelRoute = $this->modelRouteFor($session);
         $prompt = $this->toolPromptFor($session, $userMessage, $modelRoute);
@@ -144,6 +148,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
         try {
             for ($turn = 0; $turn < 3; $turn++) {
+                if ($this->isCancellationRequested($session)) {
+                    return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started]));
+                }
+
                 $response = $this->chatCompletion($modelRoute, $messages, true);
                 $responses[] = $response;
                 $finalResponse = $response;
@@ -163,6 +171,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 ];
 
                 foreach ($toolCalls as $toolCall) {
+                    if ($this->isCancellationRequested($session)) {
+                        return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
+                    }
+
                     if (! is_array($toolCall)) {
                         continue;
                     }
@@ -179,6 +191,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
             if ($assistantContent === '' && $actions !== []) {
                 try {
+                    if ($this->isCancellationRequested($session)) {
+                        return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
+                    }
+
                     $response = $this->chatCompletion($modelRoute, $messages, false);
                     $responses[] = $response;
                     $finalResponse = $response;
@@ -567,8 +583,8 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $toDate = $toDate !== '' ? $toDate : $fromDate;
 
         return [
-            \Illuminate\Support\Carbon::parse($fromDate)->startOfDay(),
-            \Illuminate\Support\Carbon::parse($toDate)->endOfDay(),
+            Carbon::parse($fromDate)->startOfDay(),
+            Carbon::parse($toDate)->endOfDay(),
         ];
     }
 
@@ -588,6 +604,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
         if ($terms->isEmpty()) {
             $query->where('title', 'like', '%'.addcslashes($text, '%_\\').'%');
+
             return;
         }
 
@@ -930,6 +947,34 @@ PROMPT;
                 'blocker' => null,
             ];
         });
+    }
+
+    private function toolRuntimeCancelled(ConversationSession $session, ConversationMessage $userMessage, Collection $events): array
+    {
+        return DB::transaction(function () use ($session, $userMessage, $events): array {
+            $cancelled = $this->recordEvent($session, 'runtime.message_cancelled', [
+                'message_id' => $userMessage->id,
+            ], 'hermes.tools', 'cancelled');
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'cancelled',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => null,
+                'events' => $events->push($cancelled),
+                'blocker' => null,
+            ];
+        });
+    }
+
+    private function isCancellationRequested(ConversationSession $session): bool
+    {
+        return ConversationSession::query()
+            ->whereKey($session->id)
+            ->where('status', 'cancelling')
+            ->exists();
     }
 
     /**

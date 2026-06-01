@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ActivityEvent;
+use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use Illuminate\Support\Collection;
 
@@ -23,4 +24,9 @@ interface HermesRuntimeService
      * @return array{status:string, session:ConversationSession, user_message:mixed, assistant_message:mixed|null, events:mixed, blocker:mixed|null}
      */
     public function sendMessage(ConversationSession $session, string $content, array $metadata = []): array;
+
+    /**
+     * @return array{status:string, session:ConversationSession, user_message:mixed, assistant_message:mixed|null, events:mixed, blocker:mixed|null}
+     */
+    public function sendExistingMessage(ConversationSession $session, ConversationMessage $userMessage): array;
 }

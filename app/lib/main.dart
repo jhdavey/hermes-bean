@@ -9,85 +9,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:speech_to_text/speech_recognition_error.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_to_text.dart' as speech_to_text;
 import 'package:url_launcher/url_launcher.dart';
 
+import 'bean_realtime_conversation.dart';
 import 'hermes_api_client.dart';
 
 typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
 typedef AppIconBadgeUpdater = Future<void> Function(int count);
-
-abstract class BeanVoiceTranscriber {
-  Future<bool> start({required ValueChanged<String> onTranscript});
-  Future<String> stop();
-  Future<void> cancel();
-}
-
-class SpeechToTextBeanVoiceTranscriber implements BeanVoiceTranscriber {
-  SpeechToTextBeanVoiceTranscriber({speech_to_text.SpeechToText? speech})
-    : _speech = speech ?? speech_to_text.SpeechToText();
-
-  final speech_to_text.SpeechToText _speech;
-  String _latestTranscript = '';
-
-  @override
-  Future<bool> start({required ValueChanged<String> onTranscript}) async {
-    _latestTranscript = '';
-    try {
-      final available = await _speech.initialize(
-        onError: (SpeechRecognitionError error) {},
-        onStatus: (String status) {},
-      );
-      if (!available) return false;
-      await _speech.listen(
-        onResult: (SpeechRecognitionResult result) {
-          final recognized = result.recognizedWords.trim();
-          if (recognized.isEmpty) return;
-          _latestTranscript = recognized;
-          onTranscript(recognized);
-        },
-        listenOptions: speech_to_text.SpeechListenOptions(
-          listenMode: speech_to_text.ListenMode.dictation,
-          partialResults: true,
-          cancelOnError: false,
-        ),
-      );
-      return true;
-    } on MissingPluginException {
-      return false;
-    } on PlatformException {
-      return false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  @override
-  Future<String> stop() async {
-    try {
-      await _speech.stop();
-    } on MissingPluginException {
-      return _latestTranscript;
-    } on PlatformException {
-      return _latestTranscript;
-    } catch (_) {
-      return _latestTranscript;
-    }
-
-    return _latestTranscript;
-  }
-
-  @override
-  Future<void> cancel() async {
-    try {
-      await _speech.cancel();
-    } catch (_) {
-      // Keep the app usable if the speech plugin is unavailable or already idle.
-    }
-  }
-}
 
 const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
 final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
@@ -432,19 +360,17 @@ class HermesBeanApp extends StatelessWidget {
     AuthTokenStore? tokenStore,
     ExternalUrlLauncher? launchExternalUrl,
     AppIconBadgeUpdater? updateAppIconBadge,
-    BeanVoiceTranscriber? voiceTranscriber,
+    this.realtimeConversation,
   }) : apiClient = apiClient ?? HermesApiClient(),
        tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore(),
        launchExternalUrl = launchExternalUrl ?? _defaultLaunchExternalUrl,
-       updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge,
-       voiceTranscriber =
-           voiceTranscriber ?? SpeechToTextBeanVoiceTranscriber();
+       updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge;
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
-  final BeanVoiceTranscriber voiceTranscriber;
+  final BeanRealtimeConversation? realtimeConversation;
 
   @override
   Widget build(BuildContext context) {
@@ -457,7 +383,7 @@ class HermesBeanApp extends StatelessWidget {
         tokenStore: tokenStore,
         launchExternalUrl: launchExternalUrl,
         updateAppIconBadge: updateAppIconBadge,
-        voiceTranscriber: voiceTranscriber,
+        realtimeConversation: realtimeConversation,
       ),
     );
   }
@@ -745,6 +671,7 @@ enum _AuthPhase { loading, signedOut, signedIn }
 enum _HomeDestination { today, tasks, bean, reminders, settings }
 
 const _dashboardChangePollInterval = Duration(seconds: 15);
+const _pendingCalendarEventWriteTtl = Duration(minutes: 2);
 
 class _DashboardSnapshot {
   const _DashboardSnapshot({
@@ -768,6 +695,18 @@ class _DashboardSnapshot {
   final GoogleCalendarSyncStatus? googleCalendarStatus;
 }
 
+class _PendingCalendarEventWrite {
+  const _PendingCalendarEventWrite({
+    required this.event,
+    required this.expiresAt,
+    required this.workspaceId,
+  });
+
+  final HermesCalendarEvent event;
+  final DateTime expiresAt;
+  final int? workspaceId;
+}
+
 class CommandCenterShell extends StatefulWidget {
   const CommandCenterShell({
     super.key,
@@ -775,14 +714,14 @@ class CommandCenterShell extends StatefulWidget {
     required this.tokenStore,
     required this.launchExternalUrl,
     required this.updateAppIconBadge,
-    required this.voiceTranscriber,
+    this.realtimeConversation,
   });
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
-  final BeanVoiceTranscriber voiceTranscriber;
+  final BeanRealtimeConversation? realtimeConversation;
 
   @override
   State<CommandCenterShell> createState() => _CommandCenterShellState();
@@ -823,6 +762,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _editingAgentPreferences = false;
   bool _beanVoiceListening = false;
   String? _beanVoiceDraft;
+  late final BeanRealtimeConversation _realtimeConversation;
   final Set<int> _dismissedReminderBannerIds = <int>{};
   final Set<int> _notifiedReminderIds = <int>{};
   int? _shownApprovalSheetId;
@@ -839,16 +779,121 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _workspaceRefreshGeneration = 0;
   int? _lastScheduledAppIconBadgeCount;
   final Map<int, _DashboardSnapshot> _workspaceSnapshots = {};
+  final Map<int, _PendingCalendarEventWrite> _pendingCalendarEventWrites = {};
 
   void _markDashboardDataMutated() {
     _dashboardDataVersion++;
     _dashboardRefreshGeneration++;
   }
 
+  void _rememberPendingCalendarEventWrite(HermesCalendarEvent event) {
+    _pendingCalendarEventWrites[event.id] = _PendingCalendarEventWrite(
+      event: event,
+      expiresAt: DateTime.now().add(_pendingCalendarEventWriteTtl),
+      workspaceId: _activeWorkspaceId(),
+    );
+  }
+
+  void _forgetPendingCalendarEventWrite(int eventId) {
+    _pendingCalendarEventWrites.remove(eventId);
+  }
+
+  List<HermesCalendarEvent> _calendarEventsWithPendingWrites(
+    List<HermesCalendarEvent> events,
+  ) {
+    if (_pendingCalendarEventWrites.isEmpty) return events;
+
+    final now = DateTime.now();
+    final activeWorkspaceId = _activeWorkspaceId();
+    final merged = List<HermesCalendarEvent>.from(events);
+    final indexById = <int, int>{
+      for (var index = 0; index < merged.length; index++)
+        merged[index].id: index,
+    };
+
+    for (final entry in _pendingCalendarEventWrites.entries.toList()) {
+      final pending = entry.value;
+      if (!pending.expiresAt.isAfter(now)) {
+        _pendingCalendarEventWrites.remove(entry.key);
+        continue;
+      }
+      if (pending.workspaceId != null &&
+          activeWorkspaceId != null &&
+          pending.workspaceId != activeWorkspaceId) {
+        continue;
+      }
+
+      final index = indexById[entry.key];
+      if (index == null) {
+        merged.add(pending.event);
+        continue;
+      }
+
+      if (_calendarEventMatchesPendingWrite(merged[index], pending.event)) {
+        _pendingCalendarEventWrites.remove(entry.key);
+      } else {
+        merged[index] = pending.event;
+      }
+    }
+
+    return merged;
+  }
+
+  bool _calendarEventMatchesPendingWrite(
+    HermesCalendarEvent refreshed,
+    HermesCalendarEvent pending,
+  ) =>
+      refreshed.title == pending.title &&
+      _sameCalendarEventInstant(refreshed.startsAt, pending.startsAt) &&
+      _sameCalendarEventInstant(
+        refreshed.endsAt,
+        pending.endsAt,
+        pending.startsAt,
+      ) &&
+      refreshed.category == pending.category &&
+      refreshed.color == pending.color &&
+      refreshed.recurrence == pending.recurrence &&
+      refreshed.isCritical == pending.isCritical;
+
+  bool _sameCalendarEventInstant(
+    String? left,
+    String? right, [
+    String? referenceValue,
+  ]) {
+    if (left == null || right == null) return left == right;
+    final leftDate = _parseCalendarEventDateTime(left, referenceValue);
+    final rightDate = _parseCalendarEventDateTime(right, referenceValue);
+    if (leftDate == null || rightDate == null) return left == right;
+    return leftDate.isAtSameMomentAs(rightDate);
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _realtimeConversation =
+        widget.realtimeConversation ??
+        BeanRealtimeConversation(
+          apiClient: widget.apiClient,
+          onStatus: (status) {
+            if (!mounted) return;
+            setState(() => _chatRunState = status);
+          },
+          onTranscript: (role, text) {
+            if (!mounted || text.trim().isEmpty) return;
+            setState(() {
+              _beanVoiceDraft = role == 'user' ? text.trim() : _beanVoiceDraft;
+            });
+          },
+          onRunQueued: (runId) {
+            if (!mounted) return;
+            setState(
+              () => _chatRunState = 'Bean is working in the background...',
+            );
+            unawaited(_pollQueuedRun(runId, _chatRunToken));
+            unawaited(_pollDashboardChanges());
+          },
+        );
     unawaited(_reminderNotifications.initialize());
     _reminderDueTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -862,6 +907,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     WidgetsBinding.instance.removeObserver(this);
     _reminderDueTimer?.cancel();
     _stopDashboardChangePolling();
+    unawaited(_realtimeConversation.stop());
     super.dispose();
   }
 
@@ -1080,7 +1126,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final summary = results[0] as HermesTodaySummary;
       final listedTasks = results[1] as List<HermesTask>;
       final listedReminders = results[2] as List<HermesReminder>;
-      final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
+      final listedCalendarEvents = _calendarEventsWithPendingWrites(
+        results[3] as List<HermesCalendarEvent>,
+      );
       if (!mounted) return;
       setState(() {
         _user = user;
@@ -1393,22 +1441,30 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _beanVoiceListening = true;
       _beanVoiceDraft = '';
       _error = null;
-      _chatRunState = 'Listening…';
+      _chatRunState = 'Starting realtime voice...';
     });
 
-    final started = await widget.voiceTranscriber.start(
-      onTranscript: (draft) {
-        if (!mounted || !_beanVoiceListening) return;
-        setState(() => _beanVoiceDraft = draft);
-      },
-    );
-    if (!started && mounted && _beanVoiceListening) {
+    try {
+      final realtimeSession = await _realtimeConversation.start(
+        workspaceId: _user?.activeWorkspace?.numericId,
+        metadata: _flutterChatMetadata(),
+      );
+      if (!mounted || !_beanVoiceListening) return;
+      _realtimeConversation.setMicrophoneEnabled(true);
+      setState(() {
+        _session = realtimeSession;
+        _chatRunState = 'Listening...';
+      });
+    } catch (error) {
+      if (!mounted) return;
       setState(() {
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
         _chatRunState = 'Ready';
-        _error =
-            'Bean could not access speech recognition. Please check microphone and speech permissions, then try again.';
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'start realtime voice',
+        );
       });
     }
   }
@@ -1420,7 +1476,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _stopAgent() async {
     final session = _session;
     if (_beanVoiceListening) {
-      await widget.voiceTranscriber.cancel();
+      await _realtimeConversation.stop();
       if (!mounted) return;
       setState(() {
         _beanVoiceListening = false;
@@ -1461,31 +1517,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _finishBeanVoiceDraft() async {
     if (!_beanVoiceListening) return;
     final typedDraft = (_beanVoiceDraft ?? '').trim();
+    _realtimeConversation.setMicrophoneEnabled(false);
     setState(() {
-      _beanVoiceListening = false;
-      _chatRunState = typedDraft.isEmpty
-          ? 'Transcribing…'
-          : 'Sending voice note…';
+      _chatRunState = typedDraft.isEmpty ? 'Listening' : 'Heard: $typedDraft';
     });
-
-    var draft = typedDraft;
-    try {
-      final spokenDraft = (await widget.voiceTranscriber.stop()).trim();
-      if (spokenDraft.isNotEmpty) {
-        draft = spokenDraft;
-      }
-    } catch (_) {
-      await widget.voiceTranscriber.cancel();
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _beanVoiceDraft = null;
-      _chatRunState = draft.isEmpty ? 'Ready' : 'Sending voice note…';
-    });
-    if (draft.isNotEmpty) {
-      unawaited(_sendChat(draft));
-    }
   }
 
   Future<void> _sendChat(String content) async {
@@ -1501,12 +1536,30 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
     });
     try {
-      final result = await widget.apiClient.sendMessage(
+      final result = await widget.apiClient.queueMessage(
         sessionId: session.id,
         content: trimmed,
         metadata: _flutterChatMetadata(),
       );
       if (!mounted || runToken != _chatRunToken) return;
+      if (result.status == 'queued') {
+        setState(() {
+          _session = result.session;
+          _chatRunState = 'Bean is working in the background...';
+          _events = _mergeEvents(result.events, _events);
+          _messages.add(
+            HermesMessage(
+              id: _messages.length + 1,
+              role: 'assistant',
+              content: 'I’m working on that in the background.',
+            ),
+          );
+        });
+        final run = result.run;
+        if (run != null) unawaited(_pollQueuedRun(run.id, runToken));
+        return;
+      }
+
       final refreshedEvents = await widget.apiClient
           .pollActivityEvents(session.id)
           .catchError((_) => result.events);
@@ -1584,6 +1637,38 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pollQueuedRun(int runId, int runToken) async {
+    for (var attempt = 0; attempt < 30; attempt++) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted || runToken != _chatRunToken) return;
+      try {
+        final run = await widget.apiClient.getAssistantRun(runId);
+        if (!mounted || runToken != _chatRunToken) return;
+        if (run.status == 'completed' ||
+            run.status == 'failed' ||
+            run.status == 'cancelled') {
+          await _refreshSignedInViews();
+          if (!mounted || runToken != _chatRunToken) return;
+          setState(() {
+            _chatRunState = switch (run.status) {
+              'completed' => 'Updated',
+              'cancelled' => 'Stopped',
+              _ => 'Failed',
+            };
+            final message = run.assistantMessage;
+            if (message != null &&
+                !_messages.any((candidate) => candidate.id == message.id)) {
+              _messages.add(_displayableAssistantMessage(message));
+            }
+          });
+          return;
+        }
+      } catch (_) {
+        // Background polling is opportunistic; dashboard polling still refreshes app state.
+      }
     }
   }
 
@@ -1870,7 +1955,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final summary = results[0] as HermesTodaySummary;
       final listedTasks = results[1] as List<HermesTask>;
       final listedReminders = results[2] as List<HermesReminder>;
-      final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
+      final listedCalendarEvents = _calendarEventsWithPendingWrites(
+        results[3] as List<HermesCalendarEvent>,
+      );
       if (!mounted ||
           refreshGeneration != _dashboardRefreshGeneration ||
           dataVersion != _dashboardDataVersion) {
@@ -1951,7 +2038,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final summary = results[0] as HermesTodaySummary;
       final listedTasks = results[1] as List<HermesTask>;
       final listedReminders = results[2] as List<HermesReminder>;
-      final listedCalendarEvents = results[3] as List<HermesCalendarEvent>;
+      final listedCalendarEvents = _calendarEventsWithPendingWrites(
+        results[3] as List<HermesCalendarEvent>,
+      );
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
           generation != _workspaceRefreshGeneration ||
@@ -2589,6 +2678,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       }
       if (!mounted) return;
       _markDashboardDataMutated();
+      _rememberPendingCalendarEventWrite(createdEvent);
       setState(() {
         _calendar = [..._calendar, createdEvent];
         _error = null;
@@ -2690,6 +2780,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       }
       if (!mounted) return;
       _markDashboardDataMutated();
+      _rememberPendingCalendarEventWrite(updatedEvent);
       setState(() {
         _calendar = _calendar
             .map(
@@ -2765,6 +2856,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         recurringDeleteMode: recurringDeleteMode,
         recurringOccurrenceDate: recurringOccurrenceDate,
       );
+      _forgetPendingCalendarEventWrite(event.id);
       _cacheCurrentDashboardSnapshot();
       await _refreshSignedInViews();
     } catch (error) {
@@ -5966,6 +6058,7 @@ const _defaultCalendarEndHour = 22;
 const _calendarHourHeight = 80.0;
 const _calendarTimeColumnWidth = 48.0;
 const _calendarDayHeaderHeight = 36.0;
+const _calendarMultiDayRowHeight = 42.0;
 const _calendarAllDayRowHeight = 42.0;
 
 class _AppleStyleTodayTimeline extends StatefulWidget {
@@ -6041,8 +6134,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
   late final PageController _dayPageController;
   late final ScrollController _timelineScrollController;
   late DateTime _pageAnchorDay;
-  int _visibleDayPage = _initialDayPage;
-  double _headerHorizontalDrag = 0;
+  int _visibleDayOffset = 0;
   String? _autoScrolledCurrentTimeDayKey;
 
   @override
@@ -6053,6 +6145,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
       initialPage: _initialDayPage,
       keepPage: false,
     );
+    _dayPageController.addListener(_syncVisibleDayOffsetFromPage);
     _timelineScrollController = ScrollController();
   }
 
@@ -6060,6 +6153,9 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
   void didUpdateWidget(covariant _AppleStyleTodayTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
     final selectedDay = _dateOnly(widget.selectedDay);
+    if (_sameCalendarDay(selectedDay, _dateOnly(oldWidget.selectedDay))) {
+      return;
+    }
     final visiblePage = _dayPageController.hasClients
         ? _dayPageController.page?.round() ?? _initialDayPage
         : _initialDayPage;
@@ -6067,7 +6163,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
 
     if (!_sameCalendarDay(selectedDay, visibleDay)) {
       _pageAnchorDay = selectedDay;
-      _visibleDayPage = _initialDayPage;
+      _visibleDayOffset = 0;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_dayPageController.hasClients) return;
         _dayPageController.jumpToPage(_initialDayPage);
@@ -6077,6 +6173,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
 
   @override
   void dispose() {
+    _dayPageController.removeListener(_syncVisibleDayOffsetFromPage);
     _dayPageController.dispose();
     _timelineScrollController.dispose();
     super.dispose();
@@ -6086,27 +6183,23 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     Duration(days: (page - _initialDayPage) * _daysPerTimelinePage),
   );
 
-  void _handleHeaderWeekDragStart(DragStartDetails details) {
-    _headerHorizontalDrag = 0;
-  }
+  DateTime _dateForDayOffset(int dayOffset) =>
+      _pageAnchorDay.add(Duration(days: dayOffset));
 
-  void _handleHeaderWeekDragUpdate(DragUpdateDetails details) {
-    _headerHorizontalDrag += details.primaryDelta ?? 0;
-  }
-
-  void _handleHeaderWeekScroll(DragEndDetails details) {
-    final velocity = details.primaryVelocity ?? 0;
-    final distance = _headerHorizontalDrag;
-    if (velocity.abs() < 80 && distance.abs() < 48) return;
-    final direction = velocity.abs() >= 80 ? velocity : distance;
+  void _syncVisibleDayOffsetFromPage() {
     if (!_dayPageController.hasClients) return;
-    final currentPage = _dayPageController.page?.round() ?? _initialDayPage;
-    final visibleDay = _dateForPage(currentPage);
-    widget.onDayChanged(visibleDay.add(Duration(days: direction < 0 ? 7 : -7)));
+    final page = _dayPageController.page ?? _initialDayPage.toDouble();
+    final nextOffset = ((page - _initialDayPage) * _daysPerTimelinePage)
+        .round();
+    if (nextOffset == _visibleDayOffset) return;
+    setState(() => _visibleDayOffset = nextOffset);
   }
 
   void _handlePageChanged(int page) {
-    setState(() => _visibleDayPage = page);
+    final nextOffset = (page - _initialDayPage) * _daysPerTimelinePage;
+    if (nextOffset != _visibleDayOffset) {
+      setState(() => _visibleDayOffset = nextOffset);
+    }
     final nextSelectedDay = _dateForPage(page);
     if (!_sameCalendarDay(nextSelectedDay, widget.selectedDay)) {
       widget.onDayChanged(nextSelectedDay);
@@ -6138,23 +6231,27 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final today = _dateOnly(now);
-    final selectedDay = _dateOnly(widget.selectedDay);
-    final weekStartDay = selectedDay.subtract(
-      Duration(days: selectedDay.weekday - DateTime.monday),
+    final visibleStartDay = _dateOnly(_dateForDayOffset(_visibleDayOffset));
+    final visibleNextDay = visibleStartDay.add(const Duration(days: 1));
+    final showMultiDayRow = widget.calendar.any(
+      (event) =>
+          _eventIsTimedMultiDay(event) &&
+          (_eventFallsOnDay(event, visibleStartDay) ||
+              _eventFallsOnDay(event, visibleNextDay)),
     );
     final visibleHours = _calendarVisibleHoursForEvents(
       widget.calendar,
-      selectedDay,
+      visibleStartDay,
       widget.startHour,
       widget.endHour,
     );
     final timelineContentHeight =
-        _calendarDayHeaderHeight +
+        (showMultiDayRow ? _calendarMultiDayRowHeight : 0) +
         _calendarAllDayRowHeight +
         (visibleHours.length * _calendarHourHeight);
     final timelineHeight = 1 + timelineContentHeight;
     final markerOffset =
-        _calendarDayHeaderHeight +
+        (showMultiDayRow ? _calendarMultiDayRowHeight : 0) +
         _calendarAllDayRowHeight +
         ((now.hour + (now.minute / 60)) - visibleHours.first).clamp(
               0.0,
@@ -6162,11 +6259,14 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
             ) *
             _calendarHourHeight;
     final showCurrentTimeMarker =
-        _sameCalendarDay(selectedDay, today) ||
-        _sameCalendarDay(selectedDay.add(const Duration(days: 1)), today);
+        _sameCalendarDay(visibleStartDay, today) ||
+        _sameCalendarDay(visibleNextDay, today);
     final timelineViewportHeight = math.min(
       timelineHeight,
-      math.max(250.0, MediaQuery.sizeOf(context).height - 360),
+      math.max(
+        250.0,
+        MediaQuery.sizeOf(context).height - 360 - _calendarDayHeaderHeight,
+      ),
     );
     _scheduleInitialCurrentTimeScroll(
       showCurrentTimeMarker: showCurrentTimeMarker,
@@ -6178,16 +6278,12 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _WeekDateHeader(
+        _ScrollableTimelineDayHeader(
+          pageController: _dayPageController,
+          initialDayPage: _initialDayPage,
+          pageAnchorDay: _pageAnchorDay,
           today: today,
-          weekStartDay: weekStartDay,
-          selectedDay: selectedDay,
-          onDateSelected: widget.onDayChanged,
-          onHorizontalDayScrollStart: _handleHeaderWeekDragStart,
-          onHorizontalDayScrollUpdate: _handleHeaderWeekDragUpdate,
-          onHorizontalDayScrollEnd: _handleHeaderWeekScroll,
         ),
-        const SizedBox(height: 10),
         SizedBox(
           height: timelineViewportHeight,
           child: SingleChildScrollView(
@@ -6206,36 +6302,78 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                     height: timelineContentHeight,
                     child: Row(
                       children: [
-                        _FixedTimelineHoursColumn(visibleHours: visibleHours),
+                        _FixedTimelineHoursColumn(
+                          visibleHours: visibleHours,
+                          showMultiDayRow: showMultiDayRow,
+                        ),
                         Expanded(
-                          child: PageView.builder(
-                            key: const PageStorageKey<String>(
-                              'apple-style-day-page-view',
-                            ),
-                            controller: _dayPageController,
-                            pageSnapping: false,
-                            physics: const BouncingScrollPhysics(),
-                            allowImplicitScrolling: true,
-                            onPageChanged: _handlePageChanged,
-                            itemBuilder: (context, page) => _TwoDayTimelinePage(
-                              key: ValueKey('two-day-timeline-page-$page'),
-                              calendar: widget.calendar,
-                              eventCategories: widget.eventCategories,
-                              googleCalendarStatus: widget.googleCalendarStatus,
-                              workspaces: widget.workspaces,
-                              activeWorkspaceId: widget.activeWorkspaceId,
-                              selectedDay: _dateForPage(page),
-                              today: today,
-                              startHour: visibleHours.first,
-                              endHour: visibleHours.last,
-                              visibleHours: visibleHours,
-                              isActivePage: page == _visibleDayPage,
-                              onEventTap: widget.onEventTap,
-                              onEventDeleted: widget.onEventDeleted,
-                              onEventCategorySaved: widget.onEventCategorySaved,
-                              onEventCategoryDeleted:
-                                  widget.onEventCategoryDeleted,
-                            ),
+                          child: Column(
+                            children: [
+                              if (showMultiDayRow)
+                                SizedBox(
+                                  height: _calendarMultiDayRowHeight,
+                                  child: _MultiDayEventSpanRow(
+                                    key: Key(
+                                      'calendar-multi-day-row-${visibleStartDay.toIso8601String()}',
+                                    ),
+                                    pageController: _dayPageController,
+                                    initialDayPage: _initialDayPage,
+                                    pageAnchorDay: _pageAnchorDay,
+                                    events: widget.calendar
+                                        .where(
+                                          (event) =>
+                                              _eventIsTimedMultiDay(event),
+                                        )
+                                        .toList(),
+                                    eventCategories: widget.eventCategories,
+                                    googleCalendarStatus:
+                                        widget.googleCalendarStatus,
+                                    workspaces: widget.workspaces,
+                                    activeWorkspaceId: widget.activeWorkspaceId,
+                                    onEventTap: widget.onEventTap,
+                                    onEventDeleted: widget.onEventDeleted,
+                                    onEventCategorySaved:
+                                        widget.onEventCategorySaved,
+                                    onEventCategoryDeleted:
+                                        widget.onEventCategoryDeleted,
+                                  ),
+                                ),
+                              Expanded(
+                                child: PageView.builder(
+                                  key: const PageStorageKey<String>(
+                                    'apple-style-day-page-view',
+                                  ),
+                                  controller: _dayPageController,
+                                  pageSnapping: false,
+                                  physics: const BouncingScrollPhysics(),
+                                  allowImplicitScrolling: true,
+                                  onPageChanged: _handlePageChanged,
+                                  itemBuilder: (context, page) =>
+                                      _TwoDayTimelinePage(
+                                        key: ValueKey(
+                                          'two-day-timeline-page-$page',
+                                        ),
+                                        calendar: widget.calendar,
+                                        eventCategories: widget.eventCategories,
+                                        googleCalendarStatus:
+                                            widget.googleCalendarStatus,
+                                        workspaces: widget.workspaces,
+                                        activeWorkspaceId:
+                                            widget.activeWorkspaceId,
+                                        selectedDay: _dateForPage(page),
+                                        startHour: visibleHours.first,
+                                        endHour: visibleHours.last,
+                                        visibleHours: visibleHours,
+                                        onEventTap: widget.onEventTap,
+                                        onEventDeleted: widget.onEventDeleted,
+                                        onEventCategorySaved:
+                                            widget.onEventCategorySaved,
+                                        onEventCategoryDeleted:
+                                            widget.onEventCategoryDeleted,
+                                      ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -6307,11 +6445,9 @@ class _TwoDayTimelinePage extends StatelessWidget {
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.selectedDay,
-    required this.today,
     required this.startHour,
     required this.endHour,
     required this.visibleHours,
-    required this.isActivePage,
     required this.onEventTap,
     required this.onEventDeleted,
     required this.onEventCategorySaved,
@@ -6324,11 +6460,9 @@ class _TwoDayTimelinePage extends StatelessWidget {
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final DateTime selectedDay;
-  final DateTime today;
   final int startHour;
   final int endHour;
   final List<int> visibleHours;
-  final bool isActivePage;
   final Future<void> Function(
     HermesCalendarEvent event, {
     required String title,
@@ -6394,32 +6528,6 @@ class _TwoDayTimelinePage extends StatelessWidget {
 
     return Column(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: _DayColumnHeading(
-                key: isActivePage
-                    ? const Key('day-column-heading-selected')
-                    : ValueKey(
-                        'day-column-heading-selected-${selectedDay.toIso8601String()}',
-                      ),
-                date: selectedDay,
-                isToday: _sameCalendarDay(selectedDay, today),
-              ),
-            ),
-            Expanded(
-              child: _DayColumnHeading(
-                key: isActivePage
-                    ? const Key('day-column-heading-next')
-                    : ValueKey(
-                        'day-column-heading-next-${selectedNextDay.toIso8601String()}',
-                      ),
-                date: selectedNextDay,
-                isToday: _sameCalendarDay(selectedNextDay, today),
-              ),
-            ),
-          ],
-        ),
         SizedBox(
           height: _calendarAllDayRowHeight,
           child: Row(
@@ -6583,142 +6691,84 @@ class _CalendarHeaderButton extends StatelessWidget {
   );
 }
 
-class _WeekDateHeader extends StatelessWidget {
-  const _WeekDateHeader({
+class _ScrollableTimelineDayHeader extends StatelessWidget {
+  const _ScrollableTimelineDayHeader({
+    required this.pageController,
+    required this.initialDayPage,
+    required this.pageAnchorDay,
     required this.today,
-    required this.weekStartDay,
-    required this.selectedDay,
-    required this.onDateSelected,
-    required this.onHorizontalDayScrollStart,
-    required this.onHorizontalDayScrollUpdate,
-    required this.onHorizontalDayScrollEnd,
   });
 
+  final PageController pageController;
+  final int initialDayPage;
+  final DateTime pageAnchorDay;
   final DateTime today;
-  final DateTime weekStartDay;
-  final DateTime selectedDay;
-  final ValueChanged<DateTime> onDateSelected;
-  final GestureDragStartCallback onHorizontalDayScrollStart;
-  final GestureDragUpdateCallback onHorizontalDayScrollUpdate;
-  final GestureDragEndCallback onHorizontalDayScrollEnd;
 
   @override
   Widget build(BuildContext context) {
-    var neutralPillIndex = 0;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragStart: onHorizontalDayScrollStart,
-      onHorizontalDragUpdate: onHorizontalDayScrollUpdate,
-      onHorizontalDragEnd: onHorizontalDayScrollEnd,
-      child: Row(
-        key: const Key('apple-style-week-date-header'),
-        children: [
-          for (var index = 0; index < 7; index++)
-            Expanded(
-              child: Builder(
-                builder: (context) {
-                  final date = weekStartDay.add(Duration(days: index));
-                  final isSelected = _sameCalendarDay(date, selectedDay);
-                  final isNextVisible = _sameCalendarDay(
-                    date,
-                    selectedDay.add(const Duration(days: 1)),
-                  );
-                  final pillKey = isSelected
-                      ? 'week-date-pill-selected'
-                      : isNextVisible
-                      ? 'week-date-pill-next-visible'
-                      : 'week-date-pill-neutral-${neutralPillIndex++}';
-
-                  return _WeekDateHeaderCell(
-                    key: Key('week-date-cell-$index'),
-                    date: date,
-                    today: today,
-                    selectedDay: selectedDay,
-                    isNextVisibleDay: isNextVisible,
-                    pillKey: Key(pillKey),
-                    onTap: () => onDateSelected(date),
-                  );
-                },
-              ),
-            ),
-        ],
+    return Container(
+      key: const Key('calendar-sticky-day-header'),
+      height: _calendarDayHeaderHeight,
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: HeyBeanTheme.border)),
       ),
-    );
-  }
-}
-
-class _WeekDateHeaderCell extends StatelessWidget {
-  const _WeekDateHeaderCell({
-    super.key,
-    required this.date,
-    required this.today,
-    required this.selectedDay,
-    required this.isNextVisibleDay,
-    required this.pillKey,
-    required this.onTap,
-  });
-
-  final DateTime date;
-  final DateTime today;
-  final DateTime selectedDay;
-  final bool isNextVisibleDay;
-  final Key pillKey;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isSelected = _sameCalendarDay(date, selectedDay);
-    final isToday = _sameCalendarDay(date, today);
-    final backgroundColor = isSelected
-        ? HeyBeanTheme.accent
-        : isNextVisibleDay
-        ? const Color(0xFFE5E7EB)
-        : null;
-    final textColor = isSelected ? Colors.white : HeyBeanTheme.text;
-    final borderRadius = isSelected && isNextVisibleDay
-        ? BorderRadius.circular(18)
-        : isSelected
-        ? const BorderRadius.horizontal(left: Radius.circular(18))
-        : isNextVisibleDay
-        ? const BorderRadius.horizontal(right: Radius.circular(18))
-        : BorderRadius.circular(18);
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Column(
+      child: Row(
         children: [
-          Text(
-            _weekdayLetter(date.weekday),
-            style: const TextStyle(
-              color: HeyBeanTheme.muted,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+          Container(
+            width: _calendarTimeColumnWidth,
+            height: _calendarDayHeaderHeight,
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: HeyBeanTheme.border)),
             ),
           ),
-          const SizedBox(height: 4),
-          Container(
-            key: pillKey,
-            width: double.infinity,
-            height: 32,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: borderRadius,
-              border: Border.all(
-                color: isToday && !isSelected
-                    ? HeyBeanTheme.accentStrong
-                    : backgroundColor == null
-                    ? Colors.transparent
-                    : HeyBeanTheme.border,
-              ),
-            ),
-            child: Text(
-              '${date.day}',
-              style: TextStyle(
-                color: textColor,
-                fontSize: 16,
-                fontWeight: FontWeight.w400,
+          Expanded(
+            child: ClipRect(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return AnimatedBuilder(
+                    animation: pageController,
+                    builder: (context, _) {
+                      final dayOffset = _timelineDayOffset(
+                        pageController,
+                        initialDayPage,
+                      );
+                      final columnWidth = constraints.maxWidth / 2;
+                      final firstRenderedDayOffset = dayOffset.floor() - 1;
+                      final activeDayOffset = dayOffset.round();
+                      return Stack(
+                        children: [
+                          for (
+                            var dayOffsetIndex = firstRenderedDayOffset;
+                            dayOffsetIndex <= firstRenderedDayOffset + 4;
+                            dayOffsetIndex++
+                          )
+                            Positioned(
+                              left: (dayOffsetIndex - dayOffset) * columnWidth,
+                              top: 0,
+                              bottom: 0,
+                              width: columnWidth,
+                              child: _DayColumnHeading(
+                                key: dayOffsetIndex == activeDayOffset
+                                    ? const Key('day-column-heading-selected')
+                                    : dayOffsetIndex == activeDayOffset + 1
+                                    ? const Key('day-column-heading-next')
+                                    : null,
+                                date: pageAnchorDay.add(
+                                  Duration(days: dayOffsetIndex),
+                                ),
+                                isToday: _sameCalendarDay(
+                                  pageAnchorDay.add(
+                                    Duration(days: dayOffsetIndex),
+                                  ),
+                                  today,
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  );
+                },
               ),
             ),
           ),
@@ -6752,16 +6802,27 @@ class _DayColumnHeading extends StatelessWidget {
       '${_shortWeekdayName(date.weekday)} — ${_monthName(date.month)} ${date.day}',
       style: TextStyle(
         color: isToday ? HeyBeanTheme.accentStrong : HeyBeanTheme.text,
-        fontWeight: FontWeight.w400,
+        fontWeight: FontWeight.w800,
       ),
     ),
   );
 }
 
+double _timelineDayOffset(PageController controller, int initialDayPage) {
+  final page = controller.hasClients
+      ? controller.page ?? initialDayPage.toDouble()
+      : initialDayPage.toDouble();
+  return (page - initialDayPage) * 2;
+}
+
 class _FixedTimelineHoursColumn extends StatelessWidget {
-  const _FixedTimelineHoursColumn({required this.visibleHours});
+  const _FixedTimelineHoursColumn({
+    required this.visibleHours,
+    required this.showMultiDayRow,
+  });
 
   final List<int> visibleHours;
+  final bool showMultiDayRow;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -6769,7 +6830,26 @@ class _FixedTimelineHoursColumn extends StatelessWidget {
     width: _calendarTimeColumnWidth,
     child: Column(
       children: [
-        const SizedBox(height: _calendarDayHeaderHeight),
+        if (showMultiDayRow)
+          SizedBox(
+            key: const Key('calendar-multi-day-label'),
+            height: _calendarMultiDayRowHeight,
+            child: const Padding(
+              padding: EdgeInsets.only(top: 10, right: 6),
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Text(
+                  'Multi-Day',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: HeyBeanTheme.muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ),
         SizedBox(
           key: const Key('calendar-all-day-label'),
           height: _calendarAllDayRowHeight,
@@ -6835,6 +6915,350 @@ class _TimelineDayGridRow extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _MultiDayEventSpanRow extends StatelessWidget {
+  const _MultiDayEventSpanRow({
+    super.key,
+    required this.pageController,
+    required this.initialDayPage,
+    required this.pageAnchorDay,
+    required this.events,
+    required this.eventCategories,
+    required this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
+    required this.onEventTap,
+    required this.onEventDeleted,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
+  });
+
+  final PageController pageController;
+  final int initialDayPage;
+  final DateTime pageAnchorDay;
+  final List<HermesCalendarEvent> events;
+  final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds,
+  })
+  onEventTap;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventDeleted;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventCategoryDeleted;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: const BoxDecoration(
+      color: Color(0x0F16A34A),
+      border: Border(
+        left: BorderSide(color: HeyBeanTheme.border),
+        bottom: BorderSide(color: HeyBeanTheme.border),
+      ),
+    ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final columnWidth = constraints.maxWidth / 2;
+        return ClipRect(
+          child: AnimatedBuilder(
+            animation: pageController,
+            builder: (context, _) {
+              final dayOffset = _timelineDayOffset(
+                pageController,
+                initialDayPage,
+              );
+              final firstRenderedDayOffset = dayOffset.floor() - 1;
+              final lastRenderedDayOffset = firstRenderedDayOffset + 4;
+              return Stack(
+                children: [
+                  for (
+                    var dayOffsetIndex = firstRenderedDayOffset + 1;
+                    dayOffsetIndex <= lastRenderedDayOffset;
+                    dayOffsetIndex++
+                  )
+                    Positioned(
+                      left: (dayOffsetIndex - dayOffset) * columnWidth,
+                      top: 0,
+                      bottom: 0,
+                      child: const VerticalDivider(
+                        width: 1,
+                        thickness: 1,
+                        color: HeyBeanTheme.border,
+                      ),
+                    ),
+                  for (final event in events)
+                    Builder(
+                      builder: (context) {
+                        final startDay = _multiDayEventStartDay(event);
+                        final endDay = _multiDayEventEndDay(event);
+                        if (startDay == null || endDay == null) {
+                          return const SizedBox.shrink();
+                        }
+                        final startOffset = startDay
+                            .difference(pageAnchorDay)
+                            .inDays;
+                        final endOffset = endDay
+                            .difference(pageAnchorDay)
+                            .inDays;
+                        if (endOffset < firstRenderedDayOffset ||
+                            startOffset > lastRenderedDayOffset) {
+                          return const SizedBox.shrink();
+                        }
+                        final daySpan = endOffset - startOffset + 1;
+                        return Positioned(
+                          left: ((startOffset - dayOffset) * columnWidth) + 6,
+                          top: 6,
+                          width: math.max(0.0, (daySpan * columnWidth) - 12),
+                          height: 30,
+                          child: _MultiDayEventSpan(
+                            event: event,
+                            startDay: startDay,
+                            daySpan: daySpan,
+                            columnWidth: columnWidth,
+                            eventCategories: eventCategories,
+                            googleCalendarStatus: googleCalendarStatus,
+                            workspaces: workspaces,
+                            activeWorkspaceId: activeWorkspaceId,
+                            onEventTap: onEventTap,
+                            onEventDeleted: onEventDeleted,
+                            onEventCategorySaved: onEventCategorySaved,
+                            onEventCategoryDeleted: onEventCategoryDeleted,
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    ),
+  );
+}
+
+class _MultiDayEventSpan extends StatelessWidget {
+  const _MultiDayEventSpan({
+    required this.event,
+    required this.startDay,
+    required this.daySpan,
+    required this.columnWidth,
+    required this.eventCategories,
+    required this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
+    required this.onEventTap,
+    required this.onEventDeleted,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
+  });
+
+  final HermesCalendarEvent event;
+  final DateTime startDay;
+  final int daySpan;
+  final double columnWidth;
+  final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+    List<Object> syncToWorkspaceIds,
+  })
+  onEventTap;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventDeleted;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventCategoryDeleted;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _calendarEventColor(event);
+    return InkWell(
+      key: Key('calendar-multi-day-event-${event.id}'),
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _showCalendarEventDetails(
+        context,
+        event,
+        eventCategories: eventCategories,
+        googleCalendarStatus: googleCalendarStatus,
+        workspaces: workspaces,
+        activeWorkspaceId: activeWorkspaceId,
+        onSave:
+            (
+              savedEvent, {
+              required String title,
+              required String startsAt,
+              String? endsAt,
+              String? category,
+              String? color,
+              String? recurrence,
+              Map<String, Object?>? metadata,
+              bool? isCritical,
+              int? reminderMinutesBefore,
+              String? reminderRecurrence,
+              List<String>? reminderSpecificDays,
+              int? reminderInterval,
+              String? reminderIntervalUnit,
+              List<Object> syncToWorkspaceIds = const [],
+            }) => onEventTap(
+              savedEvent,
+              title: title,
+              startsAt: startsAt,
+              endsAt: endsAt,
+              category: category,
+              color: color,
+              recurrence: recurrence,
+              metadata: metadata,
+              isCritical: isCritical,
+              reminderMinutesBefore: reminderMinutesBefore,
+              reminderRecurrence: reminderRecurrence,
+              reminderSpecificDays: reminderSpecificDays,
+              reminderInterval: reminderInterval,
+              reminderIntervalUnit: reminderIntervalUnit,
+              syncToWorkspaceIds: syncToWorkspaceIds,
+            ),
+        onCriticalChanged: (savedEvent, isCritical) => onEventTap(
+          savedEvent,
+          title: savedEvent.title,
+          startsAt:
+              savedEvent.startsAt ?? DateTime.now().toUtc().toIso8601String(),
+          endsAt: savedEvent.endsAt,
+          category: savedEvent.category,
+          color: savedEvent.color,
+          recurrence: savedEvent.recurrence,
+          metadata: savedEvent.metadata,
+          isCritical: isCritical,
+        ),
+        onEventCategorySaved: onEventCategorySaved,
+        onEventCategoryDeleted: onEventCategoryDeleted,
+        onDelete: onEventDeleted,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .60),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: .35)),
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: Stack(
+          children: [
+            if (event.isCritical)
+              Positioned(
+                left: 8,
+                top: 8,
+                child: Icon(
+                  Icons.star_rounded,
+                  key: Key('event-critical-star-${event.id}'),
+                  color: HeyBeanTheme.warning,
+                  size: 14,
+                ),
+              ),
+            for (var dayIndex = 0; dayIndex < daySpan; dayIndex++)
+              Positioned(
+                left: dayIndex == 0 ? 0 : (dayIndex * columnWidth) - 6,
+                top: 0,
+                bottom: 0,
+                width: math.max(
+                  0.0,
+                  (dayIndex == daySpan - 1
+                          ? (daySpan * columnWidth) - 12
+                          : ((dayIndex + 1) * columnWidth) - 6) -
+                      (dayIndex == 0 ? 0 : (dayIndex * columnWidth) - 6),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: dayIndex == 0 && event.isCritical ? 26 : 10,
+                    right: 10,
+                  ),
+                  child: Align(
+                    alignment: dayIndex == daySpan - 1
+                        ? Alignment.centerRight
+                        : dayIndex == 0
+                        ? Alignment.centerLeft
+                        : Alignment.center,
+                    child: Text(
+                      _multiDayEventLabelForDay(
+                        event,
+                        startDay.add(Duration(days: dayIndex)),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: dayIndex == daySpan - 1
+                          ? TextAlign.right
+                          : dayIndex == 0
+                          ? TextAlign.left
+                          : TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _AllDayEventRow extends StatelessWidget {
@@ -6996,11 +7420,13 @@ class _AllDayEventRow extends StatelessWidget {
                 Flexible(
                   child: Text(
                     event.title,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.black,
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
+                      height: 1,
                     ),
                   ),
                 ),
@@ -9354,7 +9780,7 @@ List<int> _calendarVisibleHoursForEvents(
   ];
 
   for (final event in events) {
-    if (_eventIsAllDay(event)) continue;
+    if (_eventRendersAboveTimeline(event)) continue;
     for (final day in days) {
       final segment = _eventVisibleSegment(event, day, 0, 23);
       if (segment == null) continue;
@@ -9403,7 +9829,7 @@ List<_TimelineEventLayout> _timelineEventLayoutsForDay(
 ) {
   final candidates = <_TimelineEventLayoutCandidate>[];
   for (final event in events) {
-    if (_eventIsAllDay(event)) continue;
+    if (_eventRendersAboveTimeline(event)) continue;
     final segment = _eventVisibleSegment(event, day, startHour, endHour);
     if (segment == null) continue;
     candidates.add(
@@ -9537,9 +9963,6 @@ String _monthName(int month) => const [
   'November',
   'December',
 ][month - 1];
-
-String _weekdayLetter(int weekday) =>
-    const ['M', 'T', 'W', 'T', 'F', 'S', 'S'][weekday - 1];
 
 String _shortWeekdayName(int weekday) =>
     const ['Mon', 'Tues', 'Wed', 'Thurs', 'Fri', 'Sat', 'Sun'][weekday - 1];
@@ -14187,6 +14610,31 @@ bool _eventIsAllDay(HermesCalendarEvent event) {
       !end.isBefore(start.add(const Duration(days: 1)));
 }
 
+bool _eventRendersAboveTimeline(HermesCalendarEvent event) =>
+    _eventIsAllDay(event) || _eventIsTimedMultiDay(event);
+
+bool _eventIsTimedMultiDay(HermesCalendarEvent event) =>
+    !_eventIsAllDay(event) && _eventSpansMultipleDays(event);
+
+bool _eventSpansMultipleDays(HermesCalendarEvent event) {
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  if (start == null || end == null || !end.isAfter(start)) return false;
+  return !_sameCalendarDay(start, end);
+}
+
+DateTime? _multiDayEventStartDay(HermesCalendarEvent event) {
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  return start == null ? null : _dateOnly(start);
+}
+
+DateTime? _multiDayEventEndDay(HermesCalendarEvent event) {
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  if (start == null || end == null || !end.isAfter(start)) return null;
+  return _dateOnly(end);
+}
+
 String _eventTimeRangeShort(HermesCalendarEvent event) {
   String shortTime(String? value) {
     final parsed = _parseCalendarEventDateTime(value, event.startsAt);
@@ -14198,6 +14646,18 @@ String _eventTimeRangeShort(HermesCalendarEvent event) {
   final end = shortTime(event.endsAt);
   if (start.isEmpty) return '';
   return end.isEmpty ? start : '$start – $end';
+}
+
+String _multiDayEventLabelForDay(HermesCalendarEvent event, DateTime day) {
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  if (start != null && _sameCalendarDay(start, day)) {
+    return '${_naturalTimeLabel(start)} ${event.title}';
+  }
+  if (end != null && _sameCalendarDay(end, day)) {
+    return '${event.title} ${_naturalTimeLabel(end)}';
+  }
+  return event.title;
 }
 
 String? _taskReminderInputToWireValue(String? value) {

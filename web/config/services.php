@@ -51,6 +51,12 @@ return [
         'timeout' => (float) env('HERMES_AGENT_TIMEOUT', 120),
     ],
 
+    'hermes_realtime' => [
+        'api_key' => env('HERMES_REALTIME_API_KEY') ?: ($hermesApiKey !== '' ? $hermesApiKey : $openAiKey),
+        'model' => env('HERMES_REALTIME_MODEL', 'gpt-realtime'),
+        'voice' => env('HERMES_REALTIME_VOICE', 'marin'),
+    ],
+
     'beta' => [
         'enabled' => (bool) env('BETA_SIGNUPS_ENABLED', true),
     ],
