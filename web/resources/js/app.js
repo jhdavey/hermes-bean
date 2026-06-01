@@ -143,12 +143,14 @@ if (mount) {
     let kioskRealtimeAssistantDraft = null;
     let kioskRealtimeSuppressNextAssistantPersist = false;
     let kioskRealtimeVoiceOnlyAssistant = false;
+    let kioskRealtimeResponseTimer = 0;
     let kioskRealtimeToolFallbackTimer = 0;
     let kioskRealtimeToolFallbackContent = '';
     let kioskRealtimeReconnectTimer = 0;
     let kioskRealtimeReconnectAttempts = 0;
     const kioskRealtimeMaxReconnectAttempts = 5;
     const kioskRealtimeConnectTimeoutMs = 15000;
+    const kioskRealtimeTurnDebounceMs = 1200;
     const kioskRealtimeProcessedCalls = new Set();
     const kioskRealtimeRunWatchTimers = new Map();
     let chatRequestCounter = 0;
@@ -3987,6 +3989,8 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        window.clearTimeout(kioskRealtimeResponseTimer);
+        kioskRealtimeResponseTimer = 0;
         window.clearTimeout(kioskRealtimeToolFallbackTimer);
         kioskRealtimeToolFallbackTimer = 0;
         kioskRealtimeToolFallbackContent = '';
@@ -4085,20 +4089,23 @@ if (mount) {
             armKioskConversationTimeout();
             return;
         }
-        kioskRealtimePendingUser = {
-            itemId: payload.item_id || `rt-user-${Date.now()}`,
-            content,
-            persisted: false,
-        };
+        const shouldAppendToPendingTurn = Boolean(kioskRealtimeResponseTimer && kioskRealtimePendingUser && !kioskRealtimePendingUser.persisted && !isWakeTurn);
+        if (shouldAppendToPendingTurn) {
+            kioskRealtimePendingUser.content = `${kioskRealtimePendingUser.content} ${content}`.replace(/\s+/g, ' ').trim();
+        } else {
+            kioskRealtimePendingUser = {
+                itemId: payload.item_id || `rt-user-${Date.now()}`,
+                content,
+                persisted: false,
+            };
+        }
         upsertRealtimeLocalMessage({
             id: `rt-user-${kioskRealtimePendingUser.itemId}`,
             role: 'user',
-            content,
+            content: kioskRealtimePendingUser.content,
             metadata: { local_realtime_turn: true },
         });
-        armRealtimeToolFallback(content);
-        setKioskVoiceStatus('working', 'thinking');
-        sendRealtimeResponseCreate();
+        scheduleRealtimeResponseCreate();
     }
 
     function realtimeTranscriptLooksSynthetic(transcript) {
@@ -4112,6 +4119,21 @@ if (mount) {
         if (normalized === 'hey bean bean heybean can you hear me calendar tasks reminders') return true;
         if (/^(?:bean\s+)?heybean\s+can you hear me calendar tasks reminders$/.test(normalized)) return true;
         return false;
+    }
+
+    function scheduleRealtimeResponseCreate() {
+        window.clearTimeout(kioskRealtimeResponseTimer);
+        clearRealtimeToolFallback();
+        setKioskVoiceStatus('listening', 'listening');
+        kioskRealtimeResponseTimer = window.setTimeout(() => {
+            kioskRealtimeResponseTimer = 0;
+            if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
+            const content = String(kioskRealtimePendingUser?.content || '').trim();
+            if (!content) return;
+            armRealtimeToolFallback(content);
+            setKioskVoiceStatus('working', 'thinking');
+            sendRealtimeResponseCreate();
+        }, kioskRealtimeTurnDebounceMs);
     }
 
     function appendRealtimeAssistantDelta(payload) {
@@ -4710,10 +4732,13 @@ if (mount) {
         window.clearTimeout(kioskCommandTimer);
         window.clearTimeout(kioskHeardTimer);
         window.clearTimeout(kioskBridgeTimer);
+        window.clearTimeout(kioskRealtimeResponseTimer);
         kioskConversationTimer = 0;
         kioskCommandTimer = 0;
         kioskHeardTimer = 0;
         kioskBridgeTimer = 0;
+        kioskRealtimeResponseTimer = 0;
+        clearRealtimeToolFallback();
         kioskConversationActive = false;
         kioskQuickReplyGeneration += 1;
         kioskCommandText = '';
