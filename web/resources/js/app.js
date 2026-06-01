@@ -2094,8 +2094,9 @@ if (mount) {
 
     function recurrenceFieldsMarkup(kind, item) {
         const recurrence = itemRecurrenceValue(item);
+        const recurrenceMeta = recurrenceMetadata(item?.metadata);
         const days = recurrenceDays(item?.metadata);
-        const unit = item?.metadata?.unit || item?.metadata?.interval_unit || item?.metadata?.intervalUnit || 'days';
+        const unit = recurrenceMeta.unit || recurrenceMeta.interval_unit || recurrenceMeta.intervalUnit || 'days';
         return `
             <label class="hb-label">${capitalize(kind)} recurrence
                 <select class="hb-select" name="recurrence" data-recurrence-select>
@@ -2106,7 +2107,7 @@ if (mount) {
                 ${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => `<label class="hb-chip"><input type="checkbox" name="specificDays" value="${day}" ${days.has(day) ? 'checked' : ''}> ${day.toUpperCase()}</label>`).join('')}
             </div>
             <div class="hb-field-row" data-recurrence-interval ${recurrence === 'interval' ? '' : 'hidden'}>
-                ${labelInput('Repeat interval', 'interval', 'number', item?.metadata?.interval || '', 'min="1"')}
+                ${labelInput('Repeat interval', 'interval', 'number', recurrenceMeta.interval || '', 'min="1"')}
                 <label class="hb-label">Interval unit<select class="hb-select" name="intervalUnit"><option value="days">Days</option><option value="weeks" ${unit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${unit === 'months' ? 'selected' : ''}>Months</option></select></label>
             </div>`;
     }
@@ -2116,11 +2117,48 @@ if (mount) {
     }
 
     function itemRecurrenceValue(item = null) {
-        return item?.recurrence || item?.metadata?.recurrence || 'none';
+        return normalizeRecurrenceValue(item?.recurrence ?? item?.metadata?.recurrence);
+    }
+
+    function normalizeRecurrenceValue(value) {
+        if (value && typeof value === 'object') {
+            if (value.interval && !value.value && !value.type && !value.frequency) return 'interval';
+            if ((value.specific_days || value.specificDays || value.days) && !value.value && !value.type && !value.frequency) return 'specific_days';
+            return normalizeRecurrenceValue(value.value || value.type || value.frequency || value.freq || value.recurrence || value.rule);
+        }
+        const normalized = String(value || 'none').toLowerCase().trim().replace(/[-\s]+/g, '_');
+        const aliases = {
+            '': 'none',
+            no: 'none',
+            never: 'none',
+            once: 'none',
+            one_time: 'none',
+            day: 'daily',
+            days: 'daily',
+            every_day: 'daily',
+            week: 'weekly',
+            weeks: 'weekly',
+            every_week: 'weekly',
+            month: 'monthly',
+            months: 'monthly',
+            every_month: 'monthly',
+            specific_day: 'specific_days',
+            selected_days: 'specific_days',
+            days_of_week: 'specific_days',
+            custom: 'interval',
+            custom_interval: 'interval',
+        };
+        return aliases[normalized] || normalized;
+    }
+
+    function recurrenceMetadata(metadata = {}) {
+        const recurrence = metadata?.recurrence && typeof metadata.recurrence === 'object' ? metadata.recurrence : {};
+        return { ...metadata, ...recurrence };
     }
 
     function recurrenceDays(metadata = {}) {
-        return new Set(normalizeList(metadata?.specific_days || metadata?.specificDays || metadata?.days));
+        const recurrence = recurrenceMetadata(metadata);
+        return new Set(normalizeList(metadata?.specific_days || metadata?.specificDays || metadata?.days || recurrence.specific_days || recurrence.specificDays || recurrence.days));
     }
 
     function categoriesModalMarkup() {
@@ -4866,9 +4904,10 @@ if (mount) {
     }
 
     function intervalRecurrenceSummary(metadata = {}) {
-        const interval = Number.parseInt(metadata?.interval, 10);
+        const recurrence = recurrenceMetadata(metadata);
+        const interval = Number.parseInt(recurrence?.interval, 10);
         if (!Number.isFinite(interval) || interval <= 0) return 'Custom interval';
-        const unit = String(metadata?.unit || metadata?.interval_unit || metadata?.intervalUnit || 'days').toLowerCase();
+        const unit = String(recurrence?.unit || recurrence?.interval_unit || recurrence?.intervalUnit || 'days').toLowerCase();
         return `Every ${interval} ${intervalUnitLabel(unit, interval)}`;
     }
 
@@ -5289,6 +5328,7 @@ if (mount) {
     }
 
     function recurrenceLabel(value) {
+        const normalized = normalizeRecurrenceValue(value);
         return {
             none: 'None',
             daily: 'Daily',
@@ -5296,7 +5336,7 @@ if (mount) {
             monthly: 'Monthly',
             specific_days: 'Specific days',
             interval: 'Every interval',
-        }[value] || value;
+        }[normalized] || '';
     }
 
     function toDatetimeLocal(value) {

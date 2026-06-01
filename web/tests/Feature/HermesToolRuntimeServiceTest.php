@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\CalendarEvent;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\WorkspaceService;
@@ -166,6 +167,85 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonPath('data.assistant_message.content', 'Still handled.');
 
         Http::assertSentCount(1);
+    }
+
+    public function test_tool_runtime_normalizes_object_recurrence_from_agent_tool_calls(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [
+                            [
+                                'id' => 'call_task',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_task',
+                                    'arguments' => json_encode([
+                                        'title' => 'Take out the trash',
+                                        'due_at' => '2026-06-02T09:00:00-04:00',
+                                        'recurrence' => [
+                                            'type' => 'interval',
+                                            'interval' => 3,
+                                            'unit' => 'days',
+                                        ],
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                            [
+                                'id' => 'call_event',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_calendar_event',
+                                    'arguments' => json_encode([
+                                        'title' => 'Family standup',
+                                        'starts_at' => '2026-06-02T17:00:00-04:00',
+                                        'recurrence' => [
+                                            'frequency' => 'weekly',
+                                        ],
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                        ],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Added the recurring items.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-recurrence@example.com');
+        $user = User::where('email', 'tool-recurrence@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'add trash every 3 days and family standup weekly',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.task.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $task = Task::where('user_id', $user->id)->where('title', 'Take out the trash')->firstOrFail();
+        $this->assertSame('interval', $task->metadata['recurrence'] ?? null);
+        $this->assertSame(3, $task->metadata['interval'] ?? null);
+        $this->assertSame('days', $task->metadata['interval_unit'] ?? null);
+
+        $event = CalendarEvent::where('user_id', $user->id)->where('title', 'Family standup')->firstOrFail();
+        $this->assertSame('weekly', $event->recurrence);
+        $this->assertSame('weekly', $event->metadata['recurrence'] ?? null);
     }
 
     public function test_successful_tool_execution_returns_fallback_if_final_narration_call_fails(): void

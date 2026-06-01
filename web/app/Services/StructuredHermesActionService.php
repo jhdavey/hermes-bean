@@ -467,6 +467,10 @@ class StructuredHermesActionService
 
     private function createTask(ConversationSession $session, array $parameters): ActivityEvent
     {
+        $metadata = $this->metadataWithRecurrence($parameters, [
+            'created_by' => 'structured_hermes_action',
+        ]);
+
         $task = Task::create([
             'user_id' => $session->user_id,
             'workspace_id' => $session->workspace_id,
@@ -480,10 +484,7 @@ class StructuredHermesActionService
             'color' => $this->resourceColor($parameters),
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
             'due_at' => isset($parameters['due_at']) ? $this->parseDashboardDateTime($session, $parameters['due_at']) : null,
-            'metadata' => array_merge(
-                ['created_by' => 'structured_hermes_action'],
-                is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []
-            ),
+            'metadata' => $metadata,
         ]);
 
         return $this->recordEvent($session, 'assistant.task.created', [
@@ -494,6 +495,10 @@ class StructuredHermesActionService
 
     private function createReminder(ConversationSession $session, array $parameters): ActivityEvent
     {
+        $metadata = $this->metadataWithRecurrence($parameters, [
+            'created_by' => 'structured_hermes_action',
+        ]);
+
         $reminder = Reminder::create([
             'user_id' => $session->user_id,
             'workspace_id' => $session->workspace_id,
@@ -507,10 +512,7 @@ class StructuredHermesActionService
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
             'remind_at' => $this->parseDashboardDateTime($session, $parameters['remind_at']),
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
-            'metadata' => array_merge(
-                ['created_by' => 'structured_hermes_action'],
-                is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []
-            ),
+            'metadata' => $metadata,
         ]);
 
         return $this->recordEvent($session, 'assistant.reminder.created', [
@@ -526,6 +528,10 @@ class StructuredHermesActionService
         $endsAtValue = $parameters['ends_at'] ?? $parameters['end_at'] ?? null;
         $startsAt = $this->parseDashboardDateTime($session, $startsAtValue);
         $endsAt = $endsAtValue !== null ? $this->parseDashboardDateTime($session, $endsAtValue) : null;
+        $recurrence = $this->recurrenceValueFromParameters($parameters);
+        $metadata = $this->metadataWithRecurrence($parameters, [
+            'created_by' => 'structured_hermes_action',
+        ]);
 
         $calendarEvent = CalendarEvent::create([
             'user_id' => $session->user_id,
@@ -538,14 +544,11 @@ class StructuredHermesActionService
             'category' => $this->resourceCategory($parameters),
             'color' => $this->resourceColor($parameters),
             'is_critical' => (bool) ($parameters['is_critical'] ?? $parameters['isCritical'] ?? false),
-            'recurrence' => $parameters['recurrence'] ?? null,
+            'recurrence' => $recurrence,
             'starts_at' => $startsAt,
             'ends_at' => $endsAt,
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
-            'metadata' => array_filter([
-                'created_by' => 'structured_hermes_action',
-                'recurrence' => $parameters['recurrence'] ?? null,
-            ], static fn ($value) => $value !== null),
+            'metadata' => $metadata,
         ]);
         $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh());
 
@@ -562,6 +565,9 @@ class StructuredHermesActionService
         $task = $this->taskForUpdate($session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'metadata']);
         $updates = $this->withDefaultUncategorizedColor($updates);
+        if (array_key_exists('recurrence', $parameters) || array_key_exists('metadata', $parameters)) {
+            $updates['metadata'] = $this->metadataWithRecurrence($parameters, is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($task->metadata ?? []));
+        }
         if (array_key_exists('due_at', $parameters)) {
             $updates['due_at'] = $parameters['due_at'] ? $this->parseDashboardDateTime($session, $parameters['due_at']) : null;
         }
@@ -616,6 +622,9 @@ class StructuredHermesActionService
         $reminder = $this->ownedModel(Reminder::class, $session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'notes', 'status', 'category', 'color', 'is_critical', 'metadata']);
         $updates = $this->withDefaultUncategorizedColor($updates);
+        if (array_key_exists('recurrence', $parameters) || array_key_exists('metadata', $parameters)) {
+            $updates['metadata'] = $this->metadataWithRecurrence($parameters, is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($reminder->metadata ?? []));
+        }
         if (array_key_exists('remind_at', $parameters)) {
             $updates['remind_at'] = $this->parseDashboardDateTime($session, $parameters['remind_at']);
         }
@@ -629,6 +638,10 @@ class StructuredHermesActionService
         $calendarEvent = $this->calendarEventForUpdate($session, $parameters);
         $updates = $this->onlyPresent($parameters, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'status', 'metadata']);
         $updates = $this->withDefaultUncategorizedColor($updates);
+        if (array_key_exists('recurrence', $parameters) || array_key_exists('metadata', $parameters)) {
+            $updates['recurrence'] = $this->recurrenceValueFromParameters($parameters);
+            $updates['metadata'] = $this->metadataWithRecurrence($parameters, is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($calendarEvent->metadata ?? []));
+        }
         if (array_key_exists('starts_at', $parameters)) {
             $updates['starts_at'] = $this->parseDashboardDateTime($session, $parameters['starts_at']);
         }
@@ -1046,6 +1059,134 @@ class StructuredHermesActionService
         return isset($parameters[$key]) && is_scalar($parameters[$key]) && (string) $parameters[$key] !== ''
             ? (string) $parameters[$key]
             : $default;
+    }
+
+    private function metadataWithRecurrence(array $parameters, array $base = []): array
+    {
+        $metadata = array_merge($base, is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []);
+        $raw = array_key_exists('recurrence', $parameters)
+            ? $parameters['recurrence']
+            : ($metadata['recurrence'] ?? null);
+        $normalized = $this->normalizeRecurrence($raw);
+
+        if ($normalized['value'] !== null) {
+            $metadata['recurrence'] = $normalized['value'];
+        } elseif (isset($metadata['recurrence']) && ! is_scalar($metadata['recurrence'])) {
+            unset($metadata['recurrence']);
+        }
+
+        foreach (['interval', 'interval_unit', 'specific_days'] as $key) {
+            if (array_key_exists($key, $normalized)) {
+                $metadata[$key] = $normalized[$key];
+            }
+        }
+
+        return array_filter($metadata, static fn ($value): bool => $value !== null && $value !== []);
+    }
+
+    private function recurrenceValueFromParameters(array $parameters): ?string
+    {
+        $metadata = is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : [];
+        $raw = array_key_exists('recurrence', $parameters)
+            ? $parameters['recurrence']
+            : ($metadata['recurrence'] ?? null);
+
+        return $this->normalizeRecurrence($raw)['value'];
+    }
+
+    /**
+     * @return array{value:?string, interval?:int, interval_unit?:string, specific_days?:array<int, string>}
+     */
+    private function normalizeRecurrence(mixed $raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return ['value' => null];
+        }
+
+        $interval = null;
+        $unit = null;
+        $specificDays = null;
+
+        if (is_array($raw)) {
+            $value = $raw['value']
+                ?? $raw['type']
+                ?? $raw['frequency']
+                ?? $raw['freq']
+                ?? $raw['recurrence']
+                ?? $raw['rule']
+                ?? null;
+            $interval = isset($raw['interval']) && is_numeric($raw['interval']) ? (int) $raw['interval'] : null;
+            $unit = $raw['interval_unit'] ?? $raw['intervalUnit'] ?? $raw['unit'] ?? null;
+            $specificDays = $raw['specific_days'] ?? $raw['specificDays'] ?? $raw['days'] ?? null;
+
+            if ($value === null && $interval !== null) {
+                $value = 'interval';
+            } elseif ($value === null && $specificDays !== null) {
+                $value = 'specific_days';
+            }
+        } else {
+            $value = $raw;
+        }
+
+        $value = $this->normalizeRecurrenceValue($value);
+        if ($interval !== null && $interval > 1 && in_array($value, ['daily', 'weekly', 'monthly'], true)) {
+            $unit ??= match ($value) {
+                'weekly' => 'weeks',
+                'monthly' => 'months',
+                default => 'days',
+            };
+            $value = 'interval';
+        }
+
+        $result = ['value' => $value];
+        if ($value === 'interval') {
+            $result['interval'] = max(1, $interval ?: 1);
+            $result['interval_unit'] = $this->normalizeIntervalUnit($unit);
+        }
+        if ($value === 'specific_days') {
+            $days = collect(is_array($specificDays) ? $specificDays : [$specificDays])
+                ->map(fn ($day): string => strtolower(substr((string) $day, 0, 3)))
+                ->filter(fn (string $day): bool => in_array($day, ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], true))
+                ->values()
+                ->all();
+            if ($days !== []) {
+                $result['specific_days'] = $days;
+            }
+        }
+
+        return $result;
+    }
+
+    private function normalizeRecurrenceValue(mixed $value): ?string
+    {
+        if (! is_scalar($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+        $normalized = str_replace(['-', ' '], '_', $normalized);
+
+        return match ($normalized) {
+            '', 'no', 'none', 'never', 'one_time', 'once' => 'none',
+            'day', 'days', 'daily', 'every_day' => 'daily',
+            'week', 'weeks', 'weekly', 'every_week' => 'weekly',
+            'month', 'months', 'monthly', 'every_month' => 'monthly',
+            'specific_day', 'specific_days', 'selected_days', 'days_of_week' => 'specific_days',
+            'interval', 'custom', 'custom_interval' => 'interval',
+            default => $normalized,
+        };
+    }
+
+    private function normalizeIntervalUnit(mixed $unit): string
+    {
+        $normalized = is_scalar($unit) ? strtolower(trim((string) $unit)) : 'days';
+        $normalized = str_replace(['-', ' '], '_', $normalized);
+
+        return match ($normalized) {
+            'week', 'weeks', 'weekly' => 'weeks',
+            'month', 'months', 'monthly' => 'months',
+            default => 'days',
+        };
     }
 
     private function parseDashboardDateTime(ConversationSession $session, mixed $value): Carbon

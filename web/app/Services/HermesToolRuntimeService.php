@@ -706,6 +706,7 @@ Use read tools when you need current app state. Use write tools when app state s
 Laravel owns app mechanics: workspace access, database writes, validation, syncing, and tool results. Trust tool results. If a read/write tool says not found, ambiguous, or failed, respond naturally from that result.
 
 Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no notes unless the user says otherwise. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
+When setting recurrence, always use recurrence as one of: none, daily, weekly, monthly, specific_days, or interval. For custom intervals like "every 3 days", set recurrence to interval and put interval plus interval_unit in metadata. Never put an object in recurrence.
 
 Use the current workspace unless the user clearly names another accessible workspace. Adapt tone to agent_profile settings and memory. If onboarding is incomplete, run a quick onboarding interview and use update_agent_profile when enough preferences are provided.
 
@@ -838,6 +839,7 @@ PROMPT;
             'color' => ['type' => 'string'],
             'is_critical' => ['type' => 'boolean'],
             'due_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp when applicable.'],
+            'recurrence' => $this->recurrenceProperty(),
             'metadata' => ['type' => 'object', 'additionalProperties' => true],
         ]);
     }
@@ -853,6 +855,7 @@ PROMPT;
             'remind_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp.'],
             'status' => ['type' => 'string'],
             'calendar_event_id' => ['type' => 'integer'],
+            'recurrence' => $this->recurrenceProperty(),
             'metadata' => ['type' => 'object', 'additionalProperties' => true],
         ]);
     }
@@ -866,7 +869,7 @@ PROMPT;
             'category' => ['type' => 'string'],
             'color' => ['type' => 'string'],
             'is_critical' => ['type' => 'boolean'],
-            'recurrence' => ['type' => ['object', 'string', 'null'], 'additionalProperties' => true],
+            'recurrence' => $this->recurrenceProperty(),
             'starts_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp.'],
             'ends_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp.'],
             'status' => ['type' => 'string'],
@@ -874,6 +877,15 @@ PROMPT;
             'workspace_id' => ['type' => 'integer'],
             'target_workspace_id' => ['type' => 'integer'],
         ]);
+    }
+
+    private function recurrenceProperty(): array
+    {
+        return [
+            'type' => ['string', 'null'],
+            'enum' => ['none', 'daily', 'weekly', 'monthly', 'specific_days', 'interval', null],
+            'description' => 'Use a string only. For "every N days/weeks/months", use interval and set metadata.interval plus metadata.interval_unit.',
+        ];
     }
 
     private function categoryProperties(bool $requireId = false): array
