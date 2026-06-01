@@ -38,7 +38,13 @@ class RealtimeAssistantFlowTest extends TestCase
 
         $this->withToken($token)->postJson('/api/ai/realtime/session', [
             'title' => 'Realtime test',
-            'metadata' => ['source' => 'test'],
+            'metadata' => [
+                'source' => 'test',
+                'client_context' => [
+                    'current_local_time' => '2026-06-01T10:15:00-04:00',
+                    'timezone_offset' => '-04:00',
+                ],
+            ],
         ])->assertCreated()
             ->assertJsonPath('data.session.runtime_mode', 'realtime')
             ->assertJsonPath('data.client_secret.value', 'ek_test_realtime_secret')
@@ -57,7 +63,9 @@ class RealtimeAssistantFlowTest extends TestCase
             && data_get($request->data(), 'session.audio.input.turn_detection.type') === 'server_vad'
             && data_get($request->data(), 'session.audio.input.turn_detection.silence_duration_ms') === 350
             && data_get($request->data(), 'session.audio.input.turn_detection.create_response') === true
-            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Yes, I can hear you.'));
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Yes, I can hear you.')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'current time/date questions')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'timezone_offset'));
     }
 
     public function test_realtime_tool_call_queues_background_laravel_agent_run(): void

@@ -154,6 +154,21 @@ Future<void> _defaultUpdateAppIconBadge(int count) async {
   }
 }
 
+Future<void> _speakFastRealtimeReply(String text) async {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return;
+  try {
+    await _heyBeanPlatformChannel.invokeMethod<void>('speakText', {
+      'text': trimmed,
+    });
+  } on PlatformException {
+    // Native speech is an iOS convenience path. Realtime audio still handles
+    // normal responses if this channel is unavailable.
+  } on MissingPluginException {
+    // Tests, web, desktop, and stale native shells may not expose this method.
+  }
+}
+
 Map<String, Object?> _clientTemporalContext() {
   final now = DateTime.now();
   final offset = now.timeZoneOffset;
@@ -178,6 +193,41 @@ Map<String, Object?> _flutterChatMetadata({
   'client_context': _clientTemporalContext(),
   ...additional,
 };
+
+String? _fastRealtimeReplyForTranscript(String transcript, {DateTime? now}) {
+  final normalized = transcript
+      .toLowerCase()
+      .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  final command = normalized
+      .replaceFirst(RegExp(r'^(hey\s+bean|heybean|bean)\s+'), '')
+      .trim();
+  if (command.isEmpty) return null;
+
+  final asksCanHear =
+      RegExp(r"\b(can|do)\s+you\s+hear\s+me\b").hasMatch(command) ||
+      RegExp(r"\bcan\s+you\s+hear\b").hasMatch(command);
+  if (asksCanHear) return 'Yes, I can hear you.';
+
+  final asksTime =
+      RegExp(r"\bwhat'?s?\s+(the\s+)?time\b").hasMatch(command) ||
+      RegExp(r"\bwhat\s+time\s+is\s+it\b").hasMatch(command) ||
+      RegExp(r"\btell\s+me\s+the\s+time\b").hasMatch(command) ||
+      RegExp(r"\bcurrent\s+time\b").hasMatch(command);
+  if (!asksTime) return null;
+
+  final localNow = now ?? DateTime.now();
+  return "It's ${_spokenClockTime(localNow)}.";
+}
+
+String _spokenClockTime(DateTime value) {
+  var hour = value.hour % 12;
+  if (hour == 0) hour = 12;
+  final minute = value.minute.toString().padLeft(2, '0');
+  final meridiem = value.hour >= 12 ? 'PM' : 'AM';
+  return '$hour:$minute $meridiem';
+}
 
 String beanFriendlyErrorMessage(Object error, {String? action}) {
   final prefix = action == null || action.trim().isEmpty
@@ -887,6 +937,33 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 _beanVoiceDraft = _beanVoiceListening
                     ? trimmed
                     : _beanVoiceDraft;
+                final fastReply = _beanVoiceListening
+                    ? _fastRealtimeReplyForTranscript(trimmed)
+                    : null;
+                if (fastReply != null) {
+                  _chatRunState = 'Ready';
+                  final alreadyDisplayed = _messages.any(
+                    (message) =>
+                        message.role != 'user' &&
+                        message.content?.trim() == fastReply &&
+                        message.metadata['realtime_fast_reply'] == true,
+                  );
+                  if (!alreadyDisplayed) {
+                    _messages.add(
+                      HermesMessage(
+                        id: _messages.length + 1,
+                        role: 'assistant',
+                        content: fastReply,
+                        metadata: const {
+                          'realtime': true,
+                          'realtime_fast_reply': true,
+                        },
+                      ),
+                    );
+                  }
+                  unawaited(_realtimeConversation.interrupt());
+                  unawaited(_speakFastRealtimeReply(fastReply));
+                }
                 return;
               }
               final alreadyDisplayed = _messages.any(

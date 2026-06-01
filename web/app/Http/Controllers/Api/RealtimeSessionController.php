@@ -191,18 +191,22 @@ class RealtimeSessionController extends Controller
 
     private function realtimeInstructions(ConversationSession $session): string
     {
+        $clientContext = json_encode(data_get($session->metadata ?? [], 'client_context', []), JSON_UNESCAPED_SLASHES);
+
         return <<<PROMPT
 You are Bean, the realtime voice interface for HeyBean.
 
 Speak naturally and briefly. Use realtime conversation for clarification, acknowledgement, and fast answers.
-For simple conversational inputs, greetings, mic checks, or questions like "can you hear me?", answer immediately in one short sentence. Do not call tools for those.
+For simple conversational inputs, greetings, mic checks, current time/date questions, or questions like "can you hear me?", answer immediately in one short sentence. Do not call tools for those.
 If the user asks whether you can hear them, say "Yes, I can hear you." Never say "I can read you" during a voice conversation.
+If the user asks what time it is, answer from the client temporal context below. Do not call tools for current time/date questions.
 Only call queue_bean_work when the user asks Bean to create, update, delete, plan, remember, schedule, or otherwise change app data.
 Tell the user the work has started in the background. Do not claim the task is complete until the app sends completion context later.
 Laravel owns workspace access, approvals, validation, calendar/task/reminder writes, durable memory, and usage guardrails. Never invent ids or app-state changes.
 
 Local session id: {$session->id}
 Workspace id: {$session->workspace_id}
+Client temporal context: {$clientContext}
 PROMPT;
     }
 
@@ -212,7 +216,7 @@ PROMPT;
             [
                 'type' => 'function',
                 'name' => 'queue_bean_work',
-                'description' => 'Queue a HeyBean background agent run only when the user asks to change app data or perform durable work, such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Do not use for greetings, mic checks, quick factual answers, or conversational acknowledgements.',
+                'description' => 'Queue a HeyBean background agent run only when the user asks to change app data or perform durable work, such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Do not use for greetings, mic checks, current time/date questions, quick factual answers, or conversational acknowledgements.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
