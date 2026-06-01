@@ -403,6 +403,61 @@ class WorkspaceSchemaTest extends TestCase
             ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $work->id]);
     }
 
+    public function test_task_update_from_linked_copy_updates_original_without_creating_reverse_duplicate(): void
+    {
+        $token = $this->apiToken('update-linked-task-copy@example.com');
+        $user = User::where('email', 'update-linked-task-copy@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+
+        $taskId = $this->withToken($token)->postJson('/api/tasks', [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'Replace air filter',
+            'type' => 'maintenance',
+            'sync_to_workspace_ids' => [$family->id],
+        ])->assertCreated()->json('data.id');
+        $familyCopyId = Task::where('workspace_id', $family->id)->value('id');
+
+        $this->withToken($token)->patchJson('/api/tasks/'.$familyCopyId, [
+            'title' => 'Replace air filter',
+            'metadata' => ['recurrence' => 'monthly'],
+            'sync_to_workspace_ids' => [$personalWorkspaceId],
+        ])->assertOk()
+            ->assertJsonPath('data.id', $familyCopyId)
+            ->assertJsonPath('data.metadata.recurrence', 'monthly');
+
+        $this->assertSame(1, Task::where('workspace_id', $personalWorkspaceId)->where('title', 'Replace air filter')->count());
+        $this->assertSame(1, Task::where('workspace_id', $family->id)->where('title', 'Replace air filter')->count());
+        $this->assertDatabaseHas('tasks', ['id' => $taskId, 'workspace_id' => $personalWorkspaceId]);
+        $this->assertSame('monthly', Task::findOrFail($taskId)->metadata['recurrence'] ?? null);
+        $this->assertSame('monthly', Task::findOrFail($familyCopyId)->metadata['recurrence'] ?? null);
+        $this->assertSame(1, WorkspaceItemLink::where('source_type', 'tasks')->count());
+        $this->assertDatabaseHas('workspace_item_links', [
+            'source_workspace_id' => $personalWorkspaceId,
+            'target_workspace_id' => $family->id,
+            'source_type' => 'tasks',
+            'source_id' => $taskId,
+            'target_type' => 'tasks',
+            'target_id' => $familyCopyId,
+            'link_type' => 'copy',
+        ]);
+        $this->assertDatabaseMissing('workspace_item_links', [
+            'source_workspace_id' => $family->id,
+            'target_workspace_id' => $personalWorkspaceId,
+            'source_type' => 'tasks',
+            'source_id' => $familyCopyId,
+            'target_type' => 'tasks',
+            'target_id' => $taskId,
+            'link_type' => 'copy',
+        ]);
+
+        $this->withToken($token)->getJson('/api/tasks?workspace_id='.$personalWorkspaceId)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.metadata.recurrence', 'monthly')
+            ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $family->id]);
+    }
+
     public function test_reminder_update_can_replace_selected_linked_workspaces(): void
     {
         $token = $this->apiToken('update-linked-reminder@example.com');

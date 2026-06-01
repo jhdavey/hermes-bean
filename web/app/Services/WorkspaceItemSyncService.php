@@ -27,6 +27,32 @@ class WorkspaceItemSyncService
         ])->first();
 
         $target = $link ? $targetClass::find($link->target_id) : null;
+        if (! $target) {
+            $inverseLink = WorkspaceItemLink::where([
+                'source_workspace_id' => $targetWorkspace->id,
+                'target_workspace_id' => $sourceWorkspaceId,
+                'source_type' => $type,
+                'target_type' => $type,
+                'target_id' => $source->id,
+                'link_type' => 'copy',
+            ])->first();
+
+            if ($inverseLink) {
+                $target = $targetClass::find($inverseLink->source_id);
+                if ($target) {
+                    $target->fill($this->attributesForCopy($source));
+                    $target->forceFill([
+                        'workspace_id' => $targetWorkspace->id,
+                        'user_id' => $actor->id,
+                        'created_by_user_id' => $actor->id,
+                    ])->save();
+
+                    $inverseLink->forceFill(['metadata' => ['synced_at' => now()->toISOString()]])->save();
+
+                    return $target->refresh();
+                }
+            }
+        }
         $target ??= $this->existingTargetForCopy($source, $targetWorkspace, $actor);
         $target ??= new $targetClass;
         $target->fill($this->attributesForCopy($source));
@@ -91,7 +117,7 @@ class WorkspaceItemSyncService
 
     private function attributesForCopy(Model $source): array
     {
-        $attributes = $source->getAttributes();
+        $attributes = $source->attributesToArray();
         foreach (['id', 'user_id', 'workspace_id', 'created_by_user_id', 'created_at', 'updated_at'] as $key) {
             unset($attributes[$key]);
         }
