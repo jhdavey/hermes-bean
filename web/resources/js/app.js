@@ -145,6 +145,8 @@ if (mount) {
     let kioskRealtimeVoiceOnlyAssistant = false;
     let kioskRealtimeToolFallbackTimer = 0;
     let kioskRealtimeToolFallbackContent = '';
+    let kioskRealtimeReconnectTimer = 0;
+    let kioskRealtimeReconnectAttempts = 0;
     const kioskRealtimeProcessedCalls = new Set();
     const kioskRealtimeRunWatchTimers = new Map();
     let chatRequestCounter = 0;
@@ -272,7 +274,11 @@ if (mount) {
             const details = payload.errors
                 ? Object.values(payload.errors).flat().join(' ')
                 : payload.message;
-            throw new Error(details || 'Something went wrong.');
+            const error = new Error(details || 'Something went wrong.');
+            error.status = response.status;
+            error.payload = payload;
+            error.body = JSON.stringify(payload).slice(0, 1000);
+            throw error;
         }
         return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
     }
@@ -551,6 +557,10 @@ if (mount) {
 
     function profileTtsProvider(profile = currentAgentProfile()) {
         return 'openai';
+    }
+
+    function allowDebugBrowserVoiceFallback() {
+        return localStorage.getItem('heybean-debug-browser-voice') === 'true';
     }
 
     function profileTtsOpenAiConfigured(profile = currentAgentProfile()) {
@@ -1182,11 +1192,11 @@ if (mount) {
 
     function kioskVoicePillLabel({ requested, ready, phase }) {
         if (ready) {
-            if (phase === 'armed' && !state.kioskVoiceMessage) return 'Say hey bean';
+            if (phase === 'armed' && !state.kioskVoiceMessage) return 'Bean voice ready';
             return state.kioskVoiceMessage || phase;
         }
         if (!requested) return 'Enable microphone to chat';
-        return state.kioskVoiceMessage || (profileTtsProvider() === 'openai' && !kioskAudioUnlocked ? 'Enable Bean voice audio' : 'Allow microphone to chat');
+        return state.kioskVoiceMessage || 'Connecting Bean voice';
     }
 
     function settingsMarkup() {
@@ -3351,11 +3361,18 @@ if (mount) {
             try { kioskRealtime.dataChannel.send(JSON.stringify({ type: 'response.cancel' })); } catch (_) {}
         }
         stopKioskSpeechPlayback();
-        setKioskVoiceStatus(state.kioskVoiceEnabled ? 'armed' : 'idle', state.kioskVoiceEnabled ? 'say hey bean' : '');
+        setKioskVoiceStatus(
+            state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'armed' : 'working') : 'idle',
+            state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'Bean voice ready' : 'Reconnecting') : ''
+        );
         render();
         scrollChatToBottom();
         if (state.kioskVoiceEnabled) {
-            restartKioskVoiceListeningSoon(700);
+            if (kioskRealtimeConnected()) {
+                restartKioskVoiceListeningSoon(700);
+            } else {
+                scheduleKioskRealtimeReconnect('cancel_reconnect');
+            }
         }
 
         if (!state.session?.id) return;
@@ -3689,46 +3706,127 @@ if (mount) {
     }
 
     function shouldUseRealtimeKioskVoice() {
-        return !kioskRealtimeUnavailable
-            && window.isSecureContext
-            && Boolean(window.RTCPeerConnection)
-            && Boolean(navigator.mediaDevices?.getUserMedia);
+        return !kioskRealtimeSupportFailureReason();
+    }
+
+    function kioskRealtimeSupportFailureReason() {
+        if (!window.isSecureContext) return 'unsupported_browser_security_context';
+        if (!window.RTCPeerConnection) return 'unsupported_browser_webrtc';
+        if (!navigator.mediaDevices?.getUserMedia) return 'unsupported_browser_microphone';
+        return '';
     }
 
     function kioskRealtimeConnected() {
         return Boolean(kioskRealtime?.connected && kioskRealtime?.peerConnection);
     }
 
+    function reportKioskRealtimeIssue(type, details = {}) {
+        const payload = {
+            event_type: String(type || 'unknown_realtime_issue').slice(0, 100),
+            session_id: kioskRealtime?.sessionId || state.session?.id || null,
+            phase: state.kioskVoicePhase || '',
+            message: state.kioskVoiceMessage || '',
+            details: {
+                ...details,
+                user_agent: navigator.userAgent || '',
+            },
+        };
+        if (window.console?.warn) {
+            console.warn('Bean realtime voice issue', payload);
+        }
+        if (!state.token) return;
+        fetch('/api/assistant/realtime/client-events', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${state.token}`,
+            },
+            body: JSON.stringify(payload),
+        }).catch(() => {});
+    }
+
+    function clearKioskRealtimeReconnect() {
+        window.clearTimeout(kioskRealtimeReconnectTimer);
+        kioskRealtimeReconnectTimer = 0;
+    }
+
+    function scheduleKioskRealtimeReconnect(reason, details = {}, delay = null) {
+        if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return;
+        clearKioskRealtimeReconnect();
+        kioskRealtimeReconnectAttempts += 1;
+        const wait = delay ?? Math.min(1000 * (2 ** Math.min(kioskRealtimeReconnectAttempts - 1, 4)), 15000);
+        setKioskVoiceStatus('working', 'Reconnecting');
+        reportKioskRealtimeIssue('realtime_reconnect_scheduled', {
+            reason,
+            wait_ms: wait,
+            attempt: kioskRealtimeReconnectAttempts,
+            ...details,
+        });
+        kioskRealtimeReconnectTimer = window.setTimeout(() => {
+            kioskRealtimeReconnectTimer = 0;
+            if (!state.kioskVoiceEnabled || kioskRealtimeConnected() || kioskRealtimeStarting) return;
+            startKioskRealtimeVoiceMode({ requestPermission: false, reconnect: true });
+        }, wait);
+    }
+
     async function startKioskRealtimeVoiceMode(options = {}) {
         if (kioskRealtimeConnected() || kioskRealtimeStarting) return true;
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token || state.voiceListening) return false;
         kioskRealtimeStarting = true;
-        setKioskVoiceStatus('working', 'connecting voice');
+        setKioskVoiceStatus('working', options.reconnect ? 'Reconnecting' : 'Connecting Bean voice');
         let stream = null;
         let peerConnection = null;
         try {
-            if (!await requestKioskMicrophoneAccess(Boolean(options.requestPermission))) return false;
+            const unsupportedReason = kioskRealtimeSupportFailureReason();
+            if (unsupportedReason) {
+                reportKioskRealtimeIssue(unsupportedReason, {
+                    secure_context: window.isSecureContext,
+                    has_peer_connection: Boolean(window.RTCPeerConnection),
+                    has_get_user_media: Boolean(navigator.mediaDevices?.getUserMedia),
+                });
+                setKioskVoiceStatus('error', 'Voice unavailable');
+                return false;
+            }
+            if (!await requestKioskMicrophoneAccess(Boolean(options.requestPermission))) {
+                setKioskVoiceStatus('error', "Bean voice couldn't connect");
+                return false;
+            }
             stream = await navigator.mediaDevices.getUserMedia({ audio: await kioskAudioConstraints() });
             await rememberKioskMicrophoneFromStream(stream);
             kioskMicrophoneReady = true;
             await ensureRealtimeChatSession();
-            const sessionData = await api('/ai/realtime/session', {
-                method: 'POST',
-                body: {
-                    title: currentChatTitle(),
-                    runtime_mode: 'realtime',
-                    workspace_id: currentWorkspaceId() || null,
-                    session_id: state.session?.id || null,
-                    voice: profileTtsVoice(),
-                    metadata: {
-                        source: 'web_realtime_voice',
-                        client_context: clientContextPayload(),
+            let sessionData = null;
+            try {
+                sessionData = await api('/ai/realtime/session', {
+                    method: 'POST',
+                    body: {
+                        title: currentChatTitle(),
+                        runtime_mode: 'realtime',
+                        workspace_id: currentWorkspaceId() || null,
+                        session_id: state.session?.id || null,
+                        voice: profileTtsVoice(),
+                        metadata: {
+                            source: 'web_realtime_voice',
+                            client_context: clientContextPayload(),
+                        },
                     },
-                },
-            });
+                });
+            } catch (error) {
+                reportKioskRealtimeIssue('client_secret_api_failure', {
+                    status: error?.status || null,
+                    body: error?.body || error?.message || '',
+                    payload: error?.payload || null,
+                });
+                error.reported = true;
+                throw error;
+            }
             state.session = sessionData.session || state.session;
             const clientSecret = realtimeClientSecretValue(sessionData.client_secret);
-            if (!clientSecret) throw new Error('Realtime voice secret was empty.');
+            if (!clientSecret) {
+                reportKioskRealtimeIssue('client_secret_api_failure', { body: 'empty client secret' });
+                throw new Error('Realtime voice secret was empty.');
+            }
 
             peerConnection = new RTCPeerConnection();
             const remoteAudio = new Audio();
@@ -3748,21 +3846,43 @@ if (mount) {
                 connected: false,
                 sessionId: state.session?.id || sessionData.session?.id || null,
             };
+            const reconnectFromFailure = (type, details = {}) => {
+                if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled) return;
+                reportKioskRealtimeIssue(type, details);
+                stopKioskRealtimeVoiceMode({ preserveStatus: true, preserveReconnect: true });
+                scheduleKioskRealtimeReconnect(type, details);
+            };
+            peerConnection.onconnectionstatechange = () => {
+                const connectionState = peerConnection.connectionState || '';
+                if (['failed', 'disconnected', 'closed'].includes(connectionState)) {
+                    reconnectFromFailure('webrtc_connection_failure', { connection_state: connectionState });
+                }
+            };
+            peerConnection.oniceconnectionstatechange = () => {
+                const iceConnectionState = peerConnection.iceConnectionState || '';
+                if (['failed', 'disconnected', 'closed'].includes(iceConnectionState)) {
+                    reconnectFromFailure('ice_webrtc_connection_failure', { ice_connection_state: iceConnectionState });
+                }
+            };
             kioskRealtime = realtimeState;
             dataChannel.onopen = () => {
                 realtimeState.connected = true;
                 kioskRealtimeUnavailable = false;
-                setKioskVoiceStatus('armed', 'say hey bean');
+                kioskRealtimeReconnectAttempts = 0;
+                clearKioskRealtimeReconnect();
+                setKioskVoiceStatus('armed', 'Bean voice ready');
                 render();
             };
             dataChannel.onmessage = (event) => handleKioskRealtimeEvent(event);
-            dataChannel.onerror = () => setKioskVoiceStatus('error', 'voice connection issue');
-            dataChannel.onclose = () => {
-                if (kioskRealtime === realtimeState) {
-                    stopKioskRealtimeVoiceMode({ preserveStatus: true });
-                    if (state.kioskVoiceEnabled) setKioskVoiceStatus('error', 'voice disconnected');
-                }
-            };
+            dataChannel.onerror = (event) => reconnectFromFailure('data_channel_error', {
+                ready_state: dataChannel.readyState,
+                message: event?.message || '',
+            });
+            dataChannel.onclose = (event) => reconnectFromFailure('data_channel_close', {
+                ready_state: dataChannel.readyState,
+                code: event?.code || null,
+                reason: event?.reason || '',
+            });
 
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
@@ -3774,17 +3894,37 @@ if (mount) {
                 },
                 body: offer.sdp,
             });
+            const sdpBody = await sdpResponse.text();
             if (!sdpResponse.ok) {
-                throw new Error(`Realtime voice failed (${sdpResponse.status}).`);
+                reportKioskRealtimeIssue('openai_realtime_calls_failure', {
+                    status: sdpResponse.status,
+                    body: sdpBody.slice(0, 1000),
+                });
+                const error = new Error(`Realtime voice failed (${sdpResponse.status}).`);
+                error.reported = true;
+                error.status = sdpResponse.status;
+                error.body = sdpBody.slice(0, 1000);
+                throw error;
             }
-            await peerConnection.setRemoteDescription({ type: 'answer', sdp: await sdpResponse.text() });
+            await peerConnection.setRemoteDescription({ type: 'answer', sdp: sdpBody });
             return true;
         } catch (error) {
-            stopKioskRealtimeVoiceMode({ preserveStatus: true });
+            stopKioskRealtimeVoiceMode({ preserveStatus: true, preserveReconnect: true });
             if (stream) stream.getTracks().forEach((track) => track.stop());
             try { peerConnection?.close(); } catch (_) {}
-            setKioskVoiceStatus('error', 'voice fallback');
-            kioskRealtimeUnavailable = true;
+            if (!error?.reported) {
+                reportKioskRealtimeIssue('realtime_start_failure', {
+                    name: error?.name || '',
+                    message: error?.message || '',
+                    status: error?.status || null,
+                    body: error?.body || '',
+                });
+            }
+            setKioskVoiceStatus('error', "Bean voice couldn't connect");
+            scheduleKioskRealtimeReconnect('realtime_start_failure', {
+                name: error?.name || '',
+                message: error?.message || '',
+            });
             return false;
         } finally {
             kioskRealtimeStarting = false;
@@ -3811,6 +3951,10 @@ if (mount) {
         const realtime = kioskRealtime;
         kioskRealtime = null;
         kioskRealtimeStarting = false;
+        if (!options.preserveReconnect) {
+            clearKioskRealtimeReconnect();
+            kioskRealtimeReconnectAttempts = 0;
+        }
         kioskRealtimePendingUser = null;
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
@@ -3961,7 +4105,7 @@ if (mount) {
             kioskRealtimePendingUser = null;
         }
         if (state.kioskVoiceEnabled && kioskRealtimeConnected()) {
-            setKioskVoiceStatus('armed', 'say hey bean');
+            setKioskVoiceStatus('armed', 'Bean voice ready');
         }
     }
 
@@ -4195,122 +4339,34 @@ if (mount) {
 
     async function startKioskVoiceMode(options = {}) {
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return;
-        if (options.forceLegacy !== true && shouldUseRealtimeKioskVoice()) {
-            const started = await startKioskRealtimeVoiceMode(options);
-            if (started) return;
-        }
-        if (kioskRecognition || kioskRecognitionActive || state.voiceListening) {
+        if (!shouldUseRealtimeKioskVoice()) {
+            const reason = kioskRealtimeSupportFailureReason();
+            reportKioskRealtimeIssue(reason || 'unsupported_browser_realtime', {
+                secure_context: window.isSecureContext,
+                has_peer_connection: Boolean(window.RTCPeerConnection),
+                has_get_user_media: Boolean(navigator.mediaDevices?.getUserMedia),
+            });
+            setKioskVoiceStatus('error', 'Voice unavailable');
             return;
         }
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!window.isSecureContext || !SpeechRecognition) {
-            setKioskVoiceStatus('error', !window.isSecureContext ? 'voice needs https or localhost' : 'voice unavailable');
-            return;
-        }
-        if (state.busy) {
-            restartKioskVoiceListeningSoon(1400);
-            return;
-        }
-        if (!await requestKioskMicrophoneAccess(Boolean(options.requestPermission))) return;
-        if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || state.voiceListening) return;
-
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-        kioskRecognition = recognition;
-        kioskRecognitionShouldRestart = true;
-
-        recognition.onstart = () => {
-            kioskRecognitionActive = true;
-            setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'say hey bean');
-        };
-        recognition.onresult = (event) => {
-            if (state.busy && voiceCancelRequested(speechTranscript(event, { fromResultIndex: true }))) {
-                cancelKioskVoiceCapture();
-                return;
-            }
-            if (!kioskConversationActive) {
-                let command = null;
-                for (const wakeTranscript of speechTranscriptCandidates(event)) {
-                    command = commandAfterWakePhrase(wakeTranscript);
-                    if (command !== null) break;
-                }
-                if (command === null) return;
-                kioskCommandText = command;
-                beginKioskConversation();
-                window.speechSynthesis?.cancel();
-                setKioskVoiceStatus('listening', 'listening');
-                if (kioskCommandText.trim()) {
-                    showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
-                    armKioskCommandSubmit();
-                }
-                return;
-            }
-            const transcript = speechTranscript(event);
-            if (!transcript) return;
-            if ((kioskConversationActive || state.busy) && voiceCancelRequested(transcript)) {
-                cancelKioskVoiceCapture();
-                return;
-            }
-            if (!['listening', 'heard'].includes(state.kioskVoicePhase)) return;
-            const command = commandAfterWakePhrase(transcript);
-            kioskCommandText = (command === null ? transcript : command).trim();
-            if (kioskCommandText) {
-                window.clearTimeout(kioskConversationTimer);
-                if (conversationEndRequested(kioskCommandText)) {
-                    endKioskConversation('done');
-                    return;
-                }
-                showKioskHeardTranscript(kioskCommandText, { phase: 'heard' });
-                armKioskCommandSubmit();
-            }
-        };
-        recognition.onend = () => {
-            kioskRecognitionActive = false;
-            kioskRecognition = null;
-            if (['listening', 'heard'].includes(state.kioskVoicePhase) && kioskCommandText.trim()) {
-                finishKioskVoiceCommand();
-                return;
-            }
-            if (['listening', 'heard'].includes(state.kioskVoicePhase)) {
-                kioskCommandText = '';
-                setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'idle', kioskConversationActive ? 'listening' : '');
-            }
-            if (kioskRecognitionShouldRestart) {
-                restartKioskVoiceListeningSoon(700);
-            }
-        };
-        recognition.onerror = (event) => {
-            const recoverable = ['aborted', 'network', 'no-speech'].includes(event.error);
-            kioskRecognitionActive = false;
-            kioskRecognition = null;
-            if (!recoverable) {
-                setKioskVoiceStatus('error', kioskVoiceErrorMessage(event.error));
-            }
-            if (kioskRecognitionShouldRestart && recoverable) {
-                restartKioskVoiceListeningSoon(event.error === 'no-speech' ? 500 : 1600);
-            }
-        };
-
-        try {
-            recognition.start();
-        } catch (error) {
-            kioskRecognition = null;
-            kioskRecognitionActive = false;
-            restartKioskVoiceListeningSoon(1200);
-        }
+        await startKioskRealtimeVoiceMode(options);
     }
 
     async function requestKioskMicrophoneAccess(requestPermission = false) {
         if (kioskMicrophoneReady) return true;
         if (!navigator.mediaDevices?.getUserMedia) {
             setKioskVoiceStatus('error', 'microphone unavailable');
+            reportKioskRealtimeIssue('unsupported_browser_microphone', {
+                has_get_user_media: Boolean(navigator.mediaDevices?.getUserMedia),
+            });
             return false;
         }
         const permission = await microphonePermissionState();
         if (permission === 'denied') {
             setKioskVoiceStatus('error', 'mic blocked');
+            reportKioskRealtimeIssue('mic_permission_failure', {
+                permission_state: permission,
+            });
             return false;
         }
         if (!requestPermission && permission !== 'granted') {
@@ -4330,6 +4386,10 @@ if (mount) {
         } catch (error) {
             kioskMicrophoneReady = false;
             setKioskVoiceStatus('error', kioskMicrophoneAccessMessage(error));
+            reportKioskRealtimeIssue('mic_permission_failure', {
+                name: error?.name || '',
+                message: error?.message || '',
+            });
             return false;
         } finally {
             stream?.getTracks().forEach((track) => track.stop());
@@ -4390,8 +4450,7 @@ if (mount) {
     }
 
     function kioskVoiceReady() {
-        if (kioskRealtimeConnected()) return state.kioskVoiceEnabled;
-        return state.kioskVoiceEnabled && kioskMicrophoneReady && kioskAudioUnlocked;
+        return state.kioskVoiceEnabled && kioskRealtimeConnected();
     }
 
     async function microphonePermissionState() {
@@ -4425,6 +4484,7 @@ if (mount) {
     }
 
     function startKioskBargeInListening() {
+        if (!allowDebugBrowserVoiceFallback()) return;
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!state.kioskVoiceEnabled || !SpeechRecognition || kioskBargeRecognition || kioskRecognitionActive) return;
         window.clearTimeout(kioskBargeRestartTimer);
@@ -4512,7 +4572,7 @@ if (mount) {
         if (kioskRealtimeConnected() || kioskRealtimeStarting) return;
         kioskRestartTimer = window.setTimeout(() => {
             kioskRestartTimer = 0;
-            startKioskVoiceMode();
+            startKioskRealtimeVoiceMode({ requestPermission: false });
         }, delay);
     }
 
@@ -4940,11 +5000,17 @@ if (mount) {
     function speakKioskAcknowledgement(text, options = {}) {
         if (!text) return Promise.resolve(false);
         if (profileTtsProvider() === 'openai') {
-            return playOpenAiTts(text, { status: 'responding', shouldPlay: options.shouldPlay, quietFailure: true }).then((spoken) => (
-                spoken || speakBrowserTts(text)
-            ));
+            return playOpenAiTts(text, { status: 'responding', shouldPlay: options.shouldPlay, quietFailure: true }).then((spoken) => {
+                if (spoken) return true;
+                reportKioskRealtimeIssue('openai_tts_emergency_fallback_failure', {
+                    message: kioskLastTtsError || "Bean's voice unavailable",
+                });
+                if (allowDebugBrowserVoiceFallback()) return speakBrowserTts(text);
+                setKioskVoiceStatus('error', "Bean voice couldn't connect");
+                return false;
+            });
         }
-        return speakBrowserTts(text);
+        return allowDebugBrowserVoiceFallback() ? speakBrowserTts(text) : Promise.resolve(false);
     }
 
     function trackKioskSpeechThenWorking(speech, generation, finalReady) {
@@ -4977,11 +5043,17 @@ if (mount) {
 
     function speakKioskResponseText(text, options = {}) {
         if (profileTtsProvider() === 'openai') {
-            return playOpenAiTts(text, { ...options, quietFailure: true }).then((spoken) => (
-                spoken || speakBrowserTts(text)
-            ));
+            return playOpenAiTts(text, { ...options, quietFailure: true }).then((spoken) => {
+                if (spoken) return true;
+                reportKioskRealtimeIssue('openai_tts_emergency_fallback_failure', {
+                    message: kioskLastTtsError || "Bean's voice unavailable",
+                });
+                if (allowDebugBrowserVoiceFallback()) return speakBrowserTts(text);
+                setKioskVoiceStatus('error', "Bean voice couldn't connect");
+                return false;
+            });
         }
-        return speakBrowserTts(text);
+        return allowDebugBrowserVoiceFallback() ? speakBrowserTts(text) : Promise.resolve(false);
     }
 
     function finalVoiceForTurn(userContent, quickReplyText, assistantContent, options = {}) {
@@ -5208,6 +5280,7 @@ if (mount) {
     }
 
     function speakBrowserTts(text) {
+        if (!allowDebugBrowserVoiceFallback()) return Promise.resolve(false);
         if (!text || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
             return Promise.resolve(false);
         }
@@ -5241,18 +5314,12 @@ if (mount) {
     }
 
     async function toggleKioskVoiceMode() {
-        if (!kioskRealtimeConnected() && state.kioskVoiceEnabled && profileTtsProvider() === 'openai' && !kioskAudioUnlocked) {
-            const unlocked = await unlockKioskAudio();
-            setKioskVoiceStatus(unlocked ? 'armed' : 'error', unlocked ? "Bean's voice ready" : "Bean's voice needs one click");
+        if (state.kioskVoiceEnabled && !kioskRealtimeConnected()) {
+            clearKioskRealtimeReconnect();
+            setKioskVoiceStatus('working', 'Connecting Bean voice');
             render();
-            if (unlocked && (!kioskRecognition && !kioskRecognitionActive)) {
-                startKioskVoiceMode({ requestPermission: true });
-            }
-            return;
-        }
-        if (!kioskRealtimeConnected() && state.kioskVoiceEnabled && !kioskVoiceReady()) {
-            await startKioskVoiceMode({ requestPermission: true });
-            render();
+            await unlockKioskAudio();
+            startKioskVoiceMode({ requestPermission: true });
             return;
         }
         state.kioskVoiceEnabled = !state.kioskVoiceEnabled;
@@ -5260,8 +5327,8 @@ if (mount) {
             kioskRealtimeUnavailable = false;
             localStorage.setItem(kioskVoiceKey, 'true');
             kioskConversationActive = false;
-            state.kioskVoicePhase = 'idle';
-            state.kioskVoiceMessage = '';
+            state.kioskVoicePhase = 'working';
+            state.kioskVoiceMessage = 'Connecting Bean voice';
             render();
             await unlockKioskAudio();
             startKioskVoiceMode({ requestPermission: true });

@@ -127,6 +127,11 @@ class RealtimeSessionController extends Controller
             Log::warning('OpenAI realtime client secret creation failed.', [
                 'user_id' => $user->id,
                 'workspace_id' => $workspace->id,
+                'conversation_session_id' => $localSession->id,
+                'api_base' => rtrim((string) config('services.hermes_runtime.api_base'), '/'),
+                'model' => $payload['session']['model'],
+                'voice' => $voice,
+                'key_source' => 'OPENAI_PUBLIC_KEY',
                 'status' => $response->status(),
                 'body' => str($response->body())->limit(500)->toString(),
             ]);
@@ -236,6 +241,34 @@ class RealtimeSessionController extends Controller
             'ok' => false,
             'message' => 'Unsupported realtime tool.',
         ]], 422);
+    }
+
+    public function clientEvent(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'event_type' => ['required', 'string', 'max:100'],
+            'session_id' => ['nullable', 'integer', 'exists:conversation_sessions,id'],
+            'phase' => ['nullable', 'string', 'max:100'],
+            'message' => ['nullable', 'string', 'max:500'],
+            'details' => ['nullable', 'array'],
+        ]);
+
+        $session = null;
+        if (! empty($data['session_id'])) {
+            $session = ConversationSession::where('user_id', $request->user()->id)->find($data['session_id']);
+        }
+
+        Log::warning('Bean realtime voice client event.', [
+            'event_type' => $data['event_type'],
+            'user_id' => $request->user()->id,
+            'conversation_session_id' => $session?->id,
+            'workspace_id' => $session?->workspace_id,
+            'phase' => $data['phase'] ?? null,
+            'message' => $data['message'] ?? null,
+            'details' => $data['details'] ?? [],
+        ]);
+
+        return response()->json(['data' => ['ok' => true]]);
     }
 
     private function realtimeInstructions(ConversationSession $session): string

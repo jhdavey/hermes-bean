@@ -128,6 +128,26 @@ class RealtimeAssistantFlowTest extends TestCase
         ]);
     }
 
+    public function test_realtime_client_events_are_accepted_for_voice_diagnostics(): void
+    {
+        $token = $this->apiToken('realtime-client-event@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/assistant/realtime/client-events', [
+            'event_type' => 'ice_webrtc_connection_failure',
+            'session_id' => $sessionId,
+            'phase' => 'working',
+            'message' => 'Reconnecting',
+            'details' => [
+                'ice_connection_state' => 'failed',
+                'user_agent' => 'Feature test',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.ok', true);
+    }
+
     public function test_realtime_tool_call_queues_background_laravel_agent_run(): void
     {
         Queue::fake();
