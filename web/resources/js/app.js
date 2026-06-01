@@ -29,6 +29,7 @@ if (mount) {
         activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
         mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
+        menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
         refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.2 6.5L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.2 5.5L21 8"/><path d="M21 3v5h-5"/></svg>',
         chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
         chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
@@ -795,11 +796,12 @@ if (mount) {
                     ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-mobile')}
                     <span class="hb-spacer"></span>
                     ${topNavMarkup()}
-                    ${showAdd ? `<button class="hb-icon-button" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
-                    ${showRefresh ? `<button class="hb-icon-button" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
+                    ${showAdd ? `<button class="hb-icon-button hb-topbar-action" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
+                    ${showRefresh ? `<button class="hb-icon-button hb-topbar-action" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
                     ${kioskVoiceToggleMarkup()}
+                    ${topOverflowMenuMarkup()}
                 </header>
                 <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
@@ -1208,6 +1210,29 @@ if (mount) {
                     ${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}
                 </select>
             </label>`;
+    }
+
+    function topOverflowMenuMarkup() {
+        const workspaceItems = workspaces();
+        const activeWorkspaceId = String(currentWorkspaceId() || '');
+        const activeWorkspace = workspaceItems.find((workspace) => String(workspace.id) === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault) || workspaceItems[0];
+        return `
+            <details class="hb-overflow-menu">
+                <summary class="hb-icon-button hb-overflow-trigger" aria-label="Open app menu" title="Menu">${icons.menu}</summary>
+                <div class="hb-overflow-popover">
+                    ${overflowMenuAction('today', 'Calendar', icons.calendar)}
+                    ${overflowMenuAction('tasks', 'Tasks', icons.tasks)}
+                    ${overflowMenuAction('reminders', 'Reminders', icons.reminders)}
+                    ${workspaceItems.length ? `<label class="hb-overflow-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select ${workspaceItems.length < 2 ? 'disabled' : ''} aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
+                    <button class="hb-overflow-action" type="button" data-open-create="event">${icons.add}<span>New event</span></button>
+                    <button class="hb-overflow-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
+                    ${overflowMenuAction('settings', 'Settings', icons.settings)}
+                </div>
+            </details>`;
+    }
+
+    function overflowMenuAction(key, label, icon) {
+        return `<button class="hb-overflow-action ${state.selected === key ? 'hb-overflow-action-active' : ''}" type="button" data-nav="${key}">${icon}<span>${label}</span></button>`;
     }
 
     function topProfileMenuMarkup() {
@@ -2230,7 +2255,7 @@ if (mount) {
         mount.querySelectorAll('[data-shift-month]').forEach((button) => button.addEventListener('click', () => {
             shiftMonth(Number(button.dataset.shiftMonth || 0));
         }));
-        mount.querySelector('[data-refresh-app]')?.addEventListener('click', refreshCurrentView);
+        mount.querySelectorAll('[data-refresh-app]').forEach((button) => button.addEventListener('click', refreshCurrentView));
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
         mount.querySelector('[data-open-issue-report]')?.addEventListener('click', () => openModal('issue-report'));
