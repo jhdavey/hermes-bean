@@ -1,13 +1,7 @@
 <?php
 
-$hermesApiKey = (string) env('HERMES_API_KEY', '');
-$openAiKey = (string) env('OPENAI_API_KEY', '');
 $openAiPublicKey = (string) env('OPENAI_PUBLIC_KEY', '');
 $hermesApiBase = env('HERMES_API_BASE') ?: 'https://api.openai.com/v1';
-$hermesResolvedApiKey = $hermesApiKey !== '' ? $hermesApiKey : ($openAiKey !== '' ? $openAiKey : $openAiPublicKey);
-$hermesResolvedApiKeySource = $hermesApiKey !== ''
-    ? 'HERMES_API_KEY'
-    : ($openAiKey !== '' ? 'OPENAI_API_KEY' : ($openAiPublicKey !== '' ? 'OPENAI_PUBLIC_KEY' : null));
 
 return [
 
@@ -50,8 +44,8 @@ return [
         'quick_reply_model' => env('HERMES_QUICK_REPLY_MODEL', 'gpt-5.4-mini'),
         'quick_reply_timeout' => (float) env('HERMES_QUICK_REPLY_TIMEOUT', 4),
         'quick_reply_max_completion_tokens' => (int) env('HERMES_QUICK_REPLY_MAX_COMPLETION_TOKENS', 90),
-        'api_key' => $hermesResolvedApiKey,
-        'api_key_source' => $hermesResolvedApiKeySource,
+        'api_key' => $openAiPublicKey,
+        'api_key_source' => $openAiPublicKey !== '' ? 'OPENAI_PUBLIC_KEY' : null,
         'api_base' => $hermesApiBase,
         'users_home' => env('HERMES_USERS_HOME', storage_path('app/hermes-users')),
         'base_home' => env('HERMES_BASE_HOME'),
@@ -62,13 +56,13 @@ return [
     ],
 
     'hermes_realtime' => [
-        'api_key' => env('HERMES_REALTIME_API_KEY') ?: ($hermesApiKey !== '' ? $hermesApiKey : $openAiKey),
+        'api_key' => $openAiPublicKey,
         'model' => env('HERMES_REALTIME_MODEL', 'gpt-realtime'),
         'voice' => env('HERMES_REALTIME_VOICE', 'marin'),
     ],
 
     'openai' => [
-        'server_api_key' => $hermesResolvedApiKey,
+        'server_api_key' => $openAiPublicKey,
         'public_key' => $openAiPublicKey,
     ],
 
