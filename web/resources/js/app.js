@@ -4002,12 +4002,14 @@ if (mount) {
         let quickReplySpeech = quickReplyText
             ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments)
             : Promise.resolve(false);
+        trackKioskSpeechThenWorking(quickReplySpeech, quickReplyGeneration, () => finalResponseReady);
         voiceTurn.lastSpeech = quickReplySpeech;
         if (allowLateQuickReply) {
             quickReplyTask.then((lateQuickReply) => {
                 const lateQuickReplyText = lateQuickReply?.text || '';
                 if (!lateQuickReplyText || finalResponseReady) return false;
                 quickReplySpeech = speakKioskVoiceSegment(lateQuickReplyText, quickReplyGeneration, spokenSegments);
+                trackKioskSpeechThenWorking(quickReplySpeech, quickReplyGeneration, () => finalResponseReady);
                 voiceTurn.lastSpeech = quickReplySpeech;
                 return quickReplySpeech;
             });
@@ -4146,6 +4148,7 @@ if (mount) {
                     const bridgeText = bridge?.text || '';
                     if (!bridgeText || cancelled || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) break;
                     const speech = speakKioskVoiceSegment(bridgeText, generation, spokenSegments);
+                    trackKioskSpeechThenWorking(speech, generation, finalReady);
                     voiceTurn.lastSpeech = speech;
                     spokeBridge = await speech || spokeBridge;
                 }
@@ -4253,6 +4256,14 @@ if (mount) {
             return playOpenAiTts(text, { status: 'responding', shouldPlay: options.shouldPlay });
         }
         return speakBrowserTts(text);
+    }
+
+    function trackKioskSpeechThenWorking(speech, generation, finalReady) {
+        Promise.resolve(speech).then(() => {
+            if (!state.busy || finalReady?.()) return;
+            if (!kioskConversationActive || generation !== kioskQuickReplyGeneration) return;
+            setKioskVoiceStatus('working', 'working');
+        }).catch(() => {});
     }
 
     function stopKioskSpeechPlayback() {
