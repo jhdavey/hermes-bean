@@ -54,16 +54,42 @@ class QuickVoiceReplyTest extends TestCase
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && $request->hasHeader('Authorization', 'Bearer test-key')
                 && $payload['model'] === 'gpt-quick-test'
-                && $payload['max_completion_tokens'] === 40
+                && $payload['max_completion_tokens'] === 90
                 && ! array_key_exists('tools', $payload)
                 && data_get($payload, 'messages.0.role') === 'system'
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'normal conversational question')
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'compact complete answer')
+                && str_contains((string) data_get($payload, 'messages.0.content'), 'Finish complete thoughts')
                 && data_get($payload, 'messages.1.role') === 'system'
                 && str_contains((string) data_get($payload, 'messages.1.content'), 'America/New_York')
                 && data_get($payload, 'messages.2.role') === 'user'
                 && data_get($payload, 'messages.2.content') === 'what should we have for dinner tonight?';
         });
+    }
+
+    public function test_quick_voice_reply_continues_to_agent_for_live_external_requests(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-flights',
+                'model' => 'gpt-quick-test',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I will check one-way flights from MCO to Dublin for tomorrow.',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('quick-voice-flights@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
+            'content' => 'can you tell me the cheapest flights from MCO to Dublin for tomorrow one way?',
+        ])->assertOk()
+            ->assertJsonPath('data.text', 'I will check one-way flights from MCO to Dublin for tomorrow.')
+            ->assertJsonPath('data.continue_agent', true);
     }
 
     public function test_quick_voice_reply_continues_to_agent_for_app_requests(): void

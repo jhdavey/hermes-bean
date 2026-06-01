@@ -46,7 +46,7 @@ return [
         'default_model' => env('HERMES_DEFAULT_MODEL', 'gpt-5.5'),
         'quick_reply_model' => env('HERMES_QUICK_REPLY_MODEL', 'gpt-5.4-mini'),
         'quick_reply_timeout' => (float) env('HERMES_QUICK_REPLY_TIMEOUT', 4),
-        'quick_reply_max_completion_tokens' => (int) env('HERMES_QUICK_REPLY_MAX_COMPLETION_TOKENS', 40),
+        'quick_reply_max_completion_tokens' => (int) env('HERMES_QUICK_REPLY_MAX_COMPLETION_TOKENS', 90),
         'api_key' => $hermesResolvedApiKey,
         'api_base' => $hermesApiBase,
         'users_home' => env('HERMES_USERS_HOME', storage_path('app/hermes-users')),

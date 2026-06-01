@@ -48,3 +48,5 @@ assert.equal(voiceCommandNeedsAgentWork('what is on my calendar today'), true);
 assert.equal(voiceCommandNeedsAgentWork('move my task from 7pm to 5pm'), true);
 assert.equal(voiceCommandNeedsAgentWork('plan my day'), true);
 assert.equal(voiceCommandNeedsAgentWork('plan dinner'), false);
+assert.equal(voiceCommandNeedsAgentWork('cheapest flights from MCO to Dublin tomorrow one way'), true);
+assert.equal(voiceCommandNeedsAgentWork('can you give me a taco recipe'), false);

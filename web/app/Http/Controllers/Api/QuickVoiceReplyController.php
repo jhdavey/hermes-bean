@@ -118,7 +118,7 @@ class QuickVoiceReplyController extends Controller
         $text = str((string) data_get($response->json(), 'choices.0.message.content', ''))
             ->replaceMatches('/\s+/', ' ')
             ->trim()
-            ->limit(220, '')
+            ->limit(360, '')
             ->toString();
 
         if ($text === '') {
@@ -151,6 +151,10 @@ class QuickVoiceReplyController extends Controller
         }
 
         if (preg_match('/\b(calendar|calendars|event|events|task|tasks|todo|to do|reminder|reminders|agenda|approval|approvals|workspace|workspaces|google calendar)\b/', $command)) {
+            return true;
+        }
+
+        if (preg_match('/\b(flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b/', $command)) {
             return true;
         }
 
@@ -193,9 +197,10 @@ The user has just finished speaking. Give the first natural spoken reply immedia
 Do not use canned support-agent phrases. Do not mention tools, models, background jobs, or internal work.
 If the user asks a normal conversational question, answer with a useful first thought right away.
 For casual questions, do not start with "Got it"; answer directly.
-For casual questions that do not need app data or an app change, give a compact complete answer in one sentence.
-If the user asks for current app data or an app change, respond naturally with what you are about to check or do, without claiming it is already done.
-Keep it to one sentence under 24 words.
+For casual questions that do not need app data, live external data, or an app change, give a compact complete answer in one or two short sentences.
+If the user asks for current app data, live external data, or an app change, respond naturally with what you are about to check or do, without claiming it is already done.
+Finish complete thoughts. Do not end with a comma, colon, or unfinished list.
+Keep it under 45 words.
 PROMPT;
     }
 }
