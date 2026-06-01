@@ -72,6 +72,50 @@ class HermesToolRuntimeServiceTest extends TestCase
         });
     }
 
+    public function test_tool_runtime_receives_voice_quick_reply_context_for_continuation(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-voice-context',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I would add a protein and something fresh, depending on what you have.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-voice-context@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'what should we have for dinner tonight?',
+            'metadata' => [
+                'client_context' => ['timezone' => 'America/New_York'],
+                'voice_context' => [
+                    'mode' => 'live_voice',
+                    'quick_reply' => 'Got it, a quick easy dinner could be tacos or pasta.',
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+            $context = json_decode(str_replace("Runtime context:\n", '', (string) data_get($payload, 'messages.1.content')), true, flags: JSON_THROW_ON_ERROR);
+
+            return $request->url() === 'https://api.openai.test/v1/chat/completions'
+                && str_contains((string) data_get($payload, 'messages.0.content'), 'already said that sentence aloud')
+                && data_get($context, 'voice_context.mode') === 'live_voice'
+                && data_get($context, 'voice_context.quick_reply') === 'Got it, a quick easy dinner could be tacos or pasta.'
+                && data_get($context, 'temporal_context.client_context.timezone') === 'America/New_York';
+        });
+    }
+
     public function test_tool_runtime_executes_native_task_update_tool_call(): void
     {
         Http::fakeSequence()

@@ -691,6 +691,9 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     ? data_get($message->metadata ?? [], 'client_context')
                     : null,
             ],
+            'voice_context' => is_array(data_get($message->metadata ?? [], 'voice_context'))
+                ? data_get($message->metadata ?? [], 'voice_context')
+                : null,
         ];
     }
 
@@ -709,6 +712,8 @@ Prefer acting on clear scheduling/productivity requests instead of asking for op
 When setting recurrence, always use recurrence as one of: none, daily, weekly, monthly, specific_days, or interval. For custom intervals like "every 3 days", set recurrence to interval and put interval plus interval_unit in metadata. Never put an object in recurrence.
 
 Use the current workspace unless the user clearly names another accessible workspace. Adapt tone to agent_profile settings and memory. If onboarding is incomplete, run a quick onboarding interview and use update_agent_profile when enough preferences are provided.
+
+If runtime_context.voice_context.quick_reply is present, Bean already said that sentence aloud in this same voice turn. Do not repeat it or paraphrase it. Continue naturally from it with only new information, the result of any work, or a concise next step.
 
 Respond to the user in natural language only. Never output JSON, tool arguments, ids, schema text, routing details, or debug text.
 PROMPT;

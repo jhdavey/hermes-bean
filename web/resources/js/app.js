@@ -3311,9 +3311,20 @@ if (mount) {
                     body: { title: onboarding ? 'Welcome to Bean' : 'Workspace chat', runtime_mode: onboarding ? 'onboarding' : 'chat', workspace_id: state.user?.active_workspace?.id || state.summary?.workspace?.id || null },
                 });
             }
+            const metadata = {
+                client_context: clientContextPayload(),
+                ...(options.voiceQuickReply
+                    ? {
+                        voice_context: {
+                            mode: 'live_voice',
+                            quick_reply: String(options.voiceQuickReply).trim().slice(0, 220),
+                        },
+                    }
+                    : {}),
+            };
             result = await api(`/assistant/sessions/${state.session.id}/messages`, {
                 method: 'POST',
-                body: { content, metadata: { client_context: clientContextPayload() } },
+                body: { content, metadata },
             });
             if (cancelledChatRequestIds.has(requestId)) {
                 state.session = result.session || state.session;
@@ -3966,10 +3977,20 @@ if (mount) {
 
         const quickReplyGeneration = ++kioskQuickReplyGeneration;
         setKioskVoiceStatus('working', 'thinking');
-        speakKioskQuickReply(content, quickReplyGeneration);
+        const quickReplyText = await timeoutPromise(
+            fetchKioskQuickReply(content, quickReplyGeneration),
+            1400,
+            '',
+        );
+        const quickReplySpeech = quickReplyText
+            ? speakKioskAcknowledgement(quickReplyText, {
+                shouldPlay: () => kioskConversationActive && quickReplyGeneration === kioskQuickReplyGeneration,
+            })
+            : Promise.resolve(false);
         startKioskBargeInListening();
         try {
-            const response = await sendChatContent(content);
+            const response = await sendChatContent(content, { voiceQuickReply: quickReplyText });
+            await quickReplySpeech;
             kioskQuickReplyGeneration += 1;
             if (!kioskConversationActive) return;
             const assistantContent = response?.assistantContent || '';
@@ -4054,7 +4075,7 @@ if (mount) {
         }, delay);
     }
 
-    async function speakKioskQuickReply(content, generation) {
+    async function fetchKioskQuickReply(content, generation) {
         try {
             const response = await api('/assistant/voice/quick-reply', {
                 method: 'POST',
@@ -4065,13 +4086,19 @@ if (mount) {
                 },
             });
             const text = String(response?.text || '').trim();
-            if (!text || !kioskConversationActive || generation !== kioskQuickReplyGeneration) return false;
-            return speakKioskAcknowledgement(text, {
-                shouldPlay: () => kioskConversationActive && generation === kioskQuickReplyGeneration,
-            });
+            if (!text || !kioskConversationActive || generation !== kioskQuickReplyGeneration) return '';
+            return text;
         } catch (_) {
-            return false;
+            return '';
         }
+    }
+
+    function timeoutPromise(promise, timeoutMs, fallback) {
+        let timeoutId = 0;
+        const timeout = new Promise((resolve) => {
+            timeoutId = window.setTimeout(() => resolve(fallback), timeoutMs);
+        });
+        return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
     }
 
     function speakKioskAcknowledgement(text, options = {}) {
