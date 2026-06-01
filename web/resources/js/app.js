@@ -556,6 +556,11 @@ if (mount) {
         return tts.openai_api_key_configured === true || tts.openaiApiKeyConfigured === true;
     }
 
+    function profileTtsOpenAiPlayable(profile = currentAgentProfile()) {
+        const tts = profileTtsSettings(profile);
+        return profileTtsOpenAiConfigured(profile) || tts.openai_app_key_configured === true || tts.openaiAppKeyConfigured === true;
+    }
+
     function profileTtsVoice(profile = currentAgentProfile()) {
         const tts = profileTtsSettings(profile);
         return tts.openai_voice || tts.openaiVoice || 'coral';
@@ -4861,8 +4866,10 @@ if (mount) {
 
     function speakKioskAcknowledgement(text, options = {}) {
         if (!text) return Promise.resolve(false);
-        if (profileTtsProvider() === 'openai' && profileTtsOpenAiConfigured()) {
-            return playOpenAiTts(text, { status: 'responding', shouldPlay: options.shouldPlay });
+        if (profileTtsProvider() === 'openai' && profileTtsOpenAiPlayable()) {
+            return playOpenAiTts(text, { status: 'responding', shouldPlay: options.shouldPlay, quietFailure: true }).then((spoken) => (
+                spoken || speakBrowserTts(text)
+            ));
         }
         return speakBrowserTts(text);
     }
@@ -4897,11 +4904,12 @@ if (mount) {
 
     function speakKioskResponseText(text, options = {}) {
         if (profileTtsProvider() === 'openai') {
-            if (!profileTtsOpenAiConfigured()) {
-                setKioskVoiceStatus('responding', 'save Bean voice key');
-                return false;
+            if (profileTtsOpenAiPlayable()) {
+                return playOpenAiTts(text, { ...options, quietFailure: true }).then((spoken) => (
+                    spoken || speakBrowserTts(text)
+                ));
             }
-            return playOpenAiTts(text, options);
+            return speakBrowserTts(text);
         }
         return speakBrowserTts(text);
     }
@@ -4993,12 +5001,12 @@ if (mount) {
             });
             if (!response.ok) {
                 const payload = await response.json().catch(() => null);
-                rememberOpenAiTtsError(payload?.message || "Bean's voice unavailable");
+                rememberOpenAiTtsError(payload?.message || "Bean's voice unavailable", !options.quietFailure);
                 return false;
             }
             const audioBuffer = await response.arrayBuffer();
             if (!audioBuffer.byteLength) {
-                rememberOpenAiTtsError("Bean's voice returned empty audio");
+                rememberOpenAiTtsError("Bean's voice returned empty audio", !options.quietFailure);
                 return false;
             }
             if (options.shouldPlay && !options.shouldPlay()) return false;
@@ -5010,7 +5018,7 @@ if (mount) {
             const message = error?.message === 'audio_not_unlocked' || error?.name === 'NotAllowedError'
                 ? "Bean's voice needs one click"
                 : `Bean voice playback failed${error?.name ? `: ${error.name}` : ''}`;
-            rememberOpenAiTtsError(message);
+            rememberOpenAiTtsError(message, !options.quietFailure);
             return false;
         } finally {
             if (url) URL.revokeObjectURL(url);
@@ -5048,9 +5056,9 @@ if (mount) {
         return kioskAudioUnlocked && (!kioskAudioContext || kioskAudioContext.state === 'running');
     }
 
-    function rememberOpenAiTtsError(message) {
+    function rememberOpenAiTtsError(message, showStatus = true) {
         kioskLastTtsError = beanVoiceStatusMessage(message);
-        setKioskVoiceStatus('error', kioskLastTtsError);
+        if (showStatus) setKioskVoiceStatus('error', kioskLastTtsError);
     }
 
     function beanVoiceStatusMessage(message) {

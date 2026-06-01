@@ -60,6 +60,10 @@ return [
         'voice' => env('HERMES_REALTIME_VOICE', 'marin'),
     ],
 
+    'openai' => [
+        'server_api_key' => $hermesApiKey !== '' ? $hermesApiKey : $openAiKey,
+    ],
+
     'beta' => [
         'enabled' => (bool) env('BETA_SIGNUPS_ENABLED', true),
     ],

@@ -222,6 +222,7 @@ class AgentProfileService
             $configured = ! empty($settings['tts']['openai_api_key_encrypted']);
             unset($settings['tts']['openai_api_key_encrypted']);
             $settings['tts']['openai_api_key_configured'] = $configured;
+            $settings['tts']['openai_app_key_configured'] = trim((string) config('services.openai.server_api_key', '')) !== '';
         }
 
         return $settings;

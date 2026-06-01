@@ -43,6 +43,7 @@ class OpenAiTextToSpeechTest extends TestCase
 
     public function test_openai_tts_endpoint_uses_saved_user_key(): void
     {
+        config(['services.openai.server_api_key' => '']);
         Http::fake([
             'api.openai.com/v1/audio/speech' => Http::response('fake-wav', 200, ['Content-Type' => 'audio/wav']),
         ]);
@@ -68,6 +69,42 @@ class OpenAiTextToSpeechTest extends TestCase
                 && $request['voice'] === 'cedar'
                 && $request['input'] === 'Hello from Bean.'
                 && $request['response_format'] === 'wav';
+        });
+    }
+
+    public function test_openai_tts_endpoint_falls_back_to_app_key_when_saved_key_fails(): void
+    {
+        config(['services.openai.server_api_key' => 'sk-app-tts-key']);
+        Http::fake(function ($request) {
+            if ($request->hasHeader('Authorization', 'Bearer sk-user-tts-key')) {
+                return Http::response(['error' => ['message' => 'invalid key']], 401);
+            }
+
+            return Http::response('app-wav', 200, ['Content-Type' => 'audio/wav']);
+        });
+
+        $token = $this->apiToken('tts-fallback@example.com');
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'tts_provider' => 'openai',
+            'tts_openai_api_key' => 'sk-user-tts-key',
+            'tts_openai_voice' => 'marin',
+        ])->assertOk();
+
+        $this->withToken($token)->postJson('/api/assistant/tts', [
+            'text' => 'Hello from Bean.',
+        ])->assertOk()
+            ->assertHeader('Content-Type', 'audio/wav')
+            ->assertHeader('X-HeyBean-TTS-Key-Source', 'app')
+            ->assertContent('app-wav');
+
+        Http::assertSentCount(2);
+        Http::assertSent(function ($request): bool {
+            return $request->hasHeader('Authorization', 'Bearer sk-user-tts-key')
+                && $request['voice'] === 'marin';
+        });
+        Http::assertSent(function ($request): bool {
+            return $request->hasHeader('Authorization', 'Bearer sk-app-tts-key')
+                && $request['voice'] === 'marin';
         });
     }
 
