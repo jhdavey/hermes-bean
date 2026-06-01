@@ -4,7 +4,8 @@ $hermesApiKey = (string) env('HERMES_API_KEY', '');
 $openAiKey = (string) env('OPENAI_API_KEY', '');
 $openAiPublicKey = (string) env('OPENAI_PUBLIC_KEY', '');
 $hermesApiBase = env('HERMES_API_BASE') ?: 'https://api.openai.com/v1';
-$hermesResolvedApiKey = $hermesApiKey !== '' ? $hermesApiKey : ($openAiPublicKey !== '' ? $openAiPublicKey : $openAiKey);
+$hermesResolvedApiKey = $hermesApiKey !== '' ? $hermesApiKey : $openAiKey;
+$hermesResolvedApiKeySource = $hermesApiKey !== '' ? 'HERMES_API_KEY' : ($openAiKey !== '' ? 'OPENAI_API_KEY' : null);
 
 return [
 
@@ -48,6 +49,7 @@ return [
         'quick_reply_timeout' => (float) env('HERMES_QUICK_REPLY_TIMEOUT', 4),
         'quick_reply_max_completion_tokens' => (int) env('HERMES_QUICK_REPLY_MAX_COMPLETION_TOKENS', 90),
         'api_key' => $hermesResolvedApiKey,
+        'api_key_source' => $hermesResolvedApiKeySource,
         'api_base' => $hermesApiBase,
         'users_home' => env('HERMES_USERS_HOME', storage_path('app/hermes-users')),
         'base_home' => env('HERMES_BASE_HOME'),
@@ -65,6 +67,7 @@ return [
 
     'openai' => [
         'server_api_key' => $hermesApiKey !== '' ? $hermesApiKey : $openAiKey,
+        'public_key' => $openAiPublicKey,
     ],
 
     'beta' => [

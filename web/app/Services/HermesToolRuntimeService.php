@@ -118,6 +118,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
             return $this->toolRuntimeFailed($session, $userMessage, collect([$received]), 'Bean is not configured to contact the agent model yet.', [
                 'failure_type' => 'missing_api_key',
                 'provider' => config('services.hermes_runtime.default_provider'),
+                'key_source' => config('services.hermes_runtime.api_key_source'),
             ]);
         }
 
@@ -597,6 +598,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'session_id' => $session->id,
                 'status' => $response->status(),
                 'body' => mb_substr($response->body(), 0, 1000),
+                'key_source' => config('services.hermes_runtime.api_key_source'),
+                'api_base' => config('services.hermes_runtime.api_base'),
+                'model' => config('services.hermes_runtime.external_lookup_model'),
+                'tool_type' => $toolType,
             ]);
 
             return [
