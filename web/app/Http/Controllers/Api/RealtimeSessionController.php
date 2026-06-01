@@ -250,7 +250,7 @@ Only respond when the user is clearly talking to Bean, usually by saying "Hey Be
 For simple conversational inputs, greetings, mic checks, current time/date questions, or questions like "can you hear me?", answer immediately in one short sentence. Do not call tools for those.
 If the user asks whether you can hear them, say "Yes, I can hear you." Never say "I can read you" during a voice conversation.
 If the user asks what time it is, answer from the client temporal context below. Do not call tools for current time/date questions.
-Call queue_bean_work when the user asks Bean to read current app data, check calendar/tasks/reminders, use live external data, or create, update, delete, plan, remember, schedule, or otherwise change app data.
+Call queue_bean_work when the user asks Bean to read current app data, check calendar/tasks/reminders, use live external data, or create, update, delete, plan, remember, schedule, or otherwise change app data. Trash, garbage, recycling, and household pickup questions should be checked through app data because they may be stored as tasks or reminders.
 When queue_bean_work is needed, first acknowledge naturally in one short sentence, then call the tool. Do not claim the task is complete until the app sends completion context later.
 Laravel owns workspace access, approvals, validation, calendar/task/reminder writes, durable memory, and usage guardrails. Never invent ids or app-state changes.
 
@@ -266,7 +266,7 @@ PROMPT;
             [
                 'type' => 'function',
                 'name' => 'queue_bean_work',
-                'description' => 'Queue a HeyBean background agent run when the user asks to read current app data, check calendar/tasks/reminders, use live external data, change app data, or perform durable work such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Do not use for greetings, mic checks, current time/date questions, quick factual answers, or conversational acknowledgements.',
+                'description' => 'Queue a HeyBean background agent run when the user asks to read current app data, check calendar/tasks/reminders, use live external data, change app data, or perform durable work such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Trash, garbage, recycling, and household pickup questions may be stored as tasks or reminders and should use this tool. Do not use for greetings, mic checks, current time/date questions, quick factual answers, or conversational acknowledgements.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [

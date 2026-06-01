@@ -51,6 +51,8 @@ assert.equal(voiceCommandNeedsAgentWork('plan my day'), true);
 assert.equal(voiceCommandNeedsAgentWork('plan dinner'), false);
 assert.equal(voiceCommandNeedsAgentWork('cheapest flights from MCO to Dublin tomorrow one way'), true);
 assert.equal(voiceCommandNeedsAgentWork('can you give me a taco recipe'), false);
+assert.equal(voiceCommandNeedsAgentWork('when am I supposed to take out the trash'), true);
+assert.equal(voiceCommandNeedsAgentWork('which recycling bin do I put out'), true);
 assert.equal(voiceCommandWantsDetailedChat('give me a 30 minute full body workout but I do not have equipment'), true);
 assert.equal(voiceCommandWantsDetailedChat('can you give me a taco recipe'), true);
 assert.equal(voiceCommandWantsDetailedChat('what should we have for dinner tonight'), false);

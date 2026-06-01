@@ -139,7 +139,12 @@ if (mount) {
     let kioskRealtimeUnavailable = false;
     let kioskRealtimePendingUser = null;
     let kioskRealtimeAssistantDraft = null;
+    let kioskRealtimeSuppressNextAssistantPersist = false;
+    let kioskRealtimeVoiceOnlyAssistant = false;
+    let kioskRealtimeToolFallbackTimer = 0;
+    let kioskRealtimeToolFallbackContent = '';
     const kioskRealtimeProcessedCalls = new Set();
+    const kioskRealtimeRunWatchTimers = new Map();
     let chatRequestCounter = 0;
     let activeChatRequestId = 0;
     const cancelledChatRequestIds = new Set();
@@ -3785,7 +3790,14 @@ if (mount) {
         kioskRealtimeStarting = false;
         kioskRealtimePendingUser = null;
         kioskRealtimeAssistantDraft = null;
+        kioskRealtimeSuppressNextAssistantPersist = false;
+        kioskRealtimeVoiceOnlyAssistant = false;
+        window.clearTimeout(kioskRealtimeToolFallbackTimer);
+        kioskRealtimeToolFallbackTimer = 0;
+        kioskRealtimeToolFallbackContent = '';
         kioskRealtimeProcessedCalls.clear();
+        kioskRealtimeRunWatchTimers.forEach((timer) => window.clearTimeout(timer));
+        kioskRealtimeRunWatchTimers.clear();
         if (realtime?.dataChannel?.readyState === 'open') {
             try { realtime.dataChannel.close(); } catch (_) {}
         }
@@ -3865,6 +3877,7 @@ if (mount) {
             content,
             metadata: { local_realtime_turn: true },
         });
+        armRealtimeToolFallback(content);
     }
 
     function appendRealtimeAssistantDelta(payload) {
@@ -3872,7 +3885,9 @@ if (mount) {
         if (!delta) return;
         const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
         draft.content += delta;
-        upsertRealtimeLocalMessage(draft);
+        if (!kioskRealtimeVoiceOnlyAssistant) {
+            upsertRealtimeLocalMessage(draft);
+        }
         setKioskVoiceStatus('responding', "Bean's voice");
     }
 
@@ -3881,7 +3896,9 @@ if (mount) {
         if (!text) return;
         const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
         draft.content = text;
-        upsertRealtimeLocalMessage(draft);
+        if (!kioskRealtimeVoiceOnlyAssistant) {
+            upsertRealtimeLocalMessage(draft);
+        }
     }
 
     function ensureRealtimeAssistantDraft(id = '') {
@@ -3915,7 +3932,7 @@ if (mount) {
             .filter((item) => item?.type === 'function_call')
             .forEach((item) => processRealtimeFunctionCall(item.name, item.call_id, item.arguments));
         const hasFunctionCall = output.some((item) => item?.type === 'function_call');
-        if (!hasFunctionCall) {
+        if (!hasFunctionCall && !kioskRealtimeToolFallbackContent) {
             persistRealtimeConversationTurn();
         } else {
             kioskRealtimePendingUser = null;
@@ -3926,6 +3943,7 @@ if (mount) {
     }
 
     async function processRealtimeFunctionCall(name, callId, rawArguments = '{}') {
+        clearRealtimeToolFallback();
         const callKey = callId || `${name}-${rawArguments}`;
         if (!name || kioskRealtimeProcessedCalls.has(callKey)) return;
         kioskRealtimeProcessedCalls.add(callKey);
@@ -3953,6 +3971,9 @@ if (mount) {
                 },
             });
             sendRealtimeFunctionOutput(callId, result);
+            if (result?.run_id) {
+                watchRealtimeAssistantRun(result.run_id);
+            }
             await loadChatSessions({ resumeToday: false, shouldRender: false }).catch(() => {});
             scheduleDashboardRealtimeRefresh([{ type: 'realtime_tool_call' }]);
         } catch (error) {
@@ -3961,6 +3982,52 @@ if (mount) {
                 message: friendlyError(error, 'start that background work'),
             });
             setKioskVoiceStatus('error', 'work failed');
+        }
+    }
+
+    function armRealtimeToolFallback(content) {
+        clearRealtimeToolFallback();
+        const command = String(content || '').trim();
+        if (!voiceCommandNeedsAgentWork(command)) return;
+        kioskRealtimeToolFallbackContent = command;
+        kioskRealtimeToolFallbackTimer = window.setTimeout(() => {
+            kioskRealtimeToolFallbackTimer = 0;
+            const pending = kioskRealtimeToolFallbackContent;
+            kioskRealtimeToolFallbackContent = '';
+            if (!pending || !state.kioskVoiceEnabled || !kioskRealtimeConnected()) return;
+            queueRealtimeFallbackWork(pending);
+        }, 2600);
+    }
+
+    function clearRealtimeToolFallback() {
+        window.clearTimeout(kioskRealtimeToolFallbackTimer);
+        kioskRealtimeToolFallbackTimer = 0;
+        kioskRealtimeToolFallbackContent = '';
+    }
+
+    async function queueRealtimeFallbackWork(content) {
+        if (!state.session?.id) return;
+        setKioskVoiceStatus('working', 'working in background');
+        try {
+            const result = await api('/assistant/realtime/tool-calls', {
+                method: 'POST',
+                body: {
+                    session_id: kioskRealtime?.sessionId || state.session.id,
+                    tool_name: 'queue_bean_work',
+                    call_id: `client_fallback_${Date.now()}`,
+                    arguments: {
+                        content,
+                        client_context: clientContextPayload(),
+                    },
+                },
+            });
+            if (result?.run_id) {
+                watchRealtimeAssistantRun(result.run_id);
+            }
+            await loadChatSessions({ resumeToday: false, shouldRender: false }).catch(() => {});
+            scheduleDashboardRealtimeRefresh([{ type: 'realtime_tool_fallback' }]);
+        } catch (error) {
+            setKioskVoiceStatus('error', friendlyError(error, 'start that background work'));
         }
     }
 
@@ -3978,12 +4045,101 @@ if (mount) {
         dataChannel.send(JSON.stringify({ type: 'response.create' }));
     }
 
+    function watchRealtimeAssistantRun(runId, attempt = 0) {
+        const id = Number(runId || 0);
+        if (!id || kioskRealtimeRunWatchTimers.has(id)) return;
+        const delay = attempt === 0 ? 900 : Math.min(1800 + (attempt * 450), 4500);
+        const timer = window.setTimeout(async () => {
+            kioskRealtimeRunWatchTimers.delete(id);
+            if (!state.kioskVoiceEnabled) return;
+            try {
+                const run = await api(`/assistant/runs/${id}`);
+                const status = String(run?.status || '').toLowerCase();
+                if (['queued', 'running'].includes(status) && attempt < 45) {
+                    watchRealtimeAssistantRun(id, attempt + 1);
+                    return;
+                }
+                if (status === 'completed') {
+                    handleRealtimeAssistantRunCompleted(run);
+                    return;
+                }
+                if (status === 'failed') {
+                    const message = run?.error ? `I could not finish that: ${run.error}` : 'I could not finish that request.';
+                    deliverRealtimeBackgroundResult(message, id);
+                    return;
+                }
+                if (status === 'cancelled') {
+                    deliverRealtimeBackgroundResult('That request was cancelled.', id);
+                }
+            } catch (_) {
+                if (attempt < 8) watchRealtimeAssistantRun(id, attempt + 1);
+            }
+        }, delay);
+        kioskRealtimeRunWatchTimers.set(id, timer);
+    }
+
+    function handleRealtimeAssistantRunCompleted(run) {
+        scheduleDashboardRealtimeRefresh([{ type: 'realtime_run_completed' }]);
+        const assistantMessage = run?.assistant_message || run?.assistantMessage || null;
+        const content = String(assistantMessage?.content || '').trim();
+        if (!content) {
+            deliverRealtimeBackgroundResult('I finished that request.', run?.id);
+            return;
+        }
+        appendPersistedAssistantMessage(assistantMessage);
+        if (kioskRealtimeConnected()) {
+            deliverRealtimeBackgroundResult(content, run?.id);
+            return;
+        }
+    }
+
+    function appendPersistedAssistantMessage(message) {
+        if (!message?.id || state.messages.some((item) => String(item.id) === String(message.id))) return;
+        state.messages.push(message);
+        state.chatRunState = 'Ready';
+        render();
+        scrollChatToBottom();
+    }
+
+    function deliverRealtimeBackgroundResult(content, runId = null) {
+        const text = speechTextFromAssistant(content);
+        if (!text) return;
+        if (!kioskRealtimeConnected()) {
+            upsertRealtimeLocalMessage({
+                id: `rt-run-${runId || Date.now()}`,
+                role: 'assistant',
+                content: text,
+                metadata: { local_realtime_turn: true, background_result: true },
+            });
+            return;
+        }
+        const dataChannel = kioskRealtime?.dataChannel;
+        if (dataChannel?.readyState !== 'open') return;
+        kioskRealtimeSuppressNextAssistantPersist = true;
+        kioskRealtimeVoiceOnlyAssistant = true;
+        dataChannel.send(JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+                type: 'message',
+                role: 'user',
+                content: [{
+                    type: 'input_text',
+                    text: `Background work for my previous request is complete. Tell me this result naturally and concisely, without mentioning background work: ${text}`,
+                }],
+            },
+        }));
+        dataChannel.send(JSON.stringify({ type: 'response.create' }));
+    }
+
     async function persistRealtimeConversationTurn() {
         const sessionId = kioskRealtime?.sessionId || state.session?.id;
         const userTurn = kioskRealtimePendingUser;
         const assistantTurn = kioskRealtimeAssistantDraft;
+        const suppressAssistantPersist = kioskRealtimeSuppressNextAssistantPersist;
         kioskRealtimePendingUser = null;
         kioskRealtimeAssistantDraft = null;
+        kioskRealtimeSuppressNextAssistantPersist = false;
+        kioskRealtimeVoiceOnlyAssistant = false;
         if (!sessionId) return;
         try {
             if (userTurn?.content && !userTurn.persisted) {
@@ -3997,7 +4153,7 @@ if (mount) {
                     },
                 });
             }
-            if (assistantTurn?.content) {
+            if (assistantTurn?.content && !suppressAssistantPersist) {
                 await api('/assistant/realtime/messages', {
                     method: 'POST',
                     body: {
