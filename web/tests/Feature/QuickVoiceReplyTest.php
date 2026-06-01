@@ -77,4 +77,41 @@ class QuickVoiceReplyTest extends TestCase
         ])->assertStatus(502)
             ->assertJsonPath('code', 'openai_quick_voice_failed');
     }
+
+    public function test_quick_voice_reply_can_generate_bridge_without_repeating_spoken_segments(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-bridge',
+                'model' => 'gpt-quick-test',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I am narrowing that down now.',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('quick-voice-bridge@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
+            'content' => 'what should we have for dinner tonight?',
+            'stage' => 'bridge',
+            'spoken_segments' => ['Tacos could be easy tonight if you want something quick.'],
+            'elapsed_ms' => 5200,
+        ])->assertOk()
+            ->assertJsonPath('data.text', 'I am narrowing that down now.');
+
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+            $context = (string) data_get($payload, 'messages.1.content');
+
+            return str_contains((string) data_get($payload, 'messages.0.content'), 'bridge sentence')
+                && str_contains($context, '"stage":"bridge"')
+                && str_contains($context, 'Tacos could be easy tonight')
+                && str_contains($context, '"elapsed_ms":5200');
+        });
+    }
 }

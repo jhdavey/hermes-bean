@@ -122,6 +122,7 @@ if (mount) {
     let kioskAutoCloseTimer = 0;
     let kioskHeardTimer = 0;
     let kioskConversationTimer = 0;
+    let kioskBridgeTimer = 0;
     let kioskMicrophoneReady = false;
     let kioskAudioUnlocked = false;
     let kioskAudioContext = null;
@@ -3919,9 +3920,11 @@ if (mount) {
         window.clearTimeout(kioskConversationTimer);
         window.clearTimeout(kioskCommandTimer);
         window.clearTimeout(kioskHeardTimer);
+        window.clearTimeout(kioskBridgeTimer);
         kioskConversationTimer = 0;
         kioskCommandTimer = 0;
         kioskHeardTimer = 0;
+        kioskBridgeTimer = 0;
         kioskConversationActive = false;
         kioskQuickReplyGeneration += 1;
         kioskCommandText = '';
@@ -3978,28 +3981,39 @@ if (mount) {
         }
 
         const quickReplyGeneration = ++kioskQuickReplyGeneration;
+        const turnStartedAt = Date.now();
+        const spokenSegments = [];
         setKioskVoiceStatus('working', 'thinking');
         const quickReplyTask = fetchKioskQuickReply(content, quickReplyGeneration);
         const quickReplyText = await timeoutPromise(quickReplyTask, 2200, '');
         let finalResponseReady = false;
         let quickReplySpeech = quickReplyText
-            ? speakKioskQuickReplyText(quickReplyText, quickReplyGeneration)
+            ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments)
             : Promise.resolve(false);
         if (!quickReplyText) {
             quickReplyTask.then((lateQuickReplyText) => {
                 if (!lateQuickReplyText || finalResponseReady) return false;
-                quickReplySpeech = speakKioskQuickReplyText(lateQuickReplyText, quickReplyGeneration);
+                quickReplySpeech = speakKioskVoiceSegment(lateQuickReplyText, quickReplyGeneration, spokenSegments);
                 return quickReplySpeech;
             });
         }
         startKioskBargeInListening();
+        const bridgeReply = scheduleKioskBridgeReply(
+            content,
+            quickReplyGeneration,
+            spokenSegments,
+            turnStartedAt,
+            () => finalResponseReady,
+        );
         try {
             const response = await sendChatContent(content, {
                 voiceQuickReply: quickReplyText,
                 voiceQuickReplyPending: !quickReplyText,
             });
             finalResponseReady = true;
+            bridgeReply.cancel();
             await quickReplySpeech;
+            await bridgeReply.promise;
             kioskQuickReplyGeneration += 1;
             if (!kioskConversationActive) return;
             const assistantContent = response?.assistantContent || '';
@@ -4019,6 +4033,7 @@ if (mount) {
             }
         } catch (error) {
             finalResponseReady = true;
+            bridgeReply.cancel();
             setKioskVoiceStatus('error', friendlyError(error, 'send that message'));
             await sleep(1800);
         } finally {
@@ -4033,10 +4048,55 @@ if (mount) {
         restartKioskVoiceListeningSoon(1200);
     }
 
-    function speakKioskQuickReplyText(text, generation) {
+    function speakKioskVoiceSegment(text, generation, spokenSegments) {
+        const cleanText = String(text || '').trim();
+        if (!cleanText) return Promise.resolve(false);
+        spokenSegments.push(cleanText);
         return speakKioskAcknowledgement(text, {
             shouldPlay: () => kioskConversationActive && generation === kioskQuickReplyGeneration,
         });
+    }
+
+    function scheduleKioskBridgeReply(content, generation, spokenSegments, startedAt, finalReady) {
+        window.clearTimeout(kioskBridgeTimer);
+        let resolveBridge = () => {};
+        let settled = false;
+        let speechStarted = false;
+        const resolveOnce = (value) => {
+            if (settled) return;
+            settled = true;
+            resolveBridge(value);
+        };
+        const promise = new Promise((resolve) => {
+            resolveBridge = resolve;
+            kioskBridgeTimer = window.setTimeout(async () => {
+                kioskBridgeTimer = 0;
+                if (finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration || spokenSegments.length === 0) {
+                    resolveOnce(false);
+                    return;
+                }
+                const bridgeText = await fetchKioskQuickReply(content, generation, {
+                    stage: 'bridge',
+                    spokenSegments,
+                    elapsedMs: Date.now() - startedAt,
+                });
+                if (!bridgeText || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) {
+                    resolveOnce(false);
+                    return;
+                }
+                speechStarted = true;
+                resolveOnce(await speakKioskVoiceSegment(bridgeText, generation, spokenSegments));
+            }, 3400);
+        });
+        return {
+            promise,
+            cancel: () => {
+                if (speechStarted) return;
+                window.clearTimeout(kioskBridgeTimer);
+                kioskBridgeTimer = 0;
+                resolveOnce(false);
+            },
+        };
     }
 
     function clientContextPayload() {
@@ -4091,7 +4151,7 @@ if (mount) {
         }, delay);
     }
 
-    async function fetchKioskQuickReply(content, generation) {
+    async function fetchKioskQuickReply(content, generation, options = {}) {
         try {
             const response = await api('/assistant/voice/quick-reply', {
                 method: 'POST',
@@ -4099,6 +4159,9 @@ if (mount) {
                     content,
                     workspace_id: currentWorkspaceId() || null,
                     client_context: clientContextPayload(),
+                    stage: options.stage || 'first',
+                    spoken_segments: options.spokenSegments || [],
+                    elapsed_ms: options.elapsedMs || 0,
                 },
             });
             const text = String(response?.text || '').trim();

@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 
 class QuickVoiceReplyController extends Controller
 {
@@ -18,6 +19,10 @@ class QuickVoiceReplyController extends Controller
             'content' => ['required', 'string', 'max:1000'],
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
             'client_context' => ['sometimes', 'nullable', 'array'],
+            'stage' => ['sometimes', 'string', Rule::in(['first', 'bridge'])],
+            'spoken_segments' => ['sometimes', 'array', 'max:4'],
+            'spoken_segments.*' => ['string', 'max:220'],
+            'elapsed_ms' => ['sometimes', 'integer', 'min:0', 'max:60000'],
         ]);
 
         $apiKey = (string) config('services.hermes_runtime.api_key', '');
@@ -34,6 +39,7 @@ class QuickVoiceReplyController extends Controller
         $settings = $profile->settings ?? [];
         $model = (string) config('services.hermes_runtime.quick_reply_model', 'gpt-5.4-mini');
         $content = str($data['content'])->squish()->limit(1000, '')->toString();
+        $stage = (string) ($data['stage'] ?? 'first');
 
         $payload = [
             'model' => $model,
@@ -41,7 +47,7 @@ class QuickVoiceReplyController extends Controller
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => $this->systemPrompt(),
+                    'content' => $this->systemPrompt($stage),
                 ],
                 [
                     'role' => 'system',
@@ -61,6 +67,11 @@ class QuickVoiceReplyController extends Controller
                             'user_preferences' => data_get($settings, 'memory.user_preferences'),
                         ],
                         'client_context' => $data['client_context'] ?? null,
+                        'voice_turn' => [
+                            'stage' => $stage,
+                            'spoken_segments' => array_values($data['spoken_segments'] ?? []),
+                            'elapsed_ms' => (int) ($data['elapsed_ms'] ?? 0),
+                        ],
                     ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
                 ],
                 [
@@ -125,8 +136,21 @@ class QuickVoiceReplyController extends Controller
         ]);
     }
 
-    private function systemPrompt(): string
+    private function systemPrompt(string $stage): string
     {
+        if ($stage === 'bridge') {
+            return <<<'PROMPT'
+You are Bean's live voice layer in the Hey Bean app.
+
+Bean already gave an initial spoken response and the main answer is still being prepared.
+Generate one brief, natural bridge sentence so the pause feels intentional.
+Do not answer the user's request. Do not add new advice, facts, calendar details, or task results.
+Do not repeat or paraphrase anything in voice_turn.spoken_segments.
+Do not mention tools, models, background jobs, or internal work.
+Sound conversational, not scripted. Keep it under 14 words.
+PROMPT;
+        }
+
         return <<<'PROMPT'
 You are Bean's live voice layer in the Hey Bean app.
 
