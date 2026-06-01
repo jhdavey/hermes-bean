@@ -104,6 +104,7 @@
     top: 0;
     z-index: 20;
     height: 58px;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -114,10 +115,14 @@
 }
 
 .hb-topbar-month-cluster {
+    flex: 0 1 260px;
+    min-width: 0;
+    max-width: min(260px, 46vw);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
+    overflow: hidden;
 }
 
 .hb-beta-banner {
@@ -216,8 +221,8 @@
     height: 36px;
     padding: 0;
     border: 0;
-    background: var(--hb-accent);
-    color: #fff;
+    background: var(--hb-critical-star);
+    color: #422006;
     font-size: 13px;
     font-weight: 900;
 }
@@ -238,7 +243,7 @@
 .hb-critical-menu[open] .hb-critical,
 .hb-critical-menu:hover .hb-critical {
     transform: translateY(-1px);
-    box-shadow: 0 9px 20px rgba(22, 163, 74, .22);
+    box-shadow: 0 9px 20px rgba(245, 158, 11, .28);
 }
 
 .hb-critical-popover {
@@ -385,24 +390,25 @@
 }
 
 .hb-profile-trigger {
-    min-height: 40px;
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
     display: inline-flex;
     align-items: center;
-    gap: 10px;
-    border: 1px solid var(--hb-border);
+    justify-content: center;
+    border: 0;
     border-radius: 999px;
-    background: rgba(255, 255, 255, .78);
+    background: transparent;
     color: var(--hb-text);
-    padding: 4px 12px 4px 4px;
+    padding: 0;
     cursor: pointer;
-    transition: transform .16s ease, background .16s ease, border-color .16s ease;
+    transition: transform .16s ease, box-shadow .16s ease;
 }
 
 .hb-profile-trigger:hover,
 .hb-profile-menu[open] .hb-profile-trigger {
     transform: translateY(-1px);
-    background: #fff;
-    border-color: var(--hb-border-strong);
+    box-shadow: 0 8px 18px rgba(22, 163, 74, .20);
 }
 
 .hb-avatar {
@@ -417,35 +423,6 @@
     font-size: 12px;
     font-weight: 950;
     letter-spacing: 0;
-}
-
-.hb-profile-copy {
-    min-width: 0;
-    display: grid;
-    gap: 1px;
-    text-align: left;
-}
-
-.hb-profile-copy strong {
-    max-width: 150px;
-    overflow: hidden;
-    color: var(--hb-text);
-    font-size: 13px;
-    font-weight: 900;
-    line-height: 1.05;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.hb-profile-copy small {
-    max-width: 150px;
-    overflow: hidden;
-    color: var(--hb-muted);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.05;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .hb-profile-popover {
@@ -1338,6 +1315,8 @@
 }
 
 .hb-month-nav {
+    min-width: 0;
+    width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1348,6 +1327,7 @@
 .hb-month-arrow {
     width: 32px;
     height: 32px;
+    flex: 0 0 32px;
     border: 1px solid var(--hb-border);
     border-radius: 999px;
     background: rgba(255, 255, 255, .72);
@@ -1356,6 +1336,7 @@
 }
 
 .hb-month-current {
+    min-width: 0;
     min-height: 36px;
     display: inline-flex;
     align-items: center;
@@ -1369,6 +1350,8 @@
     font-weight: 900;
     letter-spacing: -.02em;
     line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
 }
@@ -2982,9 +2965,12 @@
     }
 
     .hb-topbar-month-cluster {
-        position: absolute;
-        left: 50%;
-        transform: translateX(-50%);
+        flex: 0 1 244px;
+        max-width: min(244px, 22vw);
+    }
+
+    .hb-topbar:has(.hb-topbar-month-cluster) .hb-month-pill {
+        display: none;
     }
 
     .hb-top-workspace-switcher-mobile {
@@ -3238,6 +3224,31 @@
     }
 }
 
+@media (min-width: 900px) and (max-width: 1120px) {
+    .hb-topbar-current-time {
+        display: none;
+    }
+
+    .hb-topbar-month-cluster {
+        flex-basis: 184px;
+        max-width: 184px;
+    }
+
+    .hb-top-nav {
+        max-width: min(440px, 46vw);
+    }
+
+    .hb-top-nav .hb-nav-item {
+        min-width: 42px;
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    .hb-top-nav .hb-nav-item span {
+        display: none;
+    }
+}
+
 @media (min-width: 720px) {
     .hb-day-board {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3285,14 +3296,6 @@
 
     .hb-month-pill {
         max-width: 36vw;
-    }
-
-    .hb-profile-trigger {
-        padding-right: 4px;
-    }
-
-    .hb-profile-copy {
-        display: none;
     }
 
     .hb-profile-popover {

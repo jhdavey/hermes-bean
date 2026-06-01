@@ -1216,9 +1216,8 @@ if (mount) {
         const email = user.email || '';
         return `
             <details class="hb-profile-menu">
-                <summary class="hb-profile-trigger" aria-label="Account menu">
+                <summary class="hb-profile-trigger" aria-label="${escapeAttr(`Account menu for ${name}`)}" title="Account menu">
                     <span class="hb-avatar" aria-hidden="true">${escapeHtml(userInitials(name, email))}</span>
-                    <span class="hb-profile-copy"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(email)}</small></span>
                 </summary>
                 <div class="hb-profile-popover">
                     ${userIsAdmin() ? `<button class="hb-profile-action" type="button" data-nav="admin">${icons.activity}<span>Admin monitor</span></button>` : ''}
@@ -1365,7 +1364,7 @@ if (mount) {
     }
 
     function navButton([key, label, icon]) {
-        return `<button class="hb-nav-item ${state.selected === key ? 'hb-nav-item-active' : ''}" type="button" data-nav="${key}">${icon}<span>${label}</span></button>`;
+        return `<button class="hb-nav-item ${state.selected === key ? 'hb-nav-item-active' : ''}" type="button" data-nav="${key}" aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}">${icon}<span>${label}</span></button>`;
     }
 
     function criticalMenuMarkup(tasks, reminders, events) {
