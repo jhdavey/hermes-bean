@@ -100,7 +100,7 @@
 }
 
 .hb-topbar {
-    --hb-topbar-date-font-size: 22px;
+    --hb-topbar-date-font-size: 24px;
     position: sticky;
     top: 0;
     z-index: 20;
@@ -178,7 +178,7 @@
 
 .hb-topbar-current-time {
     color: var(--hb-text);
-    font-size: var(--hb-topbar-date-font-size, 22px);
+    font-size: var(--hb-topbar-date-font-size, 24px);
     font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
@@ -201,20 +201,22 @@
 }
 
 .hb-header-pill {
-    font-size: var(--hb-topbar-date-font-size, 22px);
-    font-weight: 950;
+    font-size: var(--hb-topbar-date-font-size, 24px);
+    font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
 }
 
 .hb-header-pill span {
-    font-weight: 950;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: inherit;
 }
 
 .hb-header-pill svg {
-    width: 20px;
-    height: 20px;
-    flex: 0 0 20px;
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
 }
 
 .hb-critical {
@@ -1451,7 +1453,7 @@
     background: rgba(255, 255, 255, .72);
     color: var(--hb-text);
     padding: 7px 12px;
-    font-size: var(--hb-topbar-date-font-size, 22px);
+    font-size: var(--hb-topbar-date-font-size, 24px);
     font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
@@ -3572,7 +3574,7 @@
 
 @media (max-width: 1120px) {
     .hb-topbar {
-        --hb-topbar-date-font-size: 20px;
+        --hb-topbar-date-font-size: 22px;
     }
 
     .hb-top-nav,
@@ -3606,7 +3608,7 @@
 
 @media (max-width: 700px) {
     .hb-topbar {
-        --hb-topbar-date-font-size: 18px;
+        --hb-topbar-date-font-size: 20px;
         padding-left: 12px;
         padding-right: 12px;
     }
