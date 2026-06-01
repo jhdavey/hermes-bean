@@ -316,7 +316,16 @@ class BeanRealtimeConversation {
       ),
     );
     _dataChannel?.send(
-      RTCDataChannelMessage(jsonEncode({'type': 'response.create'})),
+      RTCDataChannelMessage(
+        jsonEncode({
+          'type': 'response.create',
+          'response': {
+            'modalities': ['text', 'audio'],
+            'instructions':
+                'Acknowledge in one short sentence that Bean has started this in the background. Do not wait for the background work to finish.',
+          },
+        }),
+      ),
     );
   }
 }

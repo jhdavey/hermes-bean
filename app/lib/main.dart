@@ -909,9 +909,28 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           },
           onRunQueued: (runId) {
             if (!mounted) return;
-            setState(
-              () => _chatRunState = 'Bean is working in the background...',
-            );
+            setState(() {
+              _chatRunState = 'Bean is working in the background...';
+              final alreadyAcknowledged = _messages.any(
+                (message) =>
+                    message.metadata['realtime_run_id'] == runId &&
+                    message.metadata['realtime_queued_ack'] == true,
+              );
+              if (!alreadyAcknowledged) {
+                _messages.add(
+                  HermesMessage(
+                    id: _messages.length + 1,
+                    role: 'assistant',
+                    content: "I'm on it - I'll update that in the background.",
+                    metadata: {
+                      'realtime': true,
+                      'realtime_run_id': runId,
+                      'realtime_queued_ack': true,
+                    },
+                  ),
+                );
+              }
+            });
             unawaited(_pollQueuedRun(runId, _chatRunToken));
             unawaited(_pollDashboardChanges());
           },

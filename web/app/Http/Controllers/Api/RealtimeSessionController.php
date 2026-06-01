@@ -63,6 +63,24 @@ class RealtimeSessionController extends Controller
                 'model' => (string) config('services.hermes_realtime.model', 'gpt-realtime'),
                 'instructions' => $this->realtimeInstructions($localSession),
                 'audio' => [
+                    'input' => [
+                        'noise_reduction' => [
+                            'type' => 'near_field',
+                        ],
+                        'transcription' => [
+                            'model' => 'gpt-4o-mini-transcribe',
+                            'language' => 'en',
+                            'prompt' => 'Hey Bean, Bean, HeyBean, can you hear me, calendar, tasks, reminders.',
+                        ],
+                        'turn_detection' => [
+                            'type' => 'server_vad',
+                            'threshold' => 0.45,
+                            'prefix_padding_ms' => 250,
+                            'silence_duration_ms' => 350,
+                            'create_response' => true,
+                            'interrupt_response' => true,
+                        ],
+                    ],
                     'output' => [
                         'voice' => $voice,
                     ],
@@ -177,7 +195,9 @@ class RealtimeSessionController extends Controller
 You are Bean, the realtime voice interface for HeyBean.
 
 Speak naturally and briefly. Use realtime conversation for clarification, acknowledgement, and fast answers.
-When the user asks Bean to create, update, delete, plan, remember, schedule, or otherwise change app data, call queue_bean_work with the user's request instead of waiting to finish the work verbally.
+For simple conversational inputs, greetings, mic checks, or questions like "can you hear me?", answer immediately in one short sentence. Do not call tools for those.
+If the user asks whether you can hear them, say "Yes, I can hear you." Never say "I can read you" during a voice conversation.
+Only call queue_bean_work when the user asks Bean to create, update, delete, plan, remember, schedule, or otherwise change app data.
 Tell the user the work has started in the background. Do not claim the task is complete until the app sends completion context later.
 Laravel owns workspace access, approvals, validation, calendar/task/reminder writes, durable memory, and usage guardrails. Never invent ids or app-state changes.
 
@@ -192,7 +212,7 @@ PROMPT;
             [
                 'type' => 'function',
                 'name' => 'queue_bean_work',
-                'description' => 'Queue a HeyBean background agent run in Laravel for any task, reminder, calendar, profile, memory, planning, or app-data work.',
+                'description' => 'Queue a HeyBean background agent run only when the user asks to change app data or perform durable work, such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Do not use for greetings, mic checks, quick factual answers, or conversational acknowledgements.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
