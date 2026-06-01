@@ -4108,11 +4108,11 @@ if (mount) {
                 setKioskVoiceStatus('error', 'no response');
                 await sleep(1200);
             } else {
-                const finalVoiceText = finalVoiceTextForTurn(quickReplyText, assistantContent, {
+                const finalVoice = finalVoiceForTurn(content, quickReplyText, assistantContent, {
                     wantsDetailedChat,
                 });
-                const spoken = finalVoiceText
-                    ? await speakKioskResponse(finalVoiceText, { pendingMessage: 'working in background' })
+                const spoken = finalVoice.text
+                    ? await speakKioskResponse(finalVoice.text, finalVoice.handoff ? {} : { pendingMessage: 'working in background' })
                     : true;
                 if (!spoken) {
                     if (profileTtsProvider() === 'openai' && kioskLastTtsError) {
@@ -4347,17 +4347,17 @@ if (mount) {
         return speakBrowserTts(text);
     }
 
-    function finalVoiceTextForTurn(quickReplyText, assistantContent, options = {}) {
+    function finalVoiceForTurn(userContent, quickReplyText, assistantContent, options = {}) {
         const text = speechTextFromAssistant(assistantContent);
-        if (!text) return '';
-        if (!quickReplyText) return text;
+        if (!text) return { text: '', handoff: false };
+        if (!quickReplyText) return { text, handoff: false };
         if (options.wantsDetailedChat || finalResponseIsDetailed(assistantContent, text)) {
-            return '';
+            return { text: finalDetailNotice(userContent), handoff: true };
         }
         if (quickReplyCoversFinal(quickReplyText, text)) {
-            return '';
+            return { text: '', handoff: false };
         }
-        return text;
+        return { text, handoff: false };
     }
 
     function finalResponseIsDetailed(rawContent, spokenText) {
@@ -4366,6 +4366,20 @@ if (mount) {
             || raw.length > 700
             || /(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S/.test(raw)
             || (raw.match(/\n/g) || []).length >= 3;
+    }
+
+    function finalDetailNotice(userContent) {
+        const command = String(userContent || '').toLowerCase();
+        if (/\b(?:workout|exercise|routine|training|stretch|stretches)\b/.test(command)) {
+            return "I've written the full workout plan in chat.";
+        }
+        if (/\b(?:recipe|cook|meal)\b/.test(command)) {
+            return "I've written the full recipe in chat.";
+        }
+        if (/\b(?:plan|guide|steps|instructions)\b/.test(command)) {
+            return "I've written the full plan in chat.";
+        }
+        return "I've written the full details in chat.";
     }
 
     function quickReplyCoversFinal(quickReplyText, finalText) {
