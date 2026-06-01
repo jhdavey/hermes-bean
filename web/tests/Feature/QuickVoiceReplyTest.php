@@ -89,7 +89,7 @@ class QuickVoiceReplyTest extends TestCase
         $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
             'content' => 'can you tell me the cheapest flights from MCO to Dublin for tomorrow one way?',
         ])->assertOk()
-            ->assertJsonPath('data.text', 'I will check one-way flights from MCO to Dublin for tomorrow.')
+            ->assertJsonPath('data.text', "I'll check one-way flights from MCO to Dublin for tomorrow.")
             ->assertJsonPath('data.continue_agent', true);
     }
 
@@ -114,7 +114,7 @@ class QuickVoiceReplyTest extends TestCase
         $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
             'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
         ])->assertOk()
-            ->assertJsonPath('data.text', 'I will check the current weather in Orlando.')
+            ->assertJsonPath('data.text', "I'll check the current weather in Orlando.")
             ->assertJsonPath('data.continue_agent', true);
     }
 
@@ -139,7 +139,7 @@ class QuickVoiceReplyTest extends TestCase
         $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
             'content' => 'can you tell me when my local store closes today?',
         ])->assertOk()
-            ->assertJsonPath('data.text', 'I will check what I can access for that current outside information.')
+            ->assertJsonPath('data.text', "I'll check what I can access for that current outside information.")
             ->assertJsonPath('data.continue_agent', true);
     }
 
@@ -164,7 +164,7 @@ class QuickVoiceReplyTest extends TestCase
         $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
             'content' => 'what is on my calendar today?',
         ])->assertOk()
-            ->assertJsonPath('data.text', 'I will check your calendar for today.')
+            ->assertJsonPath('data.text', "I'll check your calendar for today.")
             ->assertJsonPath('data.continue_agent', true);
     }
 
@@ -206,7 +206,7 @@ class QuickVoiceReplyTest extends TestCase
             'spoken_segments' => ['Tacos could be easy tonight if you want something quick.'],
             'elapsed_ms' => 5200,
         ])->assertOk()
-            ->assertJsonPath('data.text', 'I am narrowing that down now.')
+            ->assertJsonPath('data.text', "I'm narrowing that down now.")
             ->assertJsonPath('data.continue_agent', true);
 
         Http::assertSent(function ($request): bool {

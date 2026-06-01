@@ -120,6 +120,7 @@ class QuickVoiceReplyController extends Controller
             ->trim()
             ->limit(360, '')
             ->toString();
+        $text = $this->personableVoiceText($text);
 
         if ($text === '') {
             return response()->json([
@@ -200,6 +201,7 @@ You are Bean's live voice layer in the Hey Bean app.
 
 The user has just finished speaking. Give the first natural spoken reply immediately.
 Do not use canned support-agent phrases. Do not mention tools, models, background jobs, or internal work.
+Use natural spoken phrasing with contractions. Prefer "I'll check Orlando's weather now" over "I will check the weather for Orlando Florida".
 If the user asks a normal conversational question, answer with a useful first thought right away.
 For casual questions, do not start with "Got it"; answer directly.
 For casual questions that do not need app data, live external data, or an app change, give a compact complete answer in one or two short sentences.
@@ -208,5 +210,17 @@ If the user asks for current app data, live external data, or an app change, res
 Finish complete thoughts. Do not end with a comma, colon, or unfinished list.
 Keep it under 45 words.
 PROMPT;
+    }
+
+    private function personableVoiceText(string $text): string
+    {
+        $text = preg_replace('/\bI will\b/u', "I'll", $text) ?? $text;
+        $text = preg_replace('/\bI am\b/u', "I'm", $text) ?? $text;
+        $text = preg_replace('/\bI have\b/u', "I've", $text) ?? $text;
+
+        return str($text)
+            ->replaceMatches('/\s+/', ' ')
+            ->trim()
+            ->toString();
     }
 }

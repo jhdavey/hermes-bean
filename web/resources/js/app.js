@@ -4914,15 +4914,28 @@ if (mount) {
     function fallbackKioskQuickReply(content, likelyNeedsAgentWork) {
         if (!likelyNeedsAgentWork) return '';
         const command = normalizedVoiceCommand(content);
-        if (/\b(?:weather|forecast)\b/.test(command)) return 'I will check the current weather.';
-        if (/\b(?:flight|flights|airfare|ticket|tickets)\b/.test(command)) return 'I will check the current flight information.';
-        if (/\b(?:hotel|hotels|reservation|booking|bookings)\b/.test(command)) return 'I will check the current availability.';
-        if (/\b(?:traffic|delay|delays)\b/.test(command)) return 'I will check the current traffic information.';
-        if (/\b(?:news|stock|stocks|sports|score|scores)\b/.test(command)) return 'I will check the latest information.';
-        if (/\b(?:calendar|calendars|event|events|agenda|google calendar)\b/.test(command)) return 'I will check your calendar.';
-        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return 'I will check your tasks.';
-        if (/\b(?:reminder|reminders)\b/.test(command)) return 'I will check your reminders.';
-        return 'I will check that.';
+        if (/\b(?:weather|forecast)\b/.test(command)) {
+            const location = fallbackLocationHint(command);
+            return location ? `I'll check ${location}'s weather now.` : "I'll check the weather now.";
+        }
+        if (/\b(?:flight|flights|airfare|ticket|tickets)\b/.test(command)) return "I'll check the latest flight info now.";
+        if (/\b(?:hotel|hotels|reservation|booking|bookings)\b/.test(command)) return "I'll check the current availability now.";
+        if (/\b(?:traffic|delay|delays)\b/.test(command)) return "I'll check traffic now.";
+        if (/\b(?:news|stock|stocks|sports|score|scores)\b/.test(command)) return "I'll check the latest now.";
+        if (/\b(?:calendar|calendars|event|events|agenda|google calendar)\b/.test(command)) return "I'll check your calendar now.";
+        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return "I'll check your tasks now.";
+        if (/\b(?:reminder|reminders)\b/.test(command)) return "I'll check your reminders now.";
+        return "I'll check now.";
+    }
+
+    function fallbackLocationHint(command) {
+        const match = command.match(/\b(?:in|for|near)\s+([a-z][a-z\s]+?)(?:\s+(?:right now|now|today|tonight|tomorrow)|$)/);
+        if (!match) return '';
+        return match[1]
+            .replace(/\b(?:florida|fl|usa|united states)\b/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/\b\w/g, (letter) => letter.toUpperCase());
     }
 
     function timeoutPromise(promise, timeoutMs, fallback) {
