@@ -3787,39 +3787,6 @@ if (mount) {
             await rememberKioskMicrophoneFromStream(stream);
             kioskMicrophoneReady = true;
             await ensureRealtimeChatSession();
-            let sessionData = null;
-            try {
-                sessionData = await api('/ai/realtime/session', {
-                    method: 'POST',
-                    timeoutMs: kioskRealtimeConnectTimeoutMs,
-                    body: {
-                        title: currentChatTitle(),
-                        runtime_mode: 'realtime',
-                        workspace_id: currentWorkspaceId() || null,
-                        session_id: state.session?.id || null,
-                        voice: profileTtsVoice(),
-                        metadata: {
-                            source: 'web_realtime_voice',
-                            client_context: clientContextPayload(),
-                        },
-                    },
-                });
-            } catch (error) {
-                reportKioskRealtimeIssue('client_secret_api_failure', {
-                    status: error?.status || null,
-                    body: error?.body || error?.message || '',
-                    payload: error?.payload || null,
-                });
-                error.reported = true;
-                error.nonRetryable = error?.payload?.retryable === false;
-                throw error;
-            }
-            state.session = sessionData.session || state.session;
-            const clientSecret = realtimeClientSecretValue(sessionData.client_secret);
-            if (!clientSecret) {
-                reportKioskRealtimeIssue('client_secret_api_failure', { body: 'empty client secret' });
-                throw new Error('Realtime voice secret was empty.');
-            }
 
             peerConnection = new RTCPeerConnection();
             const remoteAudio = new Audio();
@@ -3838,7 +3805,7 @@ if (mount) {
                 remoteAudio,
                 disconnectTimer: 0,
                 connected: false,
-                sessionId: state.session?.id || sessionData.session?.id || null,
+                sessionId: state.session?.id || null,
             };
             const reconnectFromFailure = (type, details = {}) => {
                 if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled) return;
@@ -3927,24 +3894,38 @@ if (mount) {
 
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            const sdpResponse = await fetchWithTimeout('https://api.openai.com/v1/realtime/calls', {
+            const sdpResponse = await fetchWithTimeout('/api/assistant/realtime/calls', {
                 method: 'POST',
                 headers: {
-                    Authorization: `Bearer ${clientSecret}`,
-                    'Content-Type': 'application/sdp',
+                    Accept: 'application/sdp',
+                    'Content-Type': 'application/json',
+                    ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
                 },
-                body: offer.sdp,
+                body: JSON.stringify({
+                    session_id: state.session?.id,
+                    sdp: offer.sdp,
+                    voice: profileTtsVoice(),
+                    metadata: {
+                        source: 'web_realtime_voice',
+                        client_context: clientContextPayload(),
+                    },
+                }),
             }, kioskRealtimeConnectTimeoutMs);
             const sdpBody = await sdpResponse.text();
             if (!sdpResponse.ok) {
-                reportKioskRealtimeIssue('openai_realtime_calls_failure', {
+                let payload = null;
+                try { payload = JSON.parse(sdpBody); } catch (_) {}
+                reportKioskRealtimeIssue('server_realtime_calls_failure', {
                     status: sdpResponse.status,
                     body: sdpBody.slice(0, 1000),
+                    payload,
                 });
-                const error = new Error(`Realtime voice failed (${sdpResponse.status}).`);
+                const error = new Error(payload?.message || `Realtime voice failed (${sdpResponse.status}).`);
                 error.reported = true;
                 error.status = sdpResponse.status;
                 error.body = sdpBody.slice(0, 1000);
+                error.payload = payload;
+                error.nonRetryable = payload?.retryable === false;
                 throw error;
             }
             await peerConnection.setRemoteDescription({ type: 'answer', sdp: sdpBody });
@@ -3981,11 +3962,6 @@ if (mount) {
         } finally {
             kioskRealtimeStarting = false;
         }
-    }
-
-    function realtimeClientSecretValue(secret) {
-        if (typeof secret === 'string') return secret;
-        return secret?.value || secret?.client_secret?.value || secret?.client_secret || '';
     }
 
     async function ensureRealtimeChatSession() {

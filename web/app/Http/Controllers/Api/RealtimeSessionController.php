@@ -86,44 +86,7 @@ class RealtimeSessionController extends Controller
         $requestedVoice = (string) ($data['voice'] ?? data_get($profile->settings ?? [], 'tts.openai_voice', config('services.hermes_realtime.voice', 'marin')));
         $voice = $this->realtimeVoice($requestedVoice);
         $payload = [
-            'session' => [
-                'type' => 'realtime',
-                'model' => (string) config('services.hermes_realtime.model', 'gpt-realtime'),
-                'instructions' => $this->realtimeInstructions($localSession),
-                'audio' => [
-                    'input' => [
-                        'noise_reduction' => [
-                            'type' => 'near_field',
-                        ],
-                        'transcription' => [
-                            'model' => 'gpt-4o-mini-transcribe',
-                            'language' => 'en',
-                            'prompt' => 'Hey Bean, Bean, HeyBean, can you hear me, calendar, tasks, reminders.',
-                        ],
-                        'turn_detection' => [
-                            'type' => 'server_vad',
-                            'threshold' => 0.45,
-                            'prefix_padding_ms' => 250,
-                            'silence_duration_ms' => 350,
-                            'create_response' => true,
-                            'interrupt_response' => true,
-                        ],
-                    ],
-                    'output' => [
-                        'voice' => $voice,
-                    ],
-                ],
-                'tools' => $this->realtimeTools(),
-                'tool_choice' => 'auto',
-                'tracing' => [
-                    'workflow_name' => 'heybean-realtime',
-                    'group_id' => 'conversation_session_'.$localSession->id,
-                    'metadata' => [
-                        'user_id' => (string) $user->id,
-                        'workspace_id' => (string) $workspace->id,
-                    ],
-                ],
-            ],
+            'session' => $this->realtimeSessionConfig($localSession, $user->id, $workspace->id, $voice),
         ];
 
         $response = Http::withToken($apiKey)
@@ -168,6 +131,82 @@ class RealtimeSessionController extends Controller
             ],
             'tools' => collect($this->realtimeTools())->map(fn (array $tool): ?string => data_get($tool, 'name'))->filter()->values()->all(),
         ]], 201);
+    }
+
+    public function call(Request $request): mixed
+    {
+        $data = $request->validate([
+            'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
+            'sdp' => ['required', 'string', 'max:50000'],
+            'voice' => ['nullable', 'string', Rule::in(self::REALTIME_VOICES)],
+            'metadata' => ['nullable', 'array'],
+        ]);
+
+        $user = $request->user();
+        $localSession = ConversationSession::where('user_id', $user->id)->findOrFail($data['session_id']);
+        $localSession->update([
+            'metadata' => [
+                ...($localSession->metadata ?? []),
+                ...($data['metadata'] ?? []),
+                'realtime' => true,
+            ],
+            'last_activity_at' => now(),
+        ]);
+        $localSession = $localSession->refresh();
+        $workspace = $localSession->workspace ?: $this->workspaces->resolveWorkspace($user, $localSession->workspace_id);
+        $profile = $this->profiles->ensureForWorkspace($workspace, $user);
+        $apiKey = (string) config('services.hermes_realtime.api_key', '');
+
+        if ($apiKey === '') {
+            return response()->json([
+                'message' => 'Realtime is not configured because the OpenAI API key is missing.',
+                'code' => 'openai_realtime_not_configured',
+            ], 409);
+        }
+
+        $requestedVoice = (string) ($data['voice'] ?? data_get($profile->settings ?? [], 'tts.openai_voice', config('services.hermes_realtime.voice', 'marin')));
+        $voice = $this->realtimeVoice($requestedVoice);
+        $sessionConfig = $this->realtimeSessionConfig($localSession, $user->id, $workspace->id, $voice);
+
+        $response = Http::withToken($apiKey)
+            ->asMultipart()
+            ->timeout(20)
+            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/realtime/calls', [
+                ['name' => 'sdp', 'contents' => $data['sdp']],
+                ['name' => 'session', 'contents' => json_encode($sessionConfig, JSON_UNESCAPED_SLASHES)],
+            ]);
+
+        if (! $response->successful()) {
+            $upstreamStatus = $response->status();
+            $retryable = $upstreamStatus === 429 || $upstreamStatus >= 500;
+            $upstreamMessage = (string) ($response->json('error.message') ?: 'OpenAI rejected the realtime call request.');
+
+            Log::warning('OpenAI realtime call creation failed.', [
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $localSession->id,
+                'api_base' => rtrim((string) config('services.hermes_runtime.api_base'), '/'),
+                'model' => $sessionConfig['model'],
+                'voice' => $voice,
+                'requested_voice' => $requestedVoice,
+                'key_source' => 'OPENAI_PUBLIC_KEY',
+                'status' => $upstreamStatus,
+                'body' => str($response->body())->limit(500)->toString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Realtime voice could not connect.',
+                'code' => 'openai_realtime_call_failed',
+                'status' => $upstreamStatus,
+                'upstream_message' => $upstreamMessage,
+                'retryable' => $retryable,
+            ], 502);
+        }
+
+        return response($response->body(), 200, [
+            'Content-Type' => $response->header('Content-Type') ?: 'application/sdp',
+            'Cache-Control' => 'no-store',
+        ]);
     }
 
     public function message(Request $request): JsonResponse
@@ -318,6 +357,48 @@ PROMPT;
         return in_array($mapped, self::REALTIME_VOICES, true)
             ? $mapped
             : (string) config('services.hermes_realtime.voice', 'marin');
+    }
+
+    private function realtimeSessionConfig(ConversationSession $session, int $userId, int $workspaceId, string $voice): array
+    {
+        return [
+            'type' => 'realtime',
+            'model' => (string) config('services.hermes_realtime.model', 'gpt-realtime'),
+            'instructions' => $this->realtimeInstructions($session),
+            'audio' => [
+                'input' => [
+                    'noise_reduction' => [
+                        'type' => 'near_field',
+                    ],
+                    'transcription' => [
+                        'model' => 'gpt-4o-mini-transcribe',
+                        'language' => 'en',
+                        'prompt' => 'Hey Bean, Bean, HeyBean, can you hear me, calendar, tasks, reminders.',
+                    ],
+                    'turn_detection' => [
+                        'type' => 'server_vad',
+                        'threshold' => 0.45,
+                        'prefix_padding_ms' => 250,
+                        'silence_duration_ms' => 350,
+                        'create_response' => true,
+                        'interrupt_response' => true,
+                    ],
+                ],
+                'output' => [
+                    'voice' => $voice,
+                ],
+            ],
+            'tools' => $this->realtimeTools(),
+            'tool_choice' => 'auto',
+            'tracing' => [
+                'workflow_name' => 'heybean-realtime',
+                'group_id' => 'conversation_session_'.$session->id,
+                'metadata' => [
+                    'user_id' => (string) $userId,
+                    'workspace_id' => (string) $workspaceId,
+                ],
+            ],
+        ];
     }
 
     private function realtimeTools(): array

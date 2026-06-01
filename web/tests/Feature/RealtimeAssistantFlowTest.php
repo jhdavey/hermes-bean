@@ -127,6 +127,71 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertJsonPath('upstream_message', 'Invalid realtime session configuration.');
     }
 
+    public function test_realtime_call_endpoint_exchanges_sdp_server_side(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/realtime/calls' => Http::response("v=0\r\nanswer", 200, ['Content-Type' => 'application/sdp']),
+        ]);
+
+        $token = $this->apiToken('realtime-call@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+            'metadata' => [
+                'client_context' => ['timezone_offset' => '-04:00'],
+            ],
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/assistant/realtime/calls', [
+            'session_id' => $sessionId,
+            'sdp' => "v=0\r\no=- offer",
+            'voice' => 'coral',
+            'metadata' => [
+                'source' => 'test-realtime-call',
+                'client_context' => ['timezone_offset' => '-04:00'],
+            ],
+        ])->assertOk()
+            ->assertHeader('Content-Type', 'application/sdp')
+            ->assertContent("v=0\r\nanswer");
+
+        $this->assertTrue((bool) ConversationSession::findOrFail($sessionId)->metadata['realtime']);
+        $this->assertSame('test-realtime-call', ConversationSession::findOrFail($sessionId)->metadata['source']);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/realtime/calls'
+            && $request->hasHeader('Authorization', 'Bearer test-key')
+            && str_contains((string) $request->body(), 'name="sdp"')
+            && str_contains((string) $request->body(), "v=0\r\no=- offer")
+            && str_contains((string) $request->body(), 'name="session"')
+            && str_contains((string) $request->body(), '"model":"gpt-realtime-test"')
+            && str_contains((string) $request->body(), '"voice":"coral"')
+            && str_contains((string) $request->body(), '"group_id":"conversation_session_'.$sessionId.'"'));
+    }
+
+    public function test_realtime_call_endpoint_marks_upstream_bad_requests_as_not_retryable(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/realtime/calls' => Http::response([
+                'error' => [
+                    'message' => 'Invalid SDP request.',
+                    'type' => 'invalid_request_error',
+                ],
+            ], 400),
+        ]);
+
+        $token = $this->apiToken('realtime-call-400@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/assistant/realtime/calls', [
+            'session_id' => $sessionId,
+            'sdp' => "v=0\r\no=- offer",
+        ])->assertStatus(502)
+            ->assertJsonPath('code', 'openai_realtime_call_failed')
+            ->assertJsonPath('status', 400)
+            ->assertJsonPath('retryable', false)
+            ->assertJsonPath('upstream_message', 'Invalid SDP request.');
+    }
+
     public function test_realtime_messages_can_be_appended_without_running_agent(): void
     {
         $token = $this->apiToken('realtime-message@example.com');

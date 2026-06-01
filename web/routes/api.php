@@ -53,6 +53,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/assistant/runs/{run}', [AssistantRunController::class, 'show']);
         Route::post('/assistant/runs/{run}/cancel', [AssistantRunController::class, 'cancel']);
         Route::post('/assistant/realtime/sessions', [RealtimeSessionController::class, 'store']);
+        Route::post('/assistant/realtime/calls', [RealtimeSessionController::class, 'call']);
         Route::post('/assistant/realtime/tool-calls', [RealtimeSessionController::class, 'toolCall']);
         Route::post('/assistant/realtime/messages', [RealtimeSessionController::class, 'message']);
         Route::post('/assistant/realtime/client-events', [RealtimeSessionController::class, 'clientEvent']);
