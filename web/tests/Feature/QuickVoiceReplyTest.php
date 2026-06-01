@@ -93,6 +93,31 @@ class QuickVoiceReplyTest extends TestCase
             ->assertJsonPath('data.continue_agent', true);
     }
 
+    public function test_quick_voice_reply_continues_to_agent_for_local_business_hours_requests(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-store-hours',
+                'model' => 'gpt-quick-test',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I will check your local Ace Hardware hours for today.',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('quick-voice-store-hours@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
+            'content' => 'can you tell me when my local Ace Hardware store closes today?',
+        ])->assertOk()
+            ->assertJsonPath('data.text', 'I will check your local Ace Hardware hours for today.')
+            ->assertJsonPath('data.continue_agent', true);
+    }
+
     public function test_quick_voice_reply_continues_to_agent_for_app_requests(): void
     {
         Http::fake([

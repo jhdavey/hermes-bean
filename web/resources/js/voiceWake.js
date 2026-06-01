@@ -49,6 +49,10 @@ export function voiceCommandNeedsAgentWork(transcript) {
     if (/\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b/.test(command)) {
         return true;
     }
+    if (/\b(?:store|stores|restaurant|restaurants|business|businesses|hardware|pharmacy|pharmacies|grocery|groceries|bank|banks|office|location|locations|near me|nearby|local)\b/.test(command)
+        && /\b(?:open|opens|closed|closes|close|closing|hours|hour|today|tonight|tomorrow|available|availability)\b/.test(command)) {
+        return true;
+    }
     if (/\b(?:trash|garbage|recycling|recycle|pickup|pick up)\b/.test(command)
         && /\b(?:when|what|which|supposed|take out|put out|do i|should i)\b/.test(command)) {
         return true;
