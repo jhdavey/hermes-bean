@@ -129,6 +129,7 @@ if (mount) {
     let kioskConversationTimer = 0;
     let kioskBridgeTimer = 0;
     let kioskMicrophoneReady = false;
+    let kioskPreferredAudioDeviceId = localStorage.getItem('heybean-preferred-audio-input') || '';
     let kioskAudioUnlocked = false;
     let kioskAudioContext = null;
     let kioskActiveAudioSource = null;
@@ -3713,13 +3714,8 @@ if (mount) {
         let peerConnection = null;
         try {
             if (!await requestKioskMicrophoneAccess(Boolean(options.requestPermission))) return false;
-            stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                },
-            });
+            stream = await navigator.mediaDevices.getUserMedia({ audio: await kioskAudioConstraints() });
+            await rememberKioskMicrophoneFromStream(stream);
             kioskMicrophoneReady = true;
             await ensureRealtimeChatSession();
             const sessionData = await api('/ai/realtime/session', {
@@ -4327,9 +4323,14 @@ if (mount) {
             setKioskVoiceStatus('error', 'click mic to allow');
             return false;
         }
+        if (!requestPermission && permission === 'granted') {
+            kioskMicrophoneReady = true;
+            return true;
+        }
         let stream = null;
         try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream = await navigator.mediaDevices.getUserMedia({ audio: await kioskAudioConstraints() });
+            await rememberKioskMicrophoneFromStream(stream);
             kioskMicrophoneReady = true;
             return true;
         } catch (error) {
@@ -4339,6 +4340,59 @@ if (mount) {
         } finally {
             stream?.getTracks().forEach((track) => track.stop());
         }
+    }
+
+    async function kioskAudioConstraints() {
+        const base = {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+        };
+        const deviceId = await preferredLocalAudioInputDeviceId();
+        return deviceId ? { ...base, deviceId: { ideal: deviceId } } : base;
+    }
+
+    async function preferredLocalAudioInputDeviceId() {
+        if (!navigator.mediaDevices?.enumerateDevices) return '';
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter((device) => device.kind === 'audioinput' && device.deviceId);
+            const localInput = audioInputs.find((device) => {
+                const label = String(device.label || '').toLowerCase();
+                return label && !/(iphone|ipad|continuity|camera|nearby)/.test(label);
+            });
+            const storedInput = audioInputs.find((device) => device.deviceId === kioskPreferredAudioDeviceId);
+            const storedLabel = String(storedInput?.label || '').toLowerCase();
+            const storedIsRemote = /(iphone|ipad|continuity|camera|nearby)/.test(storedLabel);
+            const deviceId = localInput?.deviceId || (storedInput && !storedIsRemote ? storedInput.deviceId : '');
+            if (deviceId) {
+                kioskPreferredAudioDeviceId = deviceId;
+                localStorage.setItem('heybean-preferred-audio-input', deviceId);
+            } else if (storedIsRemote) {
+                kioskPreferredAudioDeviceId = '';
+                localStorage.removeItem('heybean-preferred-audio-input');
+            }
+            return deviceId;
+        } catch (_) {
+            return '';
+        }
+    }
+
+    async function rememberKioskMicrophoneFromStream(stream) {
+        const deviceId = stream?.getAudioTracks?.()[0]?.getSettings?.().deviceId || '';
+        if (!deviceId) return;
+        if (navigator.mediaDevices?.enumerateDevices) {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const active = devices.find((device) => device.kind === 'audioinput' && device.deviceId === deviceId);
+                if (/(iphone|ipad|continuity|camera|nearby)/i.test(active?.label || '')) {
+                    const localDeviceId = await preferredLocalAudioInputDeviceId();
+                    if (localDeviceId) return;
+                }
+            } catch (_) {}
+        }
+        kioskPreferredAudioDeviceId = deviceId;
+        localStorage.setItem('heybean-preferred-audio-input', deviceId);
     }
 
     function kioskVoiceReady() {
