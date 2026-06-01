@@ -1,6 +1,5 @@
 import {
     commandAfterWakePhrase,
-    voiceAcknowledgementForCommand,
     voiceCancelRequested,
 } from './voiceWake.js';
 
@@ -116,7 +115,7 @@ if (mount) {
     let kioskRecognitionShouldRestart = false;
     let kioskCommandText = '';
     let kioskConversationActive = false;
-    let kioskAcknowledgementSpoken = false;
+    let kioskQuickReplyGeneration = 0;
     let kioskCommandTimer = 0;
     let kioskRestartTimer = 0;
     let kioskBargeRestartTimer = 0;
@@ -3891,7 +3890,6 @@ if (mount) {
 
     function beginKioskConversation() {
         kioskConversationActive = true;
-        kioskAcknowledgementSpoken = false;
         window.clearTimeout(kioskConversationTimer);
     }
 
@@ -3912,7 +3910,7 @@ if (mount) {
         kioskCommandTimer = 0;
         kioskHeardTimer = 0;
         kioskConversationActive = false;
-        kioskAcknowledgementSpoken = false;
+        kioskQuickReplyGeneration += 1;
         kioskCommandText = '';
         setKioskVoiceStatus('armed', message || 'say hey bean');
     }
@@ -3966,15 +3964,13 @@ if (mount) {
             return;
         }
 
-        const acknowledgement = voiceAcknowledgementForCommand(content);
-        setKioskVoiceStatus('working', acknowledgement || 'working');
-        if (acknowledgement && !kioskAcknowledgementSpoken) {
-            kioskAcknowledgementSpoken = true;
-            speakKioskAcknowledgement(acknowledgement);
-        }
+        const quickReplyGeneration = ++kioskQuickReplyGeneration;
+        setKioskVoiceStatus('working', 'thinking');
+        speakKioskQuickReply(content, quickReplyGeneration);
         startKioskBargeInListening();
         try {
             const response = await sendChatContent(content);
+            kioskQuickReplyGeneration += 1;
             if (!kioskConversationActive) return;
             const assistantContent = response?.assistantContent || '';
             if (!assistantContent) {
@@ -4001,7 +3997,6 @@ if (mount) {
             restartKioskVoiceListeningSoon(650);
             return;
         }
-        kioskAcknowledgementSpoken = false;
         setKioskVoiceStatus('listening', 'listening');
         armKioskConversationTimeout();
         restartKioskVoiceListeningSoon(1200);
@@ -4059,13 +4054,32 @@ if (mount) {
         }, delay);
     }
 
-    function speakKioskAcknowledgement(text) {
-        if (!text) return;
-        if (profileTtsProvider() === 'openai' && profileTtsOpenAiConfigured()) {
-            playOpenAiTts(text, { status: 'responding' });
-            return;
+    async function speakKioskQuickReply(content, generation) {
+        try {
+            const response = await api('/assistant/voice/quick-reply', {
+                method: 'POST',
+                body: {
+                    content,
+                    workspace_id: currentWorkspaceId() || null,
+                    client_context: clientContextPayload(),
+                },
+            });
+            const text = String(response?.text || '').trim();
+            if (!text || !kioskConversationActive || generation !== kioskQuickReplyGeneration) return false;
+            return speakKioskAcknowledgement(text, {
+                shouldPlay: () => kioskConversationActive && generation === kioskQuickReplyGeneration,
+            });
+        } catch (_) {
+            return false;
         }
-        speakBrowserTts(text);
+    }
+
+    function speakKioskAcknowledgement(text, options = {}) {
+        if (!text) return Promise.resolve(false);
+        if (profileTtsProvider() === 'openai' && profileTtsOpenAiConfigured()) {
+            return playOpenAiTts(text, { status: 'responding', shouldPlay: options.shouldPlay });
+        }
+        return speakBrowserTts(text);
     }
 
     function stopKioskSpeechPlayback() {
@@ -4100,10 +4114,12 @@ if (mount) {
         let url = '';
         try {
             kioskLastTtsError = '';
-            window.speechSynthesis?.cancel();
+            if (options.shouldPlay && !options.shouldPlay()) return false;
+            stopKioskSpeechPlayback();
             if (!await ensureOpenAiAudioUnlocked()) {
                 throw new Error('audio_not_unlocked');
             }
+            if (options.shouldPlay && !options.shouldPlay()) return false;
             setKioskVoiceStatus(options.status || 'responding', "Bean's voice");
             const response = await fetch('/api/assistant/tts', {
                 method: 'POST',
@@ -4124,7 +4140,9 @@ if (mount) {
                 rememberOpenAiTtsError("Bean's voice returned empty audio");
                 return false;
             }
+            if (options.shouldPlay && !options.shouldPlay()) return false;
             if (await playOpenAiAudioBuffer(audioBuffer)) return true;
+            if (options.shouldPlay && !options.shouldPlay()) return false;
             return playAudioBlobFallback(audioBuffer, response.headers.get('Content-Type') || 'audio/wav');
         } catch (error) {
             const message = error?.message === 'audio_not_unlocked' || error?.name === 'NotAllowedError'
@@ -4251,7 +4269,7 @@ if (mount) {
             return Promise.resolve(false);
         }
         return new Promise((resolve) => {
-            window.speechSynthesis.cancel();
+            stopKioskSpeechPlayback();
             setKioskVoiceStatus('responding', 'responding');
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.rate = 1;

@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\IssueReportController;
+use App\Http\Controllers\Api\QuickVoiceReplyController;
 use App\Http\Controllers\Api\RealtimeSessionController;
 use App\Http\Controllers\Api\TextToSpeechController;
 use App\Http\Controllers\Api\TodaySummaryController;
@@ -53,6 +54,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/assistant/realtime/sessions', [RealtimeSessionController::class, 'store']);
         Route::post('/assistant/realtime/tool-calls', [RealtimeSessionController::class, 'toolCall']);
         Route::post('/ai/realtime/session', [RealtimeSessionController::class, 'store']);
+        Route::post('/assistant/voice/quick-reply', [QuickVoiceReplyController::class, 'store']);
         Route::post('/assistant/tts', [TextToSpeechController::class, 'store']);
 
         Route::get('/today', [TodaySummaryController::class, 'show']);
