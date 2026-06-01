@@ -1440,7 +1440,7 @@ void main() {
   });
 
   testWidgets(
-    'month view has six-wide month scroller and keeps task list scoped to today',
+    'month view has six-wide month scroller and shows month task scope',
     (WidgetTester tester) async {
       await tester.pumpWidget(
         HermesBeanApp(
@@ -1453,14 +1453,22 @@ void main() {
       await tester.tap(find.byKey(const Key('calendar-month-chevron')));
       await tester.pumpAndSettle();
 
+      final now = DateTime.now();
+      final tomorrow = DateTime(now.year, now.month, now.day + 1);
+      final tomorrowInCurrentMonth = tomorrow.month == now.month;
       expect(find.byKey(const Key('calendar-month-scroller')), findsOneWidget);
       expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
-      expect(find.text('Tasks for Today'), findsOneWidget);
+      expect(
+        find.text('Tasks for ${_testMonthNames[now.month - 1]} ${now.year}'),
+        findsOneWidget,
+      );
       expect(find.text('Today task'), findsOneWidget);
-      expect(find.text('Tomorrow task'), findsNothing);
+      expect(
+        find.text('Tomorrow task'),
+        tomorrowInCurrentMonth ? findsOneWidget : findsNothing,
+      );
       expect(find.text('Rest of month'), findsNothing);
 
-      final now = DateTime.now();
       final firstAllowedMonth = DateTime(now.year, now.month - 12);
       final lastAllowedMonth = DateTime(now.year, now.month + 24);
       expect(
@@ -1517,6 +1525,12 @@ void main() {
 
       expect(find.byKey(const Key('apple-style-month-grid')), findsOneWidget);
       expect(
+        find.text(
+          'Tasks for ${_testMonthNames[nextMonth.month - 1]} ${nextMonth.year}',
+        ),
+        findsOneWidget,
+      );
+      expect(
         find.descendant(
           of: find.byKey(const Key('calendar-month-pill-selected')),
           matching: find.text(_testShortMonthNames[nextMonth.month - 1]),
@@ -1530,8 +1544,10 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('Today task'), findsOneWidget);
-      expect(find.text('Tomorrow task'), findsNothing);
+      expect(
+        find.text('Tomorrow task'),
+        tomorrow.month == nextMonth.month ? findsOneWidget : findsNothing,
+      );
     },
   );
 
@@ -4548,6 +4564,22 @@ void main() {
       expect(find.text('Tomorrow task'), findsNothing);
       expect(find.text('Unscheduled task'), findsNothing);
       expect(find.text('Future recurring task'), findsNothing);
+      expect(find.text('Next month task'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('calendar-month-chevron')));
+      await tester.pumpAndSettle();
+
+      final now = DateTime.now();
+      expect(
+        find.text('Tasks for ${_testMonthNames[now.month - 1]} ${now.year}'),
+        findsOneWidget,
+      );
+      expect(find.text('Overdue task'), findsOneWidget);
+      expect(find.text('Today task'), findsOneWidget);
+      expect(find.text('Tomorrow task'), findsOneWidget);
+      expect(find.text('Unscheduled task'), findsNothing);
+      expect(find.text('Future recurring task'), findsOneWidget);
+      expect(find.text('Next month task'), findsNothing);
 
       await tester.tap(find.byKey(const Key('nav-tasks')));
       await tester.pumpAndSettle();
@@ -4558,6 +4590,7 @@ void main() {
       expect(find.text('Tomorrow task'), findsOneWidget);
       expect(find.text('Unscheduled task'), findsOneWidget);
       expect(find.text('Future recurring task'), findsOneWidget);
+      expect(find.text('Next month task'), findsOneWidget);
     },
   );
 
@@ -5631,6 +5664,7 @@ class _CalendarTaskScopeFakeHermesApiClient
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day, 10);
     final tomorrow = today.add(const Duration(days: 1, hours: 4));
+    final nextMonth = DateTime(now.year, now.month + 1, 10, 14);
     return [
       HermesTask(
         id: 251,
@@ -5657,6 +5691,12 @@ class _CalendarTaskScopeFakeHermesApiClient
         status: 'open',
         dueAt: tomorrow.toIso8601String(),
         metadata: const {'recurrence': 'daily'},
+      ),
+      HermesTask(
+        id: 256,
+        title: 'Next month task',
+        status: 'open',
+        dueAt: nextMonth.toIso8601String(),
       ),
     ];
   }

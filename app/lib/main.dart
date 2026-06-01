@@ -4609,7 +4609,9 @@ class _CommandCenterContent extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final activeTasks = _visibleSortedTasks(tasks);
-        final selectedDayTasks = _tasksForTodayAgenda(tasks, DateTime.now());
+        final calendarTasks = showCalendarMonth
+            ? _tasksForMonthAgenda(tasks, selectedCalendarDay)
+            : _tasksForTodayAgenda(tasks, DateTime.now());
         final beanPanel = _HeroChatCard(
           messages: messages,
           busy: busy,
@@ -4625,7 +4627,7 @@ class _CommandCenterContent extends StatelessWidget {
         final selectedPanel = switch (selectedDestination) {
           _HomeDestination.today => _TodayHomeView(
             user: user,
-            tasks: selectedDayTasks,
+            tasks: calendarTasks,
             calendar: calendar,
             eventCategories: eventCategories,
             googleCalendarStatus: googleCalendarStatus,
@@ -5809,7 +5811,15 @@ class _TodayHomeView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const dayLabel = 'Today';
+    final taskListLabel = showMonth
+        ? '${_monthName(selectedDay.month)} ${selectedDay.year}'
+        : 'Today';
+    final taskCountLabel = showMonth
+        ? '${tasks.length} due or overdue'
+        : '${tasks.length} tasks';
+    final emptyTaskLabel = showMonth
+        ? 'No tasks due or overdue in $taskListLabel'
+        : 'No tasks scheduled for $taskListLabel';
     return Column(
       key: const Key('today-view'),
       children: [
@@ -5854,19 +5864,19 @@ class _TodayHomeView extends StatelessWidget {
           children: [
             _SectionTitle(
               icon: Icons.task_alt_rounded,
-              title: 'Tasks for $dayLabel',
-              subtitle: '${tasks.length} tasks',
+              title: 'Tasks for $taskListLabel',
+              subtitle: taskCountLabel,
               infoKey: const Key('today-tasks-info'),
-              infoTitle: 'Tasks for today',
+              infoTitle: showMonth ? 'Tasks for month' : 'Tasks for today',
               infoBullets: const [
-                'Use this list for the tasks Bean thinks belong on your current day.',
+                'Use this list for the tasks Bean thinks belong on this calendar view.',
                 'Tap the circle to complete or reopen a task. Tap the row to edit details.',
                 'Star important tasks as Critical so they appear in the top count.',
               ],
             ),
             const SizedBox(height: 12),
             if (tasks.isEmpty)
-              _EmptySurface(label: 'No tasks scheduled for $dayLabel')
+              _EmptySurface(label: emptyTaskLabel)
             else ...[
               for (final task in tasks.where((task) => !_taskIsSubtask(task)))
                 _TaskItemTile(
@@ -14422,6 +14432,20 @@ List<HermesTask> _tasksForTodayAgenda(List<HermesTask> tasks, DateTime day) {
     final dueDay = _dateOnly(dueAt);
     if (_taskIsCompleted(task)) return _sameCalendarDay(dueDay, today);
     return _taskIsOverdue(task) || _sameCalendarDay(dueDay, today);
+  }).toList();
+  visible.sort(_compareTasksByCompletionAndDueDate);
+  return visible;
+}
+
+List<HermesTask> _tasksForMonthAgenda(List<HermesTask> tasks, DateTime month) {
+  final visibleMonth = DateTime(month.year, month.month);
+  final visible = tasks.where((task) {
+    if (_taskIsCompleted(task)) return false;
+    final dueAt = _parseTaskDueDate(task);
+    if (dueAt == null) return false;
+    final dueDay = _dateOnly(dueAt);
+    final dueMonth = DateTime(dueDay.year, dueDay.month);
+    return _taskIsOverdue(task) || dueMonth == visibleMonth;
   }).toList();
   visible.sort(_compareTasksByCompletionAndDueDate);
   return visible;
