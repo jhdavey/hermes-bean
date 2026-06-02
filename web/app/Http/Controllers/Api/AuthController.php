@@ -285,12 +285,15 @@ class AuthController extends Controller
             $agentProfiles->exposePublicSettings($user->agentProfile);
         }
         $agentProfiles->exposePublicSettings($activeProfile);
+        $earlyAccessSignup = EarlyAccessSignup::where('email', $user->email)->first();
         $user->setAttribute('personal_workspace', $personalWorkspace);
         $user->setAttribute('active_workspace', $activeWorkspace);
         $user->setAttribute('workspaces', $workspaceService->accessibleWorkspaces($user));
         $user->setAttribute('active_workspace_agent_profile', $activeProfile);
         $user->setAttribute('needs_bean_onboarding', $agentProfiles->needsOnboarding($user, $activeProfile));
         $user->setAttribute('bean_preferences_ready', $agentProfiles->preferencesReady($activeProfile));
+        $user->setAttribute('is_early_access', $earlyAccessSignup !== null);
+        $user->setAttribute('early_access_signup', $earlyAccessSignup);
 
         return $user;
     }

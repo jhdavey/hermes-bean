@@ -743,6 +743,12 @@ if (mount) {
         return state.user?.is_admin === true || state.user?.isAdmin === true;
     }
 
+    function userIsEarlyAccess() {
+        return state.user?.is_early_access === true
+            || state.user?.isEarlyAccess === true
+            || Boolean(state.user?.early_access_signup || state.user?.earlyAccessSignup);
+    }
+
     function normalizeList(value) {
         return Array.isArray(value) ? value : [];
     }
@@ -981,6 +987,8 @@ if (mount) {
     }
 
     function betaBannerMarkup() {
+        if (!userIsEarlyAccess()) return '';
+
         return `<button class="hb-beta-banner" type="button" data-open-issue-report>If you have any issues, please report them here.</button>`;
     }
 

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\PersonalAccessToken;
+use App\Models\EarlyAccessSignup;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
@@ -34,6 +35,32 @@ class AuthAndAccountLifecycleTest extends TestCase
             'source' => 'app_register',
         ]);
         $this->assertDatabaseMissing('users', ['email' => 'bean@example.com']);
+    }
+
+    public function test_converted_early_access_user_keeps_early_access_flag_while_signup_record_exists(): void
+    {
+        EarlyAccessSignup::create([
+            'name' => 'Converted User',
+            'email' => 'converted@example.com',
+            'source' => 'app_register',
+        ]);
+        $token = $this->apiToken('converted@example.com');
+
+        $this->withToken($token)->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.is_early_access', true)
+            ->assertJsonPath('data.early_access_signup.email', 'converted@example.com')
+            ->assertJsonPath('data.early_access_signup.source', 'app_register');
+    }
+
+    public function test_regular_user_without_early_access_signup_is_not_marked_early_access(): void
+    {
+        $token = $this->apiToken('regular@example.com');
+
+        $this->withToken($token)->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.is_early_access', false)
+            ->assertJsonPath('data.early_access_signup', null);
     }
 
     public function test_login_me_logout_and_hashed_tokens(): void
