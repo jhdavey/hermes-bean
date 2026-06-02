@@ -6042,6 +6042,7 @@ if (mount) {
             } else {
                 const finalVoice = finalVoiceForTurn(content, quickReplyText, assistantContent, {
                     wantsDetailedChat,
+                    quickReplyMode: turnContract.quickReplyMode,
                 });
                 if (finalVoice.suppressFinal) {
                     removeLatestAssistantMessageIfDuplicate(assistantContent, quickReplyText);
@@ -6407,9 +6408,11 @@ if (mount) {
         const quick = normalizeComparableSpeech(quickReplyText);
         const final = normalizeComparableSpeech(finalText);
         if (!quick || !final) return false;
-        if (final.startsWith(quick.slice(0, Math.min(quick.length, 100)))) return true;
-        if (quick.length >= 24 && final.length <= quick.length + 160 && quickSimilarity(quick, final) > 0.62) return true;
-        return quick.length >= 40 && quickSimilarity(quick, final) > 0.72;
+        if (final.startsWith(quick.slice(0, Math.min(quick.length, 100)))) {
+            return final.length <= quick.length + 100 || novelContentRatio(final, quick) < 0.18;
+        }
+        if (quick.length >= 24 && final.length <= quick.length + 180 && quickSimilarity(quick, final) > 0.58 && novelContentRatio(final, quick) < 0.32) return true;
+        return quick.length >= 40 && quickSimilarity(quick, final) > 0.68 && novelContentRatio(final, quick) < 0.24;
     }
 
     function finalContinuationAfterQuickReply(quickReplyText, finalText) {
@@ -6425,20 +6428,42 @@ if (mount) {
             .trim()
             .match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
         const kept = [];
-        let droppingLead = true;
         sentences.forEach((sentence) => {
-            const normalizedSentence = normalizeComparableSpeech(sentence);
-            const repeatsQuick = normalizedSentence
-                && (quick.includes(normalizedSentence) || quickSimilarity(quick, normalizedSentence) > 0.68);
-            if (droppingLead && repeatsQuick) return;
-            droppingLead = false;
-            kept.push(sentence.trim());
+            const cleaned = stripQuickReplyOverlap(sentence, quick);
+            if (!cleaned) return;
+            kept.push(cleaned);
         });
         const continuation = kept.join(' ').trim();
         if (!continuation) return '';
         const continuationNormalized = normalizeComparableSpeech(continuation);
-        if (continuationNormalized && quickSimilarity(quick, continuationNormalized) > 0.82) return '';
+        if (continuationNormalized && quickSimilarity(quick, continuationNormalized) > 0.74 && novelContentRatio(continuationNormalized, quick) < 0.28) return '';
         return continuation;
+    }
+
+    function stripQuickReplyOverlap(sentence, normalizedQuickReply) {
+        const original = String(sentence || '').replace(/\s+/g, ' ').trim();
+        const normalizedSentence = normalizeComparableSpeech(original);
+        if (!original || !normalizedSentence || !normalizedQuickReply) return original;
+        if (normalizedQuickReply.includes(normalizedSentence)) return '';
+        const similarity = quickSimilarity(normalizedQuickReply, normalizedSentence);
+        const novelty = novelContentRatio(normalizedSentence, normalizedQuickReply);
+        if (similarity > 0.58 && novelty < 0.34) return '';
+        if (similarity > 0.72 && normalizedSentence.split(' ').length <= 14) return '';
+
+        const clauses = original
+            .split(/(?<=,|;|:)\s+|\s+(?:and|then)\s+/i)
+            .map((part) => part.trim())
+            .filter(Boolean);
+        if (clauses.length <= 1) return original;
+
+        const keptClauses = clauses.filter((clause) => {
+            const normalizedClause = normalizeComparableSpeech(clause);
+            if (!normalizedClause) return false;
+            if (normalizedQuickReply.includes(normalizedClause)) return false;
+            return !(quickSimilarity(normalizedQuickReply, normalizedClause) > 0.6 && novelContentRatio(normalizedClause, normalizedQuickReply) < 0.3);
+        });
+
+        return keptClauses.join(', ').replace(/^[\s,.;:-]+/, '').trim();
     }
 
     function removeLatestAssistantMessageIfDuplicate(assistantContent, quickReplyText) {
@@ -6464,14 +6489,35 @@ if (mount) {
     }
 
     function quickSimilarity(a, b) {
-        const aWords = new Set(a.split(' ').filter((word) => word.length > 3));
-        const bWords = new Set(b.split(' ').filter((word) => word.length > 3));
+        const aWords = new Set(comparableContentWords(a));
+        const bWords = new Set(comparableContentWords(b));
         if (!aWords.size || !bWords.size) return 0;
         let overlap = 0;
         aWords.forEach((word) => {
             if (bWords.has(word)) overlap += 1;
         });
         return overlap / Math.min(aWords.size, bWords.size);
+    }
+
+    function novelContentRatio(candidate, reference) {
+        const candidateWords = comparableContentWords(candidate);
+        if (!candidateWords.length) return 0;
+        const referenceWords = new Set(comparableContentWords(reference));
+        const novelCount = candidateWords.filter((word) => !referenceWords.has(word)).length;
+        return novelCount / candidateWords.length;
+    }
+
+    function comparableContentWords(value) {
+        const stopWords = new Set([
+            'about', 'after', 'again', 'also', 'and', 'are', 'bean', 'been', 'being', 'can', 'could',
+            'for', 'from', 'get', 'got', 'have', 'here', 'into', 'just', 'like', 'now', 'okay',
+            'one', 'out', 'right', 'sure', 'that', 'the', 'then', 'there', 'this', 'with', 'you',
+            'your', 'youre', 'ill', 'i ll', 'ive', 'i ve', 'its', 'it s',
+        ]);
+        return normalizeComparableSpeech(value)
+            .split(' ')
+            .map((word) => word.replace(/'s$/, ''))
+            .filter((word) => word.length > 2 && !stopWords.has(word));
     }
 
     async function playOpenAiTts(text, options = {}) {
