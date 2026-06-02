@@ -380,7 +380,7 @@ class SharedPreferencesAuthTokenStore implements AuthTokenStore {
   }
 }
 
-class HermesBeanApp extends StatelessWidget {
+class HermesBeanApp extends StatefulWidget {
   HermesBeanApp({
     super.key,
     HermesApiClient? apiClient,
@@ -400,37 +400,195 @@ class HermesBeanApp extends StatelessWidget {
   final BeanRealtimeConversation? realtimeConversation;
 
   @override
+  State<HermesBeanApp> createState() => _HermesBeanAppState();
+}
+
+class _HermesBeanAppState extends State<HermesBeanApp> {
+  String _themeKey = 'green';
+
+  void _setThemeKey(String themeKey) {
+    final normalizedThemeKey = heyBeanColorThemeForKey(themeKey).key;
+    if (normalizedThemeKey == _themeKey) return;
+    setState(() => _themeKey = normalizedThemeKey);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Hermes Bean',
       debugShowCheckedModeBanner: false,
-      theme: HeyBeanTheme.lightTheme,
+      theme: HeyBeanTheme.lightThemeFor(_themeKey),
       home: CommandCenterShell(
-        apiClient: apiClient,
-        tokenStore: tokenStore,
-        launchExternalUrl: launchExternalUrl,
-        updateAppIconBadge: updateAppIconBadge,
-        realtimeConversation: realtimeConversation,
+        apiClient: widget.apiClient,
+        tokenStore: widget.tokenStore,
+        launchExternalUrl: widget.launchExternalUrl,
+        updateAppIconBadge: widget.updateAppIconBadge,
+        realtimeConversation: widget.realtimeConversation,
+        onThemeChanged: _setThemeKey,
       ),
     );
   }
 }
 
+class HeyBeanColorTheme {
+  const HeyBeanColorTheme({
+    required this.key,
+    required this.label,
+    required this.bg0,
+    required this.bg1,
+    required this.bg2,
+    required this.surface2,
+    required this.accent,
+    required this.accentStrong,
+    required this.success,
+  });
+
+  final String key;
+  final String label;
+  final Color bg0;
+  final Color bg1;
+  final Color bg2;
+  final Color surface2;
+  final Color accent;
+  final Color accentStrong;
+  final Color success;
+}
+
+const List<HeyBeanColorTheme> heyBeanColorThemes = [
+  HeyBeanColorTheme(
+    key: 'green',
+    label: 'Green',
+    bg0: Color(0xFFF8FBF6),
+    bg1: Color(0xFFF1F7EE),
+    bg2: Color(0xFFEAF2E6),
+    surface2: Color(0xFFF6FAF4),
+    accent: Color(0xFF16A34A),
+    accentStrong: Color(0xFF15803D),
+    success: Color(0xFF22C55E),
+  ),
+  HeyBeanColorTheme(
+    key: 'gray',
+    label: 'Gray',
+    bg0: Color(0xFFF9FAFB),
+    bg1: Color(0xFFF1F5F9),
+    bg2: Color(0xFFE2E8F0),
+    surface2: Color(0xFFF8FAFC),
+    accent: Color(0xFF64748B),
+    accentStrong: Color(0xFF475569),
+    success: Color(0xFF64748B),
+  ),
+  HeyBeanColorTheme(
+    key: 'blue',
+    label: 'Blue',
+    bg0: Color(0xFFF8FBFF),
+    bg1: Color(0xFFEFF6FF),
+    bg2: Color(0xFFDBEAFE),
+    surface2: Color(0xFFF7FBFF),
+    accent: Color(0xFF2563EB),
+    accentStrong: Color(0xFF1D4ED8),
+    success: Color(0xFF3B82F6),
+  ),
+  HeyBeanColorTheme(
+    key: 'purple',
+    label: 'Purple',
+    bg0: Color(0xFFFBF9FF),
+    bg1: Color(0xFFF5F0FF),
+    bg2: Color(0xFFEDE9FE),
+    surface2: Color(0xFFFAF7FF),
+    accent: Color(0xFF7C3AED),
+    accentStrong: Color(0xFF6D28D9),
+    success: Color(0xFF8B5CF6),
+  ),
+  HeyBeanColorTheme(
+    key: 'pink',
+    label: 'Pink',
+    bg0: Color(0xFFFFF8FB),
+    bg1: Color(0xFFFDF2F8),
+    bg2: Color(0xFFFCE7F3),
+    surface2: Color(0xFFFFF7FB),
+    accent: Color(0xFFDB2777),
+    accentStrong: Color(0xFFBE185D),
+    success: Color(0xFFEC4899),
+  ),
+  HeyBeanColorTheme(
+    key: 'red',
+    label: 'Red',
+    bg0: Color(0xFFFFFAFA),
+    bg1: Color(0xFFFEF2F2),
+    bg2: Color(0xFFFEE2E2),
+    surface2: Color(0xFFFFF7F7),
+    accent: Color(0xFFDC2626),
+    accentStrong: Color(0xFFB91C1C),
+    success: Color(0xFFEF4444),
+  ),
+  HeyBeanColorTheme(
+    key: 'orange',
+    label: 'Orange',
+    bg0: Color(0xFFFFFAF5),
+    bg1: Color(0xFFFFF7ED),
+    bg2: Color(0xFFFFEDD5),
+    surface2: Color(0xFFFFFAF4),
+    accent: Color(0xFFEA580C),
+    accentStrong: Color(0xFFC2410C),
+    success: Color(0xFFF97316),
+  ),
+  HeyBeanColorTheme(
+    key: 'gold',
+    label: 'Gold',
+    bg0: Color(0xFFFFFDF7),
+    bg1: Color(0xFFFFFBEB),
+    bg2: Color(0xFFFEF3C7),
+    surface2: Color(0xFFFFFAF0),
+    accent: Color(0xFFD97706),
+    accentStrong: Color(0xFFB45309),
+    success: Color(0xFFF59E0B),
+  ),
+  HeyBeanColorTheme(
+    key: 'teal',
+    label: 'Teal',
+    bg0: Color(0xFFF7FFFD),
+    bg1: Color(0xFFF0FDFA),
+    bg2: Color(0xFFCCFBF1),
+    surface2: Color(0xFFF6FFFD),
+    accent: Color(0xFF0D9488),
+    accentStrong: Color(0xFF0F766E),
+    success: Color(0xFF14B8A6),
+  ),
+  HeyBeanColorTheme(
+    key: 'indigo',
+    label: 'Indigo',
+    bg0: Color(0xFFF9FAFF),
+    bg1: Color(0xFFEEF2FF),
+    bg2: Color(0xFFE0E7FF),
+    surface2: Color(0xFFF7F8FF),
+    accent: Color(0xFF4F46E5),
+    accentStrong: Color(0xFF4338CA),
+    success: Color(0xFF6366F1),
+  ),
+];
+
+HeyBeanColorTheme heyBeanColorThemeForKey(String key) =>
+    heyBeanColorThemes.firstWhere(
+      (theme) => theme.key == key.trim().toLowerCase(),
+      orElse: () => heyBeanColorThemes.first,
+    );
+
 class HeyBeanTheme {
   const HeyBeanTheme._();
 
-  static const Color bg0 = Color(0xFFF8FBF6);
-  static const Color bg1 = Color(0xFFF1F7EE);
-  static const Color bg2 = Color(0xFFEAF2E6);
+  static HeyBeanColorTheme _current = heyBeanColorThemes.first;
+  static Color bg0 = _current.bg0;
+  static Color bg1 = _current.bg1;
+  static Color bg2 = _current.bg2;
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surface2 = Color(0xFFF6FAF4);
+  static Color surface2 = _current.surface2;
   static const Color text = Color(0xFF1F2937);
   static const Color muted = Color(0xFF64748B);
   static const Color border = Color(0x2694A3B8);
   static const Color borderStrong = Color(0x4D94A3B8);
-  static const Color accent = Color(0xFF16A34A);
-  static const Color accentStrong = Color(0xFF15803D);
-  static const Color success = Color(0xFF22C55E);
+  static Color accent = _current.accent;
+  static Color accentStrong = _current.accentStrong;
+  static Color success = _current.success;
   static const Color warning = Color(0xFFF59E0B);
   static const Color destructive = Color(0xFFDC2626);
 
@@ -443,7 +601,19 @@ class HeyBeanTheme {
         systemNavigationBarIconBrightness: Brightness.dark,
       );
 
-  static ThemeData get lightTheme {
+  static void useTheme(String key) {
+    _current = heyBeanColorThemeForKey(key);
+    bg0 = _current.bg0;
+    bg1 = _current.bg1;
+    bg2 = _current.bg2;
+    surface2 = _current.surface2;
+    accent = _current.accent;
+    accentStrong = _current.accentStrong;
+    success = _current.success;
+  }
+
+  static ThemeData lightThemeFor(String key) {
+    useTheme(key);
     final colorScheme =
         ColorScheme.fromSeed(
           brightness: Brightness.light,
@@ -512,6 +682,8 @@ class HeyBeanTheme {
       ),
     );
   }
+
+  static ThemeData get lightTheme => lightThemeFor(_current.key);
 }
 
 ButtonStyle _destructiveFilledButtonStyle({double radius = 14}) =>
@@ -741,6 +913,7 @@ class CommandCenterShell extends StatefulWidget {
     required this.tokenStore,
     required this.launchExternalUrl,
     required this.updateAppIconBadge,
+    required this.onThemeChanged,
     this.realtimeConversation,
   });
 
@@ -748,6 +921,7 @@ class CommandCenterShell extends StatefulWidget {
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
+  final ValueChanged<String> onThemeChanged;
   final BeanRealtimeConversation? realtimeConversation;
 
   @override
@@ -808,6 +982,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int? _lastScheduledAppIconBadgeCount;
   final Map<int, _DashboardSnapshot> _workspaceSnapshots = {};
   final Map<int, _PendingCalendarEventWrite> _pendingCalendarEventWrites = {};
+
+  void _applyUserTheme(HermesUser? user) {
+    widget.onThemeChanged(user?.theme ?? 'green');
+  }
 
   void _markDashboardDataMutated() {
     _dashboardDataVersion++;
@@ -1077,6 +1255,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     widget.apiClient.bearerToken ??= rememberedToken;
     if (widget.apiClient.bearerToken == null) {
       _stopDashboardChangePolling();
+      _applyUserTheme(null);
       setState(() => _phase = _AuthPhase.signedOut);
       return;
     }
@@ -1132,6 +1311,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     try {
       final user = knownUser ?? await widget.apiClient.me();
       if (!mounted) return;
+      _applyUserTheme(user);
       setState(() {
         _user = user;
         _session = null;
@@ -1207,6 +1387,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         results[3] as List<HermesCalendarEvent>,
       );
       if (!mounted) return;
+      _applyUserTheme(user);
       setState(() {
         _user = user;
         _session = session;
@@ -1237,6 +1418,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (invalidToken) {
         await widget.tokenStore.clearToken();
         widget.apiClient.bearerToken = null;
+        _applyUserTheme(null);
       }
       setState(() {
         _error = invalidToken
@@ -2198,6 +2380,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           dataVersion != _dashboardDataVersion) {
         return;
       }
+      _applyUserTheme(user);
       setState(() {
         _user = user;
         _session = session;
@@ -3042,6 +3225,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     try {
       final updatedUser = await widget.apiClient.updateMe(email: trimmedEmail);
       if (!mounted) return;
+      _applyUserTheme(updatedUser);
       setState(() {
         _user = updatedUser;
         _busy = false;
@@ -3131,6 +3315,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         notificationPreferences: preferences,
       );
       if (!mounted) return;
+      _applyUserTheme(updatedUser);
       setState(() {
         _user = updatedUser;
         _busy = false;
@@ -3149,6 +3334,40 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
+  Future<void> _updateTheme(String themeKey) async {
+    if (_busy) return;
+    final normalizedThemeKey = heyBeanColorThemeForKey(themeKey).key;
+    final previousUser = _user;
+    setState(() {
+      _busy = true;
+      _error = null;
+      if (previousUser != null) {
+        _user = previousUser.copyWith(theme: normalizedThemeKey);
+      }
+    });
+    _applyUserTheme(_user);
+    try {
+      final updatedUser = await widget.apiClient.updateMe(
+        theme: normalizedThemeKey,
+      );
+      if (!mounted) return;
+      _applyUserTheme(updatedUser);
+      setState(() {
+        _user = updatedUser;
+        _busy = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      _applyUserTheme(previousUser);
+      setState(() {
+        _user = previousUser;
+        _busy = false;
+        _error = beanFriendlyErrorMessage(error, action: 'update your theme');
+      });
+    }
+  }
+
   Future<void> _logout() async {
     if (_busy) return;
     _stopDashboardChangePolling();
@@ -3160,6 +3379,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     } finally {
       await widget.tokenStore.clearToken();
       if (mounted) {
+        _applyUserTheme(null);
         setState(() {
           _busy = false;
           _phase = _AuthPhase.signedOut;
@@ -3331,7 +3551,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.grid_view_rounded,
               size: 16,
               color: HeyBeanTheme.accentStrong,
@@ -3363,7 +3583,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       value: HeyBeanTheme.lightSystemOverlayStyle,
       child: Container(
         key: const Key('heybean-background-gradient'),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -3373,14 +3593,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ),
         child: Stack(
           children: [
-            const Positioned.fill(
+            Positioned.fill(
               key: Key('green-glow-left'),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
                     center: Alignment(-1.12, -1.2),
                     radius: 1.1,
-                    colors: [Color(0x1916A34A), Colors.transparent],
+                    colors: [
+                      HeyBeanTheme.accent.withValues(alpha: .10),
+                      Colors.transparent,
+                    ],
                   ),
                 ),
               ),
@@ -3659,6 +3882,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     onSignOut: _logout,
     onAccountEmailChanged: _updateAccountEmail,
     onNotificationPreferencesChanged: _updateNotificationPreferences,
+    onThemeChanged: _updateTheme,
     launchExternalUrl: widget.launchExternalUrl,
     onEditAgentOnboarding: () {
       setState(() {
@@ -3965,7 +4189,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
                         color: HeyBeanTheme.accent.withValues(alpha: .12),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.info_outline_rounded,
                         size: 18,
                         color: HeyBeanTheme.accent,
@@ -4258,7 +4482,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               if (_registerMode)
-                                const Icon(
+                                Icon(
                                   Icons.person_add_alt_1_rounded,
                                   color: HeyBeanTheme.accentStrong,
                                 )
@@ -4594,6 +4818,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onSignOut,
     required this.onAccountEmailChanged,
     required this.onNotificationPreferencesChanged,
+    required this.onThemeChanged,
     required this.launchExternalUrl,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
@@ -4724,6 +4949,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(String email) onAccountEmailChanged;
   final Future<void> Function(HermesNotificationPreferences preferences)
   onNotificationPreferencesChanged;
+  final Future<void> Function(String themeKey) onThemeChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
@@ -4808,6 +5034,7 @@ class _CommandCenterContent extends StatelessWidget {
             onSignOut: onSignOut,
             onAccountEmailChanged: onAccountEmailChanged,
             onNotificationPreferencesChanged: onNotificationPreferencesChanged,
+            onThemeChanged: onThemeChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onWorkspacesChanged: onWorkspacesChanged,
             error: error,
@@ -5491,7 +5718,7 @@ class _QuickPromptRail extends StatelessWidget {
             ),
             label: Text(prompt.label),
             onPressed: () => onPrompt(prompt.prompt),
-            backgroundColor: const Color(0x1416A34A),
+            backgroundColor: HeyBeanTheme.accent.withValues(alpha: .08),
             side: const BorderSide(color: HeyBeanTheme.border),
             labelStyle: const TextStyle(
               color: HeyBeanTheme.text,
@@ -5527,7 +5754,9 @@ class _MessageBubble extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 560),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: alignRight ? const Color(0x1F16A34A) : HeyBeanTheme.surface2,
+        color: alignRight
+            ? HeyBeanTheme.accent.withValues(alpha: .12)
+            : HeyBeanTheme.surface2,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: HeyBeanTheme.border),
       ),
@@ -5547,7 +5776,7 @@ class _MessageBubble extends StatelessWidget {
                 Text(
                   sender,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: HeyBeanTheme.accentStrong,
                     fontWeight: FontWeight.w800,
                   ),
@@ -5557,7 +5786,7 @@ class _MessageBubble extends StatelessWidget {
                   child: Text(
                     sender,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: HeyBeanTheme.accentStrong,
                       fontWeight: FontWeight.w800,
                     ),
@@ -5705,13 +5934,13 @@ class _TabSurface extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const TabBar(
+          TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,
             labelColor: HeyBeanTheme.accentStrong,
             unselectedLabelColor: HeyBeanTheme.muted,
             indicatorColor: HeyBeanTheme.accent,
-            tabs: [
+            tabs: const [
               Tab(text: 'Today'),
               Tab(text: 'Tasks'),
               Tab(text: 'Reminders'),
@@ -6175,7 +6404,7 @@ class _CriticalTaskBadge extends StatelessWidget {
       width: 36,
       height: 36,
       alignment: Alignment.center,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: HeyBeanTheme.accent,
         shape: BoxShape.circle,
       ),
@@ -7178,8 +7407,8 @@ class _MultiDayEventSpanRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(
-      color: Color(0x0F16A34A),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.accent.withValues(alpha: .06),
       border: Border(
         left: BorderSide(color: HeyBeanTheme.border),
         bottom: BorderSide(color: HeyBeanTheme.border),
@@ -8838,7 +9067,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     return Scaffold(
       key: const Key('calendar-event-detail-page'),
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
@@ -9516,7 +9745,7 @@ class _EventCategoryChip extends StatelessWidget {
                   ),
                   if (selected) ...[
                     const SizedBox(width: 5),
-                    const Icon(
+                    Icon(
                       Icons.check_circle_rounded,
                       size: 15,
                       color: HeyBeanTheme.accent,
@@ -9607,7 +9836,7 @@ class _CategoryOptionPill extends StatelessWidget {
               ),
               if (selected) ...[
                 const SizedBox(width: 6),
-                const Icon(
+                Icon(
                   Icons.check_circle_rounded,
                   size: 15,
                   color: HeyBeanTheme.accent,
@@ -10927,7 +11156,7 @@ class _MonthDayCell extends StatelessWidget {
     final backgroundColor = isToday
         ? HeyBeanTheme.accent
         : isSelected
-        ? const Color(0xFFE8F5E9)
+        ? HeyBeanTheme.accent.withValues(alpha: .10)
         : HeyBeanTheme.surface2;
     final borderColor = isToday || isSelected
         ? HeyBeanTheme.accentStrong
@@ -12646,6 +12875,7 @@ class _SettingsView extends StatelessWidget {
     required this.onSignOut,
     required this.onAccountEmailChanged,
     required this.onNotificationPreferencesChanged,
+    required this.onThemeChanged,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
     this.error,
@@ -12664,6 +12894,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(String email) onAccountEmailChanged;
   final Future<void> Function(HermesNotificationPreferences preferences)
   onNotificationPreferencesChanged;
+  final Future<void> Function(String themeKey) onThemeChanged;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
@@ -12708,6 +12939,10 @@ class _SettingsView extends StatelessWidget {
                 child: const Text('Update'),
               ),
             ),
+            _ThemePreferencesCard(
+              selectedThemeKey: user.theme,
+              onChanged: onThemeChanged,
+            ),
             _NotificationPreferencesCard(
               preferences: user.notificationPreferences,
               onChanged: onNotificationPreferencesChanged,
@@ -12741,6 +12976,188 @@ class _SettingsView extends StatelessWidget {
         launchExternalUrl: launchExternalUrl,
       ),
     ],
+  );
+}
+
+class _ThemePreferencesCard extends StatefulWidget {
+  const _ThemePreferencesCard({
+    required this.selectedThemeKey,
+    required this.onChanged,
+  });
+
+  final String selectedThemeKey;
+  final Future<void> Function(String themeKey) onChanged;
+
+  @override
+  State<_ThemePreferencesCard> createState() => _ThemePreferencesCardState();
+}
+
+class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
+  late String _selectedThemeKey;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedThemeKey = heyBeanColorThemeForKey(widget.selectedThemeKey).key;
+  }
+
+  @override
+  void didUpdateWidget(covariant _ThemePreferencesCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_saving) {
+      _selectedThemeKey = heyBeanColorThemeForKey(widget.selectedThemeKey).key;
+    }
+  }
+
+  Future<void> _save(String themeKey) async {
+    final normalizedThemeKey = heyBeanColorThemeForKey(themeKey).key;
+    if (_saving || normalizedThemeKey == _selectedThemeKey) return;
+    setState(() {
+      _selectedThemeKey = normalizedThemeKey;
+      _saving = true;
+    });
+    try {
+      await widget.onChanged(normalizedThemeKey);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('theme-preferences-card'),
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.palette_outlined, color: HeyBeanTheme.accentStrong),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Appearance',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            if (_saving)
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: HeyBeanTheme.accent,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Choose the accent color used across HeyBean.',
+          style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final theme in heyBeanColorThemes)
+              _ThemeSwatchButton(
+                theme: theme,
+                selected: theme.key == _selectedThemeKey,
+                disabled: _saving,
+                onTap: () => _save(theme.key),
+              ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+class _ThemeSwatchButton extends StatelessWidget {
+  const _ThemeSwatchButton({
+    required this.theme,
+    required this.selected,
+    required this.disabled,
+    required this.onTap,
+  });
+
+  final HeyBeanColorTheme theme;
+  final bool selected;
+  final bool disabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: selected,
+    label: '${theme.label} theme',
+    child: InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: disabled ? null : onTap,
+      child: Container(
+        width: 112,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? theme.accent.withValues(alpha: .11)
+              : Colors.white.withValues(alpha: .72),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? theme.accentStrong.withValues(alpha: .46)
+                : HeyBeanTheme.border,
+          ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: theme.accent.withValues(alpha: .10),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: theme.accent,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: .14),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                theme.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
   );
 }
 
@@ -12807,14 +13224,14 @@ class _NotificationPreferencesCardState
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: HeyBeanTheme.border),
           ),
-          child: const Row(
+          child: Row(
             children: [
               Icon(
                 Icons.notifications_active_outlined,
                 color: HeyBeanTheme.accentStrong,
               ),
-              SizedBox(width: 12),
-              Expanded(
+              const SizedBox(width: 12),
+              const Expanded(
                 child: Text(
                   'Notification preferences',
                   style: TextStyle(fontWeight: FontWeight.w800),
@@ -13208,9 +13625,9 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
 
   Widget _membershipStatusIcon(HermesWorkspaceMembership membership) {
     if (membership.status == 'active') {
-      return const Icon(
+      return Icon(
         Icons.check_circle_rounded,
-        color: Color(0xFF16A34A),
+        color: HeyBeanTheme.accent,
         size: 18,
       );
     }
@@ -13246,7 +13663,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
           children: [
             Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.home_work_outlined,
                   color: HeyBeanTheme.accentStrong,
                 ),
@@ -13619,7 +14036,7 @@ class _CalendarPreferencesCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.calendar_view_day_rounded,
                 color: HeyBeanTheme.accentStrong,
               ),
@@ -13917,10 +14334,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
           children: [
             Row(
               children: [
-                const Icon(
-                  Icons.sync_rounded,
-                  color: HeyBeanTheme.accentStrong,
-                ),
+                Icon(Icons.sync_rounded, color: HeyBeanTheme.accentStrong),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -15189,7 +15603,7 @@ class _InfoIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => IconButton(
     tooltip: 'More info about $title',
-    icon: const Icon(
+    icon: Icon(
       Icons.info_outline_rounded,
       semanticLabel: 'More info',
       size: 20,
@@ -15257,8 +15671,8 @@ Future<void> _showInfoSheet(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 5),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 5),
                       child: Icon(
                         Icons.circle,
                         size: 6,
@@ -15305,11 +15719,11 @@ class _ShellCard extends StatelessWidget {
       decoration: glow
           ? BoxDecoration(
               borderRadius: BorderRadius.circular(18),
-              boxShadow: const [
+              boxShadow: [
                 BoxShadow(
-                  color: Color(0x1716A34A),
+                  color: HeyBeanTheme.accent.withValues(alpha: .09),
                   blurRadius: 24,
-                  offset: Offset(0, 12),
+                  offset: const Offset(0, 12),
                 ),
               ],
             )
@@ -15537,7 +15951,7 @@ class _BetaFeedbackDialogState extends State<_BetaFeedbackDialog> {
   @override
   Widget build(BuildContext context) => AlertDialog(
     key: const Key('beta-feedback-dialog'),
-    icon: const Icon(Icons.bug_report_rounded, color: HeyBeanTheme.accent),
+    icon: Icon(Icons.bug_report_rounded, color: HeyBeanTheme.accent),
     title: const Text('Report an issue'),
     content: Column(
       mainAxisSize: MainAxisSize.min,
@@ -15613,7 +16027,7 @@ class _BetaFeedbackThanksDialog extends StatelessWidget {
           ),
         ],
       ),
-      child: const Icon(
+      child: Icon(
         Icons.check_circle_rounded,
         color: HeyBeanTheme.accentStrong,
         size: 34,
@@ -15653,20 +16067,20 @@ class _BeanIntroCallout extends StatelessWidget {
             color: HeyBeanTheme.surface,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: HeyBeanTheme.accent),
-            boxShadow: const [
+            boxShadow: [
               BoxShadow(
-                color: Color(0x2416A34A),
+                color: HeyBeanTheme.accent.withValues(alpha: .14),
                 blurRadius: 24,
-                offset: Offset(0, 10),
+                offset: const Offset(0, 10),
               ),
             ],
           ),
-          child: const Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.eco_rounded, color: HeyBeanTheme.accentStrong),
-              SizedBox(width: 10),
-              Flexible(
+              const SizedBox(width: 10),
+              const Flexible(
                 child: Text(
                   'Start by introducing yourself to Bean',
                   key: Key('bean-intro-callout-text'),
@@ -15940,14 +16354,14 @@ class _BeanFabState extends State<_BeanFab>
                   height: 82 + (pulse * 18),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: const Color(
-                      0xFF22C55E,
-                    ).withValues(alpha: .14 + (pulse * .10)),
+                    color: HeyBeanTheme.success.withValues(
+                      alpha: .14 + (pulse * .10),
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(
-                          0xFF22C55E,
-                        ).withValues(alpha: .42 + (pulse * .24)),
+                        color: HeyBeanTheme.success.withValues(
+                          alpha: .42 + (pulse * .24),
+                        ),
                         blurRadius: 24 + (pulse * 18),
                         spreadRadius: 5 + (pulse * 8),
                       ),
@@ -15968,13 +16382,13 @@ class _BeanFabState extends State<_BeanFab>
                 height: 72,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: const LinearGradient(
+                  gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      Color(0xFF22C55E),
-                      Color(0xFF16A34A),
-                      Color(0xFF15803D),
+                      HeyBeanTheme.success,
+                      HeyBeanTheme.accent,
+                      HeyBeanTheme.accentStrong,
                     ],
                   ),
                   border: Border.all(
@@ -15988,8 +16402,8 @@ class _BeanFabState extends State<_BeanFab>
                   boxShadow: [
                     BoxShadow(
                       color: widget.listening
-                          ? const Color(0x8F22C55E)
-                          : const Color(0x3D16A34A),
+                          ? HeyBeanTheme.success.withValues(alpha: .56)
+                          : HeyBeanTheme.accent.withValues(alpha: .24),
                       blurRadius: widget.listening ? 36 : 24,
                       spreadRadius: widget.listening ? 5 : 0,
                       offset: const Offset(0, 10),

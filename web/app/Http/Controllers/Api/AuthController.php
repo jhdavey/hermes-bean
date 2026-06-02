@@ -31,6 +31,19 @@ use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
+    private const THEME_KEYS = [
+        'green',
+        'gray',
+        'blue',
+        'purple',
+        'pink',
+        'red',
+        'orange',
+        'gold',
+        'teal',
+        'indigo',
+    ];
+
     public function register(Request $request): JsonResponse
     {
         $request->merge([
@@ -135,6 +148,7 @@ class AuthController extends Controller
             'onboarding_priorities' => ['sometimes', 'array', 'max:5'],
             'onboarding_priorities.*' => ['string', 'max:80'],
             'onboarding_context' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'theme' => ['sometimes', 'string', Rule::in(self::THEME_KEYS)],
             'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
             'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
             'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
@@ -148,7 +162,7 @@ class AuthController extends Controller
         $ttsKeys = ['tts_provider', 'tts_openai_voice', 'tts_openai_instructions'];
         $profileData = collect($data)->only($profileKeys)->all();
         $ttsData = collect($data)->only($ttsKeys)->all();
-        $userData = collect($data)->only(['name', 'email'])->all();
+        $userData = collect($data)->only(['name', 'email', 'theme'])->all();
         if (array_key_exists('notification_preferences', $data)) {
             $userData['notification_preferences'] = array_merge(
                 User::defaultNotificationPreferences(),

@@ -74,6 +74,29 @@ class AuthAndAccountLifecycleTest extends TestCase
         ])->assertUnprocessable();
     }
 
+    public function test_signed_in_user_can_update_theme(): void
+    {
+        $token = $this->registerToken('theme-user@example.com');
+
+        $this->withToken($token)->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.theme', 'green');
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'theme' => 'purple',
+        ])->assertOk()
+            ->assertJsonPath('data.theme', 'purple');
+
+        $this->assertDatabaseHas('users', [
+            'email' => 'theme-user@example.com',
+            'theme' => 'purple',
+        ]);
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'theme' => 'neon',
+        ])->assertUnprocessable();
+    }
+
     public function test_forgot_password_sends_reset_link_without_revealing_accounts(): void
     {
         Notification::fake();

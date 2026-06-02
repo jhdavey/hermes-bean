@@ -5207,6 +5207,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   String? updatedContext;
   HermesNotificationPreferences updatedNotificationPreferences =
       const HermesNotificationPreferences();
+  String updatedTheme = 'green';
   final passwordResetRequests = <String>[];
   final issueReports = <String>[];
   HermesReminder? bannerUpdatedReminder;
@@ -5247,6 +5248,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       id: 1,
       name: name,
       email: email,
+      theme: updatedTheme,
       onboardComplete: !needsBeanOnboarding,
       agentProfile: profile,
       activeWorkspaceAgentProfile: profile,
@@ -5296,12 +5298,14 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<HermesUser> updateMe({
     String? name,
     String? email,
+    String? theme,
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
     HermesNotificationPreferences? notificationPreferences,
   }) async {
     updatedEmail = email ?? updatedEmail;
+    updatedTheme = theme ?? updatedTheme;
     updatedAgentPersonality = agentPersonality ?? updatedAgentPersonality;
     updatedPriorities = onboardingPriorities ?? updatedPriorities;
     updatedContext = onboardingContext ?? updatedContext;

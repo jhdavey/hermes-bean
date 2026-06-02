@@ -19,6 +19,19 @@ if (mount) {
     const kioskVoiceKey = 'heybean.kioskVoice';
     const calendarInitialWindowDays = 56;
     const calendarWindowChunkDays = 28;
+    const appThemes = [
+        { key: 'green', label: 'Green', accent: '#16a34a' },
+        { key: 'gray', label: 'Gray', accent: '#64748b' },
+        { key: 'blue', label: 'Blue', accent: '#2563eb' },
+        { key: 'purple', label: 'Purple', accent: '#7c3aed' },
+        { key: 'pink', label: 'Pink', accent: '#db2777' },
+        { key: 'red', label: 'Red', accent: '#dc2626' },
+        { key: 'orange', label: 'Orange', accent: '#ea580c' },
+        { key: 'gold', label: 'Gold', accent: '#d97706' },
+        { key: 'teal', label: 'Teal', accent: '#0d9488' },
+        { key: 'indigo', label: 'Indigo', accent: '#4f46e5' },
+    ];
+    const appThemesByKey = new Map(appThemes.map((theme) => [theme.key, theme]));
 
     const icons = {
         add: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -32,6 +45,7 @@ if (mount) {
         stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
         edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>',
         user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>',
+        palette: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a10 10 0 1 1 8.8-5.2 2.7 2.7 0 0 1-2.4 1.4h-1.3a2 2 0 0 0-1.7 3.1c.1.2 0 .5-.3.6a10.7 10.7 0 0 1-3.1.1Z"/><circle cx="7.5" cy="10" r="1"/><circle cx="10.5" cy="6.5" r="1"/><circle cx="15" cy="7.5" r="1"/><circle cx="16.5" cy="12" r="1"/></svg>',
         tune: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M2 14h4M10 8h4M18 16h4"/></svg>',
         activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
@@ -106,6 +120,8 @@ if (mount) {
         notice: '',
         modal: null,
     };
+
+    applyAppTheme();
 
     let voiceHoldActive = false;
     let voiceHoldPressed = false;
@@ -333,6 +349,51 @@ if (mount) {
             throw new Error(details || 'Something went wrong.');
         }
         return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
+    }
+
+    function normalizeThemeKey(value) {
+        const key = String(value || '').trim().toLowerCase();
+        return appThemesByKey.has(key) ? key : 'green';
+    }
+
+    function themeForKey(value) {
+        return appThemesByKey.get(normalizeThemeKey(value)) || appThemes[0];
+    }
+
+    function currentThemeKey() {
+        return normalizeThemeKey(state.user?.theme);
+    }
+
+    function applyAppTheme(value = currentThemeKey()) {
+        const theme = themeForKey(value);
+        document.body.dataset.hbTheme = theme.key;
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme.accent);
+    }
+
+    function themeSettingsMarkup() {
+        const selectedTheme = currentThemeKey();
+        return `
+            <div class="hb-surface-soft hb-card-pad">
+                <strong>Appearance</strong>
+                <small>Choose the accent color used across HeyBean.</small>
+                <div class="hb-theme-grid">
+                    ${appThemes.map((theme) => {
+                        const active = theme.key === selectedTheme;
+                        return `
+                            <button
+                                class="hb-theme-option ${active ? 'hb-theme-option-active' : ''}"
+                                type="button"
+                                data-theme-option="${escapeAttr(theme.key)}"
+                                aria-pressed="${active ? 'true' : 'false'}"
+                            >
+                                <span class="hb-theme-swatch" style="--hb-theme-swatch: ${escapeAttr(theme.accent)}"></span>
+                                <span>${escapeHtml(theme.label)}</span>
+                            </button>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
     }
 
     async function loadSignedIn() {
@@ -660,6 +721,7 @@ if (mount) {
         deferredDashboardRenderPending = false;
         window.clearTimeout(deferredDashboardRenderTimer);
         deferredDashboardRenderTimer = 0;
+        applyAppTheme();
         const modalKey = state.modal ? modalIdentity(state.modal) : '';
         const existingModal = modalKey ? mount.querySelector('[data-modal-root]') : null;
         const preservedModal = existingModal?.dataset?.modalKey === modalKey ? existingModal : null;
@@ -1059,8 +1121,8 @@ if (mount) {
                 <svg class="hb-admin-growth-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="User growth line chart">
                     <defs>
                         <linearGradient id="hb-admin-growth-fill" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stop-color="rgba(22, 163, 74, .24)"></stop>
-                            <stop offset="100%" stop-color="rgba(22, 163, 74, 0)"></stop>
+                            <stop offset="0%" stop-color="var(--hb-accent)" stop-opacity=".24"></stop>
+                            <stop offset="100%" stop-color="var(--hb-accent)" stop-opacity="0"></stop>
                         </linearGradient>
                     </defs>
                     ${yTicks.map((tick) => `
@@ -1480,6 +1542,7 @@ if (mount) {
                     <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')}${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
                     <button class="hb-button-ghost" type="button" data-open-agent>Update</button>
                 </div>
+                ${themeSettingsMarkup()}
                 <div class="hb-surface-soft hb-card-pad">
                     <strong>Notification preferences</strong>
                     <label class="hb-switch-row"><input type="checkbox" data-pref="reminder_push" ${prefs.reminder_push !== false ? 'checked' : ''}> Reminder push notifications</label>
@@ -2773,6 +2836,7 @@ if (mount) {
         mount.querySelector('[data-workspace-select]')?.addEventListener('change', (event) => setWorkspace(event.currentTarget.value));
         mount.querySelectorAll('[data-top-workspace-select]').forEach((select) => select.addEventListener('change', (event) => setWorkspace(event.currentTarget.value)));
         mount.querySelectorAll('[data-pref]').forEach((input) => input.addEventListener('change', updateNotificationPrefs));
+        mount.querySelectorAll('[data-theme-option]').forEach((button) => button.addEventListener('click', updateThemePreference));
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
         mount.querySelectorAll('[data-approval-approve]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalApprove, false)));
@@ -6662,6 +6726,25 @@ if (mount) {
             render();
         } catch (error) {
             state.error = friendlyError(error, 'save notification preferences');
+            render();
+        }
+    }
+
+    async function updateThemePreference(event) {
+        const theme = normalizeThemeKey(event.currentTarget.dataset.themeOption);
+        if (theme === currentThemeKey()) return;
+        const previousUser = state.user;
+        state.user = { ...(state.user || {}), theme };
+        state.error = '';
+        state.notice = '';
+        render();
+        try {
+            state.user = await api('/auth/me', { method: 'PATCH', body: { theme } });
+            state.notice = 'Theme saved.';
+            render();
+        } catch (error) {
+            state.user = previousUser;
+            state.error = friendlyError(error, 'save theme');
             render();
         }
     }

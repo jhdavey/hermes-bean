@@ -104,6 +104,7 @@ class HermesApiClient {
   Future<HermesUser> updateMe({
     String? name,
     String? email,
+    String? theme,
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
@@ -115,6 +116,7 @@ class HermesApiClient {
       body: {
         if (name != null) 'name': name,
         if (email != null) 'email': email,
+        if (theme != null) 'theme': theme,
         if (agentPersonality != null) 'agent_personality': agentPersonality,
         if (onboardingPriorities != null)
           'onboarding_priorities': onboardingPriorities,
@@ -1154,6 +1156,7 @@ class HermesUser {
     required this.id,
     required this.name,
     required this.email,
+    this.theme = 'green',
     this.onboardComplete = false,
     this.agentProfile,
     this.defaultWorkspaceId,
@@ -1170,6 +1173,7 @@ class HermesUser {
   final int id;
   final String name;
   final String email;
+  final String theme;
   final bool onboardComplete;
   final HermesAgentProfile? agentProfile;
   final int? defaultWorkspaceId;
@@ -1188,6 +1192,7 @@ class HermesUser {
   HermesUser copyWith({
     String? name,
     String? email,
+    String? theme,
     bool? onboardComplete,
     HermesAgentProfile? agentProfile,
     int? defaultWorkspaceId,
@@ -1203,6 +1208,7 @@ class HermesUser {
     id: id,
     name: name ?? this.name,
     email: email ?? this.email,
+    theme: theme ?? this.theme,
     onboardComplete: onboardComplete ?? this.onboardComplete,
     agentProfile: agentProfile ?? this.agentProfile,
     defaultWorkspaceId: defaultWorkspaceId ?? this.defaultWorkspaceId,
@@ -1222,6 +1228,7 @@ class HermesUser {
     id: _expectInt(json['id']),
     name: _expectString(json['name']),
     email: _expectString(json['email']),
+    theme: _readStringOrDefault(json['theme'], 'green'),
     onboardComplete: json['onboard_complete'] == true,
     agentProfile: json['agent_profile'] is Map<String, Object?>
         ? HermesAgentProfile.fromJson(_expectMap(json['agent_profile']))
@@ -2354,6 +2361,11 @@ int? _readIntOrNull(Object? value) {
 String _expectString(Object? value) {
   if (value is String) return value;
   throw FormatException('Expected string, got ${value.runtimeType}');
+}
+
+String _readStringOrDefault(Object? value, String fallback) {
+  if (value is String && value.trim().isNotEmpty) return value;
+  return fallback;
 }
 
 bool _readBool(Object? value) {

@@ -294,6 +294,37 @@ void main() {
     },
   );
 
+  test('updates user theme through auth profile update', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'PATCH');
+        expect(request.path, '/auth/me');
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        expect(request.body, {'theme': 'purple'});
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'id': 9,
+              'name': 'Bean User',
+              'email': 'bean@example.com',
+              'theme': 'purple',
+            },
+          }),
+        );
+      },
+    );
+
+    final user = await client.updateMe(theme: 'purple');
+
+    expect(user.theme, 'purple');
+    expect(requests, hasLength(1));
+  });
+
   test('marks tasks complete with bearer token', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
