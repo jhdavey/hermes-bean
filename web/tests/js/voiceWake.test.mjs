@@ -87,6 +87,20 @@ assert.equal(
 );
 assert.equal(
     realtimeSpokenAnswerAllowsBackgroundQueue(
+        'what is on my todo list today',
+        'For today, you’ve got pack lunches, call the vet, and review the budget on your list.',
+    ),
+    false,
+);
+assert.equal(
+    realtimeSpokenAnswerAllowsBackgroundQueue(
+        'what tasks do I have today',
+        "You've got three tasks today.",
+    ),
+    false,
+);
+assert.equal(
+    realtimeSpokenAnswerAllowsBackgroundQueue(
         'what is on my calendar today',
         'You have dentist at 2 PM and dinner at 6 PM today.',
     ),
