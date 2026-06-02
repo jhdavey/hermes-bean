@@ -51,8 +51,13 @@ return [
         'base_home' => env('HERMES_BASE_HOME'),
         'timeout' => (float) env('HERMES_AGENT_TIMEOUT', 120),
         'external_lookup_model' => env('HERMES_EXTERNAL_LOOKUP_MODEL', 'gpt-5-mini'),
-        'external_lookup_timeout' => (float) env('HERMES_EXTERNAL_LOOKUP_TIMEOUT', 20),
+        'external_lookup_timeout' => (float) env('HERMES_EXTERNAL_LOOKUP_TIMEOUT', 45),
+        'external_lookup_connect_timeout' => (float) env('HERMES_EXTERNAL_LOOKUP_CONNECT_TIMEOUT', 8),
+        'external_lookup_attempts' => max(1, (int) env('HERMES_EXTERNAL_LOOKUP_ATTEMPTS', 2)),
         'external_lookup_tool' => env('HERMES_EXTERNAL_LOOKUP_TOOL', 'web_search'),
+        'weather_lookup_enabled' => (bool) env('HERMES_WEATHER_LOOKUP_ENABLED', true),
+        'weather_lookup_timeout' => (float) env('HERMES_WEATHER_LOOKUP_TIMEOUT', 6),
+        'weather_lookup_connect_timeout' => (float) env('HERMES_WEATHER_LOOKUP_CONNECT_TIMEOUT', 3),
     ],
 
     'hermes_realtime' => [

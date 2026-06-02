@@ -153,6 +153,22 @@ class HermesApiClient {
     return HermesDashboardChangeFeed.fromJson(_expectMap(data['data']));
   }
 
+  Future<void> submitIssueReport({
+    required String message,
+    int? workspaceId,
+    String? pageUrl,
+  }) async {
+    await _sendJson(
+      'POST',
+      '/issue-reports',
+      body: {
+        'message': message,
+        if (workspaceId != null) 'workspace_id': workspaceId,
+        if (pageUrl != null) 'page_url': pageUrl,
+      },
+    );
+  }
+
   Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
     final data = await _sendJson(
       'GET',
@@ -682,9 +698,32 @@ class HermesApiClient {
     return HermesSession.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesSessionList> listConversationSessions({
+    String? date,
+    String? timezone,
+    int? workspaceId,
+    int limit = 30,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/assistant/sessions', {
+        if (date != null) 'date': date,
+        if (timezone != null) 'timezone': timezone,
+        if (workspaceId != null) 'workspace_id': workspaceId.toString(),
+        'limit': limit.toString(),
+      }),
+    );
+    return HermesSessionList.fromJson(_expectMap(data['data']));
+  }
+
   Future<HermesSession> resumeSession(int sessionId) async {
     final data = await _sendJson('GET', '/assistant/sessions/$sessionId');
     return HermesSession.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async {
+    final data = await _sendJson('GET', '/assistant/sessions/$sessionId');
+    return HermesSessionDetails.fromJson(_expectMap(data['data']));
   }
 
   Future<HermesSession> cancelSession(int sessionId) async {
@@ -732,6 +771,7 @@ class HermesApiClient {
   Future<HermesRealtimeSession> startRealtimeSession({
     String? title,
     String? runtimeMode,
+    int? sessionId,
     int? workspaceId,
     Map<String, Object?>? metadata,
     String? voice,
@@ -739,6 +779,7 @@ class HermesApiClient {
     final body = <String, Object?>{};
     if (title != null) body['title'] = title;
     if (runtimeMode != null) body['runtime_mode'] = runtimeMode;
+    if (sessionId != null) body['session_id'] = sessionId;
     if (workspaceId != null) body['workspace_id'] = workspaceId;
     if (metadata != null) body['metadata'] = metadata;
     if (voice != null) body['voice'] = voice;
@@ -749,6 +790,40 @@ class HermesApiClient {
       body: body,
     );
     return HermesRealtimeSession.fromJson(_expectMap(data['data']));
+  }
+
+  Future<String> createRealtimeCall({
+    required int sessionId,
+    required String sdp,
+    String? voice,
+    Map<String, Object?>? metadata,
+  }) async {
+    final headers = <String, String>{
+      'Accept': 'application/sdp',
+      'Content-Type': 'application/json',
+    };
+    if (bearerToken != null) {
+      headers['Authorization'] = 'Bearer $bearerToken';
+    }
+    final response = await _transport(
+      HermesApiRequest(
+        method: 'POST',
+        uri: _resolveApiPath('/assistant/realtime/calls'),
+        path: '/assistant/realtime/calls',
+        headers: headers,
+        body: {
+          'session_id': sessionId,
+          'sdp': sdp,
+          if (voice != null) 'voice': voice,
+          if (metadata != null) 'metadata': metadata,
+        },
+        responseTimeout: const Duration(seconds: 25),
+      ),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HermesApiException(response.statusCode, response.body);
+    }
+    return response.body;
   }
 
   Future<Map<String, Object?>> submitRealtimeToolCall({
@@ -768,6 +843,45 @@ class HermesApiClient {
       },
     );
     return _expectMap(data['data']);
+  }
+
+  Future<HermesMessage> persistRealtimeMessage({
+    required int sessionId,
+    required String role,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/assistant/realtime/messages',
+      body: {
+        'session_id': sessionId,
+        'role': role,
+        'content': content,
+        if (metadata != null) 'metadata': metadata,
+      },
+    );
+    return HermesMessage.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> logRealtimeClientEvent({
+    required String eventType,
+    int? sessionId,
+    String? phase,
+    String? message,
+    Map<String, Object?> details = const {},
+  }) async {
+    await _sendJson(
+      'POST',
+      '/assistant/realtime/client-events',
+      body: {
+        'event_type': eventType,
+        if (sessionId != null) 'session_id': sessionId,
+        if (phase != null) 'phase': phase,
+        if (message != null) 'message': message,
+        if (details.isNotEmpty) 'details': details,
+      },
+    );
   }
 
   Future<HermesAssistantRun> getAssistantRun(int runId) async {
@@ -1035,6 +1149,7 @@ class HermesUser {
     this.activeWorkspaceAgentProfile,
     this.needsBeanOnboarding,
     this.beanPreferencesReady,
+    this.isBeta = false,
     this.notificationPreferences = const HermesNotificationPreferences(),
   });
 
@@ -1050,6 +1165,7 @@ class HermesUser {
   final HermesAgentProfile? activeWorkspaceAgentProfile;
   final bool? needsBeanOnboarding;
   final bool? beanPreferencesReady;
+  final bool isBeta;
   final HermesNotificationPreferences notificationPreferences;
 
   HermesAgentProfile? get currentAgentProfile =>
@@ -1067,6 +1183,7 @@ class HermesUser {
     HermesAgentProfile? activeWorkspaceAgentProfile,
     bool? needsBeanOnboarding,
     bool? beanPreferencesReady,
+    bool? isBeta,
     HermesNotificationPreferences? notificationPreferences,
   }) => HermesUser(
     id: id,
@@ -1082,6 +1199,7 @@ class HermesUser {
         activeWorkspaceAgentProfile ?? this.activeWorkspaceAgentProfile,
     needsBeanOnboarding: needsBeanOnboarding ?? this.needsBeanOnboarding,
     beanPreferencesReady: beanPreferencesReady ?? this.beanPreferencesReady,
+    isBeta: isBeta ?? this.isBeta,
     notificationPreferences:
         notificationPreferences ?? this.notificationPreferences,
   );
@@ -1120,6 +1238,11 @@ class HermesUser {
               ? json['beanPreferencesReady'] as bool
               : null)
         : json['bean_preferences_ready'] == true,
+    isBeta:
+        json['is_beta'] == true ||
+        json['isBeta'] == true ||
+        json['beta_user'] != null ||
+        json['betaUser'] != null,
     notificationPreferences: HermesNotificationPreferences.fromJson(
       _expectMapOrNull(json['notification_preferences']),
     ),
@@ -1898,6 +2021,53 @@ class HermesSession {
     workspaceId: _readIntOrNull(json['workspace_id']),
     title: json['title'] as String?,
   );
+}
+
+class HermesSessionList {
+  const HermesSessionList({required this.sessions, this.todaySession});
+
+  final List<HermesSession> sessions;
+  final HermesSession? todaySession;
+
+  factory HermesSessionList.fromJson(Map<String, Object?> json) =>
+      HermesSessionList(
+        sessions: _expectList(json['sessions'] ?? const [])
+            .map((session) => HermesSession.fromJson(_expectMap(session)))
+            .toList(),
+        todaySession: (json['today_session'] ?? json['todaySession']) == null
+            ? null
+            : HermesSession.fromJson(
+                _expectMap(json['today_session'] ?? json['todaySession']),
+              ),
+      );
+}
+
+class HermesSessionDetails {
+  const HermesSessionDetails({
+    required this.session,
+    this.messages = const [],
+    this.activityEvents = const [],
+  });
+
+  final HermesSession session;
+  final List<HermesMessage> messages;
+  final List<HermesActivityEvent> activityEvents;
+
+  factory HermesSessionDetails.fromJson(Map<String, Object?> json) {
+    final session = HermesSession.fromJson(json);
+    return HermesSessionDetails(
+      session: session,
+      messages: _expectList(
+        json['messages'] ?? const [],
+      ).map((message) => HermesMessage.fromJson(_expectMap(message))).toList(),
+      activityEvents:
+          _expectList(
+                json['activity_events'] ?? json['activityEvents'] ?? const [],
+              )
+              .map((event) => HermesActivityEvent.fromJson(_expectMap(event)))
+              .toList(),
+    );
+  }
 }
 
 class HermesMessageResult {

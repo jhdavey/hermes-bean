@@ -8,12 +8,15 @@ use App\Models\AiUsageLog;
 use App\Models\IssueReport;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\AdminSettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class AdminUsageController extends Controller
 {
+    public function __construct(private readonly AdminSettingsService $settings) {}
+
     public function summary(Request $request): JsonResponse
     {
         $today = now()->startOfDay();
@@ -37,9 +40,10 @@ class AdminUsageController extends Controller
             'by_route_tier' => $this->groupedUsage('route_tier', $month),
             'top_users' => $this->topUsers($month),
             'top_workspaces' => $this->topWorkspaces($month),
-            'recent_logs' => $this->logsQuery()->limit(25)->get(),
+            'recent_logs' => $this->logsQuery()->limit(25)->get()->map(fn (AiUsageLog $log): array => $this->logPayload($log))->values(),
             'alerts' => $this->alertsQuery()->limit(20)->get(),
             'issue_reports' => $this->issueReportsQuery()->limit(20)->get(),
+            'settings' => $this->settings->payload(),
         ]]);
     }
 
@@ -47,7 +51,7 @@ class AdminUsageController extends Controller
     {
         $limit = min(200, max(1, (int) $request->query('limit', 100)));
 
-        return response()->json(['data' => $this->logsQuery()->limit($limit)->get()]);
+        return response()->json(['data' => $this->logsQuery()->limit($limit)->get()->map(fn (AiUsageLog $log): array => $this->logPayload($log))->values()]);
     }
 
     public function alerts(Request $request): JsonResponse
@@ -117,7 +121,11 @@ class AdminUsageController extends Controller
     private function logsQuery()
     {
         return AiUsageLog::query()
-            ->with(['user:id,name,email,subscription_tier', 'workspace:id,name,type'])
+            ->with([
+                'user:id,name,email,subscription_tier',
+                'workspace:id,name,type',
+                'conversationMessage:id,role,content,metadata',
+            ])
             ->latest('id');
     }
 
@@ -133,5 +141,65 @@ class AdminUsageController extends Controller
         return IssueReport::query()
             ->with(['user:id,name,email', 'workspace:id,name,type'])
             ->latest('id');
+    }
+
+    private function logPayload(AiUsageLog $log): array
+    {
+        $payload = $log->toArray();
+        $request = trim((string) ($log->conversationMessage?->content ?? ''));
+        $actionTypes = collect($log->action_types ?? [])
+            ->map(fn (mixed $action): string => trim((string) $action))
+            ->filter()
+            ->values();
+
+        $payload['request_preview'] = $request !== '' ? str($request)->limit(140)->toString() : null;
+        $payload['use_case'] = $this->useCaseForLog($log, $request, $actionTypes->all());
+        $payload['action_summary'] = $actionTypes->isNotEmpty()
+            ? $actionTypes->map(fn (string $action): string => $this->humanActionName($action))->unique()->take(4)->implode(', ')
+            : null;
+
+        return $payload;
+    }
+
+    private function useCaseForLog(AiUsageLog $log, string $request, array $actionTypes): string
+    {
+        $actions = implode(' ', $actionTypes);
+        if (preg_match('/\b(external_lookup|weather|flight|store|stock|sports|traffic|news|price)\b/i', $actions) === 1) {
+            return 'Live external lookup';
+        }
+        if (preg_match('/\b(calendar|event|day_context|get_day_context)\b/i', $actions) === 1) {
+            return 'Calendar planning';
+        }
+        if (preg_match('/\btask\b/i', $actions) === 1) {
+            return 'Task management';
+        }
+        if (preg_match('/\breminder\b/i', $actions) === 1) {
+            return 'Reminder management';
+        }
+        if (preg_match('/\b(agent_profile|onboarding|preference|workspace_memory|memory)\b/i', $actions) === 1) {
+            return 'Bean setup and memory';
+        }
+        if (preg_match('/\b(approval|blocker)\b/i', $actions) === 1) {
+            return 'Workflow management';
+        }
+
+        $text = mb_strtolower($request);
+
+        return match (true) {
+            preg_match('/\b(weather|forecast|temperature|flight|store|hours|stock|price|sports|traffic|news)\b/', $text) === 1 => 'Live external lookup',
+            preg_match('/\b(calendar|schedule|event|meeting|appointment|today|tomorrow|this week)\b/', $text) === 1 => 'Calendar planning',
+            preg_match('/\b(task|todo|to do|trash|chore|complete|done)\b/', $text) === 1 => 'Task management',
+            preg_match('/\b(remind|reminder|alert|notify)\b/', $text) === 1 => 'Reminder management',
+            preg_match('/\b(dinner|recipe|workout|plan|idea|suggest|recommend)\b/', $text) === 1 => 'Advice and planning',
+            (string) $log->route_tier === 'simple' => 'Quick chat',
+            default => 'General Bean request',
+        };
+    }
+
+    private function humanActionName(string $action): string
+    {
+        $action = str_replace(['_', '.'], ' ', $action);
+
+        return str($action)->headline()->toString();
     }
 }

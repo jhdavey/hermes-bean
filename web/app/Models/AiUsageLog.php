@@ -45,4 +45,9 @@ class AiUsageLog extends Model
     {
         return $this->belongsTo(Workspace::class);
     }
+
+    public function conversationMessage(): BelongsTo
+    {
+        return $this->belongsTo(ConversationMessage::class);
+    }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AdminSettingsService;
 use App\Services\AgentProfileService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
@@ -13,7 +14,7 @@ use Illuminate\Validation\Rule;
 
 class QuickVoiceReplyController extends Controller
 {
-    public function store(Request $request, WorkspaceService $workspaces, AgentProfileService $profiles): JsonResponse
+    public function store(Request $request, WorkspaceService $workspaces, AgentProfileService $profiles, AdminSettingsService $adminSettings): JsonResponse
     {
         $data = $request->validate([
             'content' => ['required', 'string', 'max:1000'],
@@ -37,7 +38,7 @@ class QuickVoiceReplyController extends Controller
         $workspace = $workspaces->resolveWorkspace($user, $data['workspace_id'] ?? null);
         $profile = $profiles->ensureForWorkspace($workspace, $user);
         $settings = $profile->settings ?? [];
-        $model = (string) config('services.hermes_runtime.quick_reply_model', 'gpt-5.4-mini');
+        $model = $adminSettings->quickVoiceModel();
         $content = str($data['content'])->squish()->limit(1000, '')->toString();
         $stage = (string) ($data['stage'] ?? 'first');
 

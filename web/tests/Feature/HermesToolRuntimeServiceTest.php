@@ -8,6 +8,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -352,8 +353,112 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_external_lookup_routes_current_weather_to_open_meteo(): void
+    {
+        $chatCalls = 0;
+        Http::fake(function ($request) use (&$chatCalls) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-weather-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_weather',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'current weather in Orlando Florida right now',
+                                            'location' => 'Orlando, FL',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
+
+                $this->assertSame('open_meteo', data_get($lookupResult, 'provider'));
+                $this->assertSame('weather_current', data_get($lookupResult, 'kind'));
+                $this->assertSame('Orlando, Florida, US', data_get($lookupResult, 'location'));
+                $this->assertSame(82.0, data_get($lookupResult, 'weather.temperature_f'));
+                $this->assertSame('partly cloudy', data_get($lookupResult, 'weather.description'));
+
+                return Http::response([
+                    'id' => 'chatcmpl-weather-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($lookupResult, 'text'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                return Http::response([
+                    'results' => [[
+                        'id' => 4167147,
+                        'name' => 'Orlando',
+                        'latitude' => 28.5383,
+                        'longitude' => -81.3792,
+                        'admin1' => 'Florida',
+                        'country_code' => 'US',
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')) {
+                return Http::response([
+                    'timezone' => 'America/New_York',
+                    'current' => [
+                        'time' => '2026-06-02T02:30',
+                        'temperature_2m' => 82.4,
+                        'relative_humidity_2m' => 68,
+                        'apparent_temperature' => 84.8,
+                        'precipitation' => 0,
+                        'weather_code' => 2,
+                        'cloud_cover' => 45,
+                        'wind_speed_10m' => 9.2,
+                        'wind_direction_10m' => 90,
+                        'wind_gusts_10m' => 14.1,
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-weather-open-meteo@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', "It's 82°F and partly cloudy in Orlando, Florida, US right now. Feels like 85°F, humidity is 68%, wind is 9 mph from the east.");
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+        Http::assertSentCount(3);
+    }
+
     public function test_external_lookup_result_falls_back_if_final_model_call_fails(): void
     {
+        config()->set('services.hermes_runtime.weather_lookup_enabled', false);
+
         $chatCalls = 0;
         Http::fake(function ($request) use (&$chatCalls) {
             if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
@@ -411,8 +516,162 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_external_lookup_retries_transport_timeouts(): void
+    {
+        config()->set('services.hermes_runtime.weather_lookup_enabled', false);
+        config()->set('services.hermes_runtime.external_lookup_attempts', 2);
+
+        $chatCalls = 0;
+        $lookupCalls = 0;
+        Http::fake(function ($request) use (&$chatCalls, &$lookupCalls) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-weather-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_weather',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'current weather in Orlando Florida right now',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
+
+                return Http::response([
+                    'id' => 'chatcmpl-weather-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($lookupResult, 'text'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://api.openai.test/v1/responses') {
+                $lookupCalls++;
+                if ($lookupCalls === 1) {
+                    throw new ConnectionException('cURL error 28: Operation timed out after 20002 milliseconds with 0 bytes received');
+                }
+
+                return Http::response([
+                    'id' => 'resp_weather',
+                    'model' => 'gpt-lookup-test',
+                    'output_text' => 'It is 82 degrees and partly cloudy in Orlando right now.',
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request'], 500);
+        });
+
+        $token = $this->apiToken('tool-external-retry@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'It is 82 degrees and partly cloudy in Orlando right now.');
+
+        $this->assertSame(2, $lookupCalls);
+    }
+
+    public function test_external_lookup_transport_timeout_returns_specific_tool_result(): void
+    {
+        config()->set('services.hermes_runtime.weather_lookup_enabled', false);
+        config()->set('services.hermes_runtime.external_lookup_attempts', 2);
+
+        $chatCalls = 0;
+        $lookupCalls = 0;
+        Http::fake(function ($request) use (&$chatCalls, &$lookupCalls) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-weather-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_weather',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'current weather in Orlando Florida right now',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
+
+                return Http::response([
+                    'id' => 'chatcmpl-weather-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($lookupResult, 'message'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://api.openai.test/v1/responses') {
+                $lookupCalls++;
+                throw new ConnectionException('cURL error 28: Operation timed out after 20002 milliseconds with 0 bytes received');
+            }
+
+            return Http::response(['error' => 'Unexpected request'], 500);
+        });
+
+        $token = $this->apiToken('tool-external-timeout@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'The live lookup timed out before it could return current information.');
+
+        $this->assertSame(2, $lookupCalls);
+    }
+
     public function test_external_lookup_failure_does_not_fail_agent_runtime(): void
     {
+        config()->set('services.hermes_runtime.weather_lookup_enabled', false);
+
         $chatCalls = 0;
         Http::fake(function ($request) use (&$chatCalls) {
             if ($request->url() === 'https://api.openai.test/v1/chat/completions') {

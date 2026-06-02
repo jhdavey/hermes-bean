@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Services\AdminSettingsService;
 use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
@@ -31,6 +32,7 @@ class RealtimeSessionController extends Controller
         private readonly AssistantRunService $runs,
         private readonly WorkspaceService $workspaces,
         private readonly AgentProfileService $profiles,
+        private readonly AdminSettingsService $adminSettings,
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -369,7 +371,7 @@ PROMPT;
     {
         return [
             'type' => 'realtime',
-            'model' => (string) config('services.hermes_realtime.model', 'gpt-realtime'),
+            'model' => $this->adminSettings->realtimeModel(),
             'instructions' => $this->realtimeInstructions($session),
             'audio' => [
                 'input' => [

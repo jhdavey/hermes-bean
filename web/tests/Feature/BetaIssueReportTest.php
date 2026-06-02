@@ -78,4 +78,51 @@ class BetaIssueReportTest extends TestCase
             ->assertJsonPath('data.totals.open_issue_reports', 1)
             ->assertJsonPath('data.issue_reports.0.message', 'The beta banner report flow works.');
     }
+
+    public function test_admin_can_close_reopen_and_archive_issue_reports(): void
+    {
+        $adminToken = $this->apiToken('admin-issue-status@example.com');
+        $userToken = $this->apiToken('normal-issue-status@example.com');
+        $admin = User::where('email', 'admin-issue-status@example.com')->firstOrFail();
+        $admin->forceFill(['is_admin' => true])->save();
+        $user = User::where('email', 'normal-issue-status@example.com')->firstOrFail();
+
+        $report = IssueReport::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'beta_user_id' => BetaUser::where('user_id', $user->id)->firstOrFail()->id,
+            'status' => 'open',
+            'message' => 'The issue actions need testing.',
+            'page_url' => 'https://heybean.test/app',
+        ]);
+
+        $this->withToken($userToken)->patchJson("/api/admin/issue-reports/{$report->id}", [
+            'status' => 'closed',
+        ])->assertForbidden();
+
+        $this->withToken($adminToken)->patchJson("/api/admin/issue-reports/{$report->id}", [
+            'status' => 'closed',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'closed');
+
+        $this->assertNotNull($report->refresh()->resolved_at);
+
+        $this->withToken($adminToken)->getJson('/api/admin/usage/summary')
+            ->assertOk()
+            ->assertJsonPath('data.totals.open_issue_reports', 0);
+
+        $this->withToken($adminToken)->patchJson("/api/admin/issue-reports/{$report->id}", [
+            'status' => 'open',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'open')
+            ->assertJsonPath('data.resolved_at', null);
+
+        $this->withToken($adminToken)->patchJson("/api/admin/issue-reports/{$report->id}", [
+            'status' => 'archived',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'archived');
+
+        $this->assertSame($admin->id, $report->refresh()->metadata['last_status_changed_by_user_id'] ?? null);
+        $this->assertNotEmpty($report->metadata['archived_at'] ?? null);
+    }
 }

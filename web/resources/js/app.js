@@ -832,6 +832,7 @@ if (mount) {
                     <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
                     <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(now))}</span></button>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
+                    ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-mobile')}
                     ${topNavMarkup()}
                     ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')}
                     ${showAdd ? `<button class="hb-icon-button hb-topbar-action" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
@@ -940,6 +941,7 @@ if (mount) {
         const byRoute = normalizeList(usage.by_route_tier || usage.byRouteTier);
         const topUsers = normalizeList(usage.top_users || usage.topUsers);
         const topWorkspaces = normalizeList(usage.top_workspaces || usage.topWorkspaces);
+        const settings = usage.settings || {};
         return `
             <section class="hb-card hb-card-pad hb-admin-panel">
                 <div class="hb-section-action-row">
@@ -957,6 +959,7 @@ if (mount) {
                     ${adminMetricMarkup('Open alerts', totals.open_alerts, 'Warnings and hard caps')}
                     ${adminMetricMarkup('Issue reports', totals.open_issue_reports, 'Open beta feedback')}
                 </div>
+                ${adminSettingsMarkup(settings)}
                 <div class="hb-admin-grid">
                     ${adminListBlockMarkup('Beta issue reports', issueReports, adminIssueReportRowMarkup, 'No issue reports yet.')}
                     ${adminListBlockMarkup('Budget and spike alerts', alerts, adminAlertRowMarkup, 'No alerts yet.')}
@@ -971,11 +974,52 @@ if (mount) {
                         <span class="hb-item-meta">${recentLogs.length} latest</span>
                     </div>
                     <div class="hb-admin-log-table">
-                        <div class="hb-admin-log-head"><span>When</span><span>User</span><span>Workspace</span><span>Model</span><span>Tokens</span><span>Cost</span><span>Status</span></div>
+                        <div class="hb-admin-log-head"><span>When</span><span>Use case</span><span>Request</span><span>User</span><span>Workspace</span><span>Model</span><span>Tokens</span><span>Cost</span><span>Status</span></div>
                         ${recentLogs.map(adminLogRowMarkup).join('') || '<div class="hb-empty">No AI usage logs yet.</div>'}
                     </div>
                 </div>
             </section>`;
+    }
+
+    function adminSettingsMarkup(settings) {
+        const models = settings.models || {};
+        const beta = settings.beta_limits || settings.betaLimits || {};
+        return `
+            <form class="hb-admin-settings" data-admin-settings-form>
+                <div class="hb-section-action-row">
+                    <div>
+                        <strong>Runtime settings</strong>
+                        <small>Model routing and beta request limits</small>
+                    </div>
+                    <button class="hb-button-secondary" type="submit" ${state.adminUsageLoading ? 'disabled' : ''}>Save settings</button>
+                </div>
+                <div class="hb-admin-settings-grid">
+                    <label><span>Main Bean model</span><input class="hb-input" name="main_model" value="${escapeAttr(settingValue(models.main_model || models.mainModel))}" autocomplete="off"></label>
+                    <label><span>Quick voice model</span><input class="hb-input" name="quick_voice_model" value="${escapeAttr(settingValue(models.quick_voice_model || models.quickVoiceModel))}" autocomplete="off"></label>
+                    <label><span>Realtime voice model</span><input class="hb-input" name="realtime_model" value="${escapeAttr(settingValue(models.realtime_model || models.realtimeModel))}" autocomplete="off"></label>
+                    <label><span>External lookup model</span><input class="hb-input" name="external_lookup_model" value="${escapeAttr(settingValue(models.external_lookup_model || models.externalLookupModel))}" autocomplete="off"></label>
+                </div>
+                <label class="hb-admin-apply-row">
+                    <input type="checkbox" name="apply_main_model_to_profiles">
+                    <span>Apply main model to existing workspace Bean profiles</span>
+                </label>
+                <div class="hb-admin-settings-grid hb-admin-limits-grid">
+                    <label><span>Beta API/min</span><input class="hb-input" type="number" min="1" step="1" name="api_per_minute" value="${escapeAttr(settingValue(beta.api_per_minute || beta.apiPerMinute))}"></label>
+                    <label><span>Beta monthly requests</span><input class="hb-input" type="number" min="1" step="1" name="monthly_ai_actions" value="${escapeAttr(settingValue(beta.monthly_ai_actions || beta.monthlyAiActions))}"></label>
+                    <label><span>Beta monthly tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="monthly_tokens" value="${escapeAttr(settingValue(beta.monthly_tokens || beta.monthlyTokens))}"></label>
+                    <label><span>Beta monthly cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="monthly_cost_usd" value="${escapeAttr(settingValue(beta.monthly_cost_usd || beta.monthlyCostUsd))}"></label>
+                    <label><span>Daily soft tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="daily_soft_tokens" value="${escapeAttr(settingValue(beta.daily_soft_tokens || beta.dailySoftTokens))}"></label>
+                    <label><span>Daily hard tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="daily_hard_tokens" value="${escapeAttr(settingValue(beta.daily_hard_tokens || beta.dailyHardTokens))}"></label>
+                    <label><span>Daily soft cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_soft_cost_usd" value="${escapeAttr(settingValue(beta.daily_soft_cost_usd || beta.dailySoftCostUsd))}"></label>
+                    <label><span>Daily hard cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_hard_cost_usd" value="${escapeAttr(settingValue(beta.daily_hard_cost_usd || beta.dailyHardCostUsd))}"></label>
+                </div>
+            </form>`;
+    }
+
+    function settingValue(setting) {
+        return setting && typeof setting === 'object' && Object.prototype.hasOwnProperty.call(setting, 'value')
+            ? setting.value
+            : '';
     }
 
     function adminMetricMarkup(label, value, meta) {
@@ -1034,6 +1078,10 @@ if (mount) {
         const user = report.user || {};
         const workspace = report.workspace || {};
         const screenshots = normalizeList(report.screenshots);
+        const status = String(report.status || 'open').toLowerCase();
+        const id = report.id || report.issue_report_id || report.issueReportId;
+        const closed = status === 'closed';
+        const archived = status === 'archived';
         return `
             <div class="hb-admin-row hb-admin-issue-row">
                 <div>
@@ -1042,16 +1090,26 @@ if (mount) {
                     ${report.page_url || report.pageUrl ? `<a href="${escapeAttr(report.page_url || report.pageUrl)}" target="_blank" rel="noreferrer">Reported page</a>` : ''}
                     ${screenshots.length ? `<div class="hb-admin-issue-shots">${screenshots.map((shot, index) => `<a href="${escapeAttr(shot.url || '')}" target="_blank" rel="noreferrer">Screenshot ${index + 1}</a>`).join('')}</div>` : ''}
                 </div>
-                <span>${escapeHtml(report.status || 'open')}</span>
+                <span class="hb-admin-issue-controls">
+                    <mark class="hb-admin-status">${escapeHtml(status)}</mark>
+                    ${id && !closed && !archived ? `<button class="hb-admin-mini-action" type="button" data-issue-status="${escapeAttr(id)}" data-status="closed">Close</button>` : ''}
+                    ${id && closed ? `<button class="hb-admin-mini-action" type="button" data-issue-status="${escapeAttr(id)}" data-status="open">Reopen</button>` : ''}
+                    ${id && !archived ? `<button class="hb-admin-mini-action hb-admin-mini-action-muted" type="button" data-issue-status="${escapeAttr(id)}" data-status="archived">Archive</button>` : ''}
+                </span>
             </div>`;
     }
 
     function adminLogRowMarkup(log) {
         const user = log.user || {};
         const workspace = log.workspace || {};
+        const useCase = log.use_case || log.useCase || 'General Bean request';
+        const requestPreview = log.request_preview || log.requestPreview || '';
+        const actionSummary = log.action_summary || log.actionSummary || normalizeList(log.action_types || log.actionTypes).join(', ');
         return `
             <div class="hb-admin-log-row">
                 <span>${escapeHtml(formatDateTime(log.created_at || log.createdAt))}</span>
+                <span><mark class="hb-admin-use-case">${escapeHtml(useCase)}</mark></span>
+                <span>${escapeHtml(requestPreview || 'No request captured')}<small>${escapeHtml(actionSummary || 'No tools/actions')}</small></span>
                 <span>${escapeHtml(user.name || user.email || `#${log.user_id || log.userId || ''}`)}</span>
                 <span>${escapeHtml(workspace.name || (log.workspace_id || log.workspaceId ? `#${log.workspace_id || log.workspaceId}` : 'None'))}</span>
                 <span>${escapeHtml(log.model || 'unknown')}<small>${escapeHtml(log.route_tier || log.routeTier || '')}</small></span>
@@ -1865,6 +1923,7 @@ if (mount) {
 
     function modalMarkup(modal) {
         if (modal.type === 'issue-report') return issueReportModalMarkup();
+        if (modal.type === 'issue-report-success') return issueReportSuccessModalMarkup();
         if (modal.type === 'profile') return profileModalMarkup();
         if (modal.type === 'agent') return agentModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
@@ -1891,6 +1950,20 @@ if (mount) {
                         <button class="hb-button" type="submit" ${state.issueReportSubmitting ? 'disabled' : ''}>${state.issueReportSubmitting ? 'Sending...' : 'Send report'}</button>
                     </div>
                 </form>
+            </div>`;
+    }
+
+    function issueReportSuccessModalMarkup() {
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="issue-report-success-title">
+                <section class="hb-card hb-modal hb-issue-report-success-modal">
+                    <div class="hb-issue-report-success-icon" aria-hidden="true">${icons.checkCircle}</div>
+                    <h2 id="issue-report-success-title">Thank you for helping improve HeyBean!</h2>
+                    <p>We've received your feedback and will fix any issues ASAP!</p>
+                    <div class="hb-modal-actions hb-issue-report-success-actions">
+                        <button class="hb-button" type="button" data-close-modal>Done</button>
+                    </div>
+                </section>
             </div>`;
     }
 
@@ -2371,6 +2444,8 @@ if (mount) {
         }));
         mount.querySelectorAll('[data-refresh-app]').forEach((button) => button.addEventListener('click', refreshCurrentView));
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
+        mount.querySelector('[data-admin-settings-form]')?.addEventListener('submit', saveAdminSettings);
+        mount.querySelectorAll('[data-issue-status]').forEach((button) => button.addEventListener('click', () => updateIssueReportStatus(button.dataset.issueStatus, button.dataset.status)));
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
         mount.querySelector('[data-open-issue-report]')?.addEventListener('click', () => openModal('issue-report'));
         mount.querySelectorAll('[data-edit-task]').forEach((button) => button.addEventListener('click', () => openModal('task', findById(state.tasks, button.dataset.editTask))));
@@ -2795,13 +2870,77 @@ if (mount) {
         try {
             await apiForm('/issue-reports', formData);
             state.issueReportSubmitting = false;
-            state.modal = null;
-            state.notice = 'Issue report sent. Thank you for helping test Bean.';
+            state.modal = { type: 'issue-report-success' };
+            state.notice = '';
             render();
             if (state.selected === 'admin') loadAdminUsage(true);
         } catch (error) {
             state.issueReportSubmitting = false;
             state.error = friendlyError(error, 'send that issue report');
+            render();
+        }
+    }
+
+    async function updateIssueReportStatus(id, status) {
+        if (!id || !status || state.adminUsageLoading) return;
+        state.adminUsageLoading = true;
+        state.error = '';
+        render();
+        try {
+            await api(`/admin/issue-reports/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
+                body: { status },
+            });
+            state.adminUsage = null;
+            await loadAdminUsage(true);
+        } catch (error) {
+            state.error = friendlyError(error, 'update that issue report');
+            state.adminUsageLoading = false;
+            render();
+        }
+    }
+
+    async function saveAdminSettings(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const value = (name) => String(new FormData(form).get(name) || '').trim();
+        const intValue = (name) => Number.parseInt(value(name), 10);
+        const floatValue = (name) => Number.parseFloat(value(name));
+        state.adminUsageLoading = true;
+        state.error = '';
+        render();
+        try {
+            state.adminUsage = {
+                ...(state.adminUsage || {}),
+                settings: await api('/admin/settings', {
+                    method: 'PATCH',
+                    body: {
+                        model_settings: {
+                            main_model: value('main_model'),
+                            quick_voice_model: value('quick_voice_model'),
+                            realtime_model: value('realtime_model'),
+                            external_lookup_model: value('external_lookup_model'),
+                        },
+                        beta_limits: {
+                            api_per_minute: intValue('api_per_minute'),
+                            monthly_ai_actions: intValue('monthly_ai_actions'),
+                            monthly_tokens: intValue('monthly_tokens'),
+                            monthly_cost_usd: floatValue('monthly_cost_usd'),
+                            daily_soft_tokens: intValue('daily_soft_tokens'),
+                            daily_hard_tokens: intValue('daily_hard_tokens'),
+                            daily_soft_cost_usd: floatValue('daily_soft_cost_usd'),
+                            daily_hard_cost_usd: floatValue('daily_hard_cost_usd'),
+                        },
+                        apply_main_model_to_profiles: Boolean(form.querySelector('input[name="apply_main_model_to_profiles"]')?.checked),
+                    },
+                }),
+            };
+            state.notice = 'Admin settings saved.';
+            state.adminUsage = null;
+            await loadAdminUsage(true);
+        } catch (error) {
+            state.error = friendlyError(error, 'save admin settings');
+            state.adminUsageLoading = false;
             render();
         }
     }

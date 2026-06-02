@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityEventController;
+use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminUsageController;
 use App\Http\Controllers\Api\AssistantRunController;
 use App\Http\Controllers\Api\AuthController;
@@ -99,9 +100,12 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::delete('/blockers/{blocker}', [DomainResourceController::class, 'destroyBlocker']);
 
         Route::middleware('admin')->prefix('admin')->group(function (): void {
+            Route::get('/settings', [AdminSettingsController::class, 'show']);
+            Route::patch('/settings', [AdminSettingsController::class, 'update']);
             Route::get('/usage/summary', [AdminUsageController::class, 'summary']);
             Route::get('/usage/logs', [AdminUsageController::class, 'logs']);
             Route::get('/usage/alerts', [AdminUsageController::class, 'alerts']);
+            Route::patch('/issue-reports/{issueReport}', [IssueReportController::class, 'update']);
         });
     });
 });

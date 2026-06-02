@@ -9,6 +9,7 @@ use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class IssueReportController extends Controller
 {
@@ -54,5 +55,28 @@ class IssueReportController extends Controller
         ]);
 
         return response()->json(['data' => $report->load(['user:id,name,email', 'workspace:id,name,type'])], 201);
+    }
+
+    public function update(Request $request, IssueReport $issueReport): JsonResponse
+    {
+        $data = $request->validate([
+            'status' => ['required', 'string', Rule::in(['open', 'closed', 'archived'])],
+        ]);
+
+        $status = $data['status'];
+        $metadata = $issueReport->metadata ?? [];
+        $metadata['last_status_changed_by_user_id'] = $request->user()->id;
+        $metadata['last_status_changed_at'] = now()->toIso8601String();
+        if ($status === 'archived') {
+            $metadata['archived_at'] = now()->toIso8601String();
+        }
+
+        $issueReport->forceFill([
+            'status' => $status,
+            'resolved_at' => $status === 'open' ? null : ($issueReport->resolved_at ?: now()),
+            'metadata' => $metadata,
+        ])->save();
+
+        return response()->json(['data' => $issueReport->load(['user:id,name,email', 'workspace:id,name,type'])]);
     }
 }

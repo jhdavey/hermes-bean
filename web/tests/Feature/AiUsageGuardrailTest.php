@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\AiUsageLog;
+use App\Models\ConversationMessage;
+use App\Models\ConversationSession;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -22,10 +24,25 @@ class AiUsageGuardrailTest extends TestCase
         $admin = User::where('email', 'usage-admin@example.com')->firstOrFail();
         $admin->forceFill(['is_admin' => true, 'subscription_tier' => 'pro'])->save();
         $workspace = Workspace::where('personal_owner_user_id', $user->id)->firstOrFail();
+        $session = ConversationSession::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Admin usage test',
+            'status' => 'active',
+        ]);
+        $message = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => 'Please add take out the trash as a task for tonight.',
+        ]);
 
         AiUsageLog::create([
             'user_id' => $user->id,
             'workspace_id' => $workspace->id,
+            'conversation_session_id' => $session->id,
+            'conversation_message_id' => $message->id,
             'provider' => 'openai',
             'model' => 'gpt-5.4-mini',
             'route_tier' => 'simple',
@@ -46,7 +63,10 @@ class AiUsageGuardrailTest extends TestCase
             ->assertJsonPath('data.totals.tokens_month', 160)
             ->assertJsonPath('data.by_model.0.key', 'gpt-5.4-mini')
             ->assertJsonPath('data.top_users.0.email', 'usage-user@example.com')
-            ->assertJsonPath('data.recent_logs.0.status', 'completed');
+            ->assertJsonPath('data.recent_logs.0.status', 'completed')
+            ->assertJsonPath('data.recent_logs.0.use_case', 'Task management')
+            ->assertJsonPath('data.recent_logs.0.request_preview', 'Please add take out the trash as a task for tonight.')
+            ->assertJsonPath('data.recent_logs.0.action_summary', 'Task Create');
     }
 
     public function test_daily_hard_budget_alert_does_not_block_tool_runtime_invocation(): void

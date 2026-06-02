@@ -17,30 +17,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('realtime voice classifier handles fast replies and filler', () {
-    expect(
-      fastRealtimeReplyForTesting(
-        'Hey Bean, what time is it?',
-        now: DateTime(2026, 6, 1, 17, 5),
-      ),
-      "It's 5:05 PM.",
-    );
-    expect(
-      fastRealtimeReplyForTesting('Hey Bean, can you hear me?'),
-      'Yes, I can hear you.',
-    );
-    expect(
-      realtimeAcknowledgementForTesting(
-        'Hey Bean, what is on my calendar for today?',
-      ),
-      'Let me check that real quick.',
-    );
-    expect(
-      realtimeAcknowledgementForTesting('Move my task from 7 PM to 5 PM'),
-      "I'm on it.",
-    );
+  test('realtime voice cancellation phrases end the active conversation', () {
     expect(realtimeVoiceCancelForTesting('never mind'), isTrue);
     expect(realtimeVoiceCancelForTesting('stop talking Bean'), isTrue);
+    expect(realtimeVoiceCancelForTesting('Hey Bean what time is it'), isFalse);
   });
 
   testWidgets(
@@ -288,6 +268,65 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('beta users can submit feedback from the banner', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient()..betaUser = true;
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('beta-feedback-banner')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('beta-feedback-banner')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('beta-feedback-message')),
+      'The chat response felt delayed after I asked about dinner.',
+    );
+    await tester.tap(find.byKey(const Key('beta-feedback-submit')));
+    await tester.pumpAndSettle();
+
+    expect(api.issueReports, [
+      'The chat response felt delayed after I asked about dinner.',
+    ]);
+    expect(find.byKey(const Key('beta-feedback-thanks')), findsOneWidget);
+    expect(find.text('Thank you for helping improve HeyBean!'), findsOneWidget);
+  });
+
+  testWidgets('signed in app resumes today chat session when available', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient()
+      ..todaySession = const HermesSession(
+        id: 77,
+        status: 'active',
+        title: 'Today with Bean',
+      )
+      ..todaySessionMessages = const [
+        HermesMessage(id: 700, role: 'user', content: 'what did we discuss'),
+        HermesMessage(
+          id: 701,
+          role: 'assistant',
+          content: 'We talked about dinner.',
+        ),
+      ];
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('what did we discuss'), findsOneWidget);
+    expect(find.text('We talked about dinner.'), findsOneWidget);
+    expect(api.startedSessionCount, 0);
+  });
 
   testWidgets(
     'accepting a workspace invitation from Settings joins and reloads workspaces',
@@ -1268,7 +1307,7 @@ void main() {
     },
   );
 
-  testWidgets('holding the Bean chat button starts realtime voice', (
+  testWidgets('holding the Bean chat button warms realtime voice', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -1290,12 +1329,12 @@ void main() {
     expect(realtime.started, isTrue);
     expect(find.byKey(const Key('chat-view')), findsOneWidget);
     expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
-    expect(find.text('Listening...'), findsWidgets);
+    expect(find.text('Bean voice ready'), findsWidgets);
 
     await gesture.up();
     await tester.pump();
 
-    expect(realtime.microphoneEnabled, isFalse);
+    expect(realtime.microphoneEnabled, isTrue);
   });
 
   testWidgets('typed Bean chat uses realtime text when available', (
@@ -5148,7 +5187,11 @@ class _FakeHermesApiClient extends HermesApiClient {
   final sentMessageMetadata = <Map<String, Object?>?>[];
   String? updatedEmail;
   bool deletedAccount = false;
+  bool betaUser = false;
   bool plannedToday = false;
+  int startedSessionCount = 0;
+  HermesSession? todaySession;
+  List<HermesMessage> todaySessionMessages = const [];
   int todaySummaryCalls = 0;
   bool googleCalendarConnected = false;
   bool showDueReminderBanner = false;
@@ -5165,6 +5208,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   HermesNotificationPreferences updatedNotificationPreferences =
       const HermesNotificationPreferences();
   final passwordResetRequests = <String>[];
+  final issueReports = <String>[];
   HermesReminder? bannerUpdatedReminder;
   List<HermesApproval> approvals = const [];
   int? approvedApprovalId;
@@ -5208,6 +5252,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       activeWorkspaceAgentProfile: profile,
       needsBeanOnboarding: needsBeanOnboarding,
       beanPreferencesReady: !needsBeanOnboarding,
+      isBeta: betaUser,
       notificationPreferences: updatedNotificationPreferences,
     );
   }
@@ -5274,12 +5319,42 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? runtimeMode,
     int? workspaceId,
     Map<String, Object?>? metadata,
-  }) async => HermesSession(
-    id: 42,
-    status: 'active',
-    workspaceId: workspaceId,
-    title: 'Today',
+  }) async {
+    startedSessionCount++;
+    return HermesSession(
+      id: 42,
+      status: 'active',
+      workspaceId: workspaceId,
+      title: 'Today',
+    );
+  }
+
+  @override
+  Future<HermesSessionList> listConversationSessions({
+    String? date,
+    String? timezone,
+    int? workspaceId,
+    int limit = 30,
+  }) async => HermesSessionList(
+    sessions: [if (todaySession != null) todaySession!],
+    todaySession: todaySession,
   );
+
+  @override
+  Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async =>
+      HermesSessionDetails(
+        session: HermesSession(id: sessionId, status: 'active', title: 'Today'),
+        messages: todaySessionMessages,
+      );
+
+  @override
+  Future<void> submitIssueReport({
+    required String message,
+    int? workspaceId,
+    String? pageUrl,
+  }) async {
+    issueReports.add(message);
+  }
 
   @override
   Future<HermesSession> cancelSession(int sessionId) async {
@@ -6955,6 +7030,7 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
 
   @override
   Future<HermesSession> start({
+    int? sessionId,
     int? workspaceId,
     Map<String, Object?> metadata = const {},
     bool microphoneEnabled = true,
@@ -6987,6 +7063,7 @@ class _FailingBeanRealtimeConversation extends _FakeBeanRealtimeConversation {
 
   @override
   Future<HermesSession> start({
+    int? sessionId,
     int? workspaceId,
     Map<String, Object?> metadata = const {},
     bool microphoneEnabled = true,

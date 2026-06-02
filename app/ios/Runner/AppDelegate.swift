@@ -1,12 +1,10 @@
 import Flutter
-import AVFoundation
 import UIKit
 import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private var platformChannel: FlutterMethodChannel?
-  private let speechSynthesizer = AVSpeechSynthesizer()
 
   override func application(
     _ application: UIApplication,
@@ -32,10 +30,6 @@ import UserNotifications
         self.handleOpenUrl(call, result: result)
       case "setAppBadge":
         self.handleSetAppBadge(call, result: result)
-      case "speakText":
-        self.handleSpeakText(call, result: result)
-      case "stopSpeech":
-        self.handleStopSpeech(result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -102,39 +96,4 @@ import UserNotifications
     }
   }
 
-  private func handleSpeakText(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard
-      let args = call.arguments as? [String: Any],
-      let text = args["text"] as? String
-    else {
-      result(FlutterError(code: "invalid-speech", message: "Missing speech text", details: nil))
-      return
-    }
-
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-      result(nil)
-      return
-    }
-
-    DispatchQueue.main.async {
-      if self.speechSynthesizer.isSpeaking {
-        self.speechSynthesizer.stopSpeaking(at: .immediate)
-      }
-      let utterance = AVSpeechUtterance(string: trimmed)
-      utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-      utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-      self.speechSynthesizer.speak(utterance)
-      result(nil)
-    }
-  }
-
-  private func handleStopSpeech(result: @escaping FlutterResult) {
-    DispatchQueue.main.async {
-      if self.speechSynthesizer.isSpeaking {
-        self.speechSynthesizer.stopSpeaking(at: .immediate)
-      }
-      result(nil)
-    }
-  }
 }

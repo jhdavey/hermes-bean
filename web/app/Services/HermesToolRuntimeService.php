@@ -11,6 +11,7 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         private readonly AgentProfileService $agentProfileService,
         private readonly WorkspaceService $workspaceService,
         private readonly AiUsageService $usageService,
+        private readonly AdminSettingsService $adminSettings,
     ) {}
 
     public function startSession(array $attributes = []): ConversationSession
@@ -576,9 +578,16 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
         $context = trim((string) ($arguments['context'] ?? ''));
         $location = trim((string) ($arguments['location'] ?? ''));
+        if ((bool) config('services.hermes_runtime.weather_lookup_enabled', true)) {
+            $weatherResult = $this->openMeteoWeatherLookupForTool($session, $query, $context, $location);
+            if ($weatherResult !== null) {
+                return $weatherResult;
+            }
+        }
+
         $toolType = (string) config('services.hermes_runtime.external_lookup_tool', 'web_search');
         $payload = [
-            'model' => (string) config('services.hermes_runtime.external_lookup_model', 'gpt-5-mini'),
+            'model' => $this->adminSettings->externalLookupModel(),
             'tools' => [
                 ['type' => $toolType],
             ],
@@ -587,11 +596,43 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'input' => $this->externalLookupPrompt($session, $query, $context, $location),
         ];
 
-        $response = Http::withToken($this->providerApiKey())
-            ->acceptJson()
-            ->asJson()
-            ->timeout((float) config('services.hermes_runtime.external_lookup_timeout', 20))
-            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/responses', $payload);
+        $attempts = max(1, (int) config('services.hermes_runtime.external_lookup_attempts', 2));
+        $response = null;
+        $lastException = null;
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            try {
+                $response = Http::withToken($this->providerApiKey())
+                    ->acceptJson()
+                    ->asJson()
+                    ->connectTimeout((float) config('services.hermes_runtime.external_lookup_connect_timeout', 8))
+                    ->timeout((float) config('services.hermes_runtime.external_lookup_timeout', 45))
+                    ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/responses', $payload);
+                $lastException = null;
+                break;
+            } catch (ConnectionException $exception) {
+                $lastException = $exception;
+
+                Log::warning('Hermes external lookup transport failed.', [
+                    'session_id' => $session->id,
+                    'attempt' => $attempt,
+                    'attempts' => $attempts,
+                    'exception' => $exception->getMessage(),
+                    'key_source' => config('services.hermes_runtime.api_key_source'),
+                    'api_base' => config('services.hermes_runtime.api_base'),
+                    'model' => $this->adminSettings->externalLookupModel(),
+                    'tool_type' => $toolType,
+                ]);
+            }
+        }
+
+        if ($lastException !== null || $response === null) {
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'error_code' => 'external_lookup_timeout',
+                'message' => 'The live lookup timed out before it could return current information.',
+            ];
+        }
 
         if (! $response->successful()) {
             Log::warning('Hermes external lookup failed.', [
@@ -600,7 +641,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'body' => mb_substr($response->body(), 0, 1000),
                 'key_source' => config('services.hermes_runtime.api_key_source'),
                 'api_base' => config('services.hermes_runtime.api_base'),
-                'model' => config('services.hermes_runtime.external_lookup_model'),
+                'model' => $this->adminSettings->externalLookupModel(),
                 'tool_type' => $toolType,
             ]);
 
@@ -659,6 +700,422 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         return implode("\n", $parts);
+    }
+
+    private function openMeteoWeatherLookupForTool(ConversationSession $session, string $query, string $context, string $location): ?array
+    {
+        if (! $this->looksLikeWeatherLookup($query, $context)) {
+            return null;
+        }
+
+        $locationQuery = $this->weatherLocationQuery($query, $location);
+        if ($locationQuery === '') {
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'provider' => 'open_meteo',
+                'kind' => 'weather_current',
+                'error_code' => 'weather_location_missing',
+                'message' => 'I need a location to check the live weather.',
+            ];
+        }
+
+        try {
+            $geocodeResult = $this->openMeteoGeocodePlace($session, $locationQuery);
+            if (($geocodeResult['error_code'] ?? null) !== null) {
+                return $this->openMeteoFailureResult((string) $geocodeResult['error_code']);
+            }
+
+            $place = $geocodeResult['place'] ?? null;
+            if (! is_array($place)) {
+                return [
+                    'ok' => false,
+                    'tool' => 'external_lookup',
+                    'provider' => 'open_meteo',
+                    'kind' => 'weather_current',
+                    'error_code' => 'weather_location_not_found',
+                    'query' => $query,
+                    'location' => $locationQuery,
+                    'message' => "I couldn't find a weather location matching {$locationQuery}.",
+                ];
+            }
+
+            $forecast = Http::acceptJson()
+                ->connectTimeout((float) config('services.hermes_runtime.weather_lookup_connect_timeout', 3))
+                ->timeout((float) config('services.hermes_runtime.weather_lookup_timeout', 6))
+                ->get('https://api.open-meteo.com/v1/forecast', [
+                    'latitude' => $place['latitude'],
+                    'longitude' => $place['longitude'],
+                    'current' => 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+                    'temperature_unit' => 'fahrenheit',
+                    'wind_speed_unit' => 'mph',
+                    'precipitation_unit' => 'inch',
+                    'timezone' => 'auto',
+                ]);
+
+            if (! $forecast->successful()) {
+                Log::warning('Hermes Open-Meteo forecast failed.', [
+                    'session_id' => $session->id,
+                    'status' => $forecast->status(),
+                    'body' => mb_substr($forecast->body(), 0, 1000),
+                    'query' => $locationQuery,
+                    'latitude' => $place['latitude'],
+                    'longitude' => $place['longitude'],
+                ]);
+
+                return $this->openMeteoFailureResult('weather_forecast_failed');
+            }
+
+            $decoded = $forecast->json();
+            if (! is_array($decoded)) {
+                return $this->openMeteoFailureResult('weather_forecast_non_json');
+            }
+
+            $current = data_get($decoded, 'current');
+            if (! is_array($current)) {
+                return $this->openMeteoFailureResult('weather_current_missing');
+            }
+
+            $placeName = $this->openMeteoPlaceName($place);
+            $text = $this->openMeteoCurrentWeatherText($placeName, $current);
+            if ($text === '') {
+                return $this->openMeteoFailureResult('weather_current_empty');
+            }
+
+            return [
+                'ok' => true,
+                'tool' => 'external_lookup',
+                'provider' => 'open_meteo',
+                'kind' => 'weather_current',
+                'query' => $query,
+                'location' => $placeName,
+                'text' => $text,
+                'weather' => [
+                    'time' => data_get($current, 'time'),
+                    'temperature_f' => $this->roundedWeatherValue(data_get($current, 'temperature_2m')),
+                    'apparent_temperature_f' => $this->roundedWeatherValue(data_get($current, 'apparent_temperature')),
+                    'relative_humidity_percent' => $this->roundedWeatherValue(data_get($current, 'relative_humidity_2m')),
+                    'precipitation_inches' => $this->roundedWeatherValue(data_get($current, 'precipitation'), 2),
+                    'weather_code' => data_get($current, 'weather_code'),
+                    'description' => $this->openMeteoWeatherCodeDescription((int) data_get($current, 'weather_code', -1)),
+                    'cloud_cover_percent' => $this->roundedWeatherValue(data_get($current, 'cloud_cover')),
+                    'wind_speed_mph' => $this->roundedWeatherValue(data_get($current, 'wind_speed_10m')),
+                    'wind_direction_degrees' => $this->roundedWeatherValue(data_get($current, 'wind_direction_10m')),
+                    'wind_gusts_mph' => $this->roundedWeatherValue(data_get($current, 'wind_gusts_10m')),
+                ],
+                'sources' => [[
+                    'title' => 'Open-Meteo Forecast API',
+                    'url' => 'https://open-meteo.com/',
+                ]],
+            ];
+        } catch (ConnectionException $exception) {
+            Log::warning('Hermes Open-Meteo lookup transport failed.', [
+                'session_id' => $session->id,
+                'query' => $locationQuery,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return $this->openMeteoFailureResult('weather_lookup_timeout');
+        }
+    }
+
+    private function openMeteoGeocodePlace(ConversationSession $session, string $locationQuery): array
+    {
+        $parsed = $this->parseWeatherLocationForGeocoding($locationQuery);
+        $query = [
+            'name' => $parsed['name'],
+            'count' => $parsed['region'] !== null ? 10 : 1,
+            'language' => 'en',
+            'format' => 'json',
+        ];
+        if (($parsed['country_code'] ?? null) !== null) {
+            $query['countryCode'] = $parsed['country_code'];
+        }
+
+        $geocode = Http::acceptJson()
+            ->connectTimeout((float) config('services.hermes_runtime.weather_lookup_connect_timeout', 3))
+            ->timeout((float) config('services.hermes_runtime.weather_lookup_timeout', 6))
+            ->get('https://geocoding-api.open-meteo.com/v1/search', $query);
+
+        if (! $geocode->successful()) {
+            Log::warning('Hermes Open-Meteo geocode failed.', [
+                'session_id' => $session->id,
+                'status' => $geocode->status(),
+                'body' => mb_substr($geocode->body(), 0, 1000),
+                'query' => $locationQuery,
+            ]);
+
+            return ['place' => null, 'error_code' => 'weather_geocode_failed'];
+        }
+
+        $results = collect((array) $geocode->json('results'))
+            ->filter(fn (mixed $place): bool => is_array($place) && is_numeric($place['latitude'] ?? null) && is_numeric($place['longitude'] ?? null));
+
+        $region = $parsed['region'];
+        if ($region !== null) {
+            $filtered = $results->first(function (mixed $place) use ($region): bool {
+                if (! is_array($place)) {
+                    return false;
+                }
+
+                return mb_strtolower((string) ($place['admin1'] ?? '')) === mb_strtolower($region)
+                    || mb_strtolower((string) ($place['country'] ?? '')) === mb_strtolower($region)
+                    || mb_strtolower((string) ($place['country_code'] ?? '')) === mb_strtolower($region);
+            });
+
+            if (is_array($filtered)) {
+                return ['place' => $filtered, 'error_code' => null];
+            }
+        }
+
+        $place = $results->first();
+
+        return ['place' => is_array($place) ? $place : null, 'error_code' => null];
+    }
+
+    private function parseWeatherLocationForGeocoding(string $location): array
+    {
+        $location = $this->cleanWeatherLocation($location);
+        $name = $location;
+        $region = null;
+        $countryCode = null;
+
+        if (str_contains($location, ',')) {
+            [$city, $suffix] = array_pad(array_map('trim', explode(',', $location, 2)), 2, '');
+            if ($city !== '') {
+                $name = $city;
+            }
+            $region = $this->usStateName($suffix) ?? ($suffix !== '' ? $suffix : null);
+            $countryCode = $this->usStateName($suffix) !== null ? 'US' : null;
+        } else {
+            $tokens = preg_split('/\s+/', $location) ?: [];
+            for ($length = min(2, count($tokens) - 1); $length >= 1; $length--) {
+                $suffix = implode(' ', array_slice($tokens, -$length));
+                $state = $this->usStateName($suffix);
+                if ($state !== null) {
+                    $name = trim(implode(' ', array_slice($tokens, 0, -$length)));
+                    $region = $state;
+                    $countryCode = 'US';
+                    break;
+                }
+            }
+        }
+
+        return [
+            'name' => $name !== '' ? $name : $location,
+            'region' => $region,
+            'country_code' => $countryCode,
+        ];
+    }
+
+    private function looksLikeWeatherLookup(string $query, string $context): bool
+    {
+        $text = mb_strtolower($query.' '.$context);
+
+        return preg_match('/\b(weather|forecast|temperature|temp|rain|raining|storm|storming|snow|snowing|humidity|wind|windy|cloudy|sunny)\b/', $text) === 1;
+    }
+
+    private function weatherLocationQuery(string $query, string $location): string
+    {
+        $explicit = trim($location);
+        if ($explicit !== '') {
+            return $this->cleanWeatherLocation($explicit);
+        }
+
+        $patterns = [
+            '/\b(?:in|for|at|near)\s+(.+?)(?:\s+(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening))?\s*[?.!]*$/i',
+            '/\bweather\s+(.+?)(?:\s+(?:right now|currently|now|today|tonight|tomorrow))?\s*[?.!]*$/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $query, $matches) === 1) {
+                $candidate = $this->cleanWeatherLocation((string) ($matches[1] ?? ''));
+                if ($candidate !== '') {
+                    return $candidate;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function cleanWeatherLocation(string $location): string
+    {
+        $location = trim(preg_replace('/\s+/', ' ', $location) ?: '');
+        $location = preg_replace('/\b(right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening)\b/i', '', $location) ?: '';
+        $location = trim($location, " \t\n\r\0\x0B,.?!'\"");
+
+        return $location;
+    }
+
+    private function openMeteoCurrentWeatherText(string $placeName, array $current): string
+    {
+        $temperature = $this->roundedWeatherValue(data_get($current, 'temperature_2m'));
+        if ($temperature === null) {
+            return '';
+        }
+
+        $description = $this->openMeteoWeatherCodeDescription((int) data_get($current, 'weather_code', -1));
+        $parts = ["It's {$temperature}°F and {$description} in {$placeName} right now."];
+
+        $feelsLike = $this->roundedWeatherValue(data_get($current, 'apparent_temperature'));
+        $humidity = $this->roundedWeatherValue(data_get($current, 'relative_humidity_2m'));
+        $windSpeed = $this->roundedWeatherValue(data_get($current, 'wind_speed_10m'));
+        $windDirection = $this->compassDirection(data_get($current, 'wind_direction_10m'));
+        $precipitation = $this->roundedWeatherValue(data_get($current, 'precipitation'), 2);
+
+        $details = [];
+        if ($feelsLike !== null && $feelsLike !== $temperature) {
+            $details[] = "feels like {$feelsLike}°F";
+        }
+        if ($humidity !== null) {
+            $details[] = "humidity is {$humidity}%";
+        }
+        if ($windSpeed !== null) {
+            $wind = "wind is {$windSpeed} mph";
+            if ($windDirection !== null) {
+                $wind .= " from the {$windDirection}";
+            }
+            $details[] = $wind;
+        }
+        if ($precipitation !== null && $precipitation > 0) {
+            $details[] = "recent precipitation is {$precipitation} inches";
+        }
+
+        if ($details !== []) {
+            $parts[] = ucfirst(implode(', ', $details)).'.';
+        }
+
+        return implode(' ', $parts);
+    }
+
+    private function openMeteoPlaceName(array $place): string
+    {
+        $name = trim((string) ($place['name'] ?? ''));
+        $admin = trim((string) ($place['admin1'] ?? ''));
+        $country = trim((string) ($place['country_code'] ?? $place['country'] ?? ''));
+
+        return collect([$name, $admin, $country])
+            ->filter()
+            ->unique()
+            ->implode(', ');
+    }
+
+    private function openMeteoWeatherCodeDescription(int $code): string
+    {
+        return match ($code) {
+            0 => 'clear',
+            1 => 'mostly clear',
+            2 => 'partly cloudy',
+            3 => 'overcast',
+            45, 48 => 'foggy',
+            51, 53, 55 => 'drizzling',
+            56, 57 => 'freezing drizzle',
+            61, 63, 65 => 'raining',
+            66, 67 => 'freezing rain',
+            71, 73, 75 => 'snowing',
+            77 => 'snow grains',
+            80, 81, 82 => 'showery',
+            85, 86 => 'snow showers',
+            95 => 'stormy',
+            96, 99 => 'stormy with hail',
+            default => 'reporting current conditions',
+        };
+    }
+
+    private function roundedWeatherValue(mixed $value, int $precision = 0): ?float
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        return round((float) $value, $precision);
+    }
+
+    private function compassDirection(mixed $degrees): ?string
+    {
+        if (! is_numeric($degrees)) {
+            return null;
+        }
+
+        $directions = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'];
+        $index = (int) round(((float) $degrees % 360) / 45) % 8;
+
+        return $directions[$index];
+    }
+
+    private function openMeteoFailureResult(string $errorCode): array
+    {
+        return [
+            'ok' => false,
+            'tool' => 'external_lookup',
+            'provider' => 'open_meteo',
+            'kind' => 'weather_current',
+            'error_code' => $errorCode,
+            'message' => 'I could not get live weather from the weather provider right now.',
+        ];
+    }
+
+    private function usStateName(string $value): ?string
+    {
+        $normalized = mb_strtolower(trim($value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        return [
+            'al' => 'Alabama', 'alabama' => 'Alabama',
+            'ak' => 'Alaska', 'alaska' => 'Alaska',
+            'az' => 'Arizona', 'arizona' => 'Arizona',
+            'ar' => 'Arkansas', 'arkansas' => 'Arkansas',
+            'ca' => 'California', 'california' => 'California',
+            'co' => 'Colorado', 'colorado' => 'Colorado',
+            'ct' => 'Connecticut', 'connecticut' => 'Connecticut',
+            'de' => 'Delaware', 'delaware' => 'Delaware',
+            'fl' => 'Florida', 'florida' => 'Florida',
+            'ga' => 'Georgia', 'georgia' => 'Georgia',
+            'hi' => 'Hawaii', 'hawaii' => 'Hawaii',
+            'id' => 'Idaho', 'idaho' => 'Idaho',
+            'il' => 'Illinois', 'illinois' => 'Illinois',
+            'in' => 'Indiana', 'indiana' => 'Indiana',
+            'ia' => 'Iowa', 'iowa' => 'Iowa',
+            'ks' => 'Kansas', 'kansas' => 'Kansas',
+            'ky' => 'Kentucky', 'kentucky' => 'Kentucky',
+            'la' => 'Louisiana', 'louisiana' => 'Louisiana',
+            'me' => 'Maine', 'maine' => 'Maine',
+            'md' => 'Maryland', 'maryland' => 'Maryland',
+            'ma' => 'Massachusetts', 'massachusetts' => 'Massachusetts',
+            'mi' => 'Michigan', 'michigan' => 'Michigan',
+            'mn' => 'Minnesota', 'minnesota' => 'Minnesota',
+            'ms' => 'Mississippi', 'mississippi' => 'Mississippi',
+            'mo' => 'Missouri', 'missouri' => 'Missouri',
+            'mt' => 'Montana', 'montana' => 'Montana',
+            'ne' => 'Nebraska', 'nebraska' => 'Nebraska',
+            'nv' => 'Nevada', 'nevada' => 'Nevada',
+            'nh' => 'New Hampshire', 'new hampshire' => 'New Hampshire',
+            'nj' => 'New Jersey', 'new jersey' => 'New Jersey',
+            'nm' => 'New Mexico', 'new mexico' => 'New Mexico',
+            'ny' => 'New York', 'new york' => 'New York',
+            'nc' => 'North Carolina', 'north carolina' => 'North Carolina',
+            'nd' => 'North Dakota', 'north dakota' => 'North Dakota',
+            'oh' => 'Ohio', 'ohio' => 'Ohio',
+            'ok' => 'Oklahoma', 'oklahoma' => 'Oklahoma',
+            'or' => 'Oregon', 'oregon' => 'Oregon',
+            'pa' => 'Pennsylvania', 'pennsylvania' => 'Pennsylvania',
+            'ri' => 'Rhode Island', 'rhode island' => 'Rhode Island',
+            'sc' => 'South Carolina', 'south carolina' => 'South Carolina',
+            'sd' => 'South Dakota', 'south dakota' => 'South Dakota',
+            'tn' => 'Tennessee', 'tennessee' => 'Tennessee',
+            'tx' => 'Texas', 'texas' => 'Texas',
+            'ut' => 'Utah', 'utah' => 'Utah',
+            'vt' => 'Vermont', 'vermont' => 'Vermont',
+            'va' => 'Virginia', 'virginia' => 'Virginia',
+            'wa' => 'Washington', 'washington' => 'Washington',
+            'wv' => 'West Virginia', 'west virginia' => 'West Virginia',
+            'wi' => 'Wisconsin', 'wisconsin' => 'Wisconsin',
+            'wy' => 'Wyoming', 'wyoming' => 'Wyoming',
+            'dc' => 'District of Columbia', 'district of columbia' => 'District of Columbia',
+        ][$normalized] ?? null;
     }
 
     private function extractResponseText(array $response): string
@@ -1238,8 +1695,8 @@ PROMPT;
      */
     private function modelRouteFor(ConversationSession $session): array
     {
-        $defaultModel = (string) config('services.hermes_runtime.default_model', 'gpt-5.5');
-        $model = (string) ($this->profileForSession($session)?->model ?: $defaultModel);
+        $defaultModel = $this->adminSettings->mainModel();
+        $model = (string) ($this->adminSettings->mainModelOverride() ?: $this->profileForSession($session)?->model ?: $defaultModel);
 
         return [
             'mode' => 'agent',

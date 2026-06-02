@@ -154,31 +154,6 @@ Future<void> _defaultUpdateAppIconBadge(int count) async {
   }
 }
 
-Future<void> _speakFastRealtimeReply(String text) async {
-  final trimmed = text.trim();
-  if (trimmed.isEmpty) return;
-  try {
-    await _heyBeanPlatformChannel.invokeMethod<void>('speakText', {
-      'text': trimmed,
-    });
-  } on PlatformException {
-    // Native speech is an iOS convenience path. Realtime audio still handles
-    // normal responses if this channel is unavailable.
-  } on MissingPluginException {
-    // Tests, web, desktop, and stale native shells may not expose this method.
-  }
-}
-
-Future<void> _stopFastRealtimeSpeech() async {
-  try {
-    await _heyBeanPlatformChannel.invokeMethod<void>('stopSpeech');
-  } on PlatformException {
-    // Native speech is best-effort.
-  } on MissingPluginException {
-    // Tests, web, desktop, and stale native shells may not expose this method.
-  }
-}
-
 Map<String, Object?> _clientTemporalContext() {
   final now = DateTime.now();
   final offset = now.timeZoneOffset;
@@ -204,37 +179,6 @@ Map<String, Object?> _flutterChatMetadata({
   ...additional,
 };
 
-String? _fastRealtimeReplyForTranscript(String transcript, {DateTime? now}) {
-  final command = _normalizedVoiceCommand(transcript);
-  if (command.isEmpty) return null;
-
-  if (_voiceCommandIsCancel(command)) return null;
-  if (_voiceCommandIsCanYouHearMe(command)) return 'Yes, I can hear you.';
-
-  if (!_voiceCommandAsksTime(command)) return null;
-
-  final localNow = now ?? DateTime.now();
-  return "It's ${_spokenClockTime(localNow)}.";
-}
-
-String? _realtimeAcknowledgementForTranscript(String transcript) {
-  final command = _normalizedVoiceCommand(transcript);
-  if (command.isEmpty ||
-      _voiceCommandIsCancel(command) ||
-      _voiceCommandIsCanYouHearMe(command) ||
-      _voiceCommandAsksTime(command)) {
-    return null;
-  }
-
-  if (_voiceCommandLooksLikeLookup(command)) {
-    return 'Let me check that real quick.';
-  }
-  if (_voiceCommandLooksLikeDurableWork(command)) {
-    return "I'm on it.";
-  }
-  return null;
-}
-
 String _normalizedVoiceCommand(String transcript) {
   final normalized = transcript
       .toLowerCase()
@@ -258,53 +202,9 @@ bool _voiceCommandIsCancel(String command) {
   ).hasMatch(command);
 }
 
-bool _voiceCommandIsCanYouHearMe(String command) {
-  return RegExp(r"\b(can|do)\s+you\s+hear\s+me\b").hasMatch(command) ||
-      RegExp(r"\bcan\s+you\s+hear\b").hasMatch(command);
-}
-
-bool _voiceCommandAsksTime(String command) {
-  return RegExp(r"\bwhat'?s?\s+(the\s+)?time\b").hasMatch(command) ||
-      RegExp(r"\bwhat\s+time\s+is\s+it\b").hasMatch(command) ||
-      RegExp(r"\btell\s+me\s+the\s+time\b").hasMatch(command) ||
-      RegExp(r"\bcurrent\s+time\b").hasMatch(command);
-}
-
-bool _voiceCommandLooksLikeLookup(String command) {
-  final asksQuestion = RegExp(
-    r"\b(?:what|when|where|who|how many|show|tell me|do i have|what do i have|what's|whats)\b",
-  ).hasMatch(command);
-  final mentionsAppData = RegExp(
-    r"\b(?:calendar|event|events|schedule|task|tasks|reminder|reminders|today|tomorrow|this week|agenda)\b",
-  ).hasMatch(command);
-  return asksQuestion && mentionsAppData;
-}
-
-bool _voiceCommandLooksLikeDurableWork(String command) {
-  return RegExp(
-    r"\b(?:move|reschedule|schedule|create|add|update|change|delete|cancel|complete|finish|remind|remember|plan)\b",
-  ).hasMatch(command);
-}
-
-@visibleForTesting
-String? fastRealtimeReplyForTesting(String transcript, {DateTime? now}) =>
-    _fastRealtimeReplyForTranscript(transcript, now: now);
-
-@visibleForTesting
-String? realtimeAcknowledgementForTesting(String transcript) =>
-    _realtimeAcknowledgementForTranscript(transcript);
-
 @visibleForTesting
 bool realtimeVoiceCancelForTesting(String transcript) =>
     _voiceCommandIsCancel(_normalizedVoiceCommand(transcript));
-
-String _spokenClockTime(DateTime value) {
-  var hour = value.hour % 12;
-  if (hour == 0) hour = 12;
-  final minute = value.minute.toString().padLeft(2, '0');
-  final meridiem = value.hour >= 12 ? 'PM' : 'AM';
-  return '$hour:$minute $meridiem';
-}
 
 String beanFriendlyErrorMessage(Object error, {String? action}) {
   final prefix = action == null || action.trim().isEmpty
@@ -889,6 +789,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _editingAgentPreferences = false;
   bool _beanVoiceListening = false;
   String? _beanVoiceDraft;
+  int _localMessageSequence = -1;
   late final BeanRealtimeConversation _realtimeConversation;
   final Set<int> _dismissedReminderBannerIds = <int>{};
   final Set<int> _notifiedReminderIds = <int>{};
@@ -994,6 +895,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return leftDate.isAtSameMomentAs(rightDate);
   }
 
+  int _nextLocalMessageId() => _localMessageSequence--;
+
+  bool _assistantResponseIsDetailed(String content) {
+    final raw = content.trim();
+    return raw.length > 700 ||
+        raw.split('\n').length >= 4 ||
+        RegExp(r'(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S').hasMatch(raw);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1011,71 +921,28 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             setState(() {
               final trimmed = text.trim();
               if (role == 'user') {
-                _beanVoiceDraft = _beanVoiceListening
-                    ? trimmed
-                    : _beanVoiceDraft;
                 final command = _normalizedVoiceCommand(trimmed);
                 if (_beanVoiceListening && _voiceCommandIsCancel(command)) {
-                  _chatRunState = 'Ready';
-                  _beanVoiceListening = false;
+                  _chatRunState = 'Bean voice ready';
                   _beanVoiceDraft = null;
                   unawaited(_realtimeConversation.interrupt());
-                  unawaited(_stopFastRealtimeSpeech());
                   return;
                 }
-                final fastReply = _beanVoiceListening
-                    ? _fastRealtimeReplyForTranscript(trimmed)
-                    : null;
-                if (fastReply != null) {
-                  _chatRunState = 'Ready';
-                  final alreadyDisplayed = _messages.any(
-                    (message) =>
-                        message.role != 'user' &&
-                        message.content?.trim() == fastReply &&
-                        message.metadata['realtime_fast_reply'] == true,
+                _beanVoiceDraft = _beanVoiceListening ? trimmed : null;
+                _chatRunState = 'Heard: $trimmed';
+                final alreadyDisplayed =
+                    _messages.isNotEmpty &&
+                    _messages.last.role == 'user' &&
+                    _messages.last.content?.trim() == trimmed;
+                if (!alreadyDisplayed) {
+                  _messages.add(
+                    HermesMessage(
+                      id: _nextLocalMessageId(),
+                      role: 'user',
+                      content: trimmed,
+                      metadata: const {'realtime': true},
+                    ),
                   );
-                  if (!alreadyDisplayed) {
-                    _messages.add(
-                      HermesMessage(
-                        id: _messages.length + 1,
-                        role: 'assistant',
-                        content: fastReply,
-                        metadata: const {
-                          'realtime': true,
-                          'realtime_fast_reply': true,
-                        },
-                      ),
-                    );
-                  }
-                  unawaited(_realtimeConversation.interrupt());
-                  unawaited(_speakFastRealtimeReply(fastReply));
-                  return;
-                }
-                final acknowledgement = _beanVoiceListening
-                    ? _realtimeAcknowledgementForTranscript(trimmed)
-                    : null;
-                if (acknowledgement != null) {
-                  _chatRunState = acknowledgement;
-                  final alreadyDisplayed = _messages.any(
-                    (message) =>
-                        message.role != 'user' &&
-                        message.content?.trim() == acknowledgement &&
-                        message.metadata['realtime_ack'] == true,
-                  );
-                  if (!alreadyDisplayed) {
-                    _messages.add(
-                      HermesMessage(
-                        id: _messages.length + 1,
-                        role: 'assistant',
-                        content: acknowledgement,
-                        metadata: const {
-                          'realtime': true,
-                          'realtime_ack': true,
-                        },
-                      ),
-                    );
-                    unawaited(_speakFastRealtimeReply(acknowledgement));
-                  }
                 }
                 return;
               }
@@ -1088,38 +955,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               if (alreadyDisplayed) return;
               _messages.add(
                 HermesMessage(
-                  id: _messages.length + 1,
+                  id: _nextLocalMessageId(),
                   role: 'assistant',
                   content: trimmed,
                   metadata: const {'realtime': true},
                 ),
               );
-              _chatRunState = 'Ready';
+              _chatRunState = _assistantResponseIsDetailed(trimmed)
+                  ? 'Full details are in chat'
+                  : (_beanVoiceListening ? 'listening' : 'Ready');
             });
           },
           onRunQueued: (runId) {
             if (!mounted) return;
             setState(() {
-              _chatRunState = 'Bean is working in the background...';
-              final alreadyAcknowledged = _messages.any(
-                (message) =>
-                    message.metadata['realtime_run_id'] == runId &&
-                    message.metadata['realtime_queued_ack'] == true,
-              );
-              if (!alreadyAcknowledged) {
-                _messages.add(
-                  HermesMessage(
-                    id: _messages.length + 1,
-                    role: 'assistant',
-                    content: "I'm on it - I'll update that in the background.",
-                    metadata: {
-                      'realtime': true,
-                      'realtime_run_id': runId,
-                      'realtime_queued_ack': true,
-                    },
-                  ),
-                );
-              }
+              _chatRunState = 'working in background';
             });
             unawaited(_pollQueuedRun(runId, _chatRunToken));
             unawaited(_pollDashboardChanges());
@@ -1296,15 +1146,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _loadingStatusText = null;
       });
 
-      final session = await recover<HermesSession?>(
-        widget.apiClient.startSession(
-          title: _userNeedsBeanIntroduction(user) ? 'Welcome to Bean' : 'Today',
-          runtimeMode: _userNeedsBeanIntroduction(user) ? 'onboarding' : 'chat',
-          workspaceId: user.activeWorkspace?.numericId,
-          metadata: _flutterChatMetadata(),
-        ),
+      final sessionDetails = await recover<HermesSessionDetails?>(
+        _loadDailySessionForUser(user, source: 'bootstrap'),
         null,
       );
+      final session = sessionDetails?.session;
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
         fallback:
             _googleCalendarStatus ??
@@ -1364,6 +1210,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _user = user;
         _session = session;
+        _replaceMessagesFromSession(sessionDetails);
         _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
         _pastTasks = results[4] as List<HermesTask>;
         _eventCategories = results[5] as List<HermesEventCategory>;
@@ -1569,6 +1416,48 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         !(user.currentAgentProfile?.preferencesReady ?? false);
   }
 
+  Future<HermesSessionDetails?> _loadDailySessionForUser(
+    HermesUser user, {
+    String source = 'flutter',
+  }) async {
+    final onboarding = _userNeedsBeanIntroduction(user);
+    if (!onboarding) {
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+      final sessions = await widget.apiClient.listConversationSessions(
+        date: today,
+        workspaceId: user.activeWorkspace?.numericId,
+        limit: 30,
+      );
+      final todaySession = sessions.todaySession;
+      if (todaySession != null) {
+        return widget.apiClient.resumeSessionDetails(todaySession.id);
+      }
+    }
+
+    final session = await widget.apiClient.startSession(
+      title: onboarding ? 'Welcome to Bean' : 'Today with Bean',
+      runtimeMode: onboarding ? 'onboarding' : 'chat',
+      workspaceId: user.activeWorkspace?.numericId,
+      metadata: _flutterChatMetadata(additional: {'reason': source}),
+    );
+    return HermesSessionDetails(session: session);
+  }
+
+  void _replaceMessagesFromSession(HermesSessionDetails? details) {
+    _messages.clear();
+    if (details != null && details.messages.isNotEmpty) {
+      _messages.addAll(details.messages.map(_displayableAssistantMessage));
+      return;
+    }
+    _messages.add(
+      const HermesMessage(
+        id: 0,
+        role: 'assistant',
+        content: 'Hi — I can plan, schedule, remind, and follow up.',
+      ),
+    );
+  }
+
   void _selectDestination(_HomeDestination destination) {
     setState(() {
       _selectedDestination = destination;
@@ -1672,11 +1561,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _beanVoiceListening = true;
       _beanVoiceDraft = '';
       _error = null;
-      _chatRunState = 'Starting realtime voice...';
+      _chatRunState = 'Connecting Bean voice';
     });
 
     try {
       final realtimeSession = await _realtimeConversation.start(
+        sessionId: _session?.id,
         workspaceId: _user?.activeWorkspace?.numericId,
         metadata: _flutterChatMetadata(),
         microphoneEnabled: true,
@@ -1685,7 +1575,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _realtimeConversation.setMicrophoneEnabled(true);
       setState(() {
         _session = realtimeSession;
-        _chatRunState = 'Listening...';
+        _chatRunState = 'Bean voice ready';
       });
     } catch (error) {
       if (!mounted) return;
@@ -1748,11 +1638,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _finishBeanVoiceDraft() async {
     if (!_beanVoiceListening) return;
-    final typedDraft = (_beanVoiceDraft ?? '').trim();
-    _realtimeConversation.setMicrophoneEnabled(false);
-    setState(() {
-      _chatRunState = typedDraft.isEmpty ? 'Listening' : 'Heard: $typedDraft';
-    });
+    setState(() => _chatRunState = 'Bean voice ready');
   }
 
   Future<void> _sendChat(String content) async {
@@ -1886,6 +1772,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     try {
       if (!_realtimeConversation.active) {
         final realtimeSession = await _realtimeConversation.start(
+          sessionId: _session?.id,
           workspaceId: _user?.activeWorkspace?.numericId,
           metadata: _flutterChatMetadata(),
           microphoneEnabled: false,
@@ -2263,14 +2150,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final dataVersion = _dashboardDataVersion;
     try {
       final user = await widget.apiClient.me();
-      final session = await widget.apiClient.startSession(
-        title: _userNeedsBeanIntroduction(user)
-            ? 'Welcome to Bean'
-            : 'Workspace chat',
-        runtimeMode: _userNeedsBeanIntroduction(user) ? 'onboarding' : 'chat',
-        workspaceId: user.activeWorkspace?.numericId,
-        metadata: {'source': 'flutter', 'reason': 'workspace_refresh'},
+      final sessionDetails = await _loadDailySessionForUser(
+        user,
+        source: 'workspace_refresh',
       );
+      final session = sessionDetails?.session;
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
         fallback:
             _googleCalendarStatus ??
@@ -2295,9 +2179,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         widget.apiClient.listEventCategories().catchError(
           (_) => const <HermesEventCategory>[],
         ),
-        widget.apiClient
-            .pollActivityEvents(session.id)
-            .catchError((_) => const <HermesActivityEvent>[]),
+        session == null
+            ? Future<Object>.value(const <HermesActivityEvent>[])
+            : widget.apiClient
+                  .pollActivityEvents(session.id)
+                  .catchError((_) => const <HermesActivityEvent>[]),
       ]);
       final summary = results[0] as HermesTodaySummary;
       final listedTasks = results[1] as List<HermesTask>;
@@ -2315,6 +2201,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _user = user;
         _session = session;
+        _replaceMessagesFromSession(sessionDetails);
         _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
         _pastTasks = results[4] as List<HermesTask>;
         _eventCategories = results[5] as List<HermesEventCategory>;
@@ -3568,7 +3455,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                   const SizedBox(width: 16),
                 ],
               ),
-              body: SafeArea(child: _body()),
+              body: SafeArea(child: _bodyWithBetaBanner()),
               bottomNavigationBar: _phase == _AuthPhase.signedIn
                   ? _HeyBeanBottomMenu(
                       selected: _selectedDestination,
@@ -3693,6 +3580,35 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             onComplete: _completeAgentOnboarding,
           ),
       ],
+    );
+  }
+
+  Widget _bodyWithBetaBanner() {
+    final body = _body();
+    if (_phase != _AuthPhase.signedIn || _user?.isBeta != true) return body;
+    return Column(
+      children: [
+        _BetaFeedbackBanner(onTap: () => unawaited(_openBetaFeedbackForm())),
+        Expanded(child: body),
+      ],
+    );
+  }
+
+  Future<void> _openBetaFeedbackForm() async {
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (context) => _BetaFeedbackDialog(
+        onSubmit: (message) => widget.apiClient.submitIssueReport(
+          message: message,
+          workspaceId: _user?.activeWorkspace?.numericId,
+          pageUrl: 'heybean://flutter/${_selectedDestination.name}',
+        ),
+      ),
+    );
+    if (!mounted || submitted != true) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => const _BetaFeedbackThanksDialog(),
     );
   }
 
@@ -15537,6 +15453,185 @@ class _DueReminderBanner extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+class _BetaFeedbackBanner extends StatelessWidget {
+  const _BetaFeedbackBanner({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: HeyBeanTheme.accentStrong,
+    child: InkWell(
+      key: const Key('beta-feedback-banner'),
+      onTap: onTap,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Icon(Icons.bug_report_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'You are in beta testing. If you have any issues please report them here.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _BetaFeedbackDialog extends StatefulWidget {
+  const _BetaFeedbackDialog({required this.onSubmit});
+
+  final Future<void> Function(String message) onSubmit;
+
+  @override
+  State<_BetaFeedbackDialog> createState() => _BetaFeedbackDialogState();
+}
+
+class _BetaFeedbackDialogState extends State<_BetaFeedbackDialog> {
+  final _controller = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final message = _controller.text.trim();
+    if (message.isEmpty || _submitting) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.onSubmit(message);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = beanFriendlyErrorMessage(error, action: 'send that feedback');
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    key: const Key('beta-feedback-dialog'),
+    icon: const Icon(Icons.bug_report_rounded, color: HeyBeanTheme.accent),
+    title: const Text('Report an issue'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Tell us what happened so we can fix it quickly.'),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('beta-feedback-message'),
+          controller: _controller,
+          enabled: !_submitting,
+          minLines: 4,
+          maxLines: 7,
+          maxLength: 4000,
+          textInputAction: TextInputAction.newline,
+          decoration: const InputDecoration(
+            hintText:
+                'Describe what you were doing, what went wrong, and what you expected instead.',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _error!,
+            key: const Key('beta-feedback-error'),
+            style: const TextStyle(
+              color: HeyBeanTheme.destructive,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: _submitting ? null : () => Navigator.of(context).pop(false),
+        child: const Text('Cancel'),
+      ),
+      FilledButton.icon(
+        key: const Key('beta-feedback-submit'),
+        onPressed: _submitting ? null : _submit,
+        icon: _submitting
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.send_rounded),
+        label: Text(_submitting ? 'Sending...' : 'Send report'),
+      ),
+    ],
+  );
+}
+
+class _BetaFeedbackThanksDialog extends StatelessWidget {
+  const _BetaFeedbackThanksDialog();
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    key: const Key('beta-feedback-thanks'),
+    icon: Container(
+      width: 58,
+      height: 58,
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.accent.withValues(alpha: .12),
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: HeyBeanTheme.accent.withValues(alpha: .08),
+            blurRadius: 18,
+            spreadRadius: 8,
+          ),
+        ],
+      ),
+      child: const Icon(
+        Icons.check_circle_rounded,
+        color: HeyBeanTheme.accentStrong,
+        size: 34,
+      ),
+    ),
+    title: const Text('Thank you for helping improve HeyBean!'),
+    content: const Text(
+      "We've received your feedback and will fix any issues ASAP!",
+      textAlign: TextAlign.center,
+    ),
+    actionsAlignment: MainAxisAlignment.center,
+    actions: [
+      FilledButton(
+        key: const Key('beta-feedback-thanks-done'),
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Done'),
+      ),
+    ],
   );
 }
 

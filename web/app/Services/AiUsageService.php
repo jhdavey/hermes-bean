@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Log;
 
 class AiUsageService
 {
+    public function __construct(private readonly AdminSettingsService $adminSettings) {}
+
     public function estimateTokens(string $text): int
     {
         $text = trim($text);
@@ -31,7 +33,7 @@ class AiUsageService
         $user = User::findOrFail($session->user_id);
         $inputTokens = $this->estimateTokens($prompt);
         $reservedOutputTokens = (int) config('services.ai_usage.reserve_output_tokens', 1200);
-        $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? config('services.hermes_runtime.default_model', 'gpt-5.5'));
+        $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? $this->adminSettings->mainModel());
         $estimatedCost = $this->estimatedCost($billingModel, $inputTokens, $reservedOutputTokens);
         $budget = $this->budgetFor($user);
         $today = now()->startOfDay();
@@ -108,7 +110,7 @@ class AiUsageService
         $inputTokens = $this->estimateTokens($prompt);
         $outputTokens = $this->estimateTokens($stdout);
         $displayModel = (string) ($modelRoute['model'] ?? 'agent-routed');
-        $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? config('services.hermes_runtime.default_model', 'gpt-5.5'));
+        $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? $this->adminSettings->mainModel());
         $cost = $this->estimatedCost($billingModel, $inputTokens, $outputTokens);
         $actionTypes = $domainEvents
             ->map(fn (ActivityEvent $event): ?string => $event->tool_name ?: $event->event_type)
@@ -190,10 +192,23 @@ class AiUsageService
      */
     public function budgetFor(User $user): array
     {
+        if (! $user->isAdmin() && $this->isActiveBetaUser($user)) {
+            return $this->adminSettings->betaBudget();
+        }
+
         $tier = $user->isAdmin() ? 'admin' : $user->subscriptionTier();
         $budgets = config('services.ai_usage.budgets', []);
 
         return (array) ($budgets[$tier] ?? $budgets['free'] ?? []);
+    }
+
+    private function isActiveBetaUser(User $user): bool
+    {
+        if ($user->relationLoaded('betaUser')) {
+            return $user->betaUser?->status === 'active';
+        }
+
+        return $user->betaUser()->where('status', 'active')->exists();
     }
 
     /**
@@ -227,8 +242,7 @@ class AiUsageService
         array $metadata = [],
         ?string $scopeType = null,
         ?int $scopeId = null
-    ): ?AiUsageAlert
-    {
+    ): ?AiUsageAlert {
         $scopeType ??= $session->workspace_id ? 'workspace' : 'user';
         $scopeId ??= $session->workspace_id ?: $session->user_id;
 
