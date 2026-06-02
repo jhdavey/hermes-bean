@@ -181,6 +181,8 @@ if (mount) {
     let kioskRealtimePendingFunctionCalls = [];
     let kioskRealtimeBackgroundWorkActive = false;
     let kioskRealtimeAwaitingFollowup = false;
+    let kioskRealtimeLastAssistantText = '';
+    let kioskRealtimeLastAssistantOutputEndedAt = 0;
     const kioskRealtimeMaxReconnectAttempts = 5;
     const kioskRealtimeConnectTimeoutMs = 15000;
     const kioskRealtimeTransientDisconnectMs = 12000;
@@ -4007,6 +4009,8 @@ if (mount) {
         kioskRealtimeVoiceOnlyAssistant = false;
         setRealtimeBackgroundWorkActive(false);
         kioskRealtimeAwaitingFollowup = false;
+        kioskRealtimeLastAssistantText = '';
+        kioskRealtimeLastAssistantOutputEndedAt = 0;
         clearRealtimeAssistantOutputGuard();
         kioskRealtimePendingBackgroundResult = null;
         kioskRealtimePendingFunctionCalls = [];
@@ -4538,7 +4542,7 @@ if (mount) {
                         });
                         return;
                     }
-                    setKioskVoiceStatus('armed', 'Bean voice ready');
+                    setRealtimeReadyStatusIfIdle();
                 }, kioskRealtimeTransientDisconnectMs);
             };
             peerConnection.onconnectionstatechange = () => {
@@ -4556,9 +4560,7 @@ if (mount) {
                     window.clearTimeout(realtimeState.disconnectStatusTimer);
                     realtimeState.disconnectTimer = 0;
                     realtimeState.disconnectStatusTimer = 0;
-                    if (!realtimeAssistantOutputActive()) {
-                        setKioskVoiceStatus('armed', 'Bean voice ready');
-                    }
+                    setRealtimeReadyStatusIfIdle();
                 }
             };
             peerConnection.oniceconnectionstatechange = () => {
@@ -4576,9 +4578,7 @@ if (mount) {
                     window.clearTimeout(realtimeState.disconnectStatusTimer);
                     realtimeState.disconnectTimer = 0;
                     realtimeState.disconnectStatusTimer = 0;
-                    if (!realtimeAssistantOutputActive()) {
-                        setKioskVoiceStatus('armed', 'Bean voice ready');
-                    }
+                    setRealtimeReadyStatusIfIdle();
                 }
             };
             kioskRealtime = realtimeState;
@@ -4705,6 +4705,8 @@ if (mount) {
         kioskRealtimeVoiceOnlyAssistant = false;
         setRealtimeBackgroundWorkActive(false);
         kioskRealtimeAwaitingFollowup = false;
+        kioskRealtimeLastAssistantText = '';
+        kioskRealtimeLastAssistantOutputEndedAt = 0;
         clearRealtimeAssistantOutputGuard();
         kioskRealtimeUserTranscriptDrafts.clear();
         window.clearTimeout(kioskRealtimeResponseTimer);
@@ -4744,14 +4746,14 @@ if (mount) {
         }
         const type = payload?.type || '';
         if (type === 'input_audio_buffer.speech_started') {
-            if (realtimeAssistantOutputActive()) return;
+            if (realtimeAssistantRecentlyOutput()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('listening', 'listening');
             }
             return;
         }
         if (type === 'input_audio_buffer.speech_stopped') {
-            if (realtimeAssistantOutputActive()) return;
+            if (realtimeAssistantRecentlyOutput()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('working', 'thinking');
             }
@@ -4833,12 +4835,18 @@ if (mount) {
         return Date.now() < kioskRealtimeSuppressInputUntil;
     }
 
+    function realtimeAssistantRecentlyOutput(bufferMs = 2800) {
+        return realtimeAssistantOutputActive()
+            || Boolean(kioskRealtimeLastAssistantOutputEndedAt && Date.now() - kioskRealtimeLastAssistantOutputEndedAt < bufferMs)
+            || state.kioskVoicePhase === 'responding';
+    }
+
     function realtimeAssistantOutputRemainingMs() {
         const text = String(kioskRealtimeAssistantDraft?.content || '').trim();
         const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
         const estimatedTotalMs = Math.min(26000, Math.max(1800, Math.round(words * 360) + 1100));
         const elapsedMs = kioskRealtimeAssistantOutputStartedAt ? Date.now() - kioskRealtimeAssistantOutputStartedAt : 0;
-        return Math.min(14000, Math.max(1200, estimatedTotalMs - elapsedMs + 900));
+        return Math.min(20000, Math.max(1800, estimatedTotalMs - elapsedMs + 1600));
     }
 
     function scheduleRealtimeTurnStatusAfterOutput() {
@@ -4851,6 +4859,7 @@ if (mount) {
                 return;
             }
             kioskRealtimeAssistantOutputStartedAt = 0;
+            kioskRealtimeLastAssistantOutputEndedAt = Date.now();
             finishRealtimeTurnStatus();
         }, wait);
     }
@@ -4858,6 +4867,7 @@ if (mount) {
     function clearRealtimeAssistantOutputGuard() {
         kioskRealtimeSuppressInputUntil = 0;
         kioskRealtimeAssistantOutputStartedAt = 0;
+        kioskRealtimeLastAssistantOutputEndedAt = 0;
         window.clearTimeout(kioskRealtimeAssistantOutputTimer);
         kioskRealtimeAssistantOutputTimer = 0;
         window.clearTimeout(kioskRealtimeDeferredWorkingStatusTimer);
@@ -4879,6 +4889,49 @@ if (mount) {
             || /\b(?:do you want|would you like|want me to|should i|should we|do you need|need me to|would that help|sound good)\b/i.test(normalized);
     }
 
+    function setRealtimeReadyStatusIfIdle() {
+        if (
+            realtimeAssistantRecentlyOutput()
+            || kioskRealtimeBackgroundWorkActive
+            || kioskConversationActive
+            || ['heard', 'working', 'responding'].includes(state.kioskVoicePhase)
+        ) {
+            return;
+        }
+        setKioskVoiceStatus('armed', 'Bean voice ready');
+    }
+
+    function realtimeUserTranscriptLooksLikeEcho(transcript) {
+        const normalized = normalizedRealtimeTranscript(transcript);
+        if (!normalized) return true;
+        if (!realtimeAssistantRecentlyOutput()) return false;
+        if (/^(?:thank you|thanks|got it|okay|ok|alright|all right|sure|yep|yes|yeah)$/i.test(normalized)) return true;
+
+        const assistant = normalizedRealtimeTranscript(kioskRealtimeLastAssistantText || kioskRealtimeAssistantDraft?.content || '');
+        if (!assistant) return false;
+        if (assistant.includes(normalized) && normalized.split(/\s+/).length <= 8) return true;
+        return normalized.length >= 12 && transcriptSimilarity(normalized, assistant) > 0.72;
+    }
+
+    function normalizedRealtimeTranscript(transcript) {
+        return String(transcript || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s']/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function transcriptSimilarity(a, b) {
+        const aWords = new Set(String(a || '').split(/\s+/).filter(Boolean));
+        const bWords = new Set(String(b || '').split(/\s+/).filter(Boolean));
+        if (!aWords.size || !bWords.size) return 0;
+        let overlap = 0;
+        aWords.forEach((word) => {
+            if (bWords.has(word)) overlap += 1;
+        });
+        return overlap / Math.min(aWords.size, bWords.size);
+    }
+
     function handleRealtimeUserTranscript(payload) {
         const raw = String(payload.transcript || '').trim();
         if (!raw) return;
@@ -4893,6 +4946,9 @@ if (mount) {
         const isWakeTurn = command !== null;
         if (conversationEndRequested(raw) || (isWakeTurn && voiceCancelRequested(command))) {
             cancelBeanTurn();
+            return;
+        }
+        if (realtimeUserTranscriptLooksLikeEcho(raw)) {
             return;
         }
         if (realtimeAssistantOutputActive()) {
@@ -4939,6 +4995,7 @@ if (mount) {
     function handleRealtimeUserTranscriptDelta(payload) {
         const delta = String(payload.delta || '').trim();
         if (!delta) return;
+        if (realtimeUserTranscriptLooksLikeEcho(delta)) return;
         if (realtimeAssistantOutputActive()) return;
         const key = realtimeTranscriptDraftKey(payload);
         const previous = key ? (kioskRealtimeUserTranscriptDrafts.get(key) || '') : '';
@@ -4950,6 +5007,7 @@ if (mount) {
     function handleRealtimeUserTranscriptSegment(payload) {
         const text = String(payload.text || '').trim();
         if (!text) return;
+        if (realtimeUserTranscriptLooksLikeEcho(text)) return;
         if (realtimeAssistantOutputActive()) return;
         showRealtimeHeardTranscript(text);
     }
@@ -4978,6 +5036,7 @@ if (mount) {
     function showRealtimeHeardTranscript(transcript) {
         const raw = String(transcript || '').trim();
         if (!raw || realtimeTranscriptLooksSynthetic(raw)) return;
+        if (realtimeUserTranscriptLooksLikeEcho(raw)) return;
         const command = commandAfterWakePhrase(raw);
         if (!kioskConversationActive && command === null) return;
         showKioskHeardTranscript(raw, {
@@ -5039,6 +5098,7 @@ if (mount) {
         kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(text);
         const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
         draft.content = text;
+        kioskRealtimeLastAssistantText = text;
         if (!kioskRealtimeVoiceOnlyAssistant) {
             upsertRealtimeLocalMessage(draft);
         }
