@@ -145,6 +145,7 @@ if (mount) {
     let kioskRecognitionShouldRestart = false;
     let kioskCommandText = '';
     let kioskConversationActive = false;
+    let kioskIntentionalCancelActive = false;
     let kioskQuickReplyGeneration = 0;
     let kioskCommandTimer = 0;
     let kioskRestartTimer = 0;
@@ -4044,9 +4045,10 @@ if (mount) {
         await sendChatContent(content);
     }
 
-    async function cancelBeanTurn(event = null) {
+    async function cancelBeanTurn(event = null, options = {}) {
         event?.preventDefault?.();
         event?.stopPropagation?.();
+        const preserveKioskStatus = options.preserveKioskStatus === true;
         if (activeChatRequestId) {
             cancelledChatRequestIds.add(activeChatRequestId);
         }
@@ -4083,10 +4085,12 @@ if (mount) {
             try { kioskRealtime.dataChannel.send(JSON.stringify({ type: 'response.cancel' })); } catch (_) {}
         }
         stopKioskSpeechPlayback();
-        setKioskVoiceStatus(
-            state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'armed' : 'working') : 'idle',
-            state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'Say hey bean' : 'Bean is waking up') : ''
-        );
+        if (!preserveKioskStatus) {
+            setKioskVoiceStatus(
+                state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'armed' : 'working') : 'idle',
+                state.kioskVoiceEnabled ? (kioskRealtimeConnected() ? 'Say hey bean' : 'Bean is waking up') : ''
+            );
+        }
         render();
         scrollChatToBottom();
         if (state.kioskVoiceEnabled) {
@@ -5178,7 +5182,7 @@ if (mount) {
         const command = commandAfterWakePhrase(raw);
         const isWakeTurn = command !== null;
         if (conversationEndRequested(raw) || (isWakeTurn && voiceCancelRequested(command))) {
-            cancelBeanTurn();
+            cancelKioskVoiceCapture();
             return;
         }
         if (realtimeUserTranscriptLooksLikeEcho(raw)) {
@@ -6420,19 +6424,24 @@ if (mount) {
     }
 
     function cancelKioskVoiceCapture() {
+        kioskIntentionalCancelActive = true;
         stopKioskBargeInListening();
         stopKioskSpeechPlayback();
         pauseKioskVoiceListening();
-        endKioskConversation('cancelled');
+        endKioskConversation('Cancelled');
         if (state.busy) {
-            cancelBeanTurn();
+            cancelBeanTurn(null, { preserveKioskStatus: true });
             return;
         }
         restartKioskVoiceListeningSoon(650);
+        window.setTimeout(() => {
+            kioskIntentionalCancelActive = false;
+        }, 1500);
     }
 
     function conversationEndRequested(transcript) {
         return voiceCancelRequested(transcript)
+            || /^\s*(?:thanks|thank you|thx|thanks bean|thank you bean)\s*[.!?]*$/i.test(transcript)
             || /\b(?:thanks|thank you|that'?s all|stop listening|cancel)\s+(?:bean|been|beam|being)\b/i.test(transcript)
             || /\b(?:thanks|thank you),?\s*(?:that'?s all|we'?re done)\b/i.test(transcript);
     }
@@ -6548,6 +6557,12 @@ if (mount) {
             if (!kioskConversationActive) return;
             const assistantContent = response?.assistantContent || '';
             if (!assistantContent) {
+                if (kioskIntentionalCancelActive) {
+                    kioskIntentionalCancelActive = false;
+                    setKioskVoiceStatus('armed', 'Cancelled');
+                    restartKioskVoiceListeningSoon(650);
+                    return;
+                }
                 setKioskVoiceStatus('error', 'no response');
                 await sleep(1200);
             } else {
