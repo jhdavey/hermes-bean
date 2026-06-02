@@ -13,6 +13,8 @@ class AdminModelRegistryService
             'label' => 'Main Bean reasoning/chat',
             'description' => 'Used for normal Bean responses and agent reasoning.',
             'curated' => [
+                'gpt-5-mini',
+                'gpt-5-nano',
                 'gpt-5.5',
                 'gpt-5.4',
                 'gpt-5.2',
@@ -26,9 +28,9 @@ class AdminModelRegistryService
             'label' => 'Quick voice response',
             'description' => 'Used for fast conversational acknowledgements before longer work completes.',
             'curated' => [
-                'gpt-5.4-mini',
-                'gpt-5-mini',
                 'gpt-5-nano',
+                'gpt-5-mini',
+                'gpt-5.4-mini',
                 'gpt-4.1-mini',
                 'gpt-4.1-nano',
                 'gpt-4o-mini',
@@ -38,8 +40,8 @@ class AdminModelRegistryService
             'label' => 'Realtime voice',
             'description' => 'Used for low-latency speech-to-speech sessions.',
             'curated' => [
-                'gpt-realtime',
                 'gpt-realtime-mini',
+                'gpt-realtime',
                 'gpt-4o-realtime-preview',
                 'gpt-4o-mini-realtime-preview',
             ],

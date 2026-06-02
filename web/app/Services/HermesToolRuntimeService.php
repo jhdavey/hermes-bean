@@ -103,7 +103,15 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
         $modelRoute = $this->modelRouteFor($session);
         $prompt = $this->toolPromptFor($session, $userMessage, $modelRoute);
-        $this->usageService->preflight($session, $userMessage, $modelRoute, $prompt);
+        $preflight = $this->usageService->preflight($session, $userMessage, $modelRoute, $prompt);
+        if (! $preflight['allowed']) {
+            $this->usageService->recordBlocked($session, $userMessage, $modelRoute, $preflight, (string) $preflight['reason']);
+
+            return $this->toolRuntimeBlocked($session, $userMessage, collect([$received]), (string) $preflight['reason'], [
+                'failure_type' => 'usage_limit',
+                'model_route' => $modelRoute,
+            ]);
+        }
 
         return $this->sendMessageWithTools($session, $userMessage, $received, $modelRoute, $prompt);
     }
@@ -326,7 +334,15 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $name = (string) data_get($toolCall, 'function.name', '');
         $arguments = $this->decodeToolArguments((string) data_get($toolCall, 'function.arguments', '{}'));
         if ($this->isNativeReadTool($name)) {
-            return [[], collect(), $this->executeNativeReadTool($session, $name, $arguments)];
+            $toolOutput = $this->executeNativeReadTool($session, $name, $arguments);
+            $event = $this->recordEvent($session, 'assistant.read_tool.executed', [
+                'tool_name' => $name,
+                'ok' => (bool) ($toolOutput['ok'] ?? false),
+                'provider' => $toolOutput['provider'] ?? null,
+                'kind' => $toolOutput['kind'] ?? null,
+            ], $name, ($toolOutput['ok'] ?? false) ? 'succeeded' : 'failed');
+
+            return [[], collect([$event]), $toolOutput];
         }
 
         $actionType = $this->actionTypeForNativeTool($name);
@@ -597,16 +613,66 @@ class HermesToolRuntimeService implements HermesRuntimeService
             return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'missing_query', 'message' => 'A lookup query is required.'];
         }
 
+        $user = User::findOrFail($session->user_id);
         $context = trim((string) ($arguments['context'] ?? ''));
         $location = trim((string) ($arguments['location'] ?? ''));
+        $externalPreflight = $this->usageService->preflightDirect(
+            $user,
+            $session->workspace_id,
+            $this->adminSettings->externalLookupModel(),
+            $this->usageService->estimateTokens($query.' '.$context.' '.$location),
+            500,
+            null,
+            'external_lookup',
+            ['session' => $session],
+        );
+        if (! $externalPreflight['allowed']) {
+            $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', $this->adminSettings->externalLookupModel(), [], [
+                'conversation_session_id' => $session->id,
+                'reason' => $externalPreflight['reason'],
+                'query' => $query,
+            ], ['external_lookup'], 'blocked');
+
+            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'external_lookup_limit', 'message' => $externalPreflight['reason']];
+        }
+
         if ((bool) config('services.hermes_runtime.weather_lookup_enabled', true)) {
             $weatherResult = $this->openMeteoWeatherLookupForTool($session, $query, $context, $location);
             if ($weatherResult !== null) {
+                $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', 'open-meteo', [
+                    'tool_call_count' => 1,
+                ], [
+                    'conversation_session_id' => $session->id,
+                    'provider' => 'open_meteo',
+                    'query' => $query,
+                    'kind' => $weatherResult['kind'] ?? null,
+                ], ['external_lookup', 'open_meteo_weather'], ($weatherResult['ok'] ?? false) ? 'completed' : 'failed');
                 return $weatherResult;
             }
         }
 
         $toolType = (string) config('services.hermes_runtime.external_lookup_tool', 'web_search');
+        $webSearchPreflight = $this->usageService->preflightDirect(
+            $user,
+            $session->workspace_id,
+            $this->adminSettings->externalLookupModel(),
+            $this->usageService->estimateTokens($query.' '.$context.' '.$location),
+            800,
+            null,
+            'web_search',
+            ['session' => $session],
+        );
+        if (! $webSearchPreflight['allowed']) {
+            $this->usageService->recordDirectCall($user, $session->workspace_id, 'web_search', $this->adminSettings->externalLookupModel(), [], [
+                'conversation_session_id' => $session->id,
+                'reason' => $webSearchPreflight['reason'],
+                'query' => $query,
+                'tool_type' => $toolType,
+            ], ['external_lookup', 'web_search'], 'blocked');
+
+            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'web_search_limit', 'message' => $webSearchPreflight['reason']];
+        }
+
         $payload = [
             'model' => $this->adminSettings->externalLookupModel(),
             'tools' => [
@@ -684,6 +750,16 @@ class HermesToolRuntimeService implements HermesRuntimeService
         if ($text === '') {
             return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'external_lookup_empty', 'message' => 'The external lookup did not return an answer.'];
         }
+
+        $this->usageService->recordDirectCall($user, $session->workspace_id, 'web_search', (string) data_get($decoded, 'model', $this->adminSettings->externalLookupModel()), [
+            ...$this->usageService->usageFromOpenAiResponse($decoded),
+            'tool_call_count' => 1,
+        ], [
+            'conversation_session_id' => $session->id,
+            'query' => $query,
+            'tool_type' => $toolType,
+            'response_id' => data_get($decoded, 'id'),
+        ], ['external_lookup', 'web_search']);
 
         return [
             'ok' => true,
@@ -1816,6 +1892,44 @@ PROMPT;
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
                 'events' => $events->push($failed)->push($messageCompleted),
+                'blocker' => null,
+            ];
+        });
+    }
+
+    private function toolRuntimeBlocked(ConversationSession $session, ConversationMessage $userMessage, Collection $events, string $message, array $context): array
+    {
+        return DB::transaction(function () use ($session, $userMessage, $events, $message, $context): array {
+            $blocked = $this->recordEvent($session, 'runtime.usage_blocked', [
+                'message_id' => $userMessage->id,
+                'reason' => $message,
+                ...$context,
+            ], 'usage.guardrail', 'blocked');
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $message,
+                'metadata' => [
+                    'runtime' => 'tools',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'blocked' => $context,
+                ],
+            ]);
+
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+            ]);
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'blocked',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => $events->push($blocked)->push($messageCompleted),
                 'blocker' => null,
             ];
         });

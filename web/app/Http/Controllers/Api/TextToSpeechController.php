@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AiUsageService;
 use App\Services\AgentProfileService;
+use App\Services\AdminSettingsService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -31,6 +33,8 @@ class TextToSpeechController extends Controller
         $user = $request->user();
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $data['workspace_id'] ?? null);
         $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
+        $usage = app(AiUsageService::class);
+        $adminSettings = app(AdminSettingsService::class);
         $settings = $profile->settings ?? [];
         $tts = is_array($settings['tts'] ?? null) ? $settings['tts'] : [];
         $apiKey = trim((string) config('services.openai.server_api_key', ''));
@@ -50,6 +54,28 @@ class TextToSpeechController extends Controller
             'instructions' => (string) ($tts['openai_instructions'] ?? 'Speak naturally, warmly, and concisely as Bean.'),
             'response_format' => 'wav',
         ];
+        $preflight = $usage->preflightDirect(
+            $user,
+            $workspace->id,
+            $payload['model'],
+            $usage->estimateTokens($payload['input']),
+            0,
+            null,
+            'tts',
+        );
+        if (! $preflight['allowed']) {
+            $usage->recordDirectCall($user, $workspace->id, 'tts', $payload['model'], [
+                'input_tokens' => $usage->estimateTokens($payload['input']),
+            ], [
+                'reason' => $preflight['reason'],
+                'voice' => $payload['voice'],
+            ], ['tts'], 'blocked');
+
+            return response()->json([
+                'message' => $preflight['reason'] ?: ($adminSettings->beanVoiceEnabled() ? 'Bean voice is unavailable.' : 'Bean voice is paused right now.'),
+                'code' => 'bean_voice_usage_limit',
+            ], 429);
+        }
 
         $response = Http::withToken($apiKey)
             ->asJson()
@@ -72,6 +98,14 @@ class TextToSpeechController extends Controller
                 'status' => $response->status(),
             ], 502);
         }
+
+        $usage->recordDirectCall($user, $workspace->id, 'tts', $payload['model'], [
+            'input_tokens' => $usage->estimateTokens($payload['input']),
+            'audio_output_tokens' => max(1, (int) ceil(mb_strlen($payload['input']) / 6)),
+        ], [
+            'voice' => $payload['voice'],
+            'input_preview' => str($payload['input'])->limit(160)->toString(),
+        ], ['tts']);
 
         return response($response->body(), 200, [
             'Content-Type' => $response->header('Content-Type') ?: 'audio/wav',

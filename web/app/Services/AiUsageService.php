@@ -35,17 +35,71 @@ class AiUsageService
         $reservedOutputTokens = (int) config('services.ai_usage.reserve_output_tokens', 1200);
         $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? $this->adminSettings->mainModel());
         $estimatedCost = $this->estimatedCost($billingModel, $inputTokens, $reservedOutputTokens);
+
+        return $this->preflightDirect(
+            $user,
+            $session->workspace_id,
+            $billingModel,
+            $inputTokens,
+            $reservedOutputTokens,
+            $estimatedCost,
+            $this->requestTypeForMessage($message),
+            [
+                'session' => $session,
+                'message' => $message,
+                'model_route' => $modelRoute,
+            ],
+        );
+    }
+
+    /**
+     * @return array{allowed:bool,reason:?string,input_tokens:int,reserved_output_tokens:int,estimated_cost_usd:float,budget:array<string,mixed>}
+     */
+    public function preflightDirect(
+        User $user,
+        ?int $workspaceId,
+        string $model,
+        int $inputTokens = 0,
+        int $reservedOutputTokens = 0,
+        ?float $estimatedCost = null,
+        string $requestType = 'agent',
+        array $context = [],
+    ): array {
+        if (! $this->adminSettings->beanChatEnabled() && ! in_array($requestType, ['voice_turn', 'realtime_voice', 'tts'], true)) {
+            return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost ?? 0.0, $this->beanPausedMessage('chat'), $this->budgetFor($user));
+        }
+
+        if (! $this->adminSettings->beanVoiceEnabled() && in_array($requestType, ['voice_session', 'voice_turn', 'realtime_voice', 'tts'], true)) {
+            return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost ?? 0.0, $this->beanPausedMessage('voice'), $this->budgetFor($user));
+        }
+
+        $estimatedCost ??= $this->estimatedCost($model, $inputTokens, $reservedOutputTokens);
         $budget = $this->budgetFor($user);
         $today = now()->startOfDay();
         $month = now()->startOfMonth();
 
-        $daily = $this->usageTotals($session->user_id, null, $today);
-        $monthly = $this->usageTotals($session->user_id, null, $month);
+        $daily = $this->usageTotals($user->id, null, $today);
+        $monthly = $this->usageTotals($user->id, null, $month);
+        $dailyCounts = $this->dailyRequestCounts($user->id);
         $projectedDailyTokens = $daily['tokens'] + $inputTokens + $reservedOutputTokens;
         $projectedDailyCost = $daily['cost'] + $estimatedCost;
         $projectedMonthlyTokens = $monthly['tokens'] + $inputTokens + $reservedOutputTokens;
         $projectedMonthlyCost = $monthly['cost'] + $estimatedCost;
         $projectedMonthlyActions = $monthly['actions'] + 1;
+
+        foreach ($this->requestLimitChecks($requestType, $dailyCounts, $budget, $context) as [$key, $observed, $type]) {
+            $threshold = (float) ($budget[$key] ?? 0);
+            if ($threshold > 0 && $observed > $threshold) {
+                $reason = $this->humanLimitReason($type, $observed, $threshold);
+                $this->alertFromContext($user, $workspaceId, $context, $type, 'critical', $threshold, $observed, $reason, [
+                    'request_type' => $requestType,
+                    'model' => $model,
+                    'estimated_cost_usd' => $estimatedCost,
+                ]);
+
+                return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost, $reason, $budget);
+            }
+        }
 
         foreach ([
             ['monthly_ai_actions', $projectedMonthlyActions, 'monthly_action_limit'],
@@ -57,20 +111,12 @@ class AiUsageService
             $threshold = (float) ($budget[$key] ?? 0);
             if ($threshold > 0 && $observed > $threshold) {
                 $reason = $this->humanLimitReason($type, $observed, $threshold);
-                $this->alert($session, $type, 'critical', $threshold, $observed, $reason, [
-                    'model_route' => $modelRoute,
-                    'message_id' => $message->id,
+                $this->alertFromContext($user, $workspaceId, $context, $type, 'critical', $threshold, $observed, $reason, [
+                    'model' => $model,
                     'estimated_cost_usd' => $estimatedCost,
-                ], 'user', $session->user_id);
+                ]);
 
-                return [
-                    'allowed' => false,
-                    'reason' => $reason,
-                    'input_tokens' => $inputTokens,
-                    'reserved_output_tokens' => $reservedOutputTokens,
-                    'estimated_cost_usd' => $estimatedCost,
-                    'budget' => $budget,
-                ];
+                return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost, $reason, $budget);
             }
         }
 
@@ -80,10 +126,10 @@ class AiUsageService
         ] as [$key, $observed, $type]) {
             $threshold = (float) ($budget[$key] ?? 0);
             if ($threshold > 0 && $observed > $threshold) {
-                $this->alert($session, $type, 'warning', $threshold, $observed, $this->humanLimitReason($type, $observed, $threshold), [
-                    'model_route' => $modelRoute,
-                    'message_id' => $message->id,
-                ], 'user', $session->user_id);
+                $this->alertFromContext($user, $workspaceId, $context, $type, 'warning', $threshold, $observed, $this->humanLimitReason($type, $observed, $threshold), [
+                    'model' => $model,
+                    'request_type' => $requestType,
+                ]);
             }
         }
 
@@ -109,9 +155,14 @@ class AiUsageService
     ): AiUsageLog {
         $inputTokens = $this->estimateTokens($prompt);
         $outputTokens = $this->estimateTokens($stdout);
+        $actualUsage = $this->tokenUsageFromPayload($stdout);
+        if ($actualUsage['input_tokens'] > 0 || $actualUsage['output_tokens'] > 0) {
+            $inputTokens = $actualUsage['input_tokens'];
+            $outputTokens = $actualUsage['output_tokens'];
+        }
         $displayModel = (string) ($modelRoute['model'] ?? 'agent-routed');
         $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? $this->adminSettings->mainModel());
-        $cost = $this->estimatedCost($billingModel, $inputTokens, $outputTokens);
+        $cost = $this->estimatedCostWithAudio($billingModel, $inputTokens, $outputTokens, $actualUsage['audio_input_tokens'], $actualUsage['audio_output_tokens']);
         $actionTypes = $domainEvents
             ->map(fn (ActivityEvent $event): ?string => $event->tool_name ?: $event->event_type)
             ->filter()
@@ -127,10 +178,14 @@ class AiUsageService
             'provider' => (string) config('services.hermes_runtime.default_provider'),
             'model' => $displayModel,
             'route_tier' => (string) $modelRoute['tier'],
+            'request_type' => $this->requestTypeForMessage($userMessage),
             'status' => $status,
             'input_tokens' => $inputTokens,
             'output_tokens' => $outputTokens,
+            'audio_input_tokens' => $actualUsage['audio_input_tokens'],
+            'audio_output_tokens' => $actualUsage['audio_output_tokens'],
             'total_tokens' => $inputTokens + $outputTokens,
+            'tool_call_count' => count($actionTypes),
             'estimated_cost_usd' => $cost,
             'action_types' => $actionTypes,
             'metadata' => [
@@ -165,10 +220,12 @@ class AiUsageService
             'provider' => (string) config('services.hermes_runtime.default_provider'),
             'model' => (string) ($modelRoute['model'] ?? 'agent-routed'),
             'route_tier' => (string) $modelRoute['tier'],
+            'request_type' => $this->requestTypeForMessage($userMessage),
             'status' => 'blocked',
             'input_tokens' => $inputTokens,
             'output_tokens' => 0,
             'total_tokens' => $inputTokens,
+            'tool_call_count' => 0,
             'estimated_cost_usd' => 0,
             'action_types' => [],
             'metadata' => [
@@ -186,6 +243,75 @@ class AiUsageService
         $pricing = $this->pricingFor($model);
 
         return round((($inputTokens / 1_000_000) * $pricing['input']) + (($outputTokens / 1_000_000) * $pricing['output']), 6);
+    }
+
+    public function estimatedCostWithAudio(string $model, int $inputTokens, int $outputTokens, int $audioInputTokens = 0, int $audioOutputTokens = 0): float
+    {
+        $pricing = $this->pricingFor($model);
+
+        return round(
+            (($inputTokens / 1_000_000) * $pricing['input'])
+            + (($outputTokens / 1_000_000) * $pricing['output'])
+            + (($audioInputTokens / 1_000_000) * ($pricing['audio_input'] ?? $pricing['input']))
+            + (($audioOutputTokens / 1_000_000) * ($pricing['audio_output'] ?? $pricing['output'])),
+            6,
+        );
+    }
+
+    public function recordDirectCall(
+        User $user,
+        ?int $workspaceId,
+        string $requestType,
+        string $model,
+        array $usage = [],
+        array $metadata = [],
+        array $actionTypes = [],
+        string $status = 'completed',
+    ): AiUsageLog {
+        $inputTokens = (int) ($usage['input_tokens'] ?? 0);
+        $outputTokens = (int) ($usage['output_tokens'] ?? 0);
+        $audioInputTokens = (int) ($usage['audio_input_tokens'] ?? 0);
+        $audioOutputTokens = (int) ($usage['audio_output_tokens'] ?? 0);
+        $toolCallCount = (int) ($usage['tool_call_count'] ?? count($actionTypes));
+        $cost = $this->estimatedCostWithAudio($model, $inputTokens, $outputTokens, $audioInputTokens, $audioOutputTokens);
+
+        $log = AiUsageLog::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'conversation_session_id' => $metadata['conversation_session_id'] ?? null,
+            'conversation_message_id' => $metadata['conversation_message_id'] ?? null,
+            'provider' => (string) ($metadata['provider'] ?? config('services.hermes_runtime.default_provider')),
+            'model' => $model,
+            'route_tier' => (string) ($metadata['route_tier'] ?? $requestType),
+            'request_type' => $requestType,
+            'status' => $status,
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'audio_input_tokens' => $audioInputTokens,
+            'audio_output_tokens' => $audioOutputTokens,
+            'total_tokens' => $inputTokens + $outputTokens,
+            'tool_call_count' => $toolCallCount,
+            'estimated_cost_usd' => $cost,
+            'action_types' => array_values(array_filter($actionTypes)),
+            'metadata' => $metadata ?: null,
+        ]);
+
+        return $log;
+    }
+
+    /**
+     * @return array{input_tokens:int,output_tokens:int,audio_input_tokens:int,audio_output_tokens:int}
+     */
+    public function usageFromOpenAiResponse(array $response): array
+    {
+        $usage = (array) ($response['usage'] ?? []);
+
+        return [
+            'input_tokens' => (int) ($usage['prompt_tokens'] ?? $usage['input_tokens'] ?? 0),
+            'output_tokens' => (int) ($usage['completion_tokens'] ?? $usage['output_tokens'] ?? 0),
+            'audio_input_tokens' => (int) data_get($usage, 'input_token_details.audio_tokens', data_get($usage, 'prompt_tokens_details.audio_tokens', 0)),
+            'audio_output_tokens' => (int) data_get($usage, 'output_token_details.audio_tokens', data_get($usage, 'completion_tokens_details.audio_tokens', 0)),
+        ];
     }
 
     /**
@@ -230,6 +356,26 @@ class AiUsageService
             'actions' => (int) (clone $query)->count(),
             'tokens' => (int) (clone $query)->sum('total_tokens'),
             'cost' => (float) (clone $query)->sum('estimated_cost_usd'),
+        ];
+    }
+
+    /**
+     * @return array{text_requests:int,voice_turns:int,voice_seconds:float,external_tool_calls:int,web_search_calls:int}
+     */
+    public function dailyRequestCounts(int $userId): array
+    {
+        $logs = AiUsageLog::query()
+            ->where('user_id', $userId)
+            ->where('status', 'completed')
+            ->where('created_at', '>=', now()->startOfDay())
+            ->get(['request_type', 'action_types', 'metadata']);
+
+        return [
+            'text_requests' => $logs->where('request_type', 'text')->count(),
+            'voice_turns' => $logs->whereIn('request_type', ['voice_turn', 'realtime_voice'])->count(),
+            'voice_seconds' => (float) $logs->sum(fn (AiUsageLog $log): float => (float) data_get($log->metadata ?? [], 'voice_seconds', 0)),
+            'external_tool_calls' => $logs->filter(fn (AiUsageLog $log): bool => collect($log->action_types ?? [])->contains(fn (string $action): bool => in_array($action, ['external_lookup', 'open_meteo_weather', 'web_search'], true)))->count(),
+            'web_search_calls' => $logs->filter(fn (AiUsageLog $log): bool => collect($log->action_types ?? [])->contains('web_search'))->count(),
         ];
     }
 
@@ -326,16 +472,117 @@ class AiUsageService
     {
         $prices = config('services.ai_usage.pricing_per_million', []);
         if (isset($prices[$model])) {
-            return ['input' => (float) $prices[$model]['input'], 'output' => (float) $prices[$model]['output']];
+            return [
+                'input' => (float) $prices[$model]['input'],
+                'output' => (float) $prices[$model]['output'],
+                'audio_input' => isset($prices[$model]['audio_input']) ? (float) $prices[$model]['audio_input'] : null,
+                'audio_output' => isset($prices[$model]['audio_output']) ? (float) $prices[$model]['audio_output'] : null,
+            ];
         }
 
         foreach ($prices as $knownModel => $price) {
             if (str_contains($model, (string) $knownModel)) {
-                return ['input' => (float) $price['input'], 'output' => (float) $price['output']];
+                return [
+                    'input' => (float) $price['input'],
+                    'output' => (float) $price['output'],
+                    'audio_input' => isset($price['audio_input']) ? (float) $price['audio_input'] : null,
+                    'audio_output' => isset($price['audio_output']) ? (float) $price['audio_output'] : null,
+                ];
             }
         }
 
         return ['input' => 5.00, 'output' => 30.00];
+    }
+
+    private function blockedPreflight(int $inputTokens, int $reservedOutputTokens, float $estimatedCost, string $reason, array $budget): array
+    {
+        return [
+            'allowed' => false,
+            'reason' => $reason,
+            'input_tokens' => $inputTokens,
+            'reserved_output_tokens' => $reservedOutputTokens,
+            'estimated_cost_usd' => $estimatedCost,
+            'budget' => $budget,
+        ];
+    }
+
+    private function requestTypeForMessage(ConversationMessage $message): string
+    {
+        $metadata = $message->metadata ?? [];
+        if ((string) data_get($metadata, 'source') === 'realtime' || data_get($metadata, 'voice_context.mode') === 'live_voice') {
+            return 'voice_background';
+        }
+
+        return 'text';
+    }
+
+    private function requestLimitChecks(string $requestType, array $dailyCounts, array $budget, array $context = []): array
+    {
+        $checks = [];
+        if ($requestType === 'text') {
+            $checks[] = ['daily_text_requests', ($dailyCounts['text_requests'] ?? 0) + 1, 'daily_text_request_limit'];
+        }
+        if (in_array($requestType, ['voice_turn', 'realtime_voice'], true)) {
+            $voiceSeconds = (float) ($context['voice_seconds'] ?? 0);
+            $checks[] = ['daily_voice_turns', ($dailyCounts['voice_turns'] ?? 0) + 1, 'daily_voice_turn_limit'];
+            $checks[] = ['daily_voice_minutes', (($dailyCounts['voice_seconds'] ?? 0) + $voiceSeconds) / 60, 'daily_voice_minute_limit'];
+        }
+        if ($requestType === 'external_lookup') {
+            $checks[] = ['daily_external_tool_calls', ($dailyCounts['external_tool_calls'] ?? 0) + 1, 'daily_external_tool_limit'];
+        }
+        if ($requestType === 'web_search') {
+            $checks[] = ['daily_external_tool_calls', ($dailyCounts['external_tool_calls'] ?? 0) + 1, 'daily_external_tool_limit'];
+            $checks[] = ['daily_web_search_calls', ($dailyCounts['web_search_calls'] ?? 0) + 1, 'daily_web_search_limit'];
+        }
+
+        return $checks;
+    }
+
+    private function alertFromContext(User $user, ?int $workspaceId, array $context, string $type, string $severity, float $threshold, float $observed, string $message, array $metadata = []): void
+    {
+        $session = $context['session'] ?? null;
+        if ($session instanceof ConversationSession) {
+            $this->alert($session, $type, $severity, $threshold, $observed, $message, $metadata, 'user', $user->id);
+            return;
+        }
+
+        $stubSession = new ConversationSession([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+        ]);
+        $this->alert($stubSession, $type, $severity, $threshold, $observed, $message, $metadata, 'user', $user->id);
+    }
+
+    private function tokenUsageFromPayload(string $payload): array
+    {
+        $usage = [
+            'input_tokens' => 0,
+            'output_tokens' => 0,
+            'audio_input_tokens' => 0,
+            'audio_output_tokens' => 0,
+        ];
+        try {
+            $decoded = json_decode($payload, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return $usage;
+        }
+
+        foreach ((array) $decoded as $item) {
+            $itemUsage = is_array($item) ? (array) ($item['usage'] ?? []) : [];
+            $usage['input_tokens'] += (int) ($itemUsage['prompt_tokens'] ?? $itemUsage['input_tokens'] ?? 0);
+            $usage['output_tokens'] += (int) ($itemUsage['completion_tokens'] ?? $itemUsage['output_tokens'] ?? 0);
+            $usage['audio_input_tokens'] += (int) data_get($itemUsage, 'input_token_details.audio_tokens', data_get($itemUsage, 'prompt_tokens_details.audio_tokens', 0));
+            $usage['audio_output_tokens'] += (int) data_get($itemUsage, 'output_token_details.audio_tokens', data_get($itemUsage, 'completion_tokens_details.audio_tokens', 0));
+        }
+
+        return $usage;
+    }
+
+    private function beanPausedMessage(string $kind): string
+    {
+        return $kind === 'voice'
+            ? 'Bean voice is paused right now.'
+            : 'Bean chat is paused right now.';
     }
 
     private function humanLimitReason(string $type, float $observed, float $threshold): string
@@ -348,6 +595,11 @@ class AiUsageService
             'daily_cost_hard_limit' => 'This account has reached today\'s AI usage limit.',
             'daily_token_soft_warning' => 'This account is approaching today\'s AI token limit.',
             'daily_cost_soft_warning' => 'This account is approaching today\'s AI usage limit.',
+            'daily_text_request_limit' => 'This account has reached today\'s Bean text request limit.',
+            'daily_voice_turn_limit' => 'This account has reached today\'s Bean voice turn limit.',
+            'daily_voice_minute_limit' => 'This account has reached today\'s Bean voice minute limit.',
+            'daily_external_tool_limit' => 'This account has reached today\'s external lookup limit.',
+            'daily_web_search_limit' => 'This account has reached today\'s web search limit.',
             default => "AI usage limit reached ({$observed} / {$threshold}).",
         };
     }

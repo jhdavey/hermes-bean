@@ -29,29 +29,41 @@ class AdminSettingsTest extends TestCase
             ->assertForbidden();
 
         $this->withToken($adminToken)->patchJson('/api/admin/settings', $this->settingsPayload([
-            'main_model' => 'gpt-5.4',
-            'quick_voice_model' => 'gpt-5.4-mini',
-            'realtime_model' => 'gpt-realtime',
+            'main_model' => 'gpt-5-mini',
+            'quick_voice_model' => 'gpt-5-nano',
+            'realtime_model' => 'gpt-realtime-mini',
             'external_lookup_model' => 'gpt-5-mini',
         ], [
             'api_per_minute' => 12,
             'monthly_ai_actions' => 25,
-        ], true))->assertOk()
-            ->assertJsonPath('data.models.main_model.value', 'gpt-5.4')
+            'daily_text_requests' => 50,
+            'daily_voice_turns' => 20,
+            'daily_voice_minutes' => 10.0,
+            'daily_external_tool_calls' => 10,
+            'daily_web_search_calls' => 3,
+        ], true, [
+            'bean_chat_enabled' => false,
+            'bean_voice_enabled' => true,
+        ]))->assertOk()
+            ->assertJsonPath('data.models.main_model.value', 'gpt-5-mini')
             ->assertJsonPath('data.beta_limits.api_per_minute.value', 12)
-            ->assertJsonPath('data.beta_limits.monthly_ai_actions.value', 25);
+            ->assertJsonPath('data.beta_limits.monthly_ai_actions.value', 25)
+            ->assertJsonPath('data.beta_limits.daily_text_requests.value', 50)
+            ->assertJsonPath('data.beta_limits.daily_voice_minutes.value', 10)
+            ->assertJsonPath('data.kill_switches.bean_chat_enabled.value', false);
 
         $this->assertDatabaseHas('admin_settings', [
             'key' => 'models.main',
             'updated_by_user_id' => $admin->id,
         ]);
-        $this->assertSame('gpt-5.4', AdminSetting::where('key', 'models.main')->firstOrFail()->value['value']);
-        $this->assertTrue(AgentProfile::query()->where('model', 'gpt-5.4')->exists());
+        $this->assertSame('gpt-5-mini', AdminSetting::where('key', 'models.main')->firstOrFail()->value['value']);
+        $this->assertTrue(AgentProfile::query()->where('model', 'gpt-5-mini')->exists());
 
         $this->withToken($adminToken)->getJson('/api/admin/usage/summary')
             ->assertOk()
-            ->assertJsonPath('data.settings.models.main_model.value', 'gpt-5.4')
-            ->assertJsonPath('data.settings.beta_limits.api_per_minute.value', 12);
+            ->assertJsonPath('data.settings.models.main_model.value', 'gpt-5-mini')
+            ->assertJsonPath('data.settings.beta_limits.api_per_minute.value', 12)
+            ->assertJsonPath('data.settings.kill_switches.bean_chat_enabled.value', false);
 
         $this->withToken($adminToken)->patchJson('/api/admin/settings', $this->settingsPayload([
             'realtime_model' => 'gpt-5.4',
@@ -182,23 +194,32 @@ SH);
         $this->withToken($betaToken)->getJson('/api/auth/me')->assertOk();
     }
 
-    private function settingsPayload(array $models = [], array $betaLimits = [], bool $apply = false): array
+    private function settingsPayload(array $models = [], array $betaLimits = [], bool $apply = false, array $killSwitches = []): array
     {
         return [
             'model_settings' => [
-                'main_model' => $models['main_model'] ?? 'gpt-5.5',
-                'quick_voice_model' => $models['quick_voice_model'] ?? 'gpt-5.4-mini',
-                'realtime_model' => $models['realtime_model'] ?? 'gpt-realtime',
+                'main_model' => $models['main_model'] ?? 'gpt-5-mini',
+                'quick_voice_model' => $models['quick_voice_model'] ?? 'gpt-5-nano',
+                'realtime_model' => $models['realtime_model'] ?? 'gpt-realtime-mini',
                 'external_lookup_model' => $models['external_lookup_model'] ?? 'gpt-5-mini',
+            ],
+            'kill_switches' => [
+                'bean_chat_enabled' => $killSwitches['bean_chat_enabled'] ?? true,
+                'bean_voice_enabled' => $killSwitches['bean_voice_enabled'] ?? true,
             ],
             'beta_limits' => [
                 'api_per_minute' => $betaLimits['api_per_minute'] ?? 60,
-                'monthly_ai_actions' => $betaLimits['monthly_ai_actions'] ?? 50,
+                'monthly_ai_actions' => $betaLimits['monthly_ai_actions'] ?? 2_000,
                 'monthly_tokens' => $betaLimits['monthly_tokens'] ?? 1_000_000,
-                'monthly_cost_usd' => $betaLimits['monthly_cost_usd'] ?? 5.00,
+                'monthly_cost_usd' => $betaLimits['monthly_cost_usd'] ?? 4.00,
+                'daily_text_requests' => $betaLimits['daily_text_requests'] ?? 50,
+                'daily_voice_turns' => $betaLimits['daily_voice_turns'] ?? 20,
+                'daily_voice_minutes' => $betaLimits['daily_voice_minutes'] ?? 10.00,
+                'daily_external_tool_calls' => $betaLimits['daily_external_tool_calls'] ?? 10,
+                'daily_web_search_calls' => $betaLimits['daily_web_search_calls'] ?? 3,
                 'daily_soft_tokens' => $betaLimits['daily_soft_tokens'] ?? 60_000,
                 'daily_hard_tokens' => $betaLimits['daily_hard_tokens'] ?? 180_000,
-                'daily_soft_cost_usd' => $betaLimits['daily_soft_cost_usd'] ?? 0.35,
+                'daily_soft_cost_usd' => $betaLimits['daily_soft_cost_usd'] ?? 0.50,
                 'daily_hard_cost_usd' => $betaLimits['daily_hard_cost_usd'] ?? 1.00,
             ],
             'apply_main_model_to_profiles' => $apply,

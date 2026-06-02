@@ -3392,6 +3392,41 @@
     grid-template-columns: repeat(4, minmax(120px, 1fr));
 }
 
+.hb-admin-kill-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+}
+
+.hb-admin-switch {
+    display: flex !important;
+    grid-template-columns: none !important;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+    background: var(--hb-surface2);
+}
+
+.hb-admin-switch input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--hb-accent);
+}
+
+.hb-admin-switch strong {
+    display: block;
+    color: var(--hb-text);
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.hb-admin-switch small {
+    display: block;
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 760;
+}
+
 .hb-admin-settings-grid label {
     min-width: 0;
     display: grid;
@@ -3641,9 +3676,9 @@
 
 .hb-admin-log-head,
 .hb-admin-log-row {
-    min-width: 1280px;
+    min-width: 1440px;
     display: grid;
-    grid-template-columns: 145px minmax(150px, .8fr) minmax(260px, 1.5fr) minmax(160px, .95fr) minmax(140px, .9fr) minmax(150px, .9fr) 86px 86px 88px;
+    grid-template-columns: 145px minmax(150px, .8fr) minmax(260px, 1.5fr) minmax(160px, .95fr) minmax(140px, .9fr) minmax(150px, .9fr) 86px 86px 64px 86px 88px;
     gap: 10px;
     align-items: center;
     padding: 10px 12px;

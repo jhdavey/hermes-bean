@@ -5,13 +5,20 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AssistantRun;
 use App\Models\ConversationSession;
+use App\Models\User;
+use App\Services\AiUsageService;
+use App\Services\AdminSettingsService;
 use App\Services\AssistantRunService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AssistantRunController extends Controller
 {
-    public function __construct(private readonly AssistantRunService $runs) {}
+    public function __construct(
+        private readonly AssistantRunService $runs,
+        private readonly AiUsageService $usage,
+        private readonly AdminSettingsService $settings,
+    ) {}
 
     public function store(Request $request, string $session): JsonResponse
     {
@@ -21,12 +28,30 @@ class AssistantRunController extends Controller
             'metadata' => ['nullable', 'array'],
             'source' => ['nullable', 'string', 'max:50'],
         ]);
+        $user = User::findOrFail($ownedSession->user_id);
+        $source = (string) ($data['source'] ?? 'http');
+        $preflight = $this->usage->preflightDirect(
+            $user,
+            $ownedSession->workspace_id,
+            $this->settings->mainModel(),
+            $this->usage->estimateTokens($data['content']),
+            (int) config('services.ai_usage.reserve_output_tokens', 1200),
+            null,
+            $source === 'realtime' ? 'voice_background' : 'text',
+            ['session' => $ownedSession],
+        );
+        if (! $preflight['allowed']) {
+            return response()->json([
+                'message' => $preflight['reason'],
+                'code' => 'bean_usage_limit',
+            ], 429);
+        }
 
         $queued = $this->runs->queueRun(
             $ownedSession,
             $data['content'],
             $data['metadata'] ?? [],
-            $data['source'] ?? 'http'
+            $source
         );
 
         return response()->json(['data' => [

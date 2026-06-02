@@ -7,6 +7,7 @@ use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\User;
+use App\Services\AiUsageService;
 use App\Services\AdminSettingsService;
 use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
@@ -34,6 +35,7 @@ class RealtimeSessionController extends Controller
         private readonly AssistantRunService $runs,
         private readonly WorkspaceService $workspaces,
         private readonly AgentProfileService $profiles,
+        private readonly AiUsageService $usageService,
         private readonly AdminSettingsService $adminSettings,
         private readonly DashboardContextSnapshotService $dashboardContext,
     ) {}
@@ -57,6 +59,13 @@ class RealtimeSessionController extends Controller
 
         $workspace = $localSession?->workspace ?: $this->workspaces->resolveWorkspace($user, $data['workspace_id'] ?? null);
         $profile = $this->profiles->ensureForWorkspace($workspace, $user);
+        $voicePreflight = $this->usageService->preflightDirect($user, $workspace->id, $this->adminSettings->realtimeModel(), 0, 0, 0.0, 'voice_session');
+        if (! $voicePreflight['allowed']) {
+            return response()->json([
+                'message' => $voicePreflight['reason'],
+                'code' => 'bean_voice_paused',
+            ], 429);
+        }
         if ($localSession) {
             $localSession->update([
                 'metadata' => [
@@ -161,6 +170,13 @@ class RealtimeSessionController extends Controller
         $localSession = $localSession->refresh();
         $workspace = $localSession->workspace ?: $this->workspaces->resolveWorkspace($user, $localSession->workspace_id);
         $profile = $this->profiles->ensureForWorkspace($workspace, $user);
+        $voicePreflight = $this->usageService->preflightDirect($user, $workspace->id, $this->adminSettings->realtimeModel(), 0, 0, 0.0, 'voice_session');
+        if (! $voicePreflight['allowed']) {
+            return response()->json([
+                'message' => $voicePreflight['reason'],
+                'code' => 'bean_voice_paused',
+            ], 429);
+        }
         $apiKey = (string) config('services.hermes_realtime.api_key', '');
 
         if ($apiKey === '') {
@@ -302,6 +318,26 @@ class RealtimeSessionController extends Controller
                     'message' => 'No work content was provided.',
                 ]], 422);
             }
+            $preflight = $this->usageService->preflightDirect(
+                $request->user(),
+                $session->workspace_id,
+                $this->adminSettings->mainModel(),
+                $this->usageService->estimateTokens($content),
+                (int) config('services.ai_usage.reserve_output_tokens', 1200),
+                null,
+                'voice_background',
+                ['session' => $session],
+            );
+            if (! $preflight['allowed']) {
+                return response()->json([
+                    'message' => $preflight['reason'],
+                    'code' => 'bean_usage_limit',
+                    'data' => [
+                        'ok' => false,
+                        'message' => $preflight['reason'],
+                    ],
+                ], 429);
+            }
 
             $queued = $this->runs->queueRun($session, $content, [
                 'source' => 'realtime',
@@ -367,6 +403,61 @@ class RealtimeSessionController extends Controller
         ]);
 
         return response()->json(['data' => ['ok' => true]]);
+    }
+
+    public function usage(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
+            'model' => ['nullable', 'string', 'max:120'],
+            'response_id' => ['nullable', 'string', 'max:255'],
+            'usage' => ['required', 'array'],
+            'usage.input_tokens' => ['sometimes', 'integer', 'min:0'],
+            'usage.output_tokens' => ['sometimes', 'integer', 'min:0'],
+            'usage.input_token_details' => ['sometimes', 'array'],
+            'usage.output_token_details' => ['sometimes', 'array'],
+            'usage.input_token_details.audio_tokens' => ['sometimes', 'integer', 'min:0'],
+            'usage.output_token_details.audio_tokens' => ['sometimes', 'integer', 'min:0'],
+            'voice_seconds' => ['sometimes', 'numeric', 'min:0', 'max:300'],
+            'tool_call_count' => ['sometimes', 'integer', 'min:0', 'max:50'],
+            'action_types' => ['sometimes', 'array', 'max:20'],
+            'action_types.*' => ['string', 'max:100'],
+        ]);
+
+        $user = $request->user();
+        $session = ConversationSession::where('user_id', $user->id)->findOrFail($data['session_id']);
+        $workspaceId = $session->workspace_id;
+        $usage = $this->usageService->usageFromOpenAiResponse([
+            'usage' => $data['usage'],
+        ]);
+        $voiceSeconds = (float) ($data['voice_seconds'] ?? 0);
+        $model = (string) ($data['model'] ?? $this->adminSettings->realtimeModel());
+        $preflight = $this->usageService->preflightDirect(
+            $user,
+            $workspaceId,
+            $model,
+            $usage['input_tokens'],
+            $usage['output_tokens'],
+            $this->usageService->estimatedCostWithAudio($model, $usage['input_tokens'], $usage['output_tokens'], $usage['audio_input_tokens'], $usage['audio_output_tokens']),
+            'realtime_voice',
+            ['session' => $session, 'voice_seconds' => $voiceSeconds],
+        );
+        $status = $preflight['allowed'] ? 'completed' : 'blocked';
+        $log = $this->usageService->recordDirectCall($user, $workspaceId, 'realtime_voice', $model, [
+            ...$usage,
+            'tool_call_count' => (int) ($data['tool_call_count'] ?? 0),
+        ], [
+            'conversation_session_id' => $session->id,
+            'response_id' => $data['response_id'] ?? null,
+            'voice_seconds' => $voiceSeconds,
+            'limit_reason' => $preflight['allowed'] ? null : $preflight['reason'],
+        ], array_values($data['action_types'] ?? ['realtime_voice']), $status);
+
+        return response()->json(['data' => [
+            'ok' => $preflight['allowed'],
+            'usage_log_id' => $log->id,
+            'message' => $preflight['reason'],
+        ]], $preflight['allowed'] ? 201 : 429);
     }
 
     private function realtimeInstructions(ConversationSession $session): string

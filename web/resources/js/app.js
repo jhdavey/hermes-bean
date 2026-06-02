@@ -1039,6 +1039,7 @@ if (mount) {
         const topUsers = normalizeList(usage.top_users || usage.topUsers);
         const topWorkspaces = normalizeList(usage.top_workspaces || usage.topWorkspaces);
         const settings = usage.settings || {};
+        const killSwitches = settings.kill_switches || settings.killSwitches || {};
         const userGrowth = normalizeList(usage.user_growth || usage.userGrowth);
         return `
             <section class="hb-card hb-card-pad hb-admin-panel">
@@ -1055,6 +1056,8 @@ if (mount) {
                     ${adminMetricMarkup('Actions today', totals.ai_actions_today, `${formatTokens(totals.tokens_today)} tokens`)}
                     ${adminMetricMarkup('Month cost', formatCurrency(totals.cost_month), `${formatTokens(totals.tokens_month)} tokens`)}
                     ${adminMetricMarkup('Today cost', formatCurrency(totals.cost_today), `${totals.ai_actions_month || 0} actions this month`)}
+                    ${adminMetricMarkup('Voice today', formatTokens(totals.audio_tokens_today || totals.audioTokensToday), 'Audio tokens')}
+                    ${adminMetricMarkup('Tools today', totals.tool_calls_today || totals.toolCallsToday || 0, 'External/internal calls')}
                     ${adminMetricMarkup('Open alerts', totals.open_alerts, 'Warnings and hard caps')}
                     ${adminMetricMarkup('Issue reports', totals.open_issue_reports, 'Open beta feedback')}
                 </div>
@@ -1074,7 +1077,7 @@ if (mount) {
                         <span class="hb-item-meta">${recentLogs.length} latest</span>
                     </div>
                     <div class="hb-admin-log-table">
-                        <div class="hb-admin-log-head"><span>When</span><span>Use case</span><span>Request</span><span>User</span><span>Workspace</span><span>Model</span><span>Tokens</span><span>Cost</span><span>Status</span></div>
+                        <div class="hb-admin-log-head"><span>When</span><span>Use case</span><span>Request</span><span>User</span><span>Workspace</span><span>Model</span><span>Tokens</span><span>Audio</span><span>Tools</span><span>Cost</span><span>Status</span></div>
                         ${recentLogs.map(adminLogRowMarkup).join('') || '<div class="hb-empty">No AI usage logs yet.</div>'}
                     </div>
                 </div>
@@ -1176,6 +1179,7 @@ if (mount) {
     function adminSettingsMarkup(settings) {
         const models = settings.models || {};
         const beta = settings.beta_limits || settings.betaLimits || {};
+        const killSwitches = settings.kill_switches || settings.killSwitches || {};
         const registry = state.adminModelRegistry || {};
         return `
             <form class="hb-admin-settings" data-admin-settings-form>
@@ -1193,21 +1197,41 @@ if (mount) {
                     ${adminModelSelectMarkup('realtime_model', models.realtime_model || models.realtimeModel)}
                     ${adminModelSelectMarkup('external_lookup_model', models.external_lookup_model || models.externalLookupModel)}
                 </div>
+                <div class="hb-admin-settings-grid hb-admin-kill-grid">
+                    ${adminSwitchMarkup('bean_chat_enabled', 'Bean chat enabled', 'Pause all Bean text/background requests immediately.', settingValue(killSwitches.bean_chat_enabled || killSwitches.beanChatEnabled) !== false)}
+                    ${adminSwitchMarkup('bean_voice_enabled', 'Bean voice enabled', 'Pause realtime voice, quick voice replies, and TTS immediately.', settingValue(killSwitches.bean_voice_enabled || killSwitches.beanVoiceEnabled) !== false)}
+                </div>
                 <label class="hb-admin-apply-row">
                     <input type="checkbox" name="apply_main_model_to_profiles">
                     <span>Apply main model to existing workspace Bean profiles</span>
                 </label>
                 <div class="hb-admin-settings-grid hb-admin-limits-grid">
                     <label><span>Beta API/min</span><input class="hb-input" type="number" min="1" step="1" name="api_per_minute" value="${escapeAttr(settingValue(beta.api_per_minute || beta.apiPerMinute))}"></label>
-                    <label><span>Beta monthly requests</span><input class="hb-input" type="number" min="1" step="1" name="monthly_ai_actions" value="${escapeAttr(settingValue(beta.monthly_ai_actions || beta.monthlyAiActions))}"></label>
+                    <label><span>Monthly hard cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="monthly_cost_usd" value="${escapeAttr(settingValue(beta.monthly_cost_usd || beta.monthlyCostUsd))}"></label>
+                    <label><span>Daily soft cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_soft_cost_usd" value="${escapeAttr(settingValue(beta.daily_soft_cost_usd || beta.dailySoftCostUsd))}"></label>
+                    <label><span>Daily burst cap</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_hard_cost_usd" value="${escapeAttr(settingValue(beta.daily_hard_cost_usd || beta.dailyHardCostUsd))}"></label>
+                    <label><span>Daily text requests</span><input class="hb-input" type="number" min="1" step="1" name="daily_text_requests" value="${escapeAttr(settingValue(beta.daily_text_requests || beta.dailyTextRequests))}"></label>
+                    <label><span>Daily voice turns</span><input class="hb-input" type="number" min="1" step="1" name="daily_voice_turns" value="${escapeAttr(settingValue(beta.daily_voice_turns || beta.dailyVoiceTurns))}"></label>
+                    <label><span>Daily voice minutes</span><input class="hb-input" type="number" min="0.1" step="0.1" name="daily_voice_minutes" value="${escapeAttr(settingValue(beta.daily_voice_minutes || beta.dailyVoiceMinutes))}"></label>
+                    <label><span>Daily external lookups</span><input class="hb-input" type="number" min="0" step="1" name="daily_external_tool_calls" value="${escapeAttr(settingValue(beta.daily_external_tool_calls || beta.dailyExternalToolCalls))}"></label>
+                    <label><span>Daily web searches</span><input class="hb-input" type="number" min="0" step="1" name="daily_web_search_calls" value="${escapeAttr(settingValue(beta.daily_web_search_calls || beta.dailyWebSearchCalls))}"></label>
+                    <label><span>Monthly action safety cap</span><input class="hb-input" type="number" min="1" step="1" name="monthly_ai_actions" value="${escapeAttr(settingValue(beta.monthly_ai_actions || beta.monthlyAiActions))}"></label>
                     <label><span>Beta monthly tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="monthly_tokens" value="${escapeAttr(settingValue(beta.monthly_tokens || beta.monthlyTokens))}"></label>
-                    <label><span>Beta monthly cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="monthly_cost_usd" value="${escapeAttr(settingValue(beta.monthly_cost_usd || beta.monthlyCostUsd))}"></label>
                     <label><span>Daily soft tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="daily_soft_tokens" value="${escapeAttr(settingValue(beta.daily_soft_tokens || beta.dailySoftTokens))}"></label>
                     <label><span>Daily hard tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="daily_hard_tokens" value="${escapeAttr(settingValue(beta.daily_hard_tokens || beta.dailyHardTokens))}"></label>
-                    <label><span>Daily soft cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_soft_cost_usd" value="${escapeAttr(settingValue(beta.daily_soft_cost_usd || beta.dailySoftCostUsd))}"></label>
-                    <label><span>Daily hard cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_hard_cost_usd" value="${escapeAttr(settingValue(beta.daily_hard_cost_usd || beta.dailyHardCostUsd))}"></label>
                 </div>
             </form>`;
+    }
+
+    function adminSwitchMarkup(name, label, help, enabled) {
+        return `
+            <label class="hb-admin-switch">
+                <input type="checkbox" name="${escapeAttr(name)}" ${enabled ? 'checked' : ''}>
+                <span>
+                    <strong>${escapeHtml(label)}</strong>
+                    <small>${escapeHtml(help)}</small>
+                </span>
+            </label>`;
     }
 
     function adminHermesMaintenanceMarkup() {
@@ -1391,6 +1415,8 @@ if (mount) {
                 <span>${escapeHtml(workspace.name || (log.workspace_id || log.workspaceId ? `#${log.workspace_id || log.workspaceId}` : 'None'))}</span>
                 <span>${escapeHtml(log.model || 'unknown')}<small>${escapeHtml(log.route_tier || log.routeTier || '')}</small></span>
                 <span>${escapeHtml(formatTokens(log.total_tokens || log.totalTokens))}</span>
+                <span>${escapeHtml(formatTokens((log.audio_input_tokens || log.audioInputTokens || 0) + (log.audio_output_tokens || log.audioOutputTokens || 0)))}</span>
+                <span>${escapeHtml(log.tool_call_count || log.toolCallCount || 0)}</span>
                 <span>${escapeHtml(formatCurrency(log.estimated_cost_usd || log.estimatedCostUsd))}</span>
                 <span><mark class="hb-admin-status">${escapeHtml(log.status || 'logged')}</mark></span>
             </button>`;
@@ -3327,11 +3353,20 @@ if (mount) {
                             realtime_model: value('realtime_model'),
                             external_lookup_model: value('external_lookup_model'),
                         },
+                        kill_switches: {
+                            bean_chat_enabled: Boolean(form.querySelector('input[name="bean_chat_enabled"]')?.checked),
+                            bean_voice_enabled: Boolean(form.querySelector('input[name="bean_voice_enabled"]')?.checked),
+                        },
                         beta_limits: {
                             api_per_minute: intValue('api_per_minute'),
                             monthly_ai_actions: intValue('monthly_ai_actions'),
                             monthly_tokens: intValue('monthly_tokens'),
                             monthly_cost_usd: floatValue('monthly_cost_usd'),
+                            daily_text_requests: intValue('daily_text_requests'),
+                            daily_voice_turns: intValue('daily_voice_turns'),
+                            daily_voice_minutes: floatValue('daily_voice_minutes'),
+                            daily_external_tool_calls: intValue('daily_external_tool_calls'),
+                            daily_web_search_calls: intValue('daily_web_search_calls'),
                             daily_soft_tokens: intValue('daily_soft_tokens'),
                             daily_hard_tokens: intValue('daily_hard_tokens'),
                             daily_soft_cost_usd: floatValue('daily_soft_cost_usd'),
@@ -5024,6 +5059,7 @@ if (mount) {
             ...kioskRealtimePendingFunctionCalls,
             ...output.filter((item) => item?.type === 'function_call'),
         ]);
+        reportKioskRealtimeUsage(payload, functionCalls);
         kioskRealtimePendingFunctionCalls = [];
         const hasFunctionCall = functionCalls.length > 0;
         const assistantAnswered = String(kioskRealtimeAssistantDraft?.content || '').trim() !== '';
@@ -5072,6 +5108,41 @@ if (mount) {
             byKey.set(key, call);
         });
         return Array.from(byKey.values());
+    }
+
+    function reportKioskRealtimeUsage(payload, functionCalls = []) {
+        const usage = payload?.response?.usage;
+        const sessionId = kioskRealtime?.sessionId || state.session?.id;
+        if (!usage || !sessionId || !state.token) return;
+        const responseId = payload?.response?.id || payload?.response_id || null;
+        const model = payload?.response?.model || null;
+        const voiceSeconds = kioskRealtimeAssistantOutputStartedAt
+            ? Math.max(1, Math.min(300, (Date.now() - kioskRealtimeAssistantOutputStartedAt) / 1000))
+            : 1;
+        fetchWithTimeout('/api/assistant/realtime/usage', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${state.token}`,
+            },
+            body: JSON.stringify({
+                session_id: sessionId,
+                model,
+                response_id: responseId,
+                usage,
+                voice_seconds: voiceSeconds,
+                tool_call_count: functionCalls.length,
+                action_types: ['realtime_voice', ...functionCalls.map((item) => item?.name).filter(Boolean)],
+            }),
+        }, 6000).then(async (response) => {
+            if (response.ok) return;
+            const payload = await response.json().catch(() => null);
+            if (response.status === 429 && payload?.message) {
+                setKioskVoiceStatus('error', payload.message);
+                endKioskConversation('say hey bean');
+            }
+        }).catch(() => {});
     }
 
     function finishRealtimeTurnStatus() {

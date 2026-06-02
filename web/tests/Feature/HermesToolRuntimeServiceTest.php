@@ -868,7 +868,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonPath('data.assistant_message.content', 'The external lookup failed.');
     }
 
-    public function test_budget_alerts_do_not_block_tool_runtime_request(): void
+    public function test_budget_hard_limits_block_tool_runtime_request(): void
     {
         config()->set('services.ai_usage.budgets.free.daily_hard_tokens', 1);
 
@@ -890,11 +890,11 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'hello bean',
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Still handled.');
+        ])->assertStatus(429)
+            ->assertJsonPath('data.status', 'blocked')
+            ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI token limit.');
 
-        Http::assertSentCount(1);
+        Http::assertSentCount(0);
     }
 
     public function test_tool_runtime_normalizes_object_recurrence_from_agent_tool_calls(): void

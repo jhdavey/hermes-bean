@@ -98,7 +98,7 @@ class AiUsageGuardrailTest extends TestCase
             ->assertJsonCount(30, 'data.user_growth');
     }
 
-    public function test_daily_hard_budget_alert_does_not_block_tool_runtime_invocation(): void
+    public function test_daily_hard_budget_blocks_tool_runtime_invocation(): void
     {
         config()->set('services.hermes_runtime.default_provider', 'openai');
         config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
@@ -121,15 +121,15 @@ class AiUsageGuardrailTest extends TestCase
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Please plan my whole week.',
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'I can still help with that.')
-            ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
+        ])->assertStatus(429)
+            ->assertJsonPath('data.status', 'blocked')
+            ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI token limit.')
+            ->assertJsonFragment(['event_type' => 'runtime.usage_blocked']);
 
         $this->assertDatabaseHas('ai_usage_logs', [
-            'status' => 'completed',
+            'status' => 'blocked',
             'route_tier' => 'agent',
         ]);
-        Http::assertSentCount(1);
+        Http::assertSentCount(0);
     }
 }

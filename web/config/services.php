@@ -40,8 +40,8 @@ return [
 
     'hermes_runtime' => [
         'default_provider' => 'openai',
-        'default_model' => env('HERMES_DEFAULT_MODEL', 'gpt-5.5'),
-        'quick_reply_model' => env('HERMES_QUICK_REPLY_MODEL', 'gpt-5.4-mini'),
+        'default_model' => env('HERMES_DEFAULT_MODEL', 'gpt-5-mini'),
+        'quick_reply_model' => env('HERMES_QUICK_REPLY_MODEL', 'gpt-5-nano'),
         'quick_reply_timeout' => (float) env('HERMES_QUICK_REPLY_TIMEOUT', 4),
         'quick_reply_max_completion_tokens' => (int) env('HERMES_QUICK_REPLY_MAX_COMPLETION_TOKENS', 90),
         'api_key' => $openAiPublicKey,
@@ -66,7 +66,7 @@ return [
 
     'hermes_realtime' => [
         'api_key' => $openAiPublicKey,
-        'model' => env('HERMES_REALTIME_MODEL', 'gpt-realtime'),
+        'model' => env('HERMES_REALTIME_MODEL', 'gpt-realtime-mini'),
         'voice' => env('HERMES_REALTIME_VOICE', 'marin'),
     ],
 
@@ -84,18 +84,28 @@ return [
         'spike_multiplier' => (float) env('AI_USAGE_SPIKE_MULTIPLIER', 3),
         'spike_min_daily_cost_usd' => (float) env('AI_USAGE_SPIKE_MIN_DAILY_COST_USD', 1.00),
         'pricing_per_million' => [
+            'gpt-5-nano' => ['input' => 0.05, 'output' => 0.40],
+            'gpt-5-mini' => ['input' => 0.25, 'output' => 2.00],
+            'gpt-realtime-mini' => ['input' => 0.60, 'output' => 2.40, 'audio_input' => 10.00, 'audio_output' => 20.00],
+            'gpt-realtime' => ['input' => 4.00, 'output' => 16.00, 'audio_input' => 32.00, 'audio_output' => 64.00],
+            'gpt-4o-mini-tts' => ['input' => 0.60, 'output' => 12.00],
             'gpt-5.5' => ['input' => 5.00, 'output' => 30.00],
             'gpt-5.4' => ['input' => 2.50, 'output' => 15.00],
             'gpt-5.4-mini' => ['input' => 0.75, 'output' => 4.50],
         ],
         'budgets' => [
             'free' => [
-                'monthly_ai_actions' => (int) env('AI_FREE_MONTHLY_ACTIONS', 50),
+                'monthly_ai_actions' => (int) env('AI_FREE_MONTHLY_ACTIONS', 2_000),
                 'monthly_tokens' => (int) env('AI_FREE_MONTHLY_TOKENS', 1_000_000),
-                'monthly_cost_usd' => (float) env('AI_FREE_MONTHLY_COST_USD', 5.00),
+                'monthly_cost_usd' => (float) env('AI_FREE_MONTHLY_COST_USD', 4.00),
+                'daily_text_requests' => (int) env('AI_FREE_DAILY_TEXT_REQUESTS', 50),
+                'daily_voice_turns' => (int) env('AI_FREE_DAILY_VOICE_TURNS', 20),
+                'daily_voice_minutes' => (float) env('AI_FREE_DAILY_VOICE_MINUTES', 10.00),
+                'daily_external_tool_calls' => (int) env('AI_FREE_DAILY_EXTERNAL_TOOL_CALLS', 10),
+                'daily_web_search_calls' => (int) env('AI_FREE_DAILY_WEB_SEARCH_CALLS', 3),
                 'daily_soft_tokens' => (int) env('AI_FREE_DAILY_SOFT_TOKENS', 60_000),
                 'daily_hard_tokens' => (int) env('AI_FREE_DAILY_HARD_TOKENS', 180_000),
-                'daily_soft_cost_usd' => (float) env('AI_FREE_DAILY_SOFT_COST_USD', 0.35),
+                'daily_soft_cost_usd' => (float) env('AI_FREE_DAILY_SOFT_COST_USD', 0.50),
                 'daily_hard_cost_usd' => (float) env('AI_FREE_DAILY_HARD_COST_USD', 1.00),
             ],
             'mid' => [

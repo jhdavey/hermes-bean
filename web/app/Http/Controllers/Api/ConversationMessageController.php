@@ -23,6 +23,6 @@ class ConversationMessageController extends Controller
 
         $result = $this->runtime->sendMessage($ownedSession, $data['content'], $data['metadata'] ?? []);
 
-        return response()->json(['data' => $result], $result['status'] === 'blocked' ? 202 : 201);
+        return response()->json(['data' => $result], $result['status'] === 'blocked' ? 429 : 201);
     }
 }

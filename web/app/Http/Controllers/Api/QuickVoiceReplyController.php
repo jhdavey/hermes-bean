@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AiUsageService;
 use App\Services\AdminSettingsService;
 use App\Services\AgentProfileService;
 use App\Services\WorkspaceService;
@@ -14,7 +15,7 @@ use Illuminate\Validation\Rule;
 
 class QuickVoiceReplyController extends Controller
 {
-    public function store(Request $request, WorkspaceService $workspaces, AgentProfileService $profiles, AdminSettingsService $adminSettings): JsonResponse
+    public function store(Request $request, WorkspaceService $workspaces, AgentProfileService $profiles, AdminSettingsService $adminSettings, AiUsageService $usage): JsonResponse
     {
         $data = $request->validate([
             'content' => ['required', 'string', 'max:1000'],
@@ -41,6 +42,30 @@ class QuickVoiceReplyController extends Controller
         $model = $adminSettings->quickVoiceModel();
         $content = str($data['content'])->squish()->limit(1000, '')->toString();
         $stage = (string) ($data['stage'] ?? 'first');
+        $preflight = $usage->preflightDirect(
+            $user,
+            $workspace->id,
+            $model,
+            $usage->estimateTokens($content),
+            (int) config('services.hermes_runtime.quick_reply_max_completion_tokens', 90),
+            null,
+            'voice_turn',
+            [
+                'voice_seconds' => min(60, max(1, ((int) ($data['elapsed_ms'] ?? 0)) / 1000)),
+            ],
+        );
+        if (! $preflight['allowed']) {
+            $usage->recordDirectCall($user, $workspace->id, 'voice_turn', $model, [], [
+                'reason' => $preflight['reason'],
+                'stage' => $stage,
+                'voice_seconds' => min(60, max(1, ((int) ($data['elapsed_ms'] ?? 0)) / 1000)),
+            ], ['voice_turn'], 'blocked');
+
+            return response()->json([
+                'message' => $preflight['reason'],
+                'code' => 'bean_voice_usage_limit',
+            ], 429);
+        }
 
         $payload = [
             'model' => $model,
@@ -131,6 +156,15 @@ class QuickVoiceReplyController extends Controller
         }
 
         $continueAgent = $stage === 'bridge' || $this->shouldContinueAgent($content);
+        $usage->recordDirectCall($user, $workspace->id, 'voice_turn', (string) data_get($response->json(), 'model', $model), [
+            ...$usage->usageFromOpenAiResponse($response->json() ?: []),
+            'tool_call_count' => 0,
+        ], [
+            'stage' => $stage,
+            'voice_seconds' => min(60, max(1, ((int) ($data['elapsed_ms'] ?? 0)) / 1000)),
+            'response_contract' => $stage === 'bridge' ? 'bridge' : ($continueAgent ? 'background' : 'complete'),
+            'request_preview' => str($content)->limit(200)->toString(),
+        ], ['voice_turn']);
 
         return response()->json([
             'data' => [

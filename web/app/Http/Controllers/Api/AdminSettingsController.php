@@ -29,11 +29,19 @@ class AdminSettingsController extends Controller
             'model_settings.quick_voice_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:\/-]+$/'],
             'model_settings.realtime_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:\/-]+$/'],
             'model_settings.external_lookup_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:\/-]+$/'],
+            'kill_switches' => ['required', 'array'],
+            'kill_switches.bean_chat_enabled' => ['required', 'boolean'],
+            'kill_switches.bean_voice_enabled' => ['required', 'boolean'],
             'beta_limits' => ['required', 'array'],
             'beta_limits.api_per_minute' => ['required', 'integer', 'min:1', 'max:10000'],
             'beta_limits.monthly_ai_actions' => ['required', 'integer', 'min:1', 'max:1000000'],
             'beta_limits.monthly_tokens' => ['required', 'integer', 'min:1000', 'max:1000000000'],
             'beta_limits.monthly_cost_usd' => ['required', 'numeric', 'min:0.01', 'max:100000'],
+            'beta_limits.daily_text_requests' => ['required', 'integer', 'min:1', 'max:1000000'],
+            'beta_limits.daily_voice_turns' => ['required', 'integer', 'min:1', 'max:1000000'],
+            'beta_limits.daily_voice_minutes' => ['required', 'numeric', 'min:0.1', 'max:100000'],
+            'beta_limits.daily_external_tool_calls' => ['required', 'integer', 'min:0', 'max:1000000'],
+            'beta_limits.daily_web_search_calls' => ['required', 'integer', 'min:0', 'max:1000000'],
             'beta_limits.daily_soft_tokens' => ['required', 'integer', 'min:1000', 'max:1000000000'],
             'beta_limits.daily_hard_tokens' => ['required', 'integer', 'min:1000', 'max:1000000000'],
             'beta_limits.daily_soft_cost_usd' => ['required', 'numeric', 'min:0.01', 'max:100000'],
@@ -51,6 +59,7 @@ class AdminSettingsController extends Controller
             $data['beta_limits'],
             $request->user(),
             (bool) ($data['apply_main_model_to_profiles'] ?? false),
+            $data['kill_switches'],
         );
 
         return response()->json(['data' => $payload]);

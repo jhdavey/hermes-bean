@@ -28,7 +28,7 @@ class AgentProfileTest extends TestCase
 
         $this->assertSame($response->json('data.user.id'), $profile->user_id);
         $this->assertSame('openai', $profile->provider);
-        $this->assertSame('gpt-5.5', $profile->model);
+        $this->assertSame('gpt-5-mini', $profile->model);
         $this->assertSame('agent', $profile->router_mode);
         $this->assertStringContainsString($profile->slug, (string) $profile->runtime_home);
         $this->assertTrue($profile->approval_policy['auto_approve_low_risk']);
@@ -293,7 +293,7 @@ class AgentProfileTest extends TestCase
             ->getJson('/api/today')
             ->assertOk()
             ->assertJsonPath('data.agent_profile.provider', 'openai')
-            ->assertJsonPath('data.agent_profile.model', 'gpt-5.5')
+            ->assertJsonPath('data.agent_profile.model', 'gpt-5-mini')
             ->assertJsonPath('data.user.needs_bean_onboarding', true)
             ->assertJsonPath('data.user.bean_preferences_ready', false)
             ->assertJsonPath('data.agent_profile.approval_policy.approval_surface', 'app_home_top_banner');

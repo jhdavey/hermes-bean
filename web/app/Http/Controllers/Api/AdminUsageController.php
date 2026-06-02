@@ -32,6 +32,10 @@ class AdminUsageController extends Controller
                 'ai_actions_month' => (clone $logs)->where('created_at', '>=', $month)->count(),
                 'tokens_today' => (int) (clone $logs)->where('created_at', '>=', $today)->sum('total_tokens'),
                 'tokens_month' => (int) (clone $logs)->where('created_at', '>=', $month)->sum('total_tokens'),
+                'audio_tokens_today' => (int) (clone $logs)->where('created_at', '>=', $today)->sum('audio_input_tokens') + (int) (clone $logs)->where('created_at', '>=', $today)->sum('audio_output_tokens'),
+                'audio_tokens_month' => (int) (clone $logs)->where('created_at', '>=', $month)->sum('audio_input_tokens') + (int) (clone $logs)->where('created_at', '>=', $month)->sum('audio_output_tokens'),
+                'tool_calls_today' => (int) (clone $logs)->where('created_at', '>=', $today)->sum('tool_call_count'),
+                'tool_calls_month' => (int) (clone $logs)->where('created_at', '>=', $month)->sum('tool_call_count'),
                 'cost_today' => round((float) (clone $logs)->where('created_at', '>=', $today)->sum('estimated_cost_usd'), 4),
                 'cost_month' => round((float) (clone $logs)->where('created_at', '>=', $month)->sum('estimated_cost_usd'), 4),
                 'open_alerts' => AiUsageAlert::whereNull('acknowledged_at')->count(),
@@ -40,6 +44,7 @@ class AdminUsageController extends Controller
             ],
             'by_model' => $this->groupedUsage('model', $month),
             'by_route_tier' => $this->groupedUsage('route_tier', $month),
+            'by_request_type' => $this->groupedUsage('request_type', $month),
             'user_growth_range' => $userGrowthRange,
             'user_growth' => $this->userGrowth($userGrowthRange),
             'top_users' => $this->topUsers($month),
@@ -230,6 +235,7 @@ class AdminUsageController extends Controller
         $payload['request_full'] = $request !== '' ? $request : null;
         $payload['input_prompt_full'] = data_get($log->metadata, 'input_prompt') ?: $payload['request_full'];
         $payload['use_case'] = $this->useCaseForLog($log, $request, $actionTypes->all());
+        $payload['audio_tokens'] = (int) $log->audio_input_tokens + (int) $log->audio_output_tokens;
         $payload['action_summary'] = $actionTypes->isNotEmpty()
             ? $actionTypes->map(fn (string $action): string => $this->humanActionName($action))->unique()->take(4)->implode(', ')
             : null;

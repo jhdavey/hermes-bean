@@ -17,6 +17,10 @@ class AdminSettingsService
 
     public const EXTERNAL_LOOKUP_MODEL = 'models.external_lookup';
 
+    public const BEAN_CHAT_ENABLED = 'kill_switches.bean_chat_enabled';
+
+    public const BEAN_VOICE_ENABLED = 'kill_switches.bean_voice_enabled';
+
     public const BETA_API_PER_MINUTE = 'beta.api_per_minute';
 
     public const BETA_MONTHLY_AI_ACTIONS = 'beta.monthly_ai_actions';
@@ -24,6 +28,16 @@ class AdminSettingsService
     public const BETA_MONTHLY_TOKENS = 'beta.monthly_tokens';
 
     public const BETA_MONTHLY_COST_USD = 'beta.monthly_cost_usd';
+
+    public const BETA_DAILY_TEXT_REQUESTS = 'beta.daily_text_requests';
+
+    public const BETA_DAILY_VOICE_TURNS = 'beta.daily_voice_turns';
+
+    public const BETA_DAILY_VOICE_MINUTES = 'beta.daily_voice_minutes';
+
+    public const BETA_DAILY_EXTERNAL_TOOL_CALLS = 'beta.daily_external_tool_calls';
+
+    public const BETA_DAILY_WEB_SEARCH_CALLS = 'beta.daily_web_search_calls';
 
     public const BETA_DAILY_SOFT_TOKENS = 'beta.daily_soft_tokens';
 
@@ -44,13 +58,17 @@ class AdminSettingsService
                 'realtime_model' => $this->settingPayload(self::REALTIME_MODEL, $this->defaultRealtimeModel()),
                 'external_lookup_model' => $this->settingPayload(self::EXTERNAL_LOOKUP_MODEL, $this->defaultExternalLookupModel()),
             ],
+            'kill_switches' => [
+                'bean_chat_enabled' => $this->settingPayload(self::BEAN_CHAT_ENABLED, true),
+                'bean_voice_enabled' => $this->settingPayload(self::BEAN_VOICE_ENABLED, true),
+            ],
             'beta_limits' => collect($this->betaLimitDefaults())
                 ->mapWithKeys(fn (mixed $default, string $key): array => [$key => $this->settingPayload('beta.'.$key, $default)])
                 ->all(),
         ];
     }
 
-    public function update(array $modelSettings, array $betaLimits, ?User $actor = null, bool $applyMainModelToProfiles = false): array
+    public function update(array $modelSettings, array $betaLimits, ?User $actor = null, bool $applyMainModelToProfiles = false, array $killSwitches = []): array
     {
         foreach ([
             self::MAIN_MODEL => $modelSettings['main_model'] ?? null,
@@ -64,6 +82,15 @@ class AdminSettingsService
         foreach ($this->betaLimitDefaults() as $name => $default) {
             if (array_key_exists($name, $betaLimits)) {
                 $this->set('beta.'.$name, is_float($default) ? (float) $betaLimits[$name] : (int) $betaLimits[$name], is_float($default) ? 'float' : 'integer', $actor);
+            }
+        }
+
+        foreach ([
+            self::BEAN_CHAT_ENABLED => $killSwitches['bean_chat_enabled'] ?? null,
+            self::BEAN_VOICE_ENABLED => $killSwitches['bean_voice_enabled'] ?? null,
+        ] as $key => $value) {
+            if ($value !== null) {
+                $this->set($key, (bool) $value, 'boolean', $actor);
             }
         }
 
@@ -100,6 +127,16 @@ class AdminSettingsService
     public function externalLookupModel(): string
     {
         return $this->stringValue(self::EXTERNAL_LOOKUP_MODEL, $this->defaultExternalLookupModel());
+    }
+
+    public function beanChatEnabled(): bool
+    {
+        return $this->boolValue(self::BEAN_CHAT_ENABLED, true);
+    }
+
+    public function beanVoiceEnabled(): bool
+    {
+        return $this->boolValue(self::BEAN_VOICE_ENABLED, true);
     }
 
     public function betaBudget(): array
@@ -163,6 +200,13 @@ class AdminSettingsService
         return is_numeric($value) ? (float) $value : $default;
     }
 
+    private function boolValue(string $key, bool $default): bool
+    {
+        $value = $this->storedValue($key);
+
+        return is_bool($value) ? $value : $default;
+    }
+
     private function storedValue(string $key): mixed
     {
         $setting = $this->settings()->get($key);
@@ -218,12 +262,17 @@ class AdminSettingsService
 
         return [
             'api_per_minute' => (int) config('security.rate_limits.api_per_minute', 60),
-            'monthly_ai_actions' => (int) ($free['monthly_ai_actions'] ?? 50),
+            'monthly_ai_actions' => (int) ($free['monthly_ai_actions'] ?? 2_000),
             'monthly_tokens' => (int) ($free['monthly_tokens'] ?? 1_000_000),
-            'monthly_cost_usd' => (float) ($free['monthly_cost_usd'] ?? 5.00),
+            'monthly_cost_usd' => (float) ($free['monthly_cost_usd'] ?? 4.00),
+            'daily_text_requests' => (int) ($free['daily_text_requests'] ?? 50),
+            'daily_voice_turns' => (int) ($free['daily_voice_turns'] ?? 20),
+            'daily_voice_minutes' => (float) ($free['daily_voice_minutes'] ?? 10.00),
+            'daily_external_tool_calls' => (int) ($free['daily_external_tool_calls'] ?? 10),
+            'daily_web_search_calls' => (int) ($free['daily_web_search_calls'] ?? 3),
             'daily_soft_tokens' => (int) ($free['daily_soft_tokens'] ?? 60_000),
             'daily_hard_tokens' => (int) ($free['daily_hard_tokens'] ?? 180_000),
-            'daily_soft_cost_usd' => (float) ($free['daily_soft_cost_usd'] ?? 0.35),
+            'daily_soft_cost_usd' => (float) ($free['daily_soft_cost_usd'] ?? 0.50),
             'daily_hard_cost_usd' => (float) ($free['daily_hard_cost_usd'] ?? 1.00),
         ];
     }
