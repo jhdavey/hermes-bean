@@ -1,16 +1,41 @@
-# hermes_bean_app
+# HeyBean Flutter App
 
-A new Flutter project.
+## Firebase Cloud Messaging Setup
 
-## Getting Started
+Create one Firebase project for HeyBean, then add both mobile apps:
 
-This project is a starting point for a Flutter application.
+- Android package name: `com.heybean.heybeanapp`
+- iOS bundle ID: `com.heybean.heybeanapp`
 
-A few resources to get you started if this is your first Flutter project:
+In Firebase Console:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+1. Open Project settings > General and create/register the Android and iOS apps.
+2. Copy the Firebase project ID, Web API key, sender ID, Android app ID, and iOS app ID.
+3. Open Project settings > Service accounts and generate a new private key for Laravel.
+4. Open Project settings > Cloud Messaging and make sure the Firebase Cloud Messaging API is enabled.
+5. For iOS, upload an APNs authentication key in Cloud Messaging > Apple app configuration.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Laravel needs the server-side service account:
+
+```env
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_CREDENTIALS_PATH=/absolute/path/to/firebase-service-account.json
+FIREBASE_CREDENTIALS_JSON=
+```
+
+Use `FIREBASE_CREDENTIALS_PATH` in production when possible. Use `FIREBASE_CREDENTIALS_JSON` only if your host requires storing the JSON directly as an environment variable.
+
+Flutter reads Firebase client configuration from dart-defines:
+
+```sh
+flutter run \
+  --dart-define=FIREBASE_API_KEY=... \
+  --dart-define=FIREBASE_PROJECT_ID=... \
+  --dart-define=FIREBASE_MESSAGING_SENDER_ID=... \
+  --dart-define=FIREBASE_STORAGE_BUCKET=... \
+  --dart-define=FIREBASE_ANDROID_APP_ID=... \
+  --dart-define=FIREBASE_IOS_APP_ID=... \
+  --dart-define=FIREBASE_IOS_BUNDLE_ID=com.heybean.heybeanapp
+```
+
+Blank Firebase dart-defines are allowed for local builds; push registration simply stays disabled.

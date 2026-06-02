@@ -96,6 +96,32 @@ class HermesApiClient {
     bearerToken = null;
   }
 
+  Future<void> registerPushNotificationToken({
+    required String token,
+    String? platform,
+    String? deviceId,
+    String? appVersion,
+  }) async {
+    await _sendJson(
+      'POST',
+      '/push-notification-tokens',
+      body: {
+        'token': token,
+        if (platform != null) 'platform': platform,
+        if (deviceId != null) 'device_id': deviceId,
+        if (appVersion != null) 'app_version': appVersion,
+      },
+    );
+  }
+
+  Future<void> unregisterPushNotificationToken(String token) async {
+    await _sendJson(
+      'DELETE',
+      '/push-notification-tokens',
+      body: {'token': token},
+    );
+  }
+
   Future<HermesUser> me() async {
     final data = await _sendJson('GET', '/auth/me');
     return HermesUser.fromJson(_expectMap(data['data']));

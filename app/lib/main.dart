@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'bean_realtime_conversation.dart';
+import 'firebase_options.dart';
 import 'hermes_api_client.dart';
 
 typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
@@ -22,6 +25,20 @@ final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
 final Uri _termsOfServiceUrl = Uri.parse('https://heybean.org/terms');
 final Uri _supportUrl = Uri.parse('https://heybean.org/support');
 const String _beanGreenCategoryColor = '#34C759';
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (!HeyBeanFirebaseOptions.configured) return;
+  try {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: HeyBeanFirebaseOptions.currentPlatform,
+      );
+    }
+  } catch (_) {
+    // Background push handling must not crash the process if Firebase config is absent.
+  }
+}
 
 class _ReminderNotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
@@ -86,6 +103,86 @@ class _ReminderNotificationService {
     } catch (_) {
       // If the notification platform is not available, keep the app usable.
     }
+  }
+}
+
+class _PushNotificationRegistrationService {
+  bool _initialized = false;
+  String? _registeredToken;
+  StreamSubscription<String>? _tokenRefreshSubscription;
+
+  Future<void> registerForUser(HermesApiClient apiClient) async {
+    if (!HeyBeanFirebaseOptions.configured || apiClient.bearerToken == null) {
+      return;
+    }
+
+    try {
+      await _initializeFirebase();
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission(alert: true, badge: true, sound: true);
+      await messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      final token = await messaging.getToken();
+      if (token != null && token.isNotEmpty) {
+        await _sendToken(apiClient, token);
+      }
+      _tokenRefreshSubscription ??= messaging.onTokenRefresh.listen((token) {
+        unawaited(_sendToken(apiClient, token));
+      });
+    } on MissingPluginException {
+      // Firebase plugins are unavailable in widget tests and stale native shells.
+    } on PlatformException {
+      // Push permission/config can fail independently of the signed-in app.
+    } catch (_) {
+      // Keep the app usable; the server will still send email reminders.
+    }
+  }
+
+  Future<void> unregister(HermesApiClient apiClient) async {
+    final token = _registeredToken;
+    _registeredToken = null;
+    await _tokenRefreshSubscription?.cancel();
+    _tokenRefreshSubscription = null;
+    if (token == null || apiClient.bearerToken == null) return;
+    try {
+      await apiClient.unregisterPushNotificationToken(token);
+    } catch (_) {
+      // Logout should not be blocked by best-effort device-token cleanup.
+    }
+  }
+
+  Future<void> dispose() async {
+    await _tokenRefreshSubscription?.cancel();
+    _tokenRefreshSubscription = null;
+  }
+
+  Future<void> _initializeFirebase() async {
+    if (_initialized) return;
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: HeyBeanFirebaseOptions.currentPlatform,
+      );
+    }
+    _initialized = true;
+  }
+
+  Future<void> _sendToken(HermesApiClient apiClient, String token) async {
+    if (apiClient.bearerToken == null || token.isEmpty) return;
+    await apiClient.registerPushNotificationToken(
+      token: token,
+      platform: _pushPlatformName(),
+    );
+    _registeredToken = token;
+  }
+
+  String? _pushPlatformName() {
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    if (Platform.isMacOS) return 'macos';
+    return null;
   }
 }
 
@@ -316,6 +413,10 @@ String? _safeValidationSentence(String message) {
 }
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (HeyBeanFirebaseOptions.configured) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
   runApp(HermesBeanApp());
 }
 
@@ -976,6 +1077,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _approvalSheetOpen = false;
   final _ReminderNotificationService _reminderNotifications =
       _ReminderNotificationService();
+  final _PushNotificationRegistrationService _pushNotifications =
+      _PushNotificationRegistrationService();
   Timer? _reminderDueTimer;
   Timer? _dashboardChangeTimer;
   bool _dashboardChangePollInFlight = false;
@@ -1171,6 +1274,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     WidgetsBinding.instance.removeObserver(this);
     _reminderDueTimer?.cancel();
     _stopDashboardChangePolling();
+    unawaited(_pushNotifications.dispose());
     unawaited(_realtimeConversation.stop());
     super.dispose();
   }
@@ -1414,6 +1518,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             : 'You are signed in. ${beanFriendlyErrorMessage(refreshError!, action: 'refresh your latest data')}';
       });
       _syncReminderNotifications();
+      unawaited(_pushNotifications.registerForUser(widget.apiClient));
       _cacheCurrentDashboardSnapshot();
       _startDashboardChangePolling(resetCursor: true);
     } catch (error) {
@@ -3378,6 +3483,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _stopDashboardChangePolling();
     setState(() => _busy = true);
     try {
+      await _pushNotifications.unregister(widget.apiClient);
       await widget.apiClient.logout();
     } catch (_) {
       widget.apiClient.bearerToken = null;

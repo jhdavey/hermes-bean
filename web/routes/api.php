@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\IssueReportController;
+use App\Http\Controllers\Api\PushNotificationDeviceTokenController;
 use App\Http\Controllers\Api\QuickVoiceReplyController;
 use App\Http\Controllers\Api\RealtimeSessionController;
 use App\Http\Controllers\Api\TextToSpeechController;
@@ -69,6 +70,8 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/today', [TodaySummaryController::class, 'show']);
         Route::get('/dashboard-changes', [DashboardChangeController::class, 'index']);
         Route::post('/issue-reports', [IssueReportController::class, 'store']);
+        Route::post('/push-notification-tokens', [PushNotificationDeviceTokenController::class, 'store']);
+        Route::delete('/push-notification-tokens', [PushNotificationDeviceTokenController::class, 'destroy']);
         Route::get('/google-calendar/status', [GoogleCalendarController::class, 'status']);
         Route::post('/google-calendar/auth-url', [GoogleCalendarController::class, 'authUrl']);
         Route::post('/google-calendar/sync', [GoogleCalendarController::class, 'sync']);

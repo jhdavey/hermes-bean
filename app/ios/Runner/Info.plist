@@ -43,6 +43,10 @@
 	<string>HeyBean uses WebRTC for realtime conversations. Camera access is only requested if you choose a video-capable conversation feature.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

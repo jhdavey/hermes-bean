@@ -294,6 +294,48 @@ void main() {
     },
   );
 
+  test('registers and unregisters push notification tokens', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        if (request.method == 'POST') {
+          expect(request.path, '/push-notification-tokens');
+          expect(request.body, {
+            'token': 'fcm-token',
+            'platform': 'ios',
+            'device_id': 'device-1',
+            'app_version': '1.0.3',
+          });
+          return HermesApiResponse(
+            201,
+            jsonEncode({
+              'data': {'id': 1, 'token': 'fcm-token'},
+            }),
+          );
+        }
+
+        expect(request.method, 'DELETE');
+        expect(request.path, '/push-notification-tokens');
+        expect(request.body, {'token': 'fcm-token'});
+        return const HermesApiResponse(204, '');
+      },
+    );
+
+    await client.registerPushNotificationToken(
+      token: 'fcm-token',
+      platform: 'ios',
+      deviceId: 'device-1',
+      appVersion: '1.0.3',
+    );
+    await client.unregisterPushNotificationToken('fcm-token');
+
+    expect(requests, hasLength(2));
+  });
+
   test('updates user theme through auth profile update', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(

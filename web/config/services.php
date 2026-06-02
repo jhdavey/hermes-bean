@@ -76,6 +76,12 @@ return [
         'public_key' => $openAiPublicKey,
     ],
 
+    'firebase' => [
+        'project_id' => env('FIREBASE_PROJECT_ID'),
+        'credentials_path' => env('FIREBASE_CREDENTIALS_PATH'),
+        'credentials_json' => env('FIREBASE_CREDENTIALS_JSON'),
+    ],
+
     'beta' => [
         'enabled' => (bool) env('BETA_SIGNUPS_ENABLED', true),
     ],

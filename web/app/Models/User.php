@@ -45,6 +45,11 @@ class User extends Authenticatable
         return $this->hasMany(PersonalAccessToken::class);
     }
 
+    public function pushNotificationDeviceTokens(): HasMany
+    {
+        return $this->hasMany(PushNotificationDeviceToken::class);
+    }
+
     public function issueReports(): HasMany
     {
         return $this->hasMany(IssueReport::class);
