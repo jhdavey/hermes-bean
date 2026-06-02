@@ -5828,7 +5828,7 @@ if (mount) {
         window.clearTimeout(kioskRealtimeDeferredWorkingStatusTimer);
         if (!realtimeBackgroundWorkPending()) return;
         if (!realtimeAssistantOutputActive()) {
-            setKioskVoiceStatus('working', 'working in background');
+            setKioskVoiceStatus('working', 'working...');
             return;
         }
         const wait = Math.max(300, kioskRealtimeSuppressInputUntil - Date.now() + 250);
@@ -5840,7 +5840,7 @@ if (mount) {
                 showRealtimeWorkingInBackgroundWhenReady();
                 return;
             }
-            setKioskVoiceStatus('working', 'working in background');
+            setKioskVoiceStatus('working', 'working...');
         }, wait);
     }
 
@@ -6523,7 +6523,7 @@ if (mount) {
                     removeLatestAssistantMessageIfDuplicate(assistantContent, quickReplyText);
                 }
                 const spoken = finalVoice.text
-                    ? await speakKioskResponse(finalVoice.text, finalVoice.handoff ? {} : { pendingMessage: 'working in background' })
+                    ? await speakKioskResponse(finalVoice.text, finalVoice.handoff ? {} : { pendingMessage: 'working...' })
                     : true;
                 if (!spoken) {
                     if (profileTtsProvider() === 'openai' && kioskLastTtsError) {
