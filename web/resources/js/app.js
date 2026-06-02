@@ -5172,6 +5172,8 @@ if (mount) {
             setKioskVoiceStatus('armed', 'Say hey bean');
             return;
         }
+        window.clearTimeout(kioskConversationTimer);
+        kioskConversationTimer = 0;
         if (isWakeTurn) {
             beginKioskConversation();
         }
@@ -5212,6 +5214,10 @@ if (mount) {
         if (!delta) return;
         if (realtimeUserTranscriptLooksLikeEcho(delta)) return;
         if (realtimeAssistantOutputActive()) return;
+        if (kioskConversationActive || commandAfterWakePhrase(delta) !== null) {
+            window.clearTimeout(kioskConversationTimer);
+            kioskConversationTimer = 0;
+        }
         const key = realtimeTranscriptDraftKey(payload);
         const previous = key ? (kioskRealtimeUserTranscriptDrafts.get(key) || '') : '';
         const draft = mergeRealtimeTranscriptDelta(previous, delta);
@@ -5224,6 +5230,10 @@ if (mount) {
         if (!text) return;
         if (realtimeUserTranscriptLooksLikeEcho(text)) return;
         if (realtimeAssistantOutputActive()) return;
+        if (kioskConversationActive || commandAfterWakePhrase(text) !== null) {
+            window.clearTimeout(kioskConversationTimer);
+            kioskConversationTimer = 0;
+        }
         showRealtimeHeardTranscript(text);
     }
 
@@ -6330,6 +6340,14 @@ if (mount) {
         if (kioskRealtimeBackgroundWorkActive) return;
         kioskConversationTimer = window.setTimeout(() => {
             kioskConversationTimer = 0;
+            logKioskRealtimeVoiceTrace('realtime_voice_conversation_timeout', {
+                summary: 'Realtime follow-up window timed out.',
+                awaiting_followup: kioskRealtimeAwaitingFollowup,
+                background_active: realtimeBackgroundWorkPending(),
+                assistant_output_active: realtimeAssistantOutputActive(),
+                pending_user_present: Boolean(kioskRealtimePendingUser?.content),
+                current_user_turn_present: Boolean(kioskRealtimeCurrentUserTurn?.content),
+            });
             endKioskConversation();
         }, timeoutMs);
     }
