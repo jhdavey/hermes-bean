@@ -3295,6 +3295,10 @@ if (mount) {
             state.modal = null;
             state.notice = 'Saved.';
             render();
+            if (kind === 'event') {
+                refreshCalendarAfterEventSave();
+                return;
+            }
             refreshOnlyInBackground({ skipCalendarSync: true });
         } catch (error) {
             state.error = friendlyError(error, 'save that change');
@@ -7479,6 +7483,20 @@ if (mount) {
             })
             .catch(() => {
                 // Manual refresh surfaces Google sync failures; background import should not interrupt local edits.
+            });
+    }
+
+    function refreshCalendarAfterEventSave() {
+        const generation = ++dashboardRefreshGeneration;
+        api('/calendar-events?skip_google_sync=1')
+            .then((calendar) => {
+                if (generation !== dashboardRefreshGeneration) return;
+                state.calendar = reconcileCalendarRefresh(calendar);
+                saveDashboardCache();
+                renderDashboardDataUpdate();
+            })
+            .catch(() => {
+                // The saved event is already rendered optimistically; manual refresh can surface any later issue.
             });
     }
 
