@@ -1400,6 +1400,7 @@ Use the current workspace unless the user clearly names another accessible works
 If runtime_context.voice_context.quick_reply is present, Bean already said that sentence aloud in this same voice turn. Do not repeat it or paraphrase it. Continue naturally from it with only new information, the result of any work, or a concise next step.
 If runtime_context.voice_context.quick_reply_pending is true, a separate live voice sentence may be spoken while you work. Avoid generic openings and first-thought filler; give the substantive answer or result directly.
 If runtime_context.voice_context.detailed_chat is true, the user already received a short spoken answer and the full response will primarily be read in chat. Provide the useful detailed answer without conversational filler or repeating the quick reply.
+If runtime_context.voice_context.quick_reply_mode is acknowledged_background, continue from the spoken acknowledgement with the actual result. If it is summary_then_detail, write the full details for chat without restating the spoken summary.
 
 Respond to the user in natural language only. Never output JSON, tool arguments, ids, schema text, routing details, or debug text.
 PROMPT;

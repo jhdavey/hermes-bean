@@ -46,7 +46,8 @@ class QuickVoiceReplyTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.text', 'For dinner, I would start with something easy and filling, like tacos or pasta.')
             ->assertJsonPath('data.model', 'gpt-quick-test')
-            ->assertJsonPath('data.continue_agent', false);
+            ->assertJsonPath('data.continue_agent', false)
+            ->assertJsonPath('data.response_contract', 'complete');
 
         Http::assertSent(function ($request): bool {
             $payload = $request->data();
@@ -91,7 +92,8 @@ class QuickVoiceReplyTest extends TestCase
             'content' => 'can you tell me the cheapest flights from MCO to Dublin for tomorrow one way?',
         ])->assertOk()
             ->assertJsonPath('data.text', "I'll check one-way flights from MCO to Dublin for tomorrow.")
-            ->assertJsonPath('data.continue_agent', true);
+            ->assertJsonPath('data.continue_agent', true)
+            ->assertJsonPath('data.response_contract', 'background');
     }
 
     public function test_quick_voice_reply_continues_to_agent_for_current_weather_requests(): void
@@ -116,7 +118,8 @@ class QuickVoiceReplyTest extends TestCase
             'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
         ])->assertOk()
             ->assertJsonPath('data.text', "I'll check the current weather in Orlando.")
-            ->assertJsonPath('data.continue_agent', true);
+            ->assertJsonPath('data.continue_agent', true)
+            ->assertJsonPath('data.response_contract', 'background');
     }
 
     public function test_quick_voice_reply_continues_to_agent_for_generic_live_external_requests(): void
@@ -141,7 +144,8 @@ class QuickVoiceReplyTest extends TestCase
             'content' => 'can you tell me when my local store closes today?',
         ])->assertOk()
             ->assertJsonPath('data.text', "I'll check what I can access for that current outside information.")
-            ->assertJsonPath('data.continue_agent', true);
+            ->assertJsonPath('data.continue_agent', true)
+            ->assertJsonPath('data.response_contract', 'background');
     }
 
     public function test_quick_voice_reply_continues_to_agent_for_app_requests(): void
@@ -166,7 +170,34 @@ class QuickVoiceReplyTest extends TestCase
             'content' => 'what is on my calendar today?',
         ])->assertOk()
             ->assertJsonPath('data.text', "I'll check your calendar for today.")
-            ->assertJsonPath('data.continue_agent', true);
+            ->assertJsonPath('data.continue_agent', true)
+            ->assertJsonPath('data.response_contract', 'background');
+    }
+
+    public function test_quick_voice_reply_continues_to_agent_for_trash_pickup_questions(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-trash',
+                'model' => 'gpt-quick-test',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I will check what trash pickup you are supposed to take out.',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('quick-voice-trash@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
+            'content' => 'when am I supposed to take out the trash?',
+        ])->assertOk()
+            ->assertJsonPath('data.text', "I'll check what trash pickup you are supposed to take out.")
+            ->assertJsonPath('data.continue_agent', true)
+            ->assertJsonPath('data.response_contract', 'background');
     }
 
     public function test_quick_voice_reply_failure_returns_502_for_frontend_skip(): void
@@ -208,7 +239,8 @@ class QuickVoiceReplyTest extends TestCase
             'elapsed_ms' => 5200,
         ])->assertOk()
             ->assertJsonPath('data.text', "I'm narrowing that down now.")
-            ->assertJsonPath('data.continue_agent', true);
+            ->assertJsonPath('data.continue_agent', true)
+            ->assertJsonPath('data.response_contract', 'bridge');
 
         Http::assertSent(function ($request): bool {
             $payload = $request->data();

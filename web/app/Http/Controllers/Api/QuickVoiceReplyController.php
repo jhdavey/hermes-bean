@@ -130,11 +130,16 @@ class QuickVoiceReplyController extends Controller
             ], 502);
         }
 
+        $continueAgent = $stage === 'bridge' || $this->shouldContinueAgent($content);
+
         return response()->json([
             'data' => [
                 'text' => $text,
                 'model' => $model,
-                'continue_agent' => $stage === 'bridge' || $this->shouldContinueAgent($content),
+                'continue_agent' => $continueAgent,
+                'response_contract' => $stage === 'bridge'
+                    ? 'bridge'
+                    : ($continueAgent ? 'background' : 'complete'),
             ],
         ]);
     }
@@ -162,6 +167,11 @@ class QuickVoiceReplyController extends Controller
 
         if (preg_match('/\b(today|tonight|tomorrow|current|currently|latest|now|right now|near me|nearby|local)\b/', $command)
             && preg_match('/\b(open|opens|closed|closes|close|closing|hours|hour|available|availability|price|prices|cost|costs|status|delay|delays)\b/', $command)) {
+            return true;
+        }
+
+        if (preg_match('/\b(trash|garbage|recycling|recycle|pickup|pick up)\b/', $command)
+            && preg_match('/\b(when|what|which|supposed|take out|put out|do i|should i)\b/', $command)) {
             return true;
         }
 

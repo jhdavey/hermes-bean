@@ -3953,6 +3953,7 @@ if (mount) {
                         voice_context: {
                             mode: 'live_voice',
                             ...(options.voiceDetailedChat ? { detailed_chat: true } : {}),
+                            ...(options.voiceQuickReplyMode ? { quick_reply_mode: options.voiceQuickReplyMode } : {}),
                             ...(options.voiceQuickReply
                                 ? { quick_reply: String(options.voiceQuickReply).trim().slice(0, 220) }
                                 : { quick_reply_pending: true }),
@@ -4776,6 +4777,7 @@ if (mount) {
     function appendRealtimeAssistantDelta(payload) {
         const delta = String(payload.delta || '');
         if (!delta) return;
+        clearRealtimeToolFallback();
         const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
         draft.content += delta;
         if (!kioskRealtimeVoiceOnlyAssistant) {
@@ -4787,6 +4789,7 @@ if (mount) {
     function finishRealtimeAssistantTranscript(payload) {
         const text = String(payload.transcript || payload.text || '').trim();
         if (!text) return;
+        clearRealtimeToolFallback();
         const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
         draft.content = text;
         if (!kioskRealtimeVoiceOnlyAssistant) {
@@ -4825,7 +4828,11 @@ if (mount) {
             .filter((item) => item?.type === 'function_call')
             .forEach((item) => processRealtimeFunctionCall(item.name, item.call_id, item.arguments));
         const hasFunctionCall = output.some((item) => item?.type === 'function_call');
-        if (!hasFunctionCall && !kioskRealtimeToolFallbackContent) {
+        const assistantAnswered = String(kioskRealtimeAssistantDraft?.content || '').trim() !== '';
+        if (!hasFunctionCall && assistantAnswered) {
+            clearRealtimeToolFallback();
+            persistRealtimeConversationTurn();
+        } else if (!hasFunctionCall && !kioskRealtimeToolFallbackContent) {
             persistRealtimeConversationTurn();
         } else {
             kioskRealtimePendingUser = null;
@@ -4845,6 +4852,8 @@ if (mount) {
         const callKey = callId || `${name}-${rawArguments}`;
         if (!name || kioskRealtimeProcessedCalls.has(callKey)) return;
         kioskRealtimeProcessedCalls.add(callKey);
+        const quickReplyText = String(kioskRealtimeAssistantDraft?.content || '').trim();
+        const userContent = String(kioskRealtimePendingUser?.content || '').trim();
         let args = {};
         try {
             args = typeof rawArguments === 'string' ? JSON.parse(rawArguments || '{}') : (rawArguments || {});
@@ -4870,7 +4879,7 @@ if (mount) {
             });
             sendRealtimeFunctionOutput(callId, result);
             if (result?.run_id) {
-                watchRealtimeAssistantRun(result.run_id);
+                watchRealtimeAssistantRun(result.run_id, { quickReplyText, userContent });
             }
             await loadChatSessions({ resumeToday: false, shouldRender: false }).catch(() => {});
             scheduleDashboardRealtimeRefresh([{ type: 'realtime_tool_call' }]);
@@ -4905,6 +4914,7 @@ if (mount) {
 
     async function queueRealtimeFallbackWork(content) {
         if (!state.session?.id) return;
+        const quickReplyText = String(kioskRealtimeAssistantDraft?.content || '').trim();
         setKioskVoiceStatus('working', 'working in background');
         try {
             const result = await api('/assistant/realtime/tool-calls', {
@@ -4920,7 +4930,7 @@ if (mount) {
                 },
             });
             if (result?.run_id) {
-                watchRealtimeAssistantRun(result.run_id);
+                watchRealtimeAssistantRun(result.run_id, { quickReplyText, userContent: content });
             }
             await loadChatSessions({ resumeToday: false, shouldRender: false }).catch(() => {});
             scheduleDashboardRealtimeRefresh([{ type: 'realtime_tool_fallback' }]);
@@ -4950,7 +4960,7 @@ if (mount) {
         return true;
     }
 
-    function watchRealtimeAssistantRun(runId, attempt = 0) {
+    function watchRealtimeAssistantRun(runId, context = {}, attempt = 0) {
         const id = Number(runId || 0);
         if (!id || kioskRealtimeRunWatchTimers.has(id)) return;
         const delay = attempt === 0 ? 900 : Math.min(1800 + (attempt * 450), 4500);
@@ -4961,11 +4971,11 @@ if (mount) {
                 const run = await api(`/assistant/runs/${id}`);
                 const status = String(run?.status || '').toLowerCase();
                 if (['queued', 'running'].includes(status) && attempt < 45) {
-                    watchRealtimeAssistantRun(id, attempt + 1);
+                    watchRealtimeAssistantRun(id, context, attempt + 1);
                     return;
                 }
                 if (status === 'completed') {
-                    handleRealtimeAssistantRunCompleted(run);
+                    handleRealtimeAssistantRunCompleted(run, context);
                     return;
                 }
                 if (status === 'failed') {
@@ -4977,13 +4987,13 @@ if (mount) {
                     deliverRealtimeBackgroundResult('That request was cancelled.', id);
                 }
             } catch (_) {
-                if (attempt < 8) watchRealtimeAssistantRun(id, attempt + 1);
+                if (attempt < 8) watchRealtimeAssistantRun(id, context, attempt + 1);
             }
         }, delay);
         kioskRealtimeRunWatchTimers.set(id, timer);
     }
 
-    function handleRealtimeAssistantRunCompleted(run) {
+    function handleRealtimeAssistantRunCompleted(run, context = {}) {
         scheduleDashboardRealtimeRefresh([{ type: 'realtime_run_completed' }]);
         refreshRealtimeDashboardContext('realtime_run_completed').catch(() => {});
         const assistantMessage = run?.assistant_message || run?.assistantMessage || null;
@@ -4992,9 +5002,17 @@ if (mount) {
             deliverRealtimeBackgroundResult('I finished that request.', run?.id);
             return;
         }
+        const finalVoice = finalVoiceForTurn(context.userContent || '', context.quickReplyText || '', content, {});
+        if (finalVoice.suppressFinal) {
+            if (state.kioskVoiceEnabled && kioskRealtimeConnected() && kioskConversationActive) {
+                setKioskVoiceStatus('listening', 'listening');
+                armKioskConversationTimeout();
+            }
+            return;
+        }
         appendPersistedAssistantMessage(assistantMessage);
         if (kioskRealtimeConnected()) {
-            deliverRealtimeBackgroundResult(content, run?.id);
+            deliverRealtimeBackgroundResult(finalVoice.text || content, run?.id);
             return;
         }
     }
@@ -5465,16 +5483,9 @@ if (mount) {
             ? await timeoutPromise(quickReplyTask, 900, null)
             : await quickReplyTask;
         const quickReplyText = quickReply?.text || fallbackKioskQuickReply(content, likelyNeedsAgentWork);
-        let shouldContinueAgent = quickReply ? quickReply.continueAgent !== false : likelyNeedsAgentWork || wantsDetailedChat;
-        if (quickReplyText && wantsDetailedChat) {
-            shouldContinueAgent = true;
-        } else if (quickReplyText && !likelyNeedsAgentWork) {
-            shouldContinueAgent = false;
-        }
+        const turnContract = kioskVoiceTurnContract(quickReply, quickReplyText, likelyNeedsAgentWork, wantsDetailedChat);
+        const shouldContinueAgent = turnContract.shouldContinueAgent;
         const allowLateQuickReply = !quickReplyText && likelyNeedsAgentWork;
-        if (!quickReplyText && !likelyNeedsAgentWork) {
-            shouldContinueAgent = true;
-        }
         let finalResponseReady = false;
         let quickReplySpeech = quickReplyText
             ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments)
@@ -5523,6 +5534,7 @@ if (mount) {
             const response = await sendChatContent(content, {
                 voiceQuickReply: quickReplyText,
                 voiceQuickReplyPending: !quickReplyText,
+                voiceQuickReplyMode: turnContract.quickReplyMode,
                 voiceDetailedChat: wantsDetailedChat,
                 onAgentResult: () => {
                     finalResponseReady = true;
@@ -5544,6 +5556,9 @@ if (mount) {
                 const finalVoice = finalVoiceForTurn(content, quickReplyText, assistantContent, {
                     wantsDetailedChat,
                 });
+                if (finalVoice.suppressFinal) {
+                    removeLatestAssistantMessageIfDuplicate(assistantContent, quickReplyText);
+                }
                 const spoken = finalVoice.text
                     ? await speakKioskResponse(finalVoice.text, finalVoice.handoff ? {} : { pendingMessage: 'working in background' })
                     : true;
@@ -5601,6 +5616,24 @@ if (mount) {
         }
         if (state.phase === 'signedIn') render();
         scrollChatToBottom();
+    }
+
+    function kioskVoiceTurnContract(quickReply, quickReplyText, likelyNeedsAgentWork, wantsDetailedChat) {
+        const explicitContract = String(quickReply?.responseContract || '').toLowerCase();
+        const hasQuickReply = String(quickReplyText || '').trim() !== '';
+        if (wantsDetailedChat) {
+            return { shouldContinueAgent: true, quickReplyMode: hasQuickReply ? 'summary_then_detail' : 'pending_detail' };
+        }
+        if (explicitContract === 'complete' || (hasQuickReply && quickReply?.continueAgent === false && !likelyNeedsAgentWork)) {
+            return { shouldContinueAgent: false, quickReplyMode: 'complete' };
+        }
+        if (likelyNeedsAgentWork || explicitContract === 'background') {
+            return { shouldContinueAgent: true, quickReplyMode: hasQuickReply ? 'acknowledged_background' : 'pending_background' };
+        }
+        if (hasQuickReply) {
+            return { shouldContinueAgent: false, quickReplyMode: 'complete' };
+        }
+        return { shouldContinueAgent: true, quickReplyMode: 'direct_answer' };
     }
 
     function runKioskBridgeReplies(content, generation, spokenSegments, startedAt, finalReady, voiceTurn) {
@@ -5743,6 +5776,7 @@ if (mount) {
             return {
                 text,
                 continueAgent: response?.continue_agent !== false && response?.continueAgent !== false,
+                responseContract: String(response?.response_contract || response?.responseContract || '').trim(),
             };
         } catch (_) {
             return null;
@@ -5845,15 +5879,19 @@ if (mount) {
 
     function finalVoiceForTurn(userContent, quickReplyText, assistantContent, options = {}) {
         const text = speechTextFromAssistant(assistantContent);
-        if (!text) return { text: '', handoff: false };
-        if (!quickReplyText) return { text, handoff: false };
-        if (options.wantsDetailedChat || finalResponseIsDetailed(assistantContent, text)) {
-            return { text: finalDetailNotice(userContent), handoff: true };
-        }
+        if (!text) return { text: '', handoff: false, suppressFinal: false };
+        if (!quickReplyText) return { text, handoff: false, suppressFinal: false };
         if (quickReplyCoversFinal(quickReplyText, text)) {
-            return { text: '', handoff: false };
+            return { text: '', handoff: false, suppressFinal: true };
         }
-        return { text, handoff: false };
+        const continuation = finalContinuationAfterQuickReply(quickReplyText, text);
+        if (!continuation) {
+            return { text: '', handoff: false, suppressFinal: true };
+        }
+        if (options.wantsDetailedChat || finalResponseIsDetailed(assistantContent, text)) {
+            return { text: finalDetailNotice(userContent), handoff: true, suppressFinal: false };
+        }
+        return { text: continuation, handoff: false, suppressFinal: false };
     }
 
     function finalResponseIsDetailed(rawContent, spokenText) {
@@ -5881,7 +5919,53 @@ if (mount) {
     function quickReplyCoversFinal(quickReplyText, finalText) {
         const quick = normalizeComparableSpeech(quickReplyText);
         const final = normalizeComparableSpeech(finalText);
-        return quick.length >= 40 && (final.startsWith(quick.slice(0, 80)) || quickSimilarity(quick, final) > 0.72);
+        if (!quick || !final) return false;
+        if (final.startsWith(quick.slice(0, Math.min(quick.length, 100)))) return true;
+        if (quick.length >= 24 && final.length <= quick.length + 160 && quickSimilarity(quick, final) > 0.62) return true;
+        return quick.length >= 40 && quickSimilarity(quick, final) > 0.72;
+    }
+
+    function finalContinuationAfterQuickReply(quickReplyText, finalText) {
+        const quick = normalizeComparableSpeech(quickReplyText);
+        const final = normalizeComparableSpeech(finalText);
+        if (!quick || !final) return String(finalText || '').trim();
+        if (final.startsWith(quick)) {
+            return String(finalText || '').trim().slice(String(quickReplyText || '').trim().length).replace(/^[\s,.;:-]+/, '').trim();
+        }
+
+        const sentences = String(finalText || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
+        const kept = [];
+        let droppingLead = true;
+        sentences.forEach((sentence) => {
+            const normalizedSentence = normalizeComparableSpeech(sentence);
+            const repeatsQuick = normalizedSentence
+                && (quick.includes(normalizedSentence) || quickSimilarity(quick, normalizedSentence) > 0.68);
+            if (droppingLead && repeatsQuick) return;
+            droppingLead = false;
+            kept.push(sentence.trim());
+        });
+        const continuation = kept.join(' ').trim();
+        if (!continuation) return '';
+        const continuationNormalized = normalizeComparableSpeech(continuation);
+        if (continuationNormalized && quickSimilarity(quick, continuationNormalized) > 0.82) return '';
+        return continuation;
+    }
+
+    function removeLatestAssistantMessageIfDuplicate(assistantContent, quickReplyText) {
+        if (!quickReplyCoversFinal(quickReplyText, speechTextFromAssistant(assistantContent))) return false;
+        const index = [...state.messages].reverse().findIndex((message) => {
+            return message?.role === 'assistant'
+                && normalizeComparableSpeech(message.content) === normalizeComparableSpeech(assistantContent);
+        });
+        if (index < 0) return false;
+        const actualIndex = state.messages.length - 1 - index;
+        state.messages.splice(actualIndex, 1);
+        render();
+        scrollChatToBottom();
+        return true;
     }
 
     function normalizeComparableSpeech(value) {
