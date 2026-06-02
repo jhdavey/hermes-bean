@@ -155,6 +155,7 @@ if (mount) {
     let kioskRealtimeToolFallbackContent = '';
     let kioskRealtimeReconnectTimer = 0;
     let kioskRealtimeReconnectAttempts = 0;
+    let kioskRealtimeSuppressInputUntil = 0;
     const kioskRealtimeMaxReconnectAttempts = 5;
     const kioskRealtimeConnectTimeoutMs = 15000;
     const kioskRealtimeTransientDisconnectMs = 12000;
@@ -3891,6 +3892,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeSuppressInputUntil = 0;
         kioskRealtimeUserTranscriptDrafts.clear();
         window.clearTimeout(kioskRealtimeResponseTimer);
         kioskRealtimeResponseTimer = 0;
@@ -4614,12 +4616,14 @@ if (mount) {
         }
         const type = payload?.type || '';
         if (type === 'input_audio_buffer.speech_started') {
+            if (realtimeAssistantOutputActive()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('listening', 'listening');
             }
             return;
         }
         if (type === 'input_audio_buffer.speech_stopped') {
+            if (realtimeAssistantOutputActive()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('working', 'thinking');
             }
@@ -4638,6 +4642,7 @@ if (mount) {
             return;
         }
         if (type === 'response.created') {
+            markRealtimeAssistantOutputActive(5000);
             setKioskVoiceStatus('responding', "Bean's voice");
             return;
         }
@@ -4654,6 +4659,7 @@ if (mount) {
             return;
         }
         if (type === 'response.done') {
+            markRealtimeAssistantOutputActive(1200);
             processRealtimeResponseDone(payload);
             return;
         }
@@ -4678,6 +4684,14 @@ if (mount) {
         return { phase: 'error', text: text || 'voice error' };
     }
 
+    function markRealtimeAssistantOutputActive(durationMs = 3500) {
+        kioskRealtimeSuppressInputUntil = Math.max(kioskRealtimeSuppressInputUntil, Date.now() + durationMs);
+    }
+
+    function realtimeAssistantOutputActive() {
+        return state.kioskVoicePhase === 'responding' || Date.now() < kioskRealtimeSuppressInputUntil;
+    }
+
     function handleRealtimeUserTranscript(payload) {
         const raw = String(payload.transcript || '').trim();
         if (!raw) return;
@@ -4689,12 +4703,15 @@ if (mount) {
         }
         const command = commandAfterWakePhrase(raw);
         const isWakeTurn = command !== null;
-        if (!isWakeTurn && !kioskConversationActive) {
-            setKioskVoiceStatus('armed', 'Bean voice ready');
-            return;
-        }
         if (conversationEndRequested(raw) || (isWakeTurn && voiceCancelRequested(command))) {
             cancelBeanTurn();
+            return;
+        }
+        if (realtimeAssistantOutputActive()) {
+            return;
+        }
+        if (!isWakeTurn && !kioskConversationActive) {
+            setKioskVoiceStatus('armed', 'Bean voice ready');
             return;
         }
         if (isWakeTurn) {
@@ -4733,6 +4750,7 @@ if (mount) {
     function handleRealtimeUserTranscriptDelta(payload) {
         const delta = String(payload.delta || '').trim();
         if (!delta) return;
+        if (realtimeAssistantOutputActive()) return;
         const key = realtimeTranscriptDraftKey(payload);
         const previous = key ? (kioskRealtimeUserTranscriptDrafts.get(key) || '') : '';
         const draft = mergeRealtimeTranscriptDelta(previous, delta);
@@ -4743,6 +4761,7 @@ if (mount) {
     function handleRealtimeUserTranscriptSegment(payload) {
         const text = String(payload.text || '').trim();
         if (!text) return;
+        if (realtimeAssistantOutputActive()) return;
         showRealtimeHeardTranscript(text);
     }
 
@@ -4813,6 +4832,7 @@ if (mount) {
         const delta = String(payload.delta || '');
         if (!delta) return;
         clearRealtimeToolFallback();
+        markRealtimeAssistantOutputActive(4500);
         const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
         draft.content += delta;
         if (!kioskRealtimeVoiceOnlyAssistant) {
@@ -4825,6 +4845,7 @@ if (mount) {
         const text = String(payload.transcript || payload.text || '').trim();
         if (!text) return;
         clearRealtimeToolFallback();
+        markRealtimeAssistantOutputActive(2500);
         const draft = ensureRealtimeAssistantDraft(payload.response_id || payload.item_id);
         draft.content = text;
         if (!kioskRealtimeVoiceOnlyAssistant) {
