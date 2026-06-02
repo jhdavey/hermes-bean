@@ -4420,7 +4420,23 @@ if (mount) {
     }
 
     function kioskRealtimeConnected() {
-        return Boolean(kioskRealtime?.connected && kioskRealtime?.peerConnection);
+        const realtime = kioskRealtime;
+        if (!realtime?.connected || !realtime.peerConnection || realtime.dataChannel?.readyState !== 'open') return false;
+        const connectionState = realtime.peerConnection.connectionState || '';
+        const iceConnectionState = realtime.peerConnection.iceConnectionState || '';
+        return !['failed', 'closed', 'disconnected'].includes(connectionState)
+            && !['failed', 'closed', 'disconnected'].includes(iceConnectionState);
+    }
+
+    function recoverKioskRealtimeAfterSendFailure(reason = 'response_create_failed') {
+        reportKioskRealtimeIssue(reason, {
+            data_channel_state: kioskRealtime?.dataChannel?.readyState || '',
+            connection_state: kioskRealtime?.peerConnection?.connectionState || '',
+            ice_connection_state: kioskRealtime?.peerConnection?.iceConnectionState || '',
+        });
+        stopKioskRealtimeVoiceMode({ preserveStatus: true, preserveReconnect: true });
+        setKioskVoiceStatus('working', 'Bean is waking up');
+        scheduleKioskRealtimeReconnect(reason, {}, 250);
     }
 
     function reportKioskRealtimeIssue(type, details = {}) {
@@ -5079,6 +5095,12 @@ if (mount) {
     }
 
     function setRealtimeReadyStatusIfIdle() {
+        if (!kioskRealtimeConnected()) {
+            if (state.kioskVoiceEnabled && !kioskRealtimeStarting) {
+                setKioskVoiceStatus('working', 'Bean is waking up');
+            }
+            return;
+        }
         if (
             realtimeAssistantRecentlyOutput()
             || kioskRealtimeBackgroundWorkActive
@@ -5261,7 +5283,9 @@ if (mount) {
             if (!content) return;
             armRealtimeToolFallback(content);
             setKioskVoiceStatus('working', 'thinking');
-            sendRealtimeResponseCreate();
+            if (!sendRealtimeResponseCreate()) {
+                recoverKioskRealtimeAfterSendFailure('response_create_unavailable');
+            }
         }, kioskRealtimeTurnDebounceMs);
     }
 
@@ -5761,9 +5785,17 @@ if (mount) {
 
     function sendRealtimeResponseCreate(options = {}) {
         const dataChannel = kioskRealtime?.dataChannel;
-        if (dataChannel?.readyState !== 'open') return false;
-        dataChannel.send(JSON.stringify({ type: 'response.create', ...options }));
-        return true;
+        if (!kioskRealtimeConnected() || dataChannel?.readyState !== 'open') return false;
+        try {
+            dataChannel.send(JSON.stringify({ type: 'response.create', ...options }));
+            return true;
+        } catch (error) {
+            reportKioskRealtimeIssue('response_create_send_failed', {
+                message: error?.message || '',
+                data_channel_state: dataChannel?.readyState || '',
+            });
+            return false;
+        }
     }
 
     function showRealtimeWorkingInBackgroundWhenReady() {
