@@ -203,16 +203,17 @@
 
 .hb-header-pill {
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 700;
+    font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
-    text-shadow: .35px 0 0 currentColor;
+    text-shadow: .55px 0 0 currentColor;
 }
 
 .hb-header-pill span {
     font-size: inherit;
     font-weight: inherit;
     line-height: inherit;
+    text-shadow: inherit;
 }
 
 .hb-header-pill svg {
@@ -1456,10 +1457,10 @@
     color: var(--hb-text);
     padding: 7px 12px;
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 700;
+    font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
-    text-shadow: .35px 0 0 currentColor;
+    text-shadow: .55px 0 0 currentColor;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
