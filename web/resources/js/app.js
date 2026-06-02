@@ -164,6 +164,7 @@ if (mount) {
     let kioskRealtimeStarting = false;
     let kioskRealtimeUnavailable = false;
     let kioskRealtimePendingUser = null;
+    let kioskRealtimeCurrentUserTurn = null;
     let kioskRealtimeAssistantDraft = null;
     let kioskRealtimeSuppressNextAssistantPersist = false;
     let kioskRealtimeVoiceOnlyAssistant = false;
@@ -4038,6 +4039,7 @@ if (mount) {
         kioskConversationActive = false;
         kioskCommandText = '';
         kioskRealtimePendingUser = null;
+        kioskRealtimeCurrentUserTurn = null;
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
@@ -4788,6 +4790,7 @@ if (mount) {
             kioskRealtimeReconnectAttempts = 0;
         }
         kioskRealtimePendingUser = null;
+        kioskRealtimeCurrentUserTurn = null;
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
@@ -5194,6 +5197,7 @@ if (mount) {
                 persisted: false,
             };
         }
+        kioskRealtimeCurrentUserTurn = { ...kioskRealtimePendingUser };
         upsertRealtimeLocalMessage({
             id: `rt-user-${kioskRealtimePendingUser.itemId}`,
             role: 'user',
@@ -5388,17 +5392,25 @@ if (mount) {
         kioskRealtimePendingFunctionCalls = [];
         const hasFunctionCall = functionCalls.length > 0;
         const assistantAnswered = responseAssistantText !== '';
-        const pendingUserContent = String(kioskRealtimePendingUser?.content || '').trim();
+        const activeUserTurn = kioskRealtimePendingUser || kioskRealtimeCurrentUserTurn;
+        const pendingUserContent = String(activeUserTurn?.content || '').trim();
         const functionCallsAreBackgroundQueueOnly = functionCalls.length > 0
             && functionCalls.every((item) => item?.name === 'queue_bean_work');
         const backgroundQueueAllowed = realtimeSpokenAnswerAllowsBackgroundQueue(
             pendingUserContent,
             responseAssistantText,
         );
+        const reactivatedConversation = assistantAnswered && pendingUserContent && !kioskConversationActive;
+        if (reactivatedConversation) {
+            kioskConversationActive = true;
+        }
         logKioskRealtimeVoiceTrace('realtime_voice_response_done', {
             summary: 'Realtime response completed.',
             response_id: payload?.response?.id || payload?.response_id || null,
             user_content: pendingUserContent,
+            pending_user_present: Boolean(kioskRealtimePendingUser?.content),
+            current_user_turn_present: Boolean(kioskRealtimeCurrentUserTurn?.content),
+            reactivated_conversation: reactivatedConversation,
             assistant_text: responseAssistantText,
             assistant_answered: assistantAnswered,
             function_calls: functionCalls.map((item) => ({
@@ -5475,7 +5487,7 @@ if (mount) {
                 }, { createResponse: false });
             });
             persistRealtimeConversationTurn();
-            kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(kioskRealtimeAssistantDraft?.content || '');
+            kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(responseAssistantText);
             finishRealtimeTurnStatus();
             return;
         }
@@ -5487,21 +5499,24 @@ if (mount) {
             }));
             if (!preservePendingUserForDeferredQueue) {
                 kioskRealtimePendingUser = null;
+                kioskRealtimeCurrentUserTurn = null;
             }
             return;
         }
         if (!hasFunctionCall && assistantAnswered) {
             clearRealtimeToolFallback();
             persistRealtimeConversationTurn();
-            kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(kioskRealtimeAssistantDraft?.content || '');
+            kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(responseAssistantText);
         } else if (!assistantAnswered && !kioskRealtimeToolFallbackContent && voiceCommandNeedsAgentWork(pendingUserContent)) {
             kioskRealtimePendingUser = null;
+            kioskRealtimeCurrentUserTurn = null;
             queueRealtimeFallbackWork(pendingUserContent);
             return;
         } else if (!kioskRealtimeToolFallbackContent) {
             persistRealtimeConversationTurn();
         } else {
             kioskRealtimePendingUser = null;
+            kioskRealtimeCurrentUserTurn = null;
         }
         finishRealtimeTurnStatus();
     }
@@ -5684,6 +5699,7 @@ if (mount) {
             });
             if (result?.run_id) {
                 kioskRealtimePendingUser = null;
+                kioskRealtimeCurrentUserTurn = null;
                 watchRealtimeAssistantRun(result.run_id, { quickReplyText, userContent });
             } else if (name === 'queue_bean_work') {
                 setRealtimeBackgroundWorkActive(false);
@@ -5987,10 +6003,11 @@ if (mount) {
 
     async function persistRealtimeConversationTurn() {
         const sessionId = kioskRealtime?.sessionId || state.session?.id;
-        const userTurn = kioskRealtimePendingUser;
+        const userTurn = kioskRealtimePendingUser || kioskRealtimeCurrentUserTurn;
         const assistantTurn = kioskRealtimeAssistantDraft;
         const suppressAssistantPersist = kioskRealtimeSuppressNextAssistantPersist;
         kioskRealtimePendingUser = null;
+        kioskRealtimeCurrentUserTurn = null;
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
@@ -6331,6 +6348,7 @@ if (mount) {
         clearRealtimeToolFallback();
         kioskConversationActive = false;
         kioskRealtimePendingUser = null;
+        kioskRealtimeCurrentUserTurn = null;
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
