@@ -4575,8 +4575,21 @@ if (mount) {
             return;
         }
         if (type === 'error') {
-            setKioskVoiceStatus('error', payload?.error?.message || 'voice error');
+            const message = beanRealtimeUserStatusMessage(payload?.error?.message || 'voice error');
+            setKioskVoiceStatus(message.phase, message.text);
         }
+    }
+
+    function beanRealtimeUserStatusMessage(message) {
+        const text = String(message || '').trim();
+        if (/session\.type|missing required parameter|invalid_request_error/i.test(text)) {
+            reportKioskRealtimeIssue('realtime_protocol_error', { message: text });
+            return state.kioskVoiceEnabled
+                ? { phase: 'working', text: 'Reconnecting' }
+                : { phase: 'error', text: 'Voice unavailable' };
+        }
+
+        return { phase: 'error', text: text || 'voice error' };
     }
 
     function handleRealtimeUserTranscript(payload) {

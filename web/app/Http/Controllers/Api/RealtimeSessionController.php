@@ -184,10 +184,12 @@ class RealtimeSessionController extends Controller
                 [
                     'name' => 'sdp',
                     'contents' => $sdp,
+                    'headers' => ['Content-Type' => 'application/sdp'],
                 ],
                 [
                     'name' => 'session',
                     'contents' => (string) $sessionJson,
+                    'headers' => ['Content-Type' => 'application/json'],
                 ],
             ]);
 
@@ -207,6 +209,7 @@ class RealtimeSessionController extends Controller
                 'key_source' => 'OPENAI_PUBLIC_KEY',
                 'sdp_length' => strlen($sdp),
                 'session_length' => strlen((string) $sessionJson),
+                'session_type' => $sessionConfig['type'] ?? null,
                 'status' => $upstreamStatus,
                 'body' => str($response->body())->limit(500)->toString(),
             ]);
