@@ -3256,10 +3256,12 @@ if (mount) {
     }
 
     function resizeChatInput(textarea) {
-        const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight) || 20;
-        const maxHeight = Math.ceil((lineHeight * 4) + 22);
+        const styles = getComputedStyle(textarea);
+        const minHeight = Number.parseFloat(styles.minHeight) || 44;
+        const maxHeight = Number.parseFloat(styles.maxHeight) || Math.ceil(((Number.parseFloat(styles.lineHeight) || 20) * 2) + 28);
         textarea.style.height = 'auto';
-        textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+        textarea.style.maxHeight = `${maxHeight}px`;
+        textarea.style.height = `${Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight))}px`;
         textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
     }
 

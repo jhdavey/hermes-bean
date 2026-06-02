@@ -2378,6 +2378,7 @@
 }
 
 .hb-chat-dock {
+    --hb-chat-input-max-height: 68px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 8px;
@@ -2450,7 +2451,8 @@
 
 .hb-chat-dock textarea {
     min-height: 44px;
-    max-height: 102px;
+    max-height: var(--hb-chat-input-max-height);
+    box-sizing: border-box;
     border: 0;
     background: transparent;
     padding: 11px 8px;
@@ -2501,6 +2503,7 @@
 }
 
 .hb-desktop-chat-expanded .hb-chat-dock {
+    --hb-chat-input-max-height: 120px;
     border-color: var(--hb-border-strong);
 }
 
