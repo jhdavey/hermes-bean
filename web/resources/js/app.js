@@ -157,6 +157,8 @@ if (mount) {
     let kioskRealtimeReconnectAttempts = 0;
     const kioskRealtimeMaxReconnectAttempts = 5;
     const kioskRealtimeConnectTimeoutMs = 15000;
+    const kioskRealtimeTransientDisconnectMs = 12000;
+    const kioskRealtimeTransientStatusMs = 2500;
     const kioskRealtimeTurnDebounceMs = 1200;
     const kioskRealtimeProcessedCalls = new Set();
     const kioskRealtimeRunWatchTimers = new Map();
@@ -4363,23 +4365,41 @@ if (mount) {
                 stream,
                 remoteAudio,
                 disconnectTimer: 0,
+                disconnectStatusTimer: 0,
                 connected: false,
                 sessionId: state.session?.id || null,
             };
             const reconnectFromFailure = (type, details = {}) => {
                 if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled) return;
                 window.clearTimeout(realtimeState.disconnectTimer);
+                window.clearTimeout(realtimeState.disconnectStatusTimer);
                 realtimeState.disconnectTimer = 0;
+                realtimeState.disconnectStatusTimer = 0;
                 reportKioskRealtimeIssue(type, details);
                 stopKioskRealtimeVoiceMode({ preserveStatus: true, preserveReconnect: true });
                 scheduleKioskRealtimeReconnect(type, details);
             };
             const waitForTransientDisconnect = (type, details = {}) => {
                 if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled || realtimeState.disconnectTimer) return;
-                setKioskVoiceStatus('working', 'Reconnecting');
                 reportKioskRealtimeIssue(`${type}_transient`, details);
+                window.clearTimeout(realtimeState.disconnectStatusTimer);
+                realtimeState.disconnectStatusTimer = window.setTimeout(() => {
+                    realtimeState.disconnectStatusTimer = 0;
+                    if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled) return;
+                    const connectionState = peerConnection.connectionState || '';
+                    const iceConnectionState = peerConnection.iceConnectionState || '';
+                    if (
+                        ['disconnected', 'failed', 'closed'].includes(connectionState)
+                        || ['disconnected', 'failed', 'closed'].includes(iceConnectionState)
+                        || dataChannel.readyState !== 'open'
+                    ) {
+                        setKioskVoiceStatus('working', 'Checking Bean voice');
+                    }
+                }, kioskRealtimeTransientStatusMs);
                 realtimeState.disconnectTimer = window.setTimeout(() => {
                     realtimeState.disconnectTimer = 0;
+                    window.clearTimeout(realtimeState.disconnectStatusTimer);
+                    realtimeState.disconnectStatusTimer = 0;
                     if (kioskRealtime !== realtimeState || !state.kioskVoiceEnabled) return;
                     const connectionState = peerConnection.connectionState || '';
                     const iceConnectionState = peerConnection.iceConnectionState || '';
@@ -4397,7 +4417,7 @@ if (mount) {
                         return;
                     }
                     setKioskVoiceStatus('armed', 'Bean voice ready');
-                }, 5000);
+                }, kioskRealtimeTransientDisconnectMs);
             };
             peerConnection.onconnectionstatechange = () => {
                 const connectionState = peerConnection.connectionState || '';
@@ -4411,7 +4431,9 @@ if (mount) {
                 }
                 if (connectionState === 'connected') {
                     window.clearTimeout(realtimeState.disconnectTimer);
+                    window.clearTimeout(realtimeState.disconnectStatusTimer);
                     realtimeState.disconnectTimer = 0;
+                    realtimeState.disconnectStatusTimer = 0;
                     setKioskVoiceStatus('armed', 'Bean voice ready');
                 }
             };
@@ -4427,7 +4449,9 @@ if (mount) {
                 }
                 if (['connected', 'completed'].includes(iceConnectionState)) {
                     window.clearTimeout(realtimeState.disconnectTimer);
+                    window.clearTimeout(realtimeState.disconnectStatusTimer);
                     realtimeState.disconnectTimer = 0;
+                    realtimeState.disconnectStatusTimer = 0;
                     setKioskVoiceStatus('armed', 'Bean voice ready');
                 }
             };
@@ -4438,14 +4462,20 @@ if (mount) {
                 kioskRealtimeReconnectAttempts = 0;
                 clearKioskRealtimeReconnect();
                 setKioskVoiceStatus('armed', 'Bean voice ready');
-                refreshRealtimeDashboardContext('realtime_connected').catch(() => {});
                 render();
             };
             dataChannel.onmessage = (event) => handleKioskRealtimeEvent(event);
-            dataChannel.onerror = (event) => reconnectFromFailure('data_channel_error', {
-                ready_state: dataChannel.readyState,
-                message: event?.message || '',
-            });
+            dataChannel.onerror = (event) => {
+                const details = {
+                    ready_state: dataChannel.readyState,
+                    message: event?.message || '',
+                };
+                if (dataChannel.readyState === 'open') {
+                    waitForTransientDisconnect('data_channel_error', details);
+                    return;
+                }
+                reconnectFromFailure('data_channel_error', details);
+            };
             dataChannel.onclose = (event) => reconnectFromFailure('data_channel_close', {
                 ready_state: dataChannel.readyState,
                 code: event?.code || null,
@@ -4556,6 +4586,8 @@ if (mount) {
         kioskRealtimeProcessedCalls.clear();
         kioskRealtimeRunWatchTimers.forEach((timer) => window.clearTimeout(timer));
         kioskRealtimeRunWatchTimers.clear();
+        window.clearTimeout(realtime?.disconnectTimer || 0);
+        window.clearTimeout(realtime?.disconnectStatusTimer || 0);
         if (realtime?.dataChannel?.readyState === 'open') {
             try { realtime.dataChannel.close(); } catch (_) {}
         }
