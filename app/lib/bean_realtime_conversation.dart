@@ -136,6 +136,7 @@ class BeanRealtimeConversation {
           _dataChannelOpen?.complete();
         }
         onStatus?.call(microphoneEnabled ? 'Bean voice ready' : 'Ready');
+        unawaited(refreshDashboardContext());
       }
       if (state == RTCDataChannelState.RTCDataChannelClosed) {
         unawaited(
@@ -222,6 +223,39 @@ class BeanRealtimeConversation {
     _toolFallbackContent = '';
     if (endConversation) _conversationActive = false;
     onStatus?.call(endConversation ? 'Bean voice ready' : 'Interrupted');
+  }
+
+  Future<bool> refreshDashboardContext() async {
+    final sessionId = _session?.session.id;
+    final channel = _dataChannel;
+    if (sessionId == null ||
+        channel?.state != RTCDataChannelState.RTCDataChannelOpen) {
+      return false;
+    }
+
+    try {
+      final context = await apiClient.realtimeDashboardContext(
+        sessionId: sessionId,
+      );
+      final instructions = context['instructions']?.toString().trim() ?? '';
+      if (instructions.isEmpty) return false;
+      channel!.send(
+        RTCDataChannelMessage(
+          jsonEncode({
+            'type': 'session.update',
+            'session': {'instructions': instructions},
+          }),
+        ),
+      );
+      return true;
+    } catch (error) {
+      unawaited(
+        _logClientEvent('dashboard_context_refresh_failure', {
+          'message': error.toString(),
+        }),
+      );
+      return false;
+    }
   }
 
   Future<void> stop() async {
@@ -573,6 +607,7 @@ class BeanRealtimeConversation {
       if (run.status == 'completed') {
         final content = run.assistantMessage?.content?.trim() ?? '';
         if (content.isEmpty) return;
+        unawaited(refreshDashboardContext());
         _deliverBackgroundResult(content);
       }
     } catch (_) {

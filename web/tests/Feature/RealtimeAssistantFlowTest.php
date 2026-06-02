@@ -4,7 +4,12 @@ namespace Tests\Feature;
 
 use App\Jobs\ProcessAssistantRun;
 use App\Models\AssistantRun;
+use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
+use App\Models\Reminder;
+use App\Models\Task;
+use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -35,6 +40,23 @@ class RealtimeAssistantFlowTest extends TestCase
         ]);
 
         $token = $this->apiToken('realtime-session@example.com');
+        $user = User::where('email', 'realtime-session@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'title' => 'Take out trash',
+            'type' => 'chore',
+            'status' => 'pending',
+            'due_at' => now()->setTime(19, 0),
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'title' => 'Dentist',
+            'starts_at' => now()->setTime(14, 0),
+            'ends_at' => now()->setTime(15, 0),
+        ]);
 
         $this->withToken($token)->postJson('/api/ai/realtime/session', [
             'title' => 'Realtime test',
@@ -68,7 +90,9 @@ class RealtimeAssistantFlowTest extends TestCase
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Only respond when the user is clearly talking to Bean')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Yes, I can hear you.')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'current time/date questions')
-            && str_contains((string) data_get($request->data(), 'session.instructions'), 'read current app data')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Dashboard context snapshot')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Take out trash')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Dentist')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'timezone_offset'));
     }
 
@@ -235,6 +259,39 @@ class RealtimeAssistantFlowTest extends TestCase
             ],
         ])->assertOk()
             ->assertJsonPath('data.ok', true);
+    }
+
+    public function test_realtime_dashboard_context_endpoint_returns_snapshot_and_full_instructions(): void
+    {
+        $token = $this->apiToken('realtime-context@example.com');
+        $user = User::where('email', 'realtime-context@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+            'metadata' => [
+                'client_context' => ['timezone_offset' => '-04:00'],
+            ],
+        ])->assertCreated()->json('data.id');
+
+        Reminder::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'title' => 'Call insurance',
+            'remind_at' => now()->addHour(),
+            'status' => 'pending',
+        ]);
+
+        $this->withToken($token)->getJson("/api/assistant/realtime/dashboard-context?session_id={$sessionId}")
+            ->assertOk()
+            ->assertJsonPath('data.snapshot.workspace.id', $workspace->id)
+            ->assertJsonPath('data.snapshot.reminders_due.0.title', 'Call insurance')
+            ->assertJsonPath('data.snapshot.counts.reminders_next_7_days', 1)
+            ->assertJsonPath('data.snapshot.timezone', config('app.timezone'))
+            ->assertJson(fn ($json) => $json
+                ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'Dashboard context snapshot'))
+                ->where('data.instructions', fn (string $value): bool => str_contains($value, 'Call insurance') && str_contains($value, 'Only respond when the user is clearly talking to Bean'))
+                ->etc()
+            );
     }
 
     public function test_realtime_tool_call_queues_background_laravel_agent_run(): void

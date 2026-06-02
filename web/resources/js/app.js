@@ -4233,6 +4233,7 @@ if (mount) {
                 kioskRealtimeReconnectAttempts = 0;
                 clearKioskRealtimeReconnect();
                 setKioskVoiceStatus('armed', 'Bean voice ready');
+                refreshRealtimeDashboardContext('realtime_connected').catch(() => {});
                 render();
             };
             dataChannel.onmessage = (event) => handleKioskRealtimeEvent(event);
@@ -4760,6 +4761,7 @@ if (mount) {
 
     function handleRealtimeAssistantRunCompleted(run) {
         scheduleDashboardRealtimeRefresh([{ type: 'realtime_run_completed' }]);
+        refreshRealtimeDashboardContext('realtime_run_completed').catch(() => {});
         const assistantMessage = run?.assistant_message || run?.assistantMessage || null;
         const content = String(assistantMessage?.content || '').trim();
         if (!content) {
@@ -4810,6 +4812,20 @@ if (mount) {
             },
         }));
         sendRealtimeResponseCreate();
+    }
+
+    async function refreshRealtimeDashboardContext(reason = 'dashboard_context_refresh') {
+        const dataChannel = kioskRealtime?.dataChannel;
+        const sessionId = kioskRealtime?.sessionId || state.session?.id;
+        if (!sessionId || dataChannel?.readyState !== 'open') return false;
+        const context = await api(`/assistant/realtime/dashboard-context?session_id=${encodeURIComponent(sessionId)}`);
+        const instructions = String(context?.instructions || '').trim();
+        if (!instructions) return false;
+        dataChannel.send(JSON.stringify({
+            type: 'session.update',
+            session: { instructions },
+        }));
+        return true;
     }
 
     async function persistRealtimeConversationTurn() {

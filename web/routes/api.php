@@ -58,6 +58,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/assistant/realtime/tool-calls', [RealtimeSessionController::class, 'toolCall']);
         Route::post('/assistant/realtime/messages', [RealtimeSessionController::class, 'message']);
         Route::post('/assistant/realtime/client-events', [RealtimeSessionController::class, 'clientEvent']);
+        Route::get('/assistant/realtime/dashboard-context', [RealtimeSessionController::class, 'dashboardContext']);
         Route::post('/ai/realtime/session', [RealtimeSessionController::class, 'store']);
         Route::post('/assistant/voice/quick-reply', [QuickVoiceReplyController::class, 'store']);
         Route::post('/assistant/tts', [TextToSpeechController::class, 'store']);

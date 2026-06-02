@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\User;
 use App\Services\AdminSettingsService;
 use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
+use App\Services\DashboardContextSnapshotService;
 use App\Services\HermesRuntimeService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
@@ -33,6 +35,7 @@ class RealtimeSessionController extends Controller
         private readonly WorkspaceService $workspaces,
         private readonly AgentProfileService $profiles,
         private readonly AdminSettingsService $adminSettings,
+        private readonly DashboardContextSnapshotService $dashboardContext,
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -217,6 +220,26 @@ class RealtimeSessionController extends Controller
         ]);
     }
 
+    public function dashboardContext(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'session_id' => ['nullable', 'integer', 'exists:conversation_sessions,id'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+        ]);
+
+        $user = $request->user();
+        $session = ! empty($data['session_id'])
+            ? ConversationSession::where('user_id', $user->id)->findOrFail($data['session_id'])
+            : null;
+        $workspace = $session?->workspace ?: $this->workspaces->resolveWorkspace($user, $data['workspace_id'] ?? $session?->workspace_id);
+
+        return response()->json(['data' => [
+            'snapshot' => $this->dashboardContext->snapshot($user, $workspace),
+            'prompt_text' => $this->dashboardContext->promptText($user, $workspace),
+            'instructions' => $session ? $this->realtimeInstructions($session) : null,
+        ]]);
+    }
+
     public function message(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -337,6 +360,9 @@ class RealtimeSessionController extends Controller
     private function realtimeInstructions(ConversationSession $session): string
     {
         $clientContext = json_encode(data_get($session->metadata ?? [], 'client_context', []), JSON_UNESCAPED_SLASHES);
+        $user = User::findOrFail($session->user_id);
+        $workspace = $session->workspace ?: $this->workspaces->resolveWorkspace($user, $session->workspace_id);
+        $dashboardContext = $this->dashboardContext->promptText($user, $workspace);
 
         return <<<PROMPT
 You are Bean, the realtime voice interface for HeyBean.
@@ -346,7 +372,8 @@ Only respond when the user is clearly talking to Bean, usually by saying "Hey Be
 For simple conversational inputs, greetings, mic checks, current time/date questions, or questions like "can you hear me?", answer immediately in one short sentence. Do not call tools for those.
 If the user asks whether you can hear them, say "Yes, I can hear you." Never say "I can read you" during a voice conversation.
 If the user asks what time it is, answer from the client temporal context below. Do not call tools for current time/date questions.
-Call queue_bean_work when the user asks Bean to read current app data, check calendar/tasks/reminders, use live external data, or create, update, delete, plan, remember, schedule, or otherwise change app data. Trash, garbage, recycling, and household pickup questions should be checked through app data because they may be stored as tasks or reminders.
+Use the dashboard context snapshot below to answer simple read-only questions about the current dashboard, calendar, tasks, and reminders immediately. Do not call queue_bean_work if the answer is clearly present in the snapshot.
+Call queue_bean_work when the answer is not in the snapshot, the user asks to use live external data, or the user asks to create, update, delete, plan, remember, schedule, or otherwise change app data. Trash, garbage, recycling, and household pickup questions may be answered from the snapshot if present; otherwise queue background work because they may be stored as tasks or reminders.
 When queue_bean_work is needed, first acknowledge naturally in one short sentence, then call the tool. Do not claim the task is complete until the app sends completion context later.
 If the user asks for live external data that depends on current information outside HeyBean, call queue_bean_work after acknowledging so the main Bean agent can explain the current browsing limitation. Do not leave the user with only an acknowledgement.
 Laravel owns workspace access, approvals, validation, calendar/task/reminder writes, durable memory, and usage guardrails. Never invent ids or app-state changes.
@@ -354,6 +381,7 @@ Laravel owns workspace access, approvals, validation, calendar/task/reminder wri
 Local session id: {$session->id}
 Workspace id: {$session->workspace_id}
 Client temporal context: {$clientContext}
+{$dashboardContext}
 PROMPT;
     }
 
@@ -437,7 +465,7 @@ PROMPT;
             [
                 'type' => 'function',
                 'name' => 'queue_bean_work',
-                'description' => 'Queue a HeyBean background agent run when the user asks to read current app data, check calendar/tasks/reminders, use live external data, change app data, or perform durable work such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Trash, garbage, recycling, and household pickup questions may be stored as tasks or reminders and should use this tool. Do not use for greetings, mic checks, current time/date questions, quick factual answers, or conversational acknowledgements.',
+                'description' => 'Queue a HeyBean background agent run when the user asks for app data not present in the dashboard context snapshot, live external data, app-data changes, or durable work such as creating tasks/reminders/events, updating calendar data, remembering preferences, or planning a schedule. Trash, garbage, recycling, and household pickup questions may be answered from the snapshot when present; otherwise use this tool because they may be stored as tasks or reminders. Do not use for greetings, mic checks, current time/date questions, quick factual answers, conversational acknowledgements, or dashboard questions already answered by the snapshot.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [

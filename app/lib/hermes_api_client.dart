@@ -826,6 +826,20 @@ class HermesApiClient {
     return response.body;
   }
 
+  Future<Map<String, Object?>> realtimeDashboardContext({
+    int? sessionId,
+    int? workspaceId,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/assistant/realtime/dashboard-context', {
+        if (sessionId != null) 'session_id': sessionId.toString(),
+        if (workspaceId != null) 'workspace_id': workspaceId.toString(),
+      }),
+    );
+    return _expectMap(data['data']);
+  }
+
   Future<Map<String, Object?>> submitRealtimeToolCall({
     required int sessionId,
     required String toolName,
