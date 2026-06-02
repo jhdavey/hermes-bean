@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminCommandRun;
 use App\Models\AdminSetting;
 use App\Models\AgentProfile;
 use App\Models\User;
+use App\Services\AdminCommandRunService;
 use App\Services\AiUsageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -133,11 +135,28 @@ SH);
             ->assertJsonPath('data.update_available', true)
             ->assertJsonPath('data.cli_path', $script);
 
-        $this->withToken($adminToken)->postJson('/api/admin/hermes/update')
+        $runId = $this->withToken($adminToken)->postJson('/api/admin/hermes/update')
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.command_key', 'hermes_update')
+            ->json('data.id');
+
+        $this->withToken($userToken)->getJson("/api/admin/command-runs/{$runId}")
+            ->assertForbidden();
+
+        $run = app(AdminCommandRunService::class)->execute(AdminCommandRun::findOrFail($runId));
+
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(0, $run->exit_code);
+        $this->assertStringContainsString('updated users at '.$runtimeRoot.'/users', (string) $run->output);
+
+        $this->withToken($adminToken)->getJson("/api/admin/command-runs/{$runId}")
             ->assertOk()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.after.version', 'Hermes Agent v1.2.3 (test)')
-            ->assertJsonFragment(['output' => 'updated users at '.$runtimeRoot.'/users']);
+            ->assertJsonPath('data.exit_code', 0)
+            ->assertJsonPath('data.metadata.cwd', $runtimeRoot)
+            ->assertJsonPath('data.metadata.command_line', $script.' update --yes')
+            ->assertJsonPath('data.output', 'updated users at '.$runtimeRoot.'/users'."\n");
     }
 
     public function test_beta_users_use_admin_beta_budget_settings(): void

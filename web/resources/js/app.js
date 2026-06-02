@@ -116,6 +116,7 @@ if (mount) {
     let dashboardChangeAbort = null;
     let dashboardChangeLoopActive = false;
     let dashboardRefreshTimer = 0;
+    let adminCommandRunPollTimer = 0;
     let deferredDashboardRenderPending = false;
     let deferredDashboardRenderTimer = 0;
     let dashboardRefreshGeneration = 0;
@@ -750,13 +751,16 @@ if (mount) {
     }
 
     function modalIdentity(modal = {}) {
-        if (modal.type === 'admin-hermes-update') {
+        if (modal.type === 'admin-command-run') {
             return [
                 modal.type,
+                modal.runId || modal.result?.id || '',
                 modal.status || '',
                 modal.result?.status || '',
                 modal.result?.exit_code ?? modal.result?.exitCode ?? '',
-                modal.result?.ran_at || modal.result?.ranAt || '',
+                modal.result?.updated_at || modal.result?.updatedAt || '',
+                String(modal.result?.output || '').length,
+                String(modal.result?.error || '').length,
                 modal.error || '',
             ].map((part) => String(part)).join(':');
         }
@@ -2123,7 +2127,7 @@ if (mount) {
         if (modal.type === 'issue-report') return issueReportModalMarkup();
         if (modal.type === 'issue-report-success') return issueReportSuccessModalMarkup();
         if (modal.type === 'admin-usage-log') return adminUsageLogModalMarkup(modal.log);
-        if (modal.type === 'admin-hermes-update') return adminHermesUpdateModalMarkup(modal);
+        if (modal.type === 'admin-command-run') return adminCommandRunModalMarkup(modal);
         if (modal.type === 'profile') return profileModalMarkup();
         if (modal.type === 'agent') return agentModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
@@ -2173,28 +2177,28 @@ if (mount) {
         return `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(value || 'None')}</strong></span>`;
     }
 
-    function adminHermesUpdateModalMarkup(modal = {}) {
-        const running = modal.status === 'running';
+    function adminCommandRunModalMarkup(modal = {}) {
+        const running = adminCommandRunActive(modal.status);
         const result = modal.result || {};
-        const before = result.before || {};
-        const after = result.after || {};
-        const output = result.output || (running ? 'Running hermes update --yes...\nThis can take several minutes. CLI output will appear here when the process finishes.' : '');
+        const metadata = result.metadata || {};
+        const output = result.output || (running ? 'Starting command...\nLive output will appear here as the server receives it.' : '');
         const error = result.error || modal.error || '';
         const exitCode = result.exit_code ?? result.exitCode;
+        const command = metadata.command_line || metadata.commandLine || normalizeList(result.command).join(' ') || 'admin command';
 
         return `
-            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Hermes update activity">
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Admin command activity">
                 <section class="hb-card hb-modal hb-admin-log-modal">
-                    ${sectionTitle(icons.activity, 'Hermes update', running ? 'Running the configured Hermes CLI update command' : 'CLI update activity and result')}
+                    ${sectionTitle(icons.activity, result.command_label || result.commandLabel || 'Admin command', running ? 'Running on the server' : 'Command activity and result')}
                     <div class="hb-admin-log-detail-grid">
-                        ${adminLogDetailItemMarkup('Command', 'hermes update --yes')}
-                        ${adminLogDetailItemMarkup('Status', running ? 'running' : result.status || 'finished')}
+                        ${adminLogDetailItemMarkup('Command', command)}
+                        ${adminLogDetailItemMarkup('Status', result.status || modal.status || 'queued')}
                         ${adminLogDetailItemMarkup('Exit code', running ? 'pending' : exitCode ?? 'unknown')}
-                        ${adminLogDetailItemMarkup('Ran at', running ? 'now' : formatDateTime(result.ran_at || result.ranAt))}
-                        ${adminLogDetailItemMarkup('Before', before.version || 'Unknown')}
-                        ${adminLogDetailItemMarkup('After', after.version || 'Unknown')}
-                        ${adminLogDetailItemMarkup('CLI path', after.cli_path || after.cliPath || before.cli_path || before.cliPath || 'hermes')}
-                        ${adminLogDetailItemMarkup('Users home', after.users_home || after.usersHome || before.users_home || before.usersHome || 'Not configured')}
+                        ${adminLogDetailItemMarkup('Started', formatDateTime(result.started_at || result.startedAt) || (running ? 'pending' : 'unknown'))}
+                        ${adminLogDetailItemMarkup('Finished', formatDateTime(result.finished_at || result.finishedAt) || (running ? 'running' : 'unknown'))}
+                        ${adminLogDetailItemMarkup('Timeout', metadata.timeout ? `${metadata.timeout}s` : 'default')}
+                        ${adminLogDetailItemMarkup('Workdir', metadata.cwd || 'default')}
+                        ${adminLogDetailItemMarkup('Run id', result.id || modal.runId || 'pending')}
                     </div>
                     <div class="hb-admin-log-prompt-block">
                         <strong>stdout</strong>
@@ -2843,7 +2847,7 @@ if (mount) {
         });
         mount.querySelector('.hb-modal-backdrop')?.addEventListener('click', (event) => {
             if (event.target.classList.contains('hb-modal-backdrop')) {
-                if (state.modal?.type === 'admin-hermes-update' && state.modal?.status === 'running') return;
+                if (state.modal?.type === 'admin-command-run' && adminCommandRunActive(state.modal?.status)) return;
                 state.modal = null;
                 render();
             }
@@ -3276,34 +3280,69 @@ if (mount) {
         state.error = '';
         state.notice = '';
         state.modal = {
-            type: 'admin-hermes-update',
-            status: 'running',
+            type: 'admin-command-run',
+            status: 'queued',
         };
         render();
         try {
-            const result = await api('/admin/hermes/update', { method: 'POST' });
-            state.adminHermesStatus = result.after || state.adminHermesStatus;
+            const run = await api('/admin/hermes/update', { method: 'POST' });
             state.modal = {
-                type: 'admin-hermes-update',
-                status: 'completed',
-                result,
+                type: 'admin-command-run',
+                status: run.status,
+                runId: run.id,
+                result: run,
             };
-            state.notice = 'Hermes update completed.';
+            pollAdminCommandRun(run.id);
         } catch (error) {
             const result = error.payload?.data || null;
-            if (result?.after) {
-                state.adminHermesStatus = result.after;
-            }
             state.modal = {
-                type: 'admin-hermes-update',
+                type: 'admin-command-run',
                 status: 'failed',
                 result,
                 error: friendlyError(error, 'update Hermes'),
             };
-        } finally {
             state.adminHermesUpdating = false;
             render();
         }
+    }
+
+    function pollAdminCommandRun(runId) {
+        if (!runId) {
+            state.adminHermesUpdating = false;
+            render();
+            return;
+        }
+        window.clearTimeout(adminCommandRunPollTimer);
+        api(`/admin/command-runs/${encodeURIComponent(runId)}`)
+            .then((run) => {
+                state.modal = {
+                    type: 'admin-command-run',
+                    status: run.status,
+                    runId: run.id,
+                    result: run,
+                };
+                if (adminCommandRunActive(run.status)) {
+                    adminCommandRunPollTimer = window.setTimeout(() => pollAdminCommandRun(runId), 1000);
+                } else {
+                    state.adminHermesUpdating = false;
+                    state.notice = run.status === 'completed' ? 'Hermes update completed.' : 'Hermes update failed.';
+                    api('/admin/hermes/status').then((status) => {
+                        state.adminHermesStatus = status;
+                        render();
+                    }).catch(() => render());
+                    return;
+                }
+                render();
+            })
+            .catch((error) => {
+                state.adminHermesUpdating = false;
+                state.error = friendlyError(error, 'load command output');
+                render();
+            });
+    }
+
+    function adminCommandRunActive(status) {
+        return ['queued', 'running'].includes(String(status || '').toLowerCase());
     }
 
     function setAdminUserGrowthRange(range) {

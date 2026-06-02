@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AdminCommandRunService;
 use App\Services\HermesMaintenanceService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AdminHermesController extends Controller
 {
@@ -13,15 +15,13 @@ class AdminHermesController extends Controller
         return response()->json(['data' => $maintenance->status()]);
     }
 
-    public function update(HermesMaintenanceService $maintenance): JsonResponse
+    public function update(Request $request, AdminCommandRunService $commands): JsonResponse
     {
-        $result = $maintenance->update();
+        $run = $commands->start('hermes_update', $request->user());
 
         return response()->json([
-            'message' => $result['status'] === 'completed'
-                ? 'Hermes update completed.'
-                : 'Hermes update failed. Review the CLI output below.',
-            'data' => $result,
-        ], $result['status'] === 'completed' ? 200 : 502);
+            'message' => 'Hermes update started.',
+            'data' => $commands->payload($run),
+        ], 202);
     }
 }
