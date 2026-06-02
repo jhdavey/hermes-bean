@@ -67,6 +67,24 @@ export function voiceCommandNeedsAgentWork(transcript) {
     return /\b(?:what do i have|what have i got|do i have anything|anything on|what'?s next|whats next|what is next|next up)\b/.test(command);
 }
 
+export function voiceCommandRequiresBackgroundWork(transcript) {
+    const command = normalizedVoiceCommand(transcript);
+    if (!command) return false;
+
+    if (/\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b/.test(command)) {
+        return true;
+    }
+    if (/\b(?:today|tonight|tomorrow|current|currently|latest|now|right now|near me|nearby|local)\b/.test(command)
+        && /\b(?:open|opens|closed|closes|close|closing|hours|hour|available|availability|price|prices|cost|costs|status|delay|delays)\b/.test(command)) {
+        return true;
+    }
+    if (/\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b/.test(command)) {
+        return true;
+    }
+    return /\b(?:plan|organize|prioritize)\b/.test(command)
+        && /\b(?:day|today|tomorrow|week|schedule|work|tasks|calendar|morning|afternoon|evening)\b/.test(command);
+}
+
 export function voiceCommandWantsDetailedChat(transcript) {
     const command = normalizedVoiceCommand(transcript);
     if (!command || voiceCommandNeedsAgentWork(command)) return false;

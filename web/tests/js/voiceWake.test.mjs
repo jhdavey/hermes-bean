@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     commandAfterWakePhrase,
     voiceCommandNeedsAgentWork,
+    voiceCommandRequiresBackgroundWork,
     voiceCommandWantsDetailedChat,
     voiceCancelRequested,
 } from '../../resources/js/voiceWake.js';
@@ -62,6 +63,15 @@ assert.equal(voiceCommandNeedsAgentWork('is the place near me open tonight'), tr
 assert.equal(voiceCommandNeedsAgentWork('can you give me a taco recipe'), false);
 assert.equal(voiceCommandNeedsAgentWork('when am I supposed to take out the trash'), true);
 assert.equal(voiceCommandNeedsAgentWork('which recycling bin do I put out'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('what is on my calendar today'), false);
+assert.equal(voiceCommandRequiresBackgroundWork('what is on my to-do list today'), false);
+assert.equal(voiceCommandRequiresBackgroundWork('what tasks do I have today'), false);
+assert.equal(voiceCommandRequiresBackgroundWork('move my task from 7pm to 5pm'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('what is the weather in Orlando Florida right now'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('cheapest flights from MCO to Dublin tomorrow one way'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('when does my local store close today'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('plan my day'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('when am I supposed to take out the trash'), false);
 assert.equal(voiceCommandWantsDetailedChat('give me a 30 minute full body workout but I do not have equipment'), true);
 assert.equal(voiceCommandWantsDetailedChat('can you give me a taco recipe'), true);
 assert.equal(voiceCommandWantsDetailedChat('what should we have for dinner tonight'), false);

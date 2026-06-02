@@ -2,6 +2,7 @@ import {
     commandAfterWakePhrase,
     normalizedVoiceCommand,
     voiceCommandNeedsAgentWork,
+    voiceCommandRequiresBackgroundWork,
     voiceCommandWantsDetailedChat,
     voiceCancelRequested,
 } from './voiceWake.js';
@@ -156,6 +157,9 @@ if (mount) {
     let kioskRealtimeReconnectTimer = 0;
     let kioskRealtimeReconnectAttempts = 0;
     let kioskRealtimeSuppressInputUntil = 0;
+    let kioskRealtimeBackgroundDeliveryTimer = 0;
+    let kioskRealtimePendingBackgroundResult = null;
+    let kioskRealtimePendingFunctionCalls = [];
     const kioskRealtimeMaxReconnectAttempts = 5;
     const kioskRealtimeConnectTimeoutMs = 15000;
     const kioskRealtimeTransientDisconnectMs = 12000;
@@ -3893,6 +3897,10 @@ if (mount) {
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
         kioskRealtimeSuppressInputUntil = 0;
+        kioskRealtimePendingBackgroundResult = null;
+        kioskRealtimePendingFunctionCalls = [];
+        window.clearTimeout(kioskRealtimeBackgroundDeliveryTimer);
+        kioskRealtimeBackgroundDeliveryTimer = 0;
         kioskRealtimeUserTranscriptDrafts.clear();
         window.clearTimeout(kioskRealtimeResponseTimer);
         kioskRealtimeResponseTimer = 0;
@@ -4655,7 +4663,7 @@ if (mount) {
             return;
         }
         if (type === 'response.function_call_arguments.done') {
-            processRealtimeFunctionCall(payload.name, payload.call_id, payload.arguments);
+            queueRealtimeFunctionCall(payload.name, payload.call_id, payload.arguments);
             return;
         }
         if (type === 'response.done') {
@@ -4878,28 +4886,83 @@ if (mount) {
         scrollChatToBottom();
     }
 
+    function queueRealtimeFunctionCall(name, callId, rawArguments = '{}') {
+        if (!name) return;
+        const callKey = callId || `${name}-${rawArguments}`;
+        const call = { type: 'function_call', name, call_id: callId, arguments: rawArguments };
+        const existingIndex = kioskRealtimePendingFunctionCalls.findIndex((item) => {
+            return (item.call_id || `${item.name}-${item.arguments}`) === callKey;
+        });
+        if (existingIndex >= 0) {
+            kioskRealtimePendingFunctionCalls[existingIndex] = call;
+            return;
+        }
+        kioskRealtimePendingFunctionCalls.push(call);
+    }
+
     function processRealtimeResponseDone(payload) {
         const output = normalizeList(payload?.response?.output);
-        output
-            .filter((item) => item?.type === 'function_call')
-            .forEach((item) => processRealtimeFunctionCall(item.name, item.call_id, item.arguments));
-        const hasFunctionCall = output.some((item) => item?.type === 'function_call');
+        const functionCalls = mergeRealtimeFunctionCalls([
+            ...kioskRealtimePendingFunctionCalls,
+            ...output.filter((item) => item?.type === 'function_call'),
+        ]);
+        kioskRealtimePendingFunctionCalls = [];
+        const hasFunctionCall = functionCalls.length > 0;
         const assistantAnswered = String(kioskRealtimeAssistantDraft?.content || '').trim() !== '';
+        const pendingUserContent = String(kioskRealtimePendingUser?.content || '').trim();
+        const functionCallsAreBackgroundQueueOnly = functionCalls.length > 0
+            && functionCalls.every((item) => item?.name === 'queue_bean_work');
+        const backgroundRequired = voiceCommandRequiresBackgroundWork(pendingUserContent);
+        if (assistantAnswered && functionCallsAreBackgroundQueueOnly && !backgroundRequired) {
+            clearRealtimeToolFallback();
+            functionCalls.forEach((item) => {
+                sendRealtimeFunctionOutput(item.call_id, {
+                    ok: true,
+                    skipped: true,
+                    message: 'Bean already answered this turn directly.',
+                }, { createResponse: false });
+            });
+            persistRealtimeConversationTurn();
+            finishRealtimeTurnStatus();
+            return;
+        }
+        if (hasFunctionCall) {
+            functionCalls.forEach((item) => processRealtimeFunctionCall(item.name, item.call_id, item.arguments));
+            kioskRealtimePendingUser = null;
+            return;
+        }
         if (!hasFunctionCall && assistantAnswered) {
             clearRealtimeToolFallback();
             persistRealtimeConversationTurn();
-        } else if (!hasFunctionCall && !kioskRealtimeToolFallbackContent) {
+        } else if (!assistantAnswered && !kioskRealtimeToolFallbackContent && voiceCommandNeedsAgentWork(pendingUserContent)) {
+            kioskRealtimePendingUser = null;
+            queueRealtimeFallbackWork(pendingUserContent);
+            return;
+        } else if (!kioskRealtimeToolFallbackContent) {
             persistRealtimeConversationTurn();
         } else {
             kioskRealtimePendingUser = null;
         }
-        if (state.kioskVoiceEnabled && kioskRealtimeConnected()) {
-            if (kioskConversationActive) {
-                setKioskVoiceStatus('listening', 'listening');
-                armKioskConversationTimeout();
-            } else {
-                setKioskVoiceStatus('armed', 'Bean voice ready');
-            }
+        finishRealtimeTurnStatus();
+    }
+
+    function mergeRealtimeFunctionCalls(calls) {
+        const byKey = new Map();
+        normalizeList(calls).forEach((call) => {
+            if (!call?.name) return;
+            const key = call.call_id || `${call.name}-${call.arguments || ''}`;
+            byKey.set(key, call);
+        });
+        return Array.from(byKey.values());
+    }
+
+    function finishRealtimeTurnStatus() {
+        if (!state.kioskVoiceEnabled || !kioskRealtimeConnected()) return;
+        if (kioskConversationActive) {
+            setKioskVoiceStatus('listening', 'listening');
+            armKioskConversationTimeout();
+        } else {
+            setKioskVoiceStatus('armed', 'Bean voice ready');
         }
     }
 
@@ -4933,7 +4996,9 @@ if (mount) {
                     },
                 },
             });
-            sendRealtimeFunctionOutput(callId, result);
+            sendRealtimeFunctionOutput(callId, result, {
+                createResponse: name !== 'queue_bean_work' || !result?.run_id,
+            });
             if (result?.run_id) {
                 watchRealtimeAssistantRun(result.run_id, { quickReplyText, userContent });
             }
@@ -4951,7 +5016,7 @@ if (mount) {
     function armRealtimeToolFallback(content) {
         clearRealtimeToolFallback();
         const command = String(content || '').trim();
-        if (!voiceCommandNeedsAgentWork(command)) return;
+        if (!voiceCommandRequiresBackgroundWork(command)) return;
         kioskRealtimeToolFallbackContent = command;
         kioskRealtimeToolFallbackTimer = window.setTimeout(() => {
             kioskRealtimeToolFallbackTimer = 0;
@@ -4995,7 +5060,7 @@ if (mount) {
         }
     }
 
-    function sendRealtimeFunctionOutput(callId, result) {
+    function sendRealtimeFunctionOutput(callId, result, options = {}) {
         const dataChannel = kioskRealtime?.dataChannel;
         if (!callId || dataChannel?.readyState !== 'open') return;
         dataChannel.send(JSON.stringify({
@@ -5006,7 +5071,9 @@ if (mount) {
                 output: JSON.stringify(result),
             },
         }));
-        sendRealtimeResponseCreate();
+        if (options.createResponse !== false) {
+            sendRealtimeResponseCreate();
+        }
     }
 
     function sendRealtimeResponseCreate(options = {}) {
@@ -5085,6 +5152,10 @@ if (mount) {
         const text = speechTextFromAssistant(content);
         if (!text) return;
         if (!kioskConversationActive) return;
+        if (realtimeAssistantOutputActive()) {
+            scheduleRealtimeBackgroundResultDelivery(text, runId);
+            return;
+        }
         if (!kioskRealtimeConnected()) {
             upsertRealtimeLocalMessage({
                 id: `rt-run-${runId || Date.now()}`,
@@ -5110,6 +5181,19 @@ if (mount) {
             },
         }));
         sendRealtimeResponseCreate();
+    }
+
+    function scheduleRealtimeBackgroundResultDelivery(content, runId = null) {
+        kioskRealtimePendingBackgroundResult = { content, runId };
+        window.clearTimeout(kioskRealtimeBackgroundDeliveryTimer);
+        const wait = Math.max(350, kioskRealtimeSuppressInputUntil - Date.now() + 350);
+        kioskRealtimeBackgroundDeliveryTimer = window.setTimeout(() => {
+            kioskRealtimeBackgroundDeliveryTimer = 0;
+            const pending = kioskRealtimePendingBackgroundResult;
+            kioskRealtimePendingBackgroundResult = null;
+            if (!pending) return;
+            deliverRealtimeBackgroundResult(pending.content, pending.runId);
+        }, wait);
     }
 
     async function refreshRealtimeDashboardContext(reason = 'dashboard_context_refresh') {
