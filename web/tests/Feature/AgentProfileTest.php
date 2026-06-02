@@ -128,6 +128,47 @@ class AgentProfileTest extends TestCase
         $this->assertSame('coach', $householdProfile->refresh()->settings['personality_type']);
     }
 
+    public function test_auth_me_updates_active_workspace_home_city(): void
+    {
+        $user = User::factory()->create();
+        $workspaceService = app(WorkspaceService::class);
+        $personalProfile = app(AgentProfileService::class)->ensureForUser($user);
+        $household = $workspaceService->createHousehold($user, 'Davey House');
+        $user->forceFill(['default_workspace_id' => $household->id])->save();
+        $householdProfile = app(AgentProfileService::class)->ensureForWorkspace($household, $user);
+
+        $token = 'home-city-token';
+        PersonalAccessToken::create([
+            'user_id' => $user->id,
+            'name' => 'api',
+            'token' => hash('sha256', $token),
+        ]);
+
+        $this->withToken($token)
+            ->patchJson('/api/auth/me', [
+                'home_city' => 'Orlando, Florida',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.active_workspace_agent_profile.id', $householdProfile->id)
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.weather.location', 'Orlando, Florida')
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.home_location', 'Orlando, Florida');
+
+        $this->assertNull(data_get($personalProfile->refresh()->settings, 'weather.location'));
+        $this->assertSame('Orlando, Florida', data_get($householdProfile->refresh()->settings, 'weather.location'));
+        $this->assertSame('Orlando, Florida', data_get($householdProfile->settings, 'memory.user_preferences.home_location'));
+
+        $this->withToken($token)
+            ->patchJson('/api/auth/me', [
+                'home_city' => null,
+            ])
+            ->assertOk()
+            ->assertJsonMissingPath('data.active_workspace_agent_profile.settings.weather.location')
+            ->assertJsonMissingPath('data.active_workspace_agent_profile.settings.home_location');
+
+        $this->assertNull(data_get($householdProfile->refresh()->settings, 'weather.location'));
+        $this->assertNull(data_get($householdProfile->settings, 'memory.user_preferences.home_location'));
+    }
+
     public function test_me_endpoint_syncs_user_onboarding_flag_from_completed_agent_profile(): void
     {
         $user = User::factory()->create(['onboard_complete' => false]);

@@ -152,6 +152,7 @@ class AuthController extends Controller
             'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
             'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
             'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'home_city' => ['sometimes', 'nullable', 'string', 'max:120'],
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
             'notification_preferences' => ['sometimes', 'array'],
             'notification_preferences.reminder_push' => ['sometimes', 'boolean'],
@@ -160,6 +161,7 @@ class AuthController extends Controller
 
         $profileKeys = ['agent_personality', 'onboarding_priorities', 'onboarding_context'];
         $ttsKeys = ['tts_provider', 'tts_openai_voice', 'tts_openai_instructions'];
+        $homeCityData = array_key_exists('home_city', $data) ? ['home_city' => $data['home_city']] : [];
         $profileData = collect($data)->only($profileKeys)->all();
         $ttsData = collect($data)->only($ttsKeys)->all();
         $userData = collect($data)->only(['name', 'email', 'theme'])->all();
@@ -173,7 +175,7 @@ class AuthController extends Controller
         $user->fill($userData);
         $user->save();
 
-        if ($profileData !== [] || $ttsData !== []) {
+        if ($profileData !== [] || $ttsData !== [] || $homeCityData !== []) {
             $workspaceService = app(WorkspaceService::class);
             $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh(), $data['workspace_id'] ?? null);
             $profile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
@@ -185,6 +187,9 @@ class AuthController extends Controller
             }
             if ($ttsData !== []) {
                 $profile = $profiles->updateTextToSpeechSettings($profile, $data);
+            }
+            if ($homeCityData !== []) {
+                $profile = $profiles->updateHomeCitySettings($profile, $data['home_city']);
             }
             $user->unsetRelation('agentProfile');
         }

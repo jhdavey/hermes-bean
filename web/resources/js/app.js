@@ -660,6 +660,22 @@ if (mount) {
         return profile.onboarding_context || profile.onboardingContext || onboarding.context || '';
     }
 
+    function profileHomeCity(profile = currentAgentProfile()) {
+        const settings = profileSettings(profile);
+        return settings.home_location
+            || settings.homeLocation
+            || settings.weather_location
+            || settings.weatherLocation
+            || settings.default_weather_location
+            || settings.defaultWeatherLocation
+            || settings.weather?.location
+            || settings.memory?.user_preferences?.home_location
+            || settings.memory?.userPreferences?.homeLocation
+            || settings.memory?.user_preferences?.weather_location
+            || settings.memory?.userPreferences?.weatherLocation
+            || '';
+    }
+
     function profileTtsSettings(profile = currentAgentProfile()) {
         const settings = profileSettings(profile);
         return typeof settings.tts === 'object' && settings.tts ? settings.tts : {};
@@ -1567,6 +1583,7 @@ if (mount) {
         const profile = currentAgentProfile();
         const priorities = profilePriorities(profile);
         const context = profileOnboardingContext(profile);
+        const homeCity = profileHomeCity(profile);
         const complete = profilePreferencesReady(profile);
         const workspaceItems = workspaces();
         const activeWorkspaceId = String(currentWorkspaceId() || '');
@@ -1585,6 +1602,16 @@ if (mount) {
                     <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')}${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
                     <button class="hb-button-ghost" type="button" data-open-agent>Update</button>
                 </div>
+                <form class="hb-surface-soft hb-card-pad hb-home-city-settings" data-home-city-form>
+                    <strong>Home city</strong>
+                    <div class="hb-field-row" style="margin-top:10px">
+                        ${labelInput('Home city', 'homeCity', 'text', homeCity, 'autocomplete="address-level2" maxlength="120"')}
+                    </div>
+                    <div class="hb-row-actions">
+                        <button class="hb-button-secondary" type="button" data-clear-home-city ${homeCity ? '' : 'disabled'}>Clear</button>
+                        <button class="hb-button" type="submit">Save</button>
+                    </div>
+                </form>
                 ${themeSettingsMarkup()}
                 <div class="hb-surface-soft hb-card-pad">
                     <strong>Notification preferences</strong>
@@ -2880,6 +2907,8 @@ if (mount) {
         mount.querySelectorAll('[data-top-workspace-select]').forEach((select) => select.addEventListener('change', (event) => setWorkspace(event.currentTarget.value)));
         mount.querySelectorAll('[data-pref]').forEach((input) => input.addEventListener('change', updateNotificationPrefs));
         mount.querySelectorAll('[data-theme-option]').forEach((button) => button.addEventListener('click', updateThemePreference));
+        mount.querySelector('[data-home-city-form]')?.addEventListener('submit', updateHomeCityPreference);
+        mount.querySelector('[data-clear-home-city]')?.addEventListener('click', clearHomeCityPreference);
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
         mount.querySelectorAll('[data-approval-approve]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalApprove, false)));
@@ -7362,6 +7391,37 @@ if (mount) {
             render();
         } catch (error) {
             state.error = friendlyError(error, 'save notification preferences');
+            render();
+        }
+    }
+
+    async function updateHomeCityPreference(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const homeCity = String(new FormData(form).get('homeCity') || '').trim();
+        await saveHomeCityPreference(homeCity);
+    }
+
+    async function clearHomeCityPreference(event) {
+        event.preventDefault();
+        await saveHomeCityPreference('');
+    }
+
+    async function saveHomeCityPreference(homeCity) {
+        try {
+            state.user = await api('/auth/me', {
+                method: 'PATCH',
+                body: {
+                    home_city: homeCity || null,
+                    workspace_id: currentWorkspaceId() || null,
+                },
+            });
+            state.notice = homeCity ? 'Home city saved.' : 'Home city cleared.';
+            state.error = '';
+            render();
+            refreshRealtimeDashboardContext('home_city_updated').catch(() => {});
+        } catch (error) {
+            state.error = friendlyError(error, 'save the home city');
             render();
         }
     }

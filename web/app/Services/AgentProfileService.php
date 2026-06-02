@@ -204,6 +204,32 @@ class AgentProfileService
         return $profile->refresh();
     }
 
+    public function updateHomeCitySettings(AgentProfile $profile, ?string $homeCity): AgentProfile
+    {
+        $settings = $profile->settings ?? [];
+        $city = trim((string) $homeCity);
+
+        if ($city === '') {
+            data_forget($settings, 'weather.location');
+            data_forget($settings, 'weather_location');
+            data_forget($settings, 'default_weather_location');
+            data_forget($settings, 'home_location');
+            data_forget($settings, 'memory.user_preferences.weather_location');
+            data_forget($settings, 'memory.user_preferences.home_location');
+        } else {
+            data_set($settings, 'weather.location', $city);
+            $settings['weather_location'] = $city;
+            $settings['default_weather_location'] = $city;
+            $settings['home_location'] = $city;
+            data_set($settings, 'memory.user_preferences.weather_location', $city);
+            data_set($settings, 'memory.user_preferences.home_location', $city);
+        }
+
+        $profile->forceFill(['settings' => $settings])->save();
+
+        return $profile->refresh();
+    }
+
     public function publicSettings(array $settings): array
     {
         if (isset($settings['tts']) && is_array($settings['tts'])) {

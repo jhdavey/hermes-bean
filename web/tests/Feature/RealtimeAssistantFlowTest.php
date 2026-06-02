@@ -351,8 +351,9 @@ class RealtimeAssistantFlowTest extends TestCase
         $workspace = Workspace::findOrFail($user->default_workspace_id);
         $profile = app(\App\Services\AgentProfileService::class)->ensureForWorkspace($workspace, $user);
         $settings = $profile->settings ?? [];
-        data_set($settings, 'onboarding.context', 'I live in Orlando, Florida.');
-        data_set($settings, 'memory.user_preferences.summary', 'Additional user context: I live in Orlando, Florida.');
+        data_set($settings, 'weather.location', 'Orlando, Florida');
+        $settings['home_location'] = 'Orlando, Florida';
+        data_set($settings, 'memory.user_preferences.home_location', 'Orlando, Florida');
         $profile->forceFill(['settings' => $settings])->save();
 
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
