@@ -89,11 +89,14 @@ export function realtimeSpokenAnswerAllowsBackgroundQueue(userTranscript, assist
     const spoken = normalizedVoiceCommand(assistantText);
     if (!spoken) return true;
     if (spoken.length > 180) return false;
+    if (/\b(?:i don t have|i do not have|i can t see|i cannot see|i don t know|i do not know|let me check|let me get|let me look|i(?:'|’)?ll check|i will check|i(?:'|’)?ll get|i will get|i(?:'|’)?m going to check|i am going to check|i need to check|i can check|checking|pulling|gathering|looking|working|finding|one moment|give me|hang on|hold on)\b/.test(spoken)) {
+        return true;
+    }
     if (/[;:]/.test(String(assistantText || '')) || /\b\d+\b/.test(spoken)) return false;
     if (/\b(?:you have|you ve got|you've got|you got|you have got|you have \w+ tasks|you ve \w+ tasks|there are|there is|here are|here s|here's|heres|it is|it s|it's|its|looks like|right now|today you|today there|for today|on your list|todo list|to do list|tasks today|due|scheduled|starts|ends|temperature|degrees|percent|mph)\b/.test(spoken)) {
         return false;
     }
-    if (/\b(?:i(?:'|’)?ll|i will|i(?:'|’)?m going to|i am going to|let me|i(?:'|’)?m checking|i am checking|i(?:'|’)?ll check|i can check|checking|pulling|gathering|looking|working|finding|one moment|give me|hang on|hold on)\b/.test(spoken)) {
+    if (/\b(?:i(?:'|’)?ll|i will|i(?:'|’)?m going to|i am going to|let me|i(?:'|’)?m checking|i am checking)\b/.test(spoken)) {
         return true;
     }
     if (/\b(?:sure|absolutely|yeah|okay|ok|got it)\b/.test(spoken)

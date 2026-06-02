@@ -4980,10 +4980,17 @@ if (mount) {
                 };
             }
             scheduleRealtimeBackgroundProgressUpdates();
+            showRealtimeWorkingInBackgroundWhenReady();
             return;
         }
         clearRealtimeBackgroundProgressUpdates();
         kioskRealtimeBackgroundProgressContext = null;
+    }
+
+    function realtimeBackgroundWorkPending() {
+        return kioskRealtimeBackgroundWorkActive
+            || kioskRealtimeRunWatchTimers.size > 0
+            || Boolean(kioskRealtimePendingBackgroundResult);
     }
 
     function scheduleRealtimeBackgroundProgressUpdates() {
@@ -5547,7 +5554,7 @@ if (mount) {
             return;
         }
         kioskRealtimeAssistantOutputStartedAt = 0;
-        if (kioskRealtimeBackgroundWorkActive) {
+        if (realtimeBackgroundWorkPending()) {
             showRealtimeWorkingInBackgroundWhenReady();
             return;
         }
@@ -5761,6 +5768,7 @@ if (mount) {
 
     function showRealtimeWorkingInBackgroundWhenReady() {
         window.clearTimeout(kioskRealtimeDeferredWorkingStatusTimer);
+        if (!realtimeBackgroundWorkPending()) return;
         if (!realtimeAssistantOutputActive()) {
             setKioskVoiceStatus('working', 'working in background');
             return;
@@ -5769,6 +5777,7 @@ if (mount) {
         kioskRealtimeDeferredWorkingStatusTimer = window.setTimeout(() => {
             kioskRealtimeDeferredWorkingStatusTimer = 0;
             if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
+            if (!realtimeBackgroundWorkPending()) return;
             if (realtimeAssistantOutputActive()) {
                 showRealtimeWorkingInBackgroundWhenReady();
                 return;
@@ -5780,6 +5789,11 @@ if (mount) {
     function watchRealtimeAssistantRun(runId, context = {}, attempt = 0) {
         const id = Number(runId || 0);
         if (!id || kioskRealtimeRunWatchTimers.has(id)) return;
+        if (!kioskRealtimeBackgroundWorkActive) {
+            setRealtimeBackgroundWorkActive(true, context);
+        } else {
+            showRealtimeWorkingInBackgroundWhenReady();
+        }
         const delay = attempt === 0 ? 900 : Math.min(1800 + (attempt * 450), 4500);
         const timer = window.setTimeout(async () => {
             kioskRealtimeRunWatchTimers.delete(id);
@@ -5788,6 +5802,11 @@ if (mount) {
                 const run = await api(`/assistant/runs/${id}`);
                 const status = String(run?.status || '').toLowerCase();
                 if (['queued', 'running'].includes(status) && attempt < 45) {
+                    if (!kioskRealtimeBackgroundWorkActive) {
+                        setRealtimeBackgroundWorkActive(true, context);
+                    } else {
+                        showRealtimeWorkingInBackgroundWhenReady();
+                    }
                     watchRealtimeAssistantRun(id, context, attempt + 1);
                     return;
                 }
