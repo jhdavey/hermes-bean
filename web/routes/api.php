@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityEventController;
+use App\Http\Controllers\Api\AdminHermesController;
 use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminUsageController;
 use App\Http\Controllers\Api\AssistantRunController;
@@ -104,6 +105,8 @@ Route::middleware('api.rate_limit')->group(function (): void {
             Route::get('/settings', [AdminSettingsController::class, 'show']);
             Route::get('/settings/models', [AdminSettingsController::class, 'models']);
             Route::patch('/settings', [AdminSettingsController::class, 'update']);
+            Route::get('/hermes/status', [AdminHermesController::class, 'show']);
+            Route::post('/hermes/update', [AdminHermesController::class, 'update']);
             Route::get('/usage/summary', [AdminUsageController::class, 'summary']);
             Route::get('/usage/logs', [AdminUsageController::class, 'logs']);
             Route::get('/usage/alerts', [AdminUsageController::class, 'alerts']);

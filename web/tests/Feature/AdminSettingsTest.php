@@ -7,6 +7,7 @@ use App\Models\AgentProfile;
 use App\Models\User;
 use App\Services\AiUsageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -88,6 +89,55 @@ class AdminSettingsTest extends TestCase
             ->assertJsonFragment(['id' => 'gpt-5.2', 'source' => 'openai'])
             ->assertJsonFragment(['id' => 'gpt-realtime', 'source' => 'openai'])
             ->assertJsonFragment(['id' => 'gpt-4o-mini-search-preview', 'source' => 'openai']);
+    }
+
+    public function test_admin_can_view_and_update_hermes_runtime(): void
+    {
+        $runtimeRoot = sys_get_temp_dir().'/hermes-admin-runtime-'.bin2hex(random_bytes(6));
+        File::ensureDirectoryExists($runtimeRoot);
+        $script = $runtimeRoot.'/fake-hermes';
+        File::put($script, <<<'SH'
+#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "Hermes Agent v1.2.3 (test)"
+  echo "Project: $HERMES_BASE_HOME"
+  echo "Update available: test"
+  exit 0
+fi
+if [ "$1" = "update" ]; then
+  echo "updated users at $HERMES_USERS_HOME"
+  exit 0
+fi
+echo "unexpected command: $*" >&2
+exit 2
+SH);
+        chmod($script, 0755);
+
+        config()->set('services.hermes_runtime.cli_path', $script);
+        config()->set('services.hermes_runtime.cli_workdir', $runtimeRoot);
+        config()->set('services.hermes_runtime.users_home', $runtimeRoot.'/users');
+        config()->set('services.hermes_runtime.base_home', $runtimeRoot.'/base');
+
+        $adminToken = $this->apiToken('hermes-admin@example.com');
+        $userToken = $this->apiToken('hermes-user@example.com');
+        User::where('email', 'hermes-admin@example.com')->firstOrFail()->forceFill(['is_admin' => true])->save();
+
+        $this->beforeApplicationDestroyed(fn () => File::isDirectory($runtimeRoot) ? File::deleteDirectory($runtimeRoot) : null);
+
+        $this->withToken($userToken)->getJson('/api/admin/hermes/status')
+            ->assertForbidden();
+
+        $this->withToken($adminToken)->getJson('/api/admin/hermes/status')
+            ->assertOk()
+            ->assertJsonPath('data.version', 'Hermes Agent v1.2.3 (test)')
+            ->assertJsonPath('data.update_available', true)
+            ->assertJsonPath('data.cli_path', $script);
+
+        $this->withToken($adminToken)->postJson('/api/admin/hermes/update')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.after.version', 'Hermes Agent v1.2.3 (test)')
+            ->assertJsonFragment(['output' => 'updated users at '.$runtimeRoot.'/users']);
     }
 
     public function test_beta_users_use_admin_beta_budget_settings(): void

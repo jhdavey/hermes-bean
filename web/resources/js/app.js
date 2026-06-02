@@ -66,6 +66,8 @@ if (mount) {
         adminUsage: null,
         adminUsageLoading: false,
         adminModelRegistry: null,
+        adminHermesStatus: null,
+        adminHermesUpdating: false,
         adminArchivedIssuesOpen: false,
         issueReportSubmitting: false,
         ttsPreviewing: false,
@@ -965,6 +967,7 @@ if (mount) {
                     ${adminMetricMarkup('Open alerts', totals.open_alerts, 'Warnings and hard caps')}
                     ${adminMetricMarkup('Issue reports', totals.open_issue_reports, 'Open beta feedback')}
                 </div>
+                ${adminHermesMaintenanceMarkup()}
                 ${adminSettingsMarkup(settings)}
                 <div class="hb-admin-grid">
                     ${adminIssueReportsBlockMarkup(issueReports, archivedIssueReports)}
@@ -1075,6 +1078,36 @@ if (mount) {
                     <label><span>Daily hard cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_hard_cost_usd" value="${escapeAttr(settingValue(beta.daily_hard_cost_usd || beta.dailyHardCostUsd))}"></label>
                 </div>
             </form>`;
+    }
+
+    function adminHermesMaintenanceMarkup() {
+        const status = state.adminHermesStatus || {};
+        const version = status.version || 'Unknown version';
+        const updateAvailable = status.update_available === true || status.updateAvailable === true;
+        const configured = status.configured !== false;
+        const checkedAt = status.checked_at || status.checkedAt;
+        const error = status.error || '';
+
+        return `
+            <div class="hb-admin-settings hb-admin-hermes-card">
+                <div class="hb-section-action-row">
+                    <div>
+                        <strong>Hermes agent runtime</strong>
+                        <small>${escapeHtml(configured ? 'Server-hosted runtime harness for all Bean agents' : 'Hermes CLI could not be reached')}</small>
+                    </div>
+                    <button class="hb-button-secondary" type="button" data-update-hermes ${state.adminHermesUpdating ? 'disabled' : ''}>${state.adminHermesUpdating ? 'Updating...' : 'Update Hermes'}</button>
+                </div>
+                <div class="hb-admin-hermes-status">
+                    <div>
+                        <span>Current version</span>
+                        <strong>${escapeHtml(version)}</strong>
+                        <small>${checkedAt ? `Checked ${escapeHtml(formatDateTime(checkedAt))}` : 'Not checked yet'}</small>
+                    </div>
+                    <mark class="hb-admin-status ${updateAvailable ? 'hb-admin-status-warning' : ''}">${escapeHtml(updateAvailable ? 'Update available' : configured ? 'Current' : 'Unavailable')}</mark>
+                </div>
+                ${error ? `<div class="hb-admin-model-note">${escapeHtml(error)}</div>` : ''}
+                <small class="hb-admin-hermes-path">${escapeHtml(status.cli_path || status.cliPath || 'hermes')} · ${escapeHtml(status.users_home || status.usersHome || '')}</small>
+            </div>`;
     }
 
     function adminModelSelectMarkup(name, setting) {
@@ -2601,6 +2634,7 @@ if (mount) {
         mount.querySelectorAll('[data-refresh-app]').forEach((button) => button.addEventListener('click', refreshCurrentView));
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelector('[data-admin-settings-form]')?.addEventListener('submit', saveAdminSettings);
+        mount.querySelector('[data-update-hermes]')?.addEventListener('click', updateHermesRuntime);
         mount.querySelector('[data-toggle-archived-issues]')?.addEventListener('click', () => { state.adminArchivedIssuesOpen = !state.adminArchivedIssuesOpen; render(); });
         mount.querySelectorAll('[data-issue-status]').forEach((button) => button.addEventListener('click', () => updateIssueReportStatus(button.dataset.issueStatus, button.dataset.status)));
         mount.querySelectorAll('[data-admin-log-id]').forEach((button) => button.addEventListener('click', () => openAdminUsageLog(button.dataset.adminLogId)));
@@ -3143,6 +3177,24 @@ if (mount) {
         } catch (error) {
             state.error = friendlyError(error, 'save admin settings');
             state.adminUsageLoading = false;
+            render();
+        }
+    }
+
+    async function updateHermesRuntime() {
+        if (state.adminHermesUpdating) return;
+        state.adminHermesUpdating = true;
+        state.error = '';
+        state.notice = '';
+        render();
+        try {
+            const result = await api('/admin/hermes/update', { method: 'POST' });
+            state.adminHermesStatus = result.after || state.adminHermesStatus;
+            state.notice = 'Hermes update completed.';
+        } catch (error) {
+            state.error = friendlyError(error, 'update Hermes');
+        } finally {
+            state.adminHermesUpdating = false;
             render();
         }
     }
@@ -4453,6 +4505,11 @@ if (mount) {
             armKioskConversationTimeout();
             return;
         }
+        showKioskHeardTranscript(content, {
+            allowArmed: true,
+            phase: 'heard',
+            force: true,
+        });
         const shouldAppendToPendingTurn = Boolean(kioskRealtimeResponseTimer && kioskRealtimePendingUser && !kioskRealtimePendingUser.persisted && !isWakeTurn);
         if (shouldAppendToPendingTurn) {
             kioskRealtimePendingUser.content = `${kioskRealtimePendingUser.content} ${content}`.replace(/\s+/g, ' ').trim();
@@ -4537,7 +4594,9 @@ if (mount) {
     function scheduleRealtimeResponseCreate() {
         window.clearTimeout(kioskRealtimeResponseTimer);
         clearRealtimeToolFallback();
-        setKioskVoiceStatus('listening', 'listening');
+        if (state.kioskVoicePhase !== 'heard') {
+            setKioskVoiceStatus('listening', 'listening');
+        }
         kioskRealtimeResponseTimer = window.setTimeout(() => {
             kioskRealtimeResponseTimer = 0;
             if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
@@ -5456,7 +5515,31 @@ if (mount) {
     function setKioskVoiceStatus(phase, message) {
         state.kioskVoicePhase = phase;
         state.kioskVoiceMessage = message;
-        if (state.phase === 'signedIn') render();
+        if (state.phase === 'signedIn' && !updateKioskVoicePillsInPlace()) {
+            render();
+        }
+    }
+
+    function updateKioskVoicePillsInPlace() {
+        const pills = mount.querySelectorAll('[data-toggle-kiosk-voice]');
+        if (!pills.length) return false;
+        const requested = state.kioskVoiceEnabled;
+        const ready = kioskVoiceReady();
+        const phase = ready ? (state.kioskVoicePhase === 'idle' ? 'armed' : state.kioskVoicePhase || 'armed') : 'disabled';
+        const label = kioskVoicePillLabel({ requested, ready, phase });
+        const actionLabel = ready ? 'Turn off kiosk voice' : label;
+        pills.forEach((pill) => {
+            Array.from(pill.classList)
+                .filter((className) => className.startsWith('hb-kiosk-voice-pill-') && !['hb-kiosk-voice-pill-button', 'hb-kiosk-voice-pill-standalone', 'hb-kiosk-voice-pill-topbar'].includes(className))
+                .forEach((className) => pill.classList.remove(className));
+            pill.classList.add(`hb-kiosk-voice-pill-${phase}`);
+            pill.setAttribute('aria-label', actionLabel);
+            pill.setAttribute('title', actionLabel);
+            pill.setAttribute('aria-pressed', ready ? 'true' : 'false');
+            const labelNode = pill.querySelector('span:last-child');
+            if (labelNode) labelNode.textContent = label;
+        });
+        return true;
     }
 
     function openKioskChat() {
@@ -6094,12 +6177,18 @@ if (mount) {
         state.error = '';
         render();
         try {
-            const [usage, modelRegistry] = await Promise.all([
+            const [usage, modelRegistry, hermesStatus] = await Promise.all([
                 api('/admin/usage/summary'),
                 api('/admin/settings/models'),
+                api('/admin/hermes/status').catch((error) => ({
+                    configured: false,
+                    version: 'Unavailable',
+                    error: friendlyError(error, 'check Hermes status'),
+                })),
             ]);
             state.adminUsage = usage;
             state.adminModelRegistry = modelRegistry;
+            state.adminHermesStatus = hermesStatus;
         } catch (error) {
             state.error = friendlyError(error, 'load admin metrics');
         } finally {

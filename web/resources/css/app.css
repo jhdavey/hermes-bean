@@ -3200,6 +3200,53 @@
     font-weight: 850;
 }
 
+.hb-admin-hermes-card {
+    background: rgba(240, 253, 244, .66);
+}
+
+.hb-admin-hermes-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid rgba(22, 163, 74, .16);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .68);
+}
+
+.hb-admin-hermes-status div {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+
+.hb-admin-hermes-status span,
+.hb-admin-hermes-status small,
+.hb-admin-hermes-path {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.hb-admin-hermes-status strong {
+    min-width: 0;
+    color: var(--hb-text);
+    font-size: 16px;
+    line-height: 1.2;
+    font-weight: 950;
+    overflow-wrap: anywhere;
+}
+
+.hb-admin-status-warning {
+    background: rgba(245, 158, 11, .14);
+    color: #92400e;
+}
+
+.hb-admin-hermes-path {
+    overflow-wrap: anywhere;
+}
+
 .hb-admin-apply-row {
     display: inline-flex;
     align-items: center;
@@ -4098,6 +4145,15 @@
 
     .hb-admin-growth-stats span {
         text-align: left;
+    }
+
+    .hb-admin-hermes-status {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .hb-admin-hermes-status .hb-admin-status {
+        width: fit-content;
     }
 
     .hb-admin-growth-chart {
