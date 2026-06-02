@@ -18,7 +18,7 @@ class WorkspaceSchemaTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_register_creates_personal_workspace_and_owner_membership(): void
+    public function test_user_provisioning_creates_personal_workspace_and_owner_membership(): void
     {
         $token = $this->apiToken('workspace-owner@example.com');
 

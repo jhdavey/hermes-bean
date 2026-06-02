@@ -8,22 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('beta_users', function (Blueprint $table): void {
-            $table->id();
-            $table->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
-            $table->string('status')->default('active')->index();
-            $table->string('source')->nullable();
-            $table->timestamp('started_at')->nullable();
-            $table->timestamp('ended_at')->nullable();
-            $table->json('metadata')->nullable();
-            $table->timestamps();
-        });
-
         Schema::create('issue_reports', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('workspace_id')->nullable()->constrained()->nullOnDelete();
-            $table->foreignId('beta_user_id')->nullable()->constrained('beta_users')->nullOnDelete();
             $table->string('status')->default('open')->index();
             $table->text('message');
             $table->string('page_url', 2048)->nullable();
@@ -41,6 +29,5 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('issue_reports');
-        Schema::dropIfExists('beta_users');
     }
 };

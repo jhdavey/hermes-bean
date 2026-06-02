@@ -15,18 +15,14 @@ class AgentProfileTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_registration_creates_unique_server_hosted_agent_profile(): void
+    public function test_internal_user_provisioning_creates_unique_server_hosted_agent_profile(): void
     {
-        $response = $this->postJson('/api/auth/register', [
-            'name' => 'Harley Davey',
-            'email' => 'harley@example.com',
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
-        ])->assertCreated();
+        $token = $this->apiToken('harley@example.com');
+        $user = User::where('email', 'harley@example.com')->firstOrFail();
 
         $profile = AgentProfile::query()->firstOrFail();
 
-        $this->assertSame($response->json('data.user.id'), $profile->user_id);
+        $this->assertSame($user->id, $profile->user_id);
         $this->assertSame('openai', $profile->provider);
         $this->assertSame('gpt-5-mini', $profile->model);
         $this->assertSame('agent', $profile->router_mode);
@@ -39,20 +35,20 @@ class AgentProfileTest extends TestCase
         $this->assertSame('Balanced helper', $profile->settings['personality_label']);
         $this->assertStringContainsString('calm, practical, concise co-pilot', $profile->settings['personality_prompt']);
         $this->assertStringContainsString('one useful next suggestion', $profile->settings['personality_prompt']);
-        $this->assertNotNull($response->json('data.user.agent_profile.id'));
+        $this->withToken($token)->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.agent_profile.settings.personality_type', 'balanced');
     }
 
-    public function test_registration_keeps_agent_onboarding_incomplete_until_first_home_flow(): void
+    public function test_internal_user_provisioning_keeps_agent_onboarding_incomplete_until_first_home_flow(): void
     {
-        $this->postJson('/api/auth/register', [
-            'name' => 'New User',
-            'email' => 'new-user@example.com',
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
-        ])->assertCreated()
-            ->assertJsonPath('data.user.onboard_complete', false)
-            ->assertJsonPath('data.user.agent_profile.settings.personality_type', 'balanced')
-            ->assertJsonPath('data.user.agent_profile.settings.onboarding.completed', false);
+        $token = $this->apiToken('new-user@example.com');
+
+        $this->withToken($token)->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.onboard_complete', false)
+            ->assertJsonPath('data.agent_profile.settings.personality_type', 'balanced')
+            ->assertJsonPath('data.agent_profile.settings.onboarding.completed', false);
 
         $profile = AgentProfile::query()->firstOrFail();
 

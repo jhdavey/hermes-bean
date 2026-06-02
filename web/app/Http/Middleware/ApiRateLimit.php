@@ -52,10 +52,6 @@ class ApiRateLimit
 
     private function maxAttempts(?User $user): int
     {
-        if ($user && ! $user->isAdmin() && $this->isActiveBetaUser($user)) {
-            return $this->settings->betaApiPerMinute();
-        }
-
         return (int) config('security.rate_limits.api_per_minute', 60);
     }
 
@@ -63,7 +59,7 @@ class ApiRateLimit
     {
         $user = $request->user();
         if ($user instanceof User) {
-            return $user->loadMissing('betaUser');
+            return $user;
         }
 
         $plainToken = $request->bearerToken();
@@ -76,18 +72,9 @@ class ApiRateLimit
             ->where(function ($query): void {
                 $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
             })
-            ->with('user.betaUser')
+            ->with('user')
             ->first()
             ?->user;
-    }
-
-    private function isActiveBetaUser(User $user): bool
-    {
-        if ($user->relationLoaded('betaUser')) {
-            return $user->betaUser?->status === 'active';
-        }
-
-        return $user->betaUser()->where('status', 'active')->exists();
     }
 
     private function rateLimitedResponse(int $maxAttempts, int $retryAfter): JsonResponse

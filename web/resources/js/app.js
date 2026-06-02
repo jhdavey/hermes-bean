@@ -743,10 +743,6 @@ if (mount) {
         return state.user?.is_admin === true || state.user?.isAdmin === true;
     }
 
-    function userIsBeta() {
-        return state.user?.is_beta === true || state.user?.isBeta === true || Boolean(state.user?.beta_user || state.user?.betaUser);
-    }
-
     function normalizeList(value) {
         return Array.isArray(value) ? value : [];
     }
@@ -901,8 +897,8 @@ if (mount) {
                         <div class="hb-auth-title">
                             ${register ? `<span class="hb-section-icon">${icons.user}</span>` : `<img src="${escapeAttr(logoUrl)}" alt="">`}
                             <div>
-                                <h1>${forgot ? 'Reset password' : register ? 'Create your Hermes Bean account' : 'Login'}</h1>
-                                ${register ? '<p>Create your account with your email and a secure 12+ character password</p>' : ''}
+                                <h1>${forgot ? 'Reset password' : register ? 'We are currently accepting early access beta users' : 'Login'}</h1>
+                                ${register ? "<p>Sign up for early access and we'll email you as soon as we can give you access.</p>" : ''}
                             </div>
                         </div>
                         ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
@@ -921,15 +917,15 @@ if (mount) {
     function authFormMarkup(register) {
         return `
             <form class="hb-form" data-action="${register ? 'register' : 'login'}">
-                ${register ? labelInput('Name', 'name', 'text', '', 'required autocomplete="name"') : ''}
+                ${register ? labelInput('Name', 'name', 'text', '', 'autocomplete="name"') : ''}
                 ${labelInput('Email', 'email', 'email', '', 'required autocomplete="email"')}
-                ${labelInput('Password', 'password', 'password', '', `required autocomplete="${register ? 'new-password' : 'current-password'}" minlength="${register ? '12' : '1'}"`)}
-                ${register ? '<p class="hb-item-meta">Minimum 12 characters</p>' : `
+                ${register ? '' : `
+                    ${labelInput('Password', 'password', 'password', '', 'required autocomplete="current-password" minlength="1"')}
                     <label class="hb-checkbox-row"><input type="checkbox" name="remember" ${state.remember ? 'checked' : ''}> Remember me</label>
                 `}
-                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? (register ? 'Creating account…' : 'Signing in…') : (register ? 'Create account' : 'Sign in')}</button>
+                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? (register ? 'Requesting access…' : 'Signing in…') : (register ? 'Sign up for early access' : 'Sign in')}</button>
                 <div class="hb-link-row">
-                    <button class="hb-button-ghost" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? 'Already have an account? Sign in' : 'Create an account'}</button>
+                    <button class="hb-button-ghost" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? 'Already have an account? Sign in' : 'Request early access'}</button>
                     <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
                 </div>
             </form>`;
@@ -943,7 +939,7 @@ if (mount) {
                 <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Sending…' : 'Send reset link'}</button>
                 <div class="hb-link-row">
                     <button class="hb-button-ghost" type="button" data-auth-mode="login">Back to login</button>
-                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Create an account</button>
+                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Request early access</button>
                 </div>
             </form>`;
     }
@@ -985,9 +981,7 @@ if (mount) {
     }
 
     function betaBannerMarkup() {
-        if (!userIsBeta()) return '';
-
-        return `<button class="hb-beta-banner" type="button" data-open-issue-report>You are in beta testing. If you have any issues please report them here.</button>`;
+        return `<button class="hb-beta-banner" type="button" data-open-issue-report>If you have any issues, please report them here.</button>`;
     }
 
     function appPanelMarkup() {
@@ -1224,7 +1218,7 @@ if (mount) {
                 <div class="hb-section-action-row">
                     <div>
                         <strong>Runtime settings</strong>
-                        <small>Model routing and beta request limits</small>
+                        <small>Model routing and early access request limits</small>
                     </div>
                     <button class="hb-button-secondary" type="submit" ${state.adminUsageLoading ? 'disabled' : ''}>Save settings</button>
                 </div>
@@ -1244,7 +1238,7 @@ if (mount) {
                     <span>Apply main model to existing workspace Bean profiles</span>
                 </label>
                 <div class="hb-admin-settings-grid hb-admin-limits-grid">
-                    <label><span>Beta API/min</span><input class="hb-input" type="number" min="1" step="1" name="api_per_minute" value="${escapeAttr(settingValue(beta.api_per_minute || beta.apiPerMinute))}"></label>
+                    <label><span>API/min</span><input class="hb-input" type="number" min="1" step="1" name="api_per_minute" value="${escapeAttr(settingValue(beta.api_per_minute || beta.apiPerMinute))}"></label>
                     <label><span>Monthly hard cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="monthly_cost_usd" value="${escapeAttr(settingValue(beta.monthly_cost_usd || beta.monthlyCostUsd))}"></label>
                     <label><span>Daily soft cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_soft_cost_usd" value="${escapeAttr(settingValue(beta.daily_soft_cost_usd || beta.dailySoftCostUsd))}"></label>
                     <label><span>Daily burst cap</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_hard_cost_usd" value="${escapeAttr(settingValue(beta.daily_hard_cost_usd || beta.dailyHardCostUsd))}"></label>
@@ -1254,7 +1248,7 @@ if (mount) {
                     <label><span>Daily external lookups</span><input class="hb-input" type="number" min="0" step="1" name="daily_external_tool_calls" value="${escapeAttr(settingValue(beta.daily_external_tool_calls || beta.dailyExternalToolCalls))}"></label>
                     <label><span>Daily web searches</span><input class="hb-input" type="number" min="0" step="1" name="daily_web_search_calls" value="${escapeAttr(settingValue(beta.daily_web_search_calls || beta.dailyWebSearchCalls))}"></label>
                     <label><span>Monthly action safety cap</span><input class="hb-input" type="number" min="1" step="1" name="monthly_ai_actions" value="${escapeAttr(settingValue(beta.monthly_ai_actions || beta.monthlyAiActions))}"></label>
-                    <label><span>Beta monthly tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="monthly_tokens" value="${escapeAttr(settingValue(beta.monthly_tokens || beta.monthlyTokens))}"></label>
+                    <label><span>Monthly tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="monthly_tokens" value="${escapeAttr(settingValue(beta.monthly_tokens || beta.monthlyTokens))}"></label>
                     <label><span>Daily soft tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="daily_soft_tokens" value="${escapeAttr(settingValue(beta.daily_soft_tokens || beta.dailySoftTokens))}"></label>
                     <label><span>Daily hard tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="daily_hard_tokens" value="${escapeAttr(settingValue(beta.daily_hard_tokens || beta.dailyHardTokens))}"></label>
                 </div>
@@ -1365,7 +1359,7 @@ if (mount) {
         return `
             <div class="hb-surface-soft hb-card-pad hb-admin-list-block">
                 <div class="hb-admin-list-heading">
-                    <strong>Beta issue reports</strong>
+                    <strong>Issue reports</strong>
                     ${archivedReports.length ? `<button class="hb-admin-inline-link" type="button" data-toggle-archived-issues>${archivedOpen ? 'Hide archived' : `Archived issues (${archivedReports.length})`}</button>` : ''}
                 </div>
                 <div class="hb-admin-list">
@@ -2365,7 +2359,7 @@ if (mount) {
 
     function issueReportModalMarkup() {
         return `
-            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Report a beta issue">
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Report an issue">
                 <form class="hb-card hb-modal hb-form hb-issue-report-modal" data-modal-form="issue-report">
                     ${sectionTitle(icons.activity, 'Report an issue', 'Tell us what happened so we can fix it quickly.')}
                     ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
@@ -2785,9 +2779,15 @@ if (mount) {
                 return;
             }
             const payload = action === 'register'
-                ? { name: data.name, email: data.email, password: data.password, password_confirmation: data.password }
+                ? { name: data.name, email: data.email }
                 : { email: data.email, password: data.password };
             const result = await api(`/auth/${action}`, { method: 'POST', body: payload });
+            if (action === 'register') {
+                state.busy = false;
+                state.notice = result.message || "You're on the early access list. We'll email you as soon as we can give you access.";
+                render();
+                return;
+            }
             persistToken(result.token, action === 'login' && data.remember === 'on');
             state.busy = false;
             history.pushState({}, '', initialSelectedView() === 'admin' ? '/admin' : '/app');

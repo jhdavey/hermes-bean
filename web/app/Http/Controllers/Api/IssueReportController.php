@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\BetaUser;
 use App\Models\IssueReport;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
@@ -25,7 +24,6 @@ class IssueReportController extends Controller
 
         $user = $request->user();
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $data['workspace_id'] ?? null);
-        $betaUser = BetaUser::where('user_id', $user->id)->where('status', 'active')->first();
         $screenshots = [];
 
         foreach ($request->file('screenshots', []) as $file) {
@@ -42,7 +40,6 @@ class IssueReportController extends Controller
         $report = IssueReport::create([
             'user_id' => $user->id,
             'workspace_id' => $workspace->id,
-            'beta_user_id' => $betaUser?->id,
             'status' => 'open',
             'message' => $data['message'],
             'page_url' => $data['page_url'] ?? null,
@@ -50,7 +47,6 @@ class IssueReportController extends Controller
             'screenshots' => $screenshots,
             'metadata' => [
                 'ip' => $request->ip(),
-                'is_beta' => $betaUser !== null,
             ],
         ]);
 

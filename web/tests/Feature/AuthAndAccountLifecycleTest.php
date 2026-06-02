@@ -17,21 +17,43 @@ class AuthAndAccountLifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_register_login_me_logout_and_hashed_tokens(): void
+    public function test_register_records_early_access_signup(): void
     {
-        $register = $this->postJson('/api/auth/register', [
+        $this->postJson('/api/auth/register', [
             'name' => 'Bean User',
             'email' => 'bean@example.com',
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
         ])->assertCreated()
-            ->assertJsonPath('data.user.email', 'bean@example.com');
+            ->assertJsonPath('data.message', "You're on the early access list. We'll email you as soon as we can give you access.")
+            ->assertJsonPath('data.early_access_signup.email', 'bean@example.com')
+            ->assertJsonPath('data.early_access_signup.name', 'Bean User')
+            ->assertJsonPath('data.early_access_signup.source', 'app_register');
 
-        $plainToken = $register->json('data.token');
-        $this->assertIsString($plainToken);
-        $this->assertDatabaseMissing('personal_access_tokens', ['token' => $plainToken]);
+        $this->assertDatabaseHas('early_access_signups', [
+            'email' => 'bean@example.com',
+            'name' => 'Bean User',
+            'source' => 'app_register',
+        ]);
+        $this->assertDatabaseMissing('users', ['email' => 'bean@example.com']);
+    }
+
+    public function test_login_me_logout_and_hashed_tokens(): void
+    {
+        User::factory()->create([
+            'name' => 'Bean User',
+            'email' => 'bean@example.com',
+            'password' => Hash::make('correct-horse-battery-staple'),
+        ]);
+
+        $login = $this->postJson('/api/auth/login', [
+            'email' => 'bean@example.com',
+            'password' => 'correct-horse-battery-staple',
+        ])->assertOk()
+            ->assertJsonPath('data.user.name', 'Bean User');
+
+        $plainToken = $login->json('data.token');
         $userId = User::where('email', 'bean@example.com')->value('id');
         $hashedRegisterToken = hash('sha256', $plainToken);
+        $this->assertDatabaseMissing('personal_access_tokens', ['token' => $plainToken]);
         $this->assertDatabaseHas('personal_access_tokens', [
             'user_id' => $userId,
             'token' => $hashedRegisterToken,
@@ -44,17 +66,10 @@ class AuthAndAccountLifecycleTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.email', 'bean@example.com');
 
-        $loginToken = $this->postJson('/api/auth/login', [
-            'email' => 'bean@example.com',
-            'password' => 'correct-horse-battery-staple',
-        ])->assertOk()
-            ->assertJsonPath('data.user.name', 'Bean User')
-            ->json('data.token');
-
-        $this->withToken($loginToken)->postJson('/api/auth/logout')
+        $this->withToken($plainToken)->postJson('/api/auth/logout')
             ->assertNoContent();
 
-        $this->withToken($loginToken)->getJson('/api/auth/me')
+        $this->withToken($plainToken)->getJson('/api/auth/me')
             ->assertUnauthorized();
     }
 
@@ -141,14 +156,9 @@ class AuthAndAccountLifecycleTest extends TestCase
         ])->assertOk();
     }
 
-    public function test_registration_starts_with_empty_user_resources(): void
+    public function test_new_user_starts_with_empty_user_resources(): void
     {
-        $token = $this->postJson('/api/auth/register', [
-            'name' => 'Clean User',
-            'email' => 'clean@example.com',
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
-        ])->assertCreated()->json('data.token');
+        $token = $this->registerToken('clean@example.com');
 
         $this->withToken($token)->getJson('/api/today')
             ->assertOk()
@@ -348,11 +358,6 @@ class AuthAndAccountLifecycleTest extends TestCase
 
     private function registerToken(string $email): string
     {
-        return $this->postJson('/api/auth/register', [
-            'name' => str($email)->before('@')->title()->toString(),
-            'email' => $email,
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
-        ])->assertCreated()->json('data.token');
+        return $this->apiToken($email);
     }
 }

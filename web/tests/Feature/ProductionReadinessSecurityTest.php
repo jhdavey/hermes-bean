@@ -87,12 +87,7 @@ class ProductionReadinessSecurityTest extends TestCase
             ->assertUnauthorized()
             ->assertJsonPath('error.code', 'unauthenticated');
 
-        $token = $this->postJson('/api/auth/register', [
-            'name' => 'Delete Me',
-            'email' => 'delete-me@example.com',
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
-        ])->assertCreated()->json('data.token');
+        $token = $this->apiToken('delete-me@example.com');
 
         $this->withToken($token)->deleteJson('/api/account')
             ->assertNoContent();

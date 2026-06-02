@@ -10,7 +10,6 @@ class IssueReport extends Model
     protected $fillable = [
         'user_id',
         'workspace_id',
-        'beta_user_id',
         'status',
         'message',
         'page_url',
@@ -39,8 +38,4 @@ class IssueReport extends Model
         return $this->belongsTo(Workspace::class);
     }
 
-    public function betaUser(): BelongsTo
-    {
-        return $this->belongsTo(BetaUser::class);
-    }
 }

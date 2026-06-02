@@ -7,7 +7,6 @@ use App\Models\AdminSetting;
 use App\Models\AgentProfile;
 use App\Models\User;
 use App\Services\AdminCommandRunService;
-use App\Services\AiUsageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -169,29 +168,6 @@ SH);
             ->assertJsonPath('data.metadata.cwd', $runtimeRoot)
             ->assertJsonPath('data.metadata.command_line', $script.' update --yes')
             ->assertJsonPath('data.output', 'updated users at '.$runtimeRoot.'/users'."\n");
-    }
-
-    public function test_beta_users_use_admin_beta_budget_settings(): void
-    {
-        config()->set('services.hermes_runtime.api_key', '');
-        $adminToken = $this->apiToken('budget-settings-admin@example.com');
-        $betaToken = $this->apiToken('budget-settings-beta@example.com');
-        User::where('email', 'budget-settings-admin@example.com')->firstOrFail()->forceFill(['is_admin' => true])->save();
-        $betaUser = User::where('email', 'budget-settings-beta@example.com')->firstOrFail();
-
-        $this->withToken($adminToken)->patchJson('/api/admin/settings', $this->settingsPayload([], [
-            'monthly_ai_actions' => 9,
-            'monthly_tokens' => 123000,
-            'daily_hard_cost_usd' => 2.75,
-        ]))->assertOk();
-
-        $budget = app(AiUsageService::class)->budgetFor($betaUser);
-
-        $this->assertSame(9, $budget['monthly_ai_actions']);
-        $this->assertSame(123000, $budget['monthly_tokens']);
-        $this->assertSame(2.75, $budget['daily_hard_cost_usd']);
-
-        $this->withToken($betaToken)->getJson('/api/auth/me')->assertOk();
     }
 
     private function settingsPayload(array $models = [], array $betaLimits = [], bool $apply = false, array $killSwitches = []): array

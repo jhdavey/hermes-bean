@@ -6,10 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\ActivityEvent;
 use App\Models\AgentProfile;
 use App\Models\Approval;
-use App\Models\BetaUser;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
+use App\Models\EarlyAccessSignup;
 use App\Models\EventCategory;
 use App\Models\GoogleCalendarConnection;
 use App\Models\PersonalAccessToken;
@@ -27,7 +27,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
@@ -48,28 +47,26 @@ class AuthController extends Controller
     {
         $request->merge([
             'email' => strtolower(trim((string) $request->input('email', ''))),
+            'name' => trim((string) $request->input('name', '')),
         ]);
 
         $data = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
-            'password' => ['required', 'confirmed', Password::min(12)],
+            'name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email:rfc', 'max:255'],
         ]);
 
-        $user = User::create(collect($data)->only(['name', 'email', 'password'])->all());
-        if ((bool) config('services.beta.enabled', true)) {
-            BetaUser::firstOrCreate(
-                ['user_id' => $user->id],
-                ['status' => 'active', 'source' => 'self_signup', 'started_at' => now()]
-            );
-        }
-        app(AgentProfileService::class)->ensureForUser($user);
-        app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
-        app(WelcomeConversationService::class)->ensureForUser($user);
+        $signup = EarlyAccessSignup::updateOrCreate(
+            ['email' => $data['email']],
+            [
+                'name' => $data['name'] ?: null,
+                'use_case' => null,
+                'source' => 'app_register',
+            ],
+        );
 
         return response()->json(['data' => [
-            'user' => $this->hydratedUser($user),
-            'token' => $this->issueToken($user),
+            'message' => "You're on the early access list. We'll email you as soon as we can give you access.",
+            'early_access_signup' => $signup,
         ]], 201);
     }
 
@@ -288,16 +285,12 @@ class AuthController extends Controller
             $agentProfiles->exposePublicSettings($user->agentProfile);
         }
         $agentProfiles->exposePublicSettings($activeProfile);
-        $betaUser = BetaUser::where('user_id', $user->id)->where('status', 'active')->first();
-
         $user->setAttribute('personal_workspace', $personalWorkspace);
         $user->setAttribute('active_workspace', $activeWorkspace);
         $user->setAttribute('workspaces', $workspaceService->accessibleWorkspaces($user));
         $user->setAttribute('active_workspace_agent_profile', $activeProfile);
         $user->setAttribute('needs_bean_onboarding', $agentProfiles->needsOnboarding($user, $activeProfile));
         $user->setAttribute('bean_preferences_ready', $agentProfiles->preferencesReady($activeProfile));
-        $user->setAttribute('is_beta', $betaUser !== null);
-        $user->setAttribute('beta_user', $betaUser);
 
         return $user;
     }

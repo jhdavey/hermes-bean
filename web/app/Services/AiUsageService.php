@@ -319,23 +319,10 @@ class AiUsageService
      */
     public function budgetFor(User $user): array
     {
-        if (! $user->isAdmin() && $this->isActiveBetaUser($user)) {
-            return $this->adminSettings->betaBudget();
-        }
-
         $tier = $user->isAdmin() ? 'admin' : $user->subscriptionTier();
         $budgets = config('services.ai_usage.budgets', []);
 
         return (array) ($budgets[$tier] ?? $budgets['free'] ?? []);
-    }
-
-    private function isActiveBetaUser(User $user): bool
-    {
-        if ($user->relationLoaded('betaUser')) {
-            return $user->betaUser?->status === 'active';
-        }
-
-        return $user->betaUser()->where('status', 'active')->exists();
     }
 
     /**

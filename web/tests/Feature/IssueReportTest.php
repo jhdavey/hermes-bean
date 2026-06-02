@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\BetaUser;
 use App\Models\IssueReport;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -10,28 +9,11 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
-class BetaIssueReportTest extends TestCase
+class IssueReportTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_new_registered_users_are_labeled_beta(): void
-    {
-        $token = $this->apiToken('beta-user@example.com');
-        $user = User::where('email', 'beta-user@example.com')->firstOrFail();
-
-        $this->assertDatabaseHas('beta_users', [
-            'user_id' => $user->id,
-            'status' => 'active',
-            'source' => 'self_signup',
-        ]);
-
-        $this->withToken($token)->getJson('/api/auth/me')
-            ->assertOk()
-            ->assertJsonPath('data.is_beta', true)
-            ->assertJsonPath('data.beta_user.status', 'active');
-    }
-
-    public function test_beta_user_can_submit_issue_report_with_screenshot(): void
+    public function test_signed_in_user_can_submit_issue_report_with_screenshot(): void
     {
         Storage::fake('public');
 
@@ -53,7 +35,6 @@ class BetaIssueReportTest extends TestCase
 
         $report = IssueReport::firstOrFail();
         $this->assertSame($user->id, $report->user_id);
-        $this->assertSame(BetaUser::where('user_id', $user->id)->firstOrFail()->id, $report->beta_user_id);
         $this->assertCount(1, $report->screenshots);
         Storage::disk('public')->assertExists($report->screenshots[0]['path']);
     }
@@ -67,7 +48,6 @@ class BetaIssueReportTest extends TestCase
         IssueReport::create([
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
-            'beta_user_id' => BetaUser::where('user_id', $user->id)->firstOrFail()->id,
             'status' => 'open',
             'message' => 'The beta banner report flow works.',
             'page_url' => 'https://heybean.test/app',
@@ -76,7 +56,6 @@ class BetaIssueReportTest extends TestCase
         IssueReport::create([
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
-            'beta_user_id' => BetaUser::where('user_id', $user->id)->firstOrFail()->id,
             'status' => 'closed',
             'message' => 'This closed report should be archived.',
             'page_url' => 'https://heybean.test/app',
@@ -102,7 +81,6 @@ class BetaIssueReportTest extends TestCase
         $report = IssueReport::create([
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
-            'beta_user_id' => BetaUser::where('user_id', $user->id)->firstOrFail()->id,
             'status' => 'open',
             'message' => 'The issue actions need testing.',
             'page_url' => 'https://heybean.test/app',
