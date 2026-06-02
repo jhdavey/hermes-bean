@@ -175,6 +175,7 @@ if (mount) {
     let kioskRealtimeSuppressInputUntil = 0;
     let kioskRealtimeAssistantOutputStartedAt = 0;
     let kioskRealtimeAssistantOutputTimer = 0;
+    let kioskRealtimeDeferredWorkingStatusTimer = 0;
     let kioskRealtimeBackgroundDeliveryTimer = 0;
     let kioskRealtimePendingBackgroundResult = null;
     let kioskRealtimePendingFunctionCalls = [];
@@ -4850,6 +4851,8 @@ if (mount) {
         kioskRealtimeAssistantOutputStartedAt = 0;
         window.clearTimeout(kioskRealtimeAssistantOutputTimer);
         kioskRealtimeAssistantOutputTimer = 0;
+        window.clearTimeout(kioskRealtimeDeferredWorkingStatusTimer);
+        kioskRealtimeDeferredWorkingStatusTimer = 0;
     }
 
     function handleRealtimeUserTranscript(payload) {
@@ -5173,7 +5176,7 @@ if (mount) {
         } catch (_) {
             args = {};
         }
-        setKioskVoiceStatus('working', 'working in background');
+        showRealtimeWorkingInBackgroundWhenReady();
         try {
             const result = await api('/assistant/realtime/tool-calls', {
                 method: 'POST',
@@ -5230,7 +5233,7 @@ if (mount) {
     async function queueRealtimeFallbackWork(content) {
         if (!state.session?.id) return;
         const quickReplyText = String(kioskRealtimeAssistantDraft?.content || '').trim();
-        setKioskVoiceStatus('working', 'working in background');
+        showRealtimeWorkingInBackgroundWhenReady();
         try {
             const result = await api('/assistant/realtime/tool-calls', {
                 method: 'POST',
@@ -5275,6 +5278,24 @@ if (mount) {
         if (dataChannel?.readyState !== 'open') return false;
         dataChannel.send(JSON.stringify({ type: 'response.create', ...options }));
         return true;
+    }
+
+    function showRealtimeWorkingInBackgroundWhenReady() {
+        window.clearTimeout(kioskRealtimeDeferredWorkingStatusTimer);
+        if (!realtimeAssistantOutputActive()) {
+            setKioskVoiceStatus('working', 'working in background');
+            return;
+        }
+        const wait = Math.max(300, kioskRealtimeSuppressInputUntil - Date.now() + 250);
+        kioskRealtimeDeferredWorkingStatusTimer = window.setTimeout(() => {
+            kioskRealtimeDeferredWorkingStatusTimer = 0;
+            if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
+            if (realtimeAssistantOutputActive()) {
+                showRealtimeWorkingInBackgroundWhenReady();
+                return;
+            }
+            setKioskVoiceStatus('working', 'working in background');
+        }, wait);
     }
 
     function watchRealtimeAssistantRun(runId, context = {}, attempt = 0) {
