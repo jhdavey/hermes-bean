@@ -359,17 +359,19 @@
     height: 100%;
     border: 0;
     background: transparent;
-    color: var(--hb-text);
+    color: transparent;
     font-size: 13px;
     font-weight: 850;
     padding: 0;
     outline: 0;
     opacity: 0;
     cursor: pointer;
+    -webkit-text-fill-color: transparent;
 }
 
 .hb-top-workspace-switcher select:disabled {
-    opacity: .8;
+    opacity: 0;
+    cursor: default;
 }
 
 .hb-top-nav {
