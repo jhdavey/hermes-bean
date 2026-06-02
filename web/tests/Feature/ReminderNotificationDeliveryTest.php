@@ -62,6 +62,25 @@ class ReminderNotificationDeliveryTest extends TestCase
         );
     }
 
+    public function test_due_reminder_email_header_includes_black_bean_logo(): void
+    {
+        Carbon::setTestNow('2026-05-18 13:45:00');
+        $user = User::factory()->create(['email' => 'logo-reminder@example.com']);
+        $reminder = Reminder::create([
+            'user_id' => $user->id,
+            'title' => 'Logo email reminder',
+            'notes' => 'Bring the black logo into the header.',
+            'remind_at' => now(),
+            'status' => 'pending',
+        ]);
+
+        $html = (string) (new ReminderDueNotification($reminder))->toMail($user)->render();
+
+        $this->assertStringContainsString('images/bean-logo-black.png', $html);
+        $this->assertStringContainsString('Reminder from Bean', $html);
+        $this->assertStringContainsString('Logo email reminder', $html);
+    }
+
     public function test_due_reminder_email_is_skipped_when_email_preference_disabled(): void
     {
         Notification::fake();

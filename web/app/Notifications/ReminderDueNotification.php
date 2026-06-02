@@ -24,11 +24,11 @@ class ReminderDueNotification extends Notification
 
         return (new MailMessage)
             ->subject('Reminder: '.$this->reminder->title)
-            ->greeting('Reminder from Bean')
-            ->line($this->reminder->title)
-            ->when($time, fn (MailMessage $message) => $message->line('Scheduled for '.$time.'.'))
-            ->when($this->reminder->notes, fn (MailMessage $message) => $message->line($this->reminder->notes))
-            ->line('You can dismiss or complete this reminder in HeyBean.');
+            ->view('mail.reminder-due', [
+                'logoUrl' => asset('images/bean-logo-black.png'),
+                'reminder' => $this->reminder,
+                'time' => $time,
+            ]);
     }
 
     public function toArray(object $notifiable): array
