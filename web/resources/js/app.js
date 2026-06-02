@@ -173,6 +173,8 @@ if (mount) {
     let kioskRealtimeReconnectTimer = 0;
     let kioskRealtimeReconnectAttempts = 0;
     let kioskRealtimeSuppressInputUntil = 0;
+    let kioskRealtimeAssistantOutputStartedAt = 0;
+    let kioskRealtimeAssistantOutputTimer = 0;
     let kioskRealtimeBackgroundDeliveryTimer = 0;
     let kioskRealtimePendingBackgroundResult = null;
     let kioskRealtimePendingFunctionCalls = [];
@@ -3964,7 +3966,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
-        kioskRealtimeSuppressInputUntil = 0;
+        clearRealtimeAssistantOutputGuard();
         kioskRealtimePendingBackgroundResult = null;
         kioskRealtimePendingFunctionCalls = [];
         window.clearTimeout(kioskRealtimeBackgroundDeliveryTimer);
@@ -4512,7 +4514,9 @@ if (mount) {
                     window.clearTimeout(realtimeState.disconnectStatusTimer);
                     realtimeState.disconnectTimer = 0;
                     realtimeState.disconnectStatusTimer = 0;
-                    setKioskVoiceStatus('armed', 'Bean voice ready');
+                    if (!realtimeAssistantOutputActive()) {
+                        setKioskVoiceStatus('armed', 'Bean voice ready');
+                    }
                 }
             };
             peerConnection.oniceconnectionstatechange = () => {
@@ -4530,7 +4534,9 @@ if (mount) {
                     window.clearTimeout(realtimeState.disconnectStatusTimer);
                     realtimeState.disconnectTimer = 0;
                     realtimeState.disconnectStatusTimer = 0;
-                    setKioskVoiceStatus('armed', 'Bean voice ready');
+                    if (!realtimeAssistantOutputActive()) {
+                        setKioskVoiceStatus('armed', 'Bean voice ready');
+                    }
                 }
             };
             kioskRealtime = realtimeState;
@@ -4655,6 +4661,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        clearRealtimeAssistantOutputGuard();
         kioskRealtimeUserTranscriptDrafts.clear();
         window.clearTimeout(kioskRealtimeResponseTimer);
         kioskRealtimeResponseTimer = 0;
@@ -4718,12 +4725,22 @@ if (mount) {
             return;
         }
         if (type === 'response.created') {
-            markRealtimeAssistantOutputActive(5000);
+            markRealtimeAssistantOutputActive(5000, { started: true });
+            setKioskVoiceStatus('responding', "Bean's voice");
+            return;
+        }
+        if (type === 'response.audio.delta') {
+            markRealtimeAssistantOutputActive(2500);
             setKioskVoiceStatus('responding', "Bean's voice");
             return;
         }
         if (type === 'response.audio_transcript.delta' || type === 'response.output_text.delta') {
             appendRealtimeAssistantDelta(payload);
+            return;
+        }
+        if (type === 'response.audio.done') {
+            markRealtimeAssistantOutputActive(realtimeAssistantOutputRemainingMs());
+            scheduleRealtimeTurnStatusAfterOutput();
             return;
         }
         if (type === 'response.audio_transcript.done' || type === 'response.output_text.done') {
@@ -4735,7 +4752,7 @@ if (mount) {
             return;
         }
         if (type === 'response.done') {
-            markRealtimeAssistantOutputActive(1200);
+            markRealtimeAssistantOutputActive(realtimeAssistantOutputRemainingMs());
             processRealtimeResponseDone(payload);
             return;
         }
@@ -4760,12 +4777,44 @@ if (mount) {
         return { phase: 'error', text: text || 'voice error' };
     }
 
-    function markRealtimeAssistantOutputActive(durationMs = 3500) {
+    function markRealtimeAssistantOutputActive(durationMs = 3500, options = {}) {
+        if (options.started || !kioskRealtimeAssistantOutputStartedAt) {
+            kioskRealtimeAssistantOutputStartedAt = Date.now();
+        }
         kioskRealtimeSuppressInputUntil = Math.max(kioskRealtimeSuppressInputUntil, Date.now() + durationMs);
     }
 
     function realtimeAssistantOutputActive() {
-        return state.kioskVoicePhase === 'responding' || Date.now() < kioskRealtimeSuppressInputUntil;
+        return Date.now() < kioskRealtimeSuppressInputUntil;
+    }
+
+    function realtimeAssistantOutputRemainingMs() {
+        const text = String(kioskRealtimeAssistantDraft?.content || '').trim();
+        const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+        const estimatedTotalMs = Math.min(26000, Math.max(1800, Math.round(words * 360) + 1100));
+        const elapsedMs = kioskRealtimeAssistantOutputStartedAt ? Date.now() - kioskRealtimeAssistantOutputStartedAt : 0;
+        return Math.min(14000, Math.max(1200, estimatedTotalMs - elapsedMs + 900));
+    }
+
+    function scheduleRealtimeTurnStatusAfterOutput() {
+        window.clearTimeout(kioskRealtimeAssistantOutputTimer);
+        const wait = Math.max(300, kioskRealtimeSuppressInputUntil - Date.now() + 250);
+        kioskRealtimeAssistantOutputTimer = window.setTimeout(() => {
+            kioskRealtimeAssistantOutputTimer = 0;
+            if (realtimeAssistantOutputActive()) {
+                scheduleRealtimeTurnStatusAfterOutput();
+                return;
+            }
+            kioskRealtimeAssistantOutputStartedAt = 0;
+            finishRealtimeTurnStatus();
+        }, wait);
+    }
+
+    function clearRealtimeAssistantOutputGuard() {
+        kioskRealtimeSuppressInputUntil = 0;
+        kioskRealtimeAssistantOutputStartedAt = 0;
+        window.clearTimeout(kioskRealtimeAssistantOutputTimer);
+        kioskRealtimeAssistantOutputTimer = 0;
     }
 
     function handleRealtimeUserTranscript(payload) {
@@ -4774,6 +4823,7 @@ if (mount) {
         const key = realtimeTranscriptDraftKey(payload);
         if (key) kioskRealtimeUserTranscriptDrafts.delete(key);
         if (realtimeTranscriptLooksSynthetic(raw)) {
+            if (realtimeAssistantOutputActive()) return;
             setKioskVoiceStatus('armed', 'Bean voice ready');
             return;
         }
@@ -5026,6 +5076,11 @@ if (mount) {
 
     function finishRealtimeTurnStatus() {
         if (!state.kioskVoiceEnabled || !kioskRealtimeConnected()) return;
+        if (realtimeAssistantOutputActive()) {
+            scheduleRealtimeTurnStatusAfterOutput();
+            return;
+        }
+        kioskRealtimeAssistantOutputStartedAt = 0;
         if (kioskConversationActive) {
             setKioskVoiceStatus('listening', 'listening');
             armKioskConversationTimeout();
@@ -5626,6 +5681,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        clearRealtimeAssistantOutputGuard();
         kioskRealtimeUserTranscriptDrafts.clear();
         kioskQuickReplyGeneration += 1;
         kioskCommandText = '';
