@@ -1125,8 +1125,7 @@ if (mount) {
         return `
             <article class="hb-chat-onboarding-card">
                 <div class="hb-chat-onboarding-kicker">${icons.tune}<span>Quick onboarding interview</span></div>
-                <strong>Bean is learning how to help this workspace.</strong>
-                <p>Answer a few short questions about priorities, communication style, and anything Bean should remember. When it’s saved, you’ll get a clear way back to the dashboard.</p>
+                <p>Answer a few quick questions so Bean can understand how to be as helpful as possible.</p>
             </article>`;
     }
 
