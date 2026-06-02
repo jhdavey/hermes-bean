@@ -5380,6 +5380,16 @@ if (mount) {
         if (kioskRealtimeIgnoreNextFunctionCalls) {
             kioskRealtimeIgnoreNextFunctionCalls = false;
             if (hasFunctionCall) {
+                logKioskRealtimeVoiceTrace('realtime_voice_tool_calls_skipped', {
+                    summary: 'Skipped realtime tool calls for a speech-only internal response.',
+                    reason: 'ignore_function_calls',
+                    assistant_text: responseAssistantText,
+                    function_calls: functionCalls.map((item) => ({
+                        name: item?.name || '',
+                        call_id: item?.call_id || '',
+                        arguments: item?.arguments || '',
+                    })),
+                });
                 functionCalls.forEach((item) => {
                     sendRealtimeFunctionOutput(item.call_id, {
                         ok: true,
@@ -5391,6 +5401,32 @@ if (mount) {
                 finishRealtimeTurnStatus();
                 return;
             }
+        }
+        if (hasFunctionCall && !pendingUserContent) {
+            clearRealtimeToolFallback();
+            logKioskRealtimeVoiceTrace('realtime_voice_tool_calls_skipped', {
+                summary: 'Skipped realtime tool calls because there is no active user turn.',
+                reason: 'missing_pending_user',
+                phase: state.kioskVoicePhase || '',
+                assistant_text: responseAssistantText,
+                function_calls: functionCalls.map((item) => ({
+                    name: item?.name || '',
+                    call_id: item?.call_id || '',
+                    arguments: item?.arguments || '',
+                })),
+            });
+            functionCalls.forEach((item) => {
+                sendRealtimeFunctionOutput(item.call_id, {
+                    ok: true,
+                    skipped: true,
+                    message: 'No active user turn is available for this tool call.',
+                }, { createResponse: false });
+            });
+            kioskRealtimeAssistantDraft = null;
+            kioskRealtimeSuppressNextAssistantPersist = false;
+            kioskRealtimeVoiceOnlyAssistant = false;
+            finishRealtimeTurnStatus();
+            return;
         }
         if (assistantAnswered && functionCallsAreBackgroundQueueOnly && !backgroundQueueAllowed) {
             clearRealtimeToolFallback();
@@ -5529,6 +5565,22 @@ if (mount) {
         if (!name || kioskRealtimeProcessedCalls.has(callKey)) return;
         const quickReplyText = String(options.assistantText || kioskRealtimeAssistantDraft?.content || kioskRealtimeLastAssistantText || '').trim();
         const userContent = String(options.userContent || kioskRealtimePendingUser?.content || '').trim();
+        if (name === 'queue_bean_work' && !userContent) {
+            kioskRealtimeProcessedCalls.add(callKey);
+            logKioskRealtimeVoiceTrace('realtime_voice_queue_skipped', {
+                summary: 'Skipped queue_bean_work because there is no active user turn.',
+                reason: 'missing_pending_user',
+                assistant_text: quickReplyText,
+                call_id: callId || null,
+            });
+            sendRealtimeFunctionOutput(callId, {
+                ok: true,
+                skipped: true,
+                message: 'No active user turn is available for this background work.',
+            }, { createResponse: false });
+            finishRealtimeTurnStatus();
+            return;
+        }
         if (name === 'queue_bean_work' && !quickReplyText && options.deferForTranscript !== false) {
             window.setTimeout(() => {
                 processRealtimeFunctionCall(name, callId, rawArguments, {
