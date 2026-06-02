@@ -154,6 +154,10 @@
     top: 34px;
 }
 
+.hb-app:has(.hb-beta-banner) .hb-main-chat {
+    height: calc(100dvh - 92px);
+}
+
 .hb-topbar-auth {
     justify-content: center;
     background: transparent;
@@ -647,8 +651,8 @@
 }
 
 .hb-main-chat {
-    height: calc(100vh - 58px);
-    min-height: 580px;
+    height: calc(100dvh - 58px);
+    min-height: 0;
     display: flex;
     padding-bottom: 92px;
 }
@@ -3438,6 +3442,7 @@
 
     .hb-main-chat {
         padding-bottom: 0;
+        overflow: hidden;
     }
 
     .hb-side-column {
