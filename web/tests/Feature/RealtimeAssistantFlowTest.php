@@ -11,6 +11,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -28,6 +29,13 @@ class RealtimeAssistantFlowTest extends TestCase
         config()->set('services.hermes_realtime.api_key', 'test-key');
         config()->set('services.hermes_realtime.model', 'gpt-realtime-test');
         config()->set('services.hermes_realtime.voice', 'marin');
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     public function test_realtime_session_creates_local_session_and_ephemeral_client_secret(): void
@@ -292,10 +300,90 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertJsonPath('data.snapshot.workspace.id', $workspace->id)
             ->assertJsonPath('data.snapshot.reminders_due.0.title', 'Call insurance')
             ->assertJsonPath('data.snapshot.counts.reminders_next_7_days', 1)
-            ->assertJsonPath('data.snapshot.timezone', config('app.timezone'))
+            ->assertJsonPath('data.snapshot.timezone', '-04:00')
             ->assertJson(fn ($json) => $json
                 ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'Dashboard context snapshot'))
                 ->where('data.instructions', fn (string $value): bool => str_contains($value, 'Call insurance') && str_contains($value, 'Only respond when the user is clearly talking to Bean'))
+                ->etc()
+            );
+    }
+
+    public function test_realtime_dashboard_context_uses_client_visible_dates_for_multi_day_items(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-01T16:00:00Z'));
+
+        $token = $this->apiToken('realtime-context-timezone@example.com');
+        $user = User::where('email', 'realtime-context-timezone@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-06-01T12:00:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspace->id,
+            'title' => 'Timed multi-day event',
+            'starts_at' => '2026-06-05T13:00:00-04:00',
+            'ends_at' => '2026-06-08T20:00:00-04:00',
+            'status' => 'confirmed',
+        ])->assertCreated();
+        $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspace->id,
+            'title' => 'All-day multi-day event',
+            'starts_at' => '2026-06-07T00:00:00Z',
+            'ends_at' => '2026-06-10T00:00:00Z',
+            'status' => 'confirmed',
+            'metadata' => ['all_day' => true],
+        ])->assertCreated();
+        $this->withToken($token)->postJson('/api/tasks', [
+            'workspace_id' => $workspace->id,
+            'title' => 'Pack bags',
+            'type' => 'todo',
+            'status' => 'pending',
+            'due_at' => '2026-06-08T20:00:00-04:00',
+        ])->assertCreated();
+        $this->withToken($token)->postJson('/api/reminders', [
+            'workspace_id' => $workspace->id,
+            'title' => 'Check in online',
+            'status' => 'pending',
+            'remind_at' => '2026-06-08T20:00:00-04:00',
+        ])->assertCreated();
+        $this->assertSame(
+            '2026-06-05T17:00:00+00:00',
+            CalendarEvent::where('title', 'Timed multi-day event')->firstOrFail()->starts_at->utc()->toIso8601String(),
+        );
+
+        $this->withToken($token)->getJson("/api/assistant/realtime/dashboard-context?session_id={$sessionId}")
+            ->assertOk()
+            ->assertJsonPath('data.snapshot.timezone', 'America/New_York')
+            ->assertJsonPath('data.snapshot.today', '2026-06-01')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.0.title', 'Timed multi-day event')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.0.starts_at', '2026-06-05T13:00:00-04:00')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.0.ends_at', '2026-06-08T20:00:00-04:00')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.0.ends_at_utc', '2026-06-09T00:00:00+00:00')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.0.display_start_date', '2026-06-05')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.0.display_end_date', '2026-06-08')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.0.display_date_range', '2026-06-05 through 2026-06-08')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.1.title', 'All-day multi-day event')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.1.starts_at', '2026-06-07')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.1.ends_at', '2026-06-09')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.1.starts_at_utc', '2026-06-07T00:00:00+00:00')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.1.display_start_date', '2026-06-07')
+            ->assertJsonPath('data.snapshot.calendar_upcoming.1.display_end_date', '2026-06-09')
+            ->assertJsonPath('data.snapshot.tasks_upcoming_month.0.due_at', '2026-06-08T20:00:00-04:00')
+            ->assertJsonPath('data.snapshot.tasks_upcoming_month.0.display_due_date', '2026-06-08')
+            ->assertJsonPath('data.snapshot.reminders_due.0.remind_at', '2026-06-08T20:00:00-04:00')
+            ->assertJsonPath('data.snapshot.reminders_due.0.display_remind_date', '2026-06-08')
+            ->assertJson(fn ($json) => $json
+                ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'use display_start_date/display_end_date'))
+                ->where('data.instructions', fn (string $value): bool => str_contains($value, '2026-06-05 through 2026-06-08'))
                 ->etc()
             );
     }

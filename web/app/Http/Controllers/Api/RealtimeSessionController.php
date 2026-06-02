@@ -241,10 +241,13 @@ class RealtimeSessionController extends Controller
             ? ConversationSession::where('user_id', $user->id)->findOrFail($data['session_id'])
             : null;
         $workspace = $session?->workspace ?: $this->workspaces->resolveWorkspace($user, $data['workspace_id'] ?? $session?->workspace_id);
+        $clientContext = is_array(data_get($session?->metadata ?? [], 'client_context'))
+            ? data_get($session?->metadata ?? [], 'client_context')
+            : null;
 
         return response()->json(['data' => [
-            'snapshot' => $this->dashboardContext->snapshot($user, $workspace),
-            'prompt_text' => $this->dashboardContext->promptText($user, $workspace),
+            'snapshot' => $this->dashboardContext->snapshot($user, $workspace, $clientContext),
+            'prompt_text' => $this->dashboardContext->promptText($user, $workspace, $clientContext),
             'instructions' => $session ? $this->realtimeInstructions($session) : null,
         ]]);
     }
@@ -371,7 +374,10 @@ class RealtimeSessionController extends Controller
         $clientContext = json_encode(data_get($session->metadata ?? [], 'client_context', []), JSON_UNESCAPED_SLASHES);
         $user = User::findOrFail($session->user_id);
         $workspace = $session->workspace ?: $this->workspaces->resolveWorkspace($user, $session->workspace_id);
-        $dashboardContext = $this->dashboardContext->promptText($user, $workspace);
+        $dashboardClientContext = is_array(data_get($session->metadata ?? [], 'client_context'))
+            ? data_get($session->metadata ?? [], 'client_context')
+            : null;
+        $dashboardContext = $this->dashboardContext->promptText($user, $workspace, $dashboardClientContext);
 
         return <<<PROMPT
 You are Bean, the realtime voice interface for HeyBean.

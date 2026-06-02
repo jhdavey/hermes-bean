@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
+use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -170,6 +172,137 @@ class HermesToolRuntimeServiceTest extends TestCase
                 && data_get($payload, 'messages.4.role') === 'user'
                 && data_get($payload, 'messages.4.content') === 'it should be a task not a reminder';
         });
+    }
+
+    public function test_native_read_tools_return_client_visible_dates_for_calendar_tasks_and_reminders(): void
+    {
+        $chatCalls = 0;
+        Http::fake(function ($request) use (&$chatCalls) {
+            if ($request->url() !== 'https://api.openai.test/v1/chat/completions') {
+                return Http::response(['error' => 'Unexpected request'], 500);
+            }
+
+            $chatCalls++;
+            if ($chatCalls === 1) {
+                return Http::response([
+                    'id' => 'chatcmpl-read-tools',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'tool_calls',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => null,
+                            'tool_calls' => [
+                                [
+                                    'id' => 'call_calendar',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'search_calendar_events',
+                                        'arguments' => json_encode(['query' => 'Timed multi-day event'], JSON_THROW_ON_ERROR),
+                                    ],
+                                ],
+                                [
+                                    'id' => 'call_tasks',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'search_tasks',
+                                        'arguments' => json_encode(['from_date' => '2026-06-08', 'to_date' => '2026-06-08'], JSON_THROW_ON_ERROR),
+                                    ],
+                                ],
+                                [
+                                    'id' => 'call_reminders',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'search_reminders',
+                                        'arguments' => json_encode(['from_date' => '2026-06-08', 'to_date' => '2026-06-08'], JSON_THROW_ON_ERROR),
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            $toolOutputs = collect($request->data()['messages'] ?? [])
+                ->where('role', 'tool')
+                ->mapWithKeys(function (array $message): array {
+                    $output = json_decode((string) data_get($message, 'content'), true, flags: JSON_THROW_ON_ERROR);
+
+                    return [(string) data_get($output, 'tool') => $output];
+                });
+
+            $calendar = $toolOutputs->get('search_calendar_events');
+            $task = $toolOutputs->get('search_tasks');
+            $reminder = $toolOutputs->get('search_reminders');
+
+            $this->assertSame('America/New_York', data_get($calendar, 'timezone'));
+            $this->assertSame('2026-06-05T13:00:00-04:00', data_get($calendar, 'items.0.starts_at'));
+            $this->assertSame('2026-06-08T20:00:00-04:00', data_get($calendar, 'items.0.ends_at'));
+            $this->assertSame('2026-06-09T00:00:00+00:00', data_get($calendar, 'items.0.ends_at_utc'));
+            $this->assertSame('2026-06-08', data_get($calendar, 'items.0.display_end_date'));
+            $this->assertSame('2026-06-05 through 2026-06-08', data_get($calendar, 'items.0.display_date_range'));
+            $this->assertSame('2026-06-08T20:00:00-04:00', data_get($task, 'items.0.due_at'));
+            $this->assertSame('2026-06-08', data_get($task, 'items.0.display_due_date'));
+            $this->assertSame('2026-06-08T20:00:00-04:00', data_get($reminder, 'items.0.remind_at'));
+            $this->assertSame('2026-06-08', data_get($reminder, 'items.0.display_remind_date'));
+
+            return Http::response([
+                'id' => 'chatcmpl-read-tools-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'That event covers June 5 through June 8.',
+                    ],
+                ]],
+            ], 200);
+        });
+
+        $token = $this->apiToken('tool-read-timezone@example.com');
+        $user = User::where('email', 'tool-read-timezone@example.com')->firstOrFail();
+        $workspace = app(WorkspaceService::class)->resolveWorkspace($user);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Timed multi-day event',
+            'starts_at' => Carbon::parse('2026-06-05 13:00:00', 'America/New_York')->utc(),
+            'ends_at' => Carbon::parse('2026-06-08 20:00:00', 'America/New_York')->utc(),
+            'status' => 'confirmed',
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Pack bags',
+            'status' => 'pending',
+            'due_at' => Carbon::parse('2026-06-08 20:00:00', 'America/New_York')->utc(),
+        ]);
+        Reminder::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Check in online',
+            'status' => 'pending',
+            'remind_at' => Carbon::parse('2026-06-08 20:00:00', 'America/New_York')->utc(),
+        ]);
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'What dates does my upcoming multi-day event cover, and what else is due that day?',
+            'metadata' => [
+                'client_context' => [
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'That event covers June 5 through June 8.');
+
+        $this->assertSame(2, $chatCalls);
     }
 
     public function test_tool_runtime_executes_native_task_update_tool_call(): void

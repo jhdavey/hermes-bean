@@ -436,6 +436,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
     private function searchTasksForTool(ConversationSession $session, array $arguments): array
     {
         $workspaceId = $this->toolWorkspaceId($session, $arguments);
+        $timezone = $this->sessionDisplayTimezone($session);
         $query = Task::query()->where('user_id', $session->user_id)->where('workspace_id', $workspaceId);
         if (! (bool) ($arguments['include_completed'] ?? false)) {
             $query->where('status', '!=', 'completed');
@@ -446,7 +447,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         if (filled($arguments['query'] ?? null)) {
             $this->whereLooseTitle($query, (string) $arguments['query']);
         }
-        [$from, $to] = $this->toolDateWindow($arguments);
+        [$from, $to] = $this->toolDateWindow($session, $arguments);
         if ($from && $to) {
             $query->where(function ($query) use ($from, $to): void {
                 $query->whereBetween('due_at', [$from, $to])->orWhereNull('due_at');
@@ -467,16 +468,20 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'category' => $task->category,
                 'color' => $task->color,
                 'is_critical' => (bool) $task->is_critical,
-                'due_at' => $task->due_at?->toIso8601String(),
+                'due_at' => $this->localIso($task->due_at, $timezone),
+                'due_at_utc' => $this->utcIso($task->due_at),
+                'display_due_date' => $this->localDate($task->due_at, $timezone),
+                'display_due_time' => $this->localTime($task->due_at, $timezone),
                 'recurrence' => data_get($task->metadata ?? [], 'recurrence'),
             ])->values()->all();
 
-        return $this->readToolResult('search_tasks', $items, $workspaceId);
+        return $this->readToolResult('search_tasks', $items, $workspaceId, $timezone);
     }
 
     private function searchRemindersForTool(ConversationSession $session, array $arguments): array
     {
         $workspaceId = $this->toolWorkspaceId($session, $arguments);
+        $timezone = $this->sessionDisplayTimezone($session);
         $query = Reminder::query()->where('user_id', $session->user_id)->where('workspace_id', $workspaceId);
         if (filled($arguments['status'] ?? null)) {
             $query->where('status', (string) $arguments['status']);
@@ -484,7 +489,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         if (filled($arguments['query'] ?? null)) {
             $this->whereLooseTitle($query, (string) $arguments['query']);
         }
-        [$from, $to] = $this->toolDateWindow($arguments);
+        [$from, $to] = $this->toolDateWindow($session, $arguments);
         if ($from && $to) {
             $query->whereBetween('remind_at', [$from, $to]);
         }
@@ -500,16 +505,20 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'category' => $reminder->category,
                 'color' => $reminder->color,
                 'is_critical' => (bool) $reminder->is_critical,
-                'remind_at' => $reminder->remind_at?->toIso8601String(),
+                'remind_at' => $this->localIso($reminder->remind_at, $timezone),
+                'remind_at_utc' => $this->utcIso($reminder->remind_at),
+                'display_remind_date' => $this->localDate($reminder->remind_at, $timezone),
+                'display_remind_time' => $this->localTime($reminder->remind_at, $timezone),
                 'recurrence' => data_get($reminder->metadata ?? [], 'recurrence'),
             ])->values()->all();
 
-        return $this->readToolResult('search_reminders', $items, $workspaceId);
+        return $this->readToolResult('search_reminders', $items, $workspaceId, $timezone);
     }
 
     private function searchCalendarEventsForTool(ConversationSession $session, array $arguments): array
     {
         $workspaceId = $this->toolWorkspaceId($session, $arguments);
+        $timezone = $this->sessionDisplayTimezone($session);
         $query = CalendarEvent::query()->where('user_id', $session->user_id)->where('workspace_id', $workspaceId);
         if (filled($arguments['status'] ?? null)) {
             $query->where('status', (string) $arguments['status']);
@@ -517,7 +526,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         if (filled($arguments['query'] ?? null)) {
             $this->whereLooseTitle($query, (string) $arguments['query']);
         }
-        [$from, $to] = $this->toolDateWindow($arguments);
+        [$from, $to] = $this->toolDateWindow($session, $arguments);
         if ($from && $to) {
             $query->where(function ($query) use ($from, $to): void {
                 $query->whereBetween('starts_at', [$from, $to])
@@ -539,11 +548,22 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'is_critical' => (bool) $event->is_critical,
                 'recurrence' => $event->recurrence,
                 'status' => $event->status,
-                'starts_at' => $event->starts_at?->toIso8601String(),
-                'ends_at' => $event->ends_at?->toIso8601String(),
+                'starts_at' => $this->calendarEventAllDay($event) ? $this->calendarEventDisplayStartDate($event, $timezone) : $this->localIso($event->starts_at, $timezone),
+                'ends_at' => $this->calendarEventAllDay($event) ? $this->calendarEventDisplayEndDate($event, $timezone) : $this->localIso($event->ends_at, $timezone),
+                'starts_at_utc' => $this->utcIso($event->starts_at),
+                'ends_at_utc' => $this->utcIso($event->ends_at),
+                'display_start_date' => $this->calendarEventDisplayStartDate($event, $timezone),
+                'display_end_date' => $this->calendarEventDisplayEndDate($event, $timezone),
+                'display_start_time' => $this->calendarEventAllDay($event) ? null : $this->localTime($event->starts_at, $timezone),
+                'display_end_time' => $this->calendarEventAllDay($event) ? null : $this->localTime($event->ends_at, $timezone),
+                'display_date_range' => $this->displayDateRange(
+                    $this->calendarEventDisplayStartDate($event, $timezone),
+                    $this->calendarEventDisplayEndDate($event, $timezone),
+                ),
+                'all_day' => $this->calendarEventAllDay($event),
             ])->values()->all();
 
-        return $this->readToolResult('search_calendar_events', $items, $workspaceId);
+        return $this->readToolResult('search_calendar_events', $items, $workspaceId, $timezone);
     }
 
     private function dayContextForTool(ConversationSession $session, array $arguments): array
@@ -563,6 +583,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'tool' => 'get_day_context',
             'workspace_id' => $workspaceId,
             'date' => $date,
+            'timezone' => $this->sessionDisplayTimezone($session),
             'tasks' => $this->searchTasksForTool($session, [...$arguments, 'include_completed' => false])['items'],
             'reminders' => $this->searchRemindersForTool($session, $arguments)['items'],
             'calendar_events' => $this->searchCalendarEventsForTool($session, $arguments)['items'],
@@ -1197,12 +1218,13 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
     }
 
-    private function readToolResult(string $tool, array $items, int $workspaceId): array
+    private function readToolResult(string $tool, array $items, int $workspaceId, ?string $timezone = null): array
     {
         return [
             'ok' => true,
             'tool' => $tool,
             'workspace_id' => $workspaceId,
+            'timezone' => $timezone,
             'count' => count($items),
             'items' => $items,
         ];
@@ -1218,7 +1240,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $workspace->id;
     }
 
-    private function toolDateWindow(array $arguments): array
+    private function toolDateWindow(ConversationSession $session, array $arguments): array
     {
         $date = trim((string) ($arguments['date'] ?? ''));
         $fromDate = trim((string) ($arguments['from_date'] ?? ''));
@@ -1232,16 +1254,151 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
         $fromDate = $fromDate !== '' ? $fromDate : $toDate;
         $toDate = $toDate !== '' ? $toDate : $fromDate;
+        $timezone = $this->sessionDisplayTimezone($session);
 
         return [
-            Carbon::parse($fromDate)->startOfDay(),
-            Carbon::parse($toDate)->endOfDay(),
+            Carbon::parse($fromDate, $timezone)->startOfDay()->utc(),
+            Carbon::parse($toDate, $timezone)->endOfDay()->utc(),
         ];
     }
 
     private function toolLimit(array $arguments): int
     {
         return max(1, min(50, (int) ($arguments['limit'] ?? 12)));
+    }
+
+    private function sessionDisplayTimezone(ConversationSession $session): string
+    {
+        $message = $session->messages()
+            ->where('role', 'user')
+            ->latest('id')
+            ->first();
+        $messageMetadata = is_array($message?->metadata) ? $message->metadata : [];
+        $sessionMetadata = is_array($session->metadata) ? $session->metadata : [];
+
+        foreach ([$messageMetadata, $sessionMetadata] as $metadata) {
+            $context = data_get($metadata, 'client_context');
+            if (! is_array($context)) {
+                continue;
+            }
+
+            $timezone = $this->displayTimezoneFromClientContext($context);
+            if ($timezone !== null) {
+                return $timezone;
+            }
+        }
+
+        $profileTimezone = data_get($this->profileForSession($session)?->settings ?? [], 'timezone');
+        if (is_string($profileTimezone) && $this->validTimezone($profileTimezone)) {
+            return $profileTimezone;
+        }
+
+        $fallback = (string) config('app.timezone', 'UTC');
+
+        return $this->validTimezone($fallback) ? $fallback : 'UTC';
+    }
+
+    private function displayTimezoneFromClientContext(array $context): ?string
+    {
+        $timezone = data_get($context, 'timezone');
+        if (is_string($timezone) && $this->validTimezone($timezone)) {
+            return $timezone;
+        }
+
+        $offset = data_get($context, 'timezone_offset');
+        if (is_string($offset) && preg_match('/^[+-]\d{2}:?\d{2}$/', $offset)) {
+            return strlen($offset) === 5
+                ? substr($offset, 0, 3).':'.substr($offset, 3, 2)
+                : $offset;
+        }
+
+        $minutes = data_get($context, 'timezone_offset_minutes');
+        if (is_numeric($minutes)) {
+            $totalMinutes = (int) $minutes;
+            $sign = $totalMinutes < 0 ? '-' : '+';
+            $absolute = abs($totalMinutes);
+
+            return sprintf('%s%02d:%02d', $sign, intdiv($absolute, 60), $absolute % 60);
+        }
+
+        return null;
+    }
+
+    private function validTimezone(string $timezone): bool
+    {
+        try {
+            new \DateTimeZone($timezone);
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    private function localIso(?Carbon $value, string $timezone): ?string
+    {
+        return $value?->copy()->setTimezone($timezone)->toIso8601String();
+    }
+
+    private function utcIso(?Carbon $value): ?string
+    {
+        return $value?->copy()->utc()->toIso8601String();
+    }
+
+    private function localDate(?Carbon $value, string $timezone): ?string
+    {
+        return $value?->copy()->setTimezone($timezone)->toDateString();
+    }
+
+    private function localTime(?Carbon $value, string $timezone): ?string
+    {
+        return $value?->copy()->setTimezone($timezone)->format('H:i');
+    }
+
+    private function calendarEventAllDay(CalendarEvent $event): bool
+    {
+        $value = data_get($event->metadata ?? [], 'all_day', data_get($event->metadata ?? [], 'allDay'));
+
+        return $value === true
+            || $value === 1
+            || in_array(strtolower((string) $value), ['true', '1', 'yes'], true);
+    }
+
+    private function calendarEventDisplayEndDate(CalendarEvent $event, string $timezone): ?string
+    {
+        if (! $event->ends_at) {
+            return $this->calendarEventDisplayStartDate($event, $timezone);
+        }
+
+        if ($this->calendarEventAllDay($event)) {
+            return $event->ends_at->copy()->utc()->subDay()->toDateString();
+        }
+
+        $end = $event->ends_at->copy()->setTimezone($timezone);
+
+        return $end->toDateString();
+    }
+
+    private function calendarEventDisplayStartDate(CalendarEvent $event, string $timezone): ?string
+    {
+        if ($this->calendarEventAllDay($event)) {
+            return $event->starts_at?->copy()->utc()->toDateString();
+        }
+
+        return $this->localDate($event->starts_at, $timezone);
+    }
+
+    private function displayDateRange(?string $startDate, ?string $endDate): ?string
+    {
+        if ($startDate === null) {
+            return $endDate;
+        }
+
+        if ($endDate === null || $endDate === $startDate) {
+            return $startDate;
+        }
+
+        return "{$startDate} through {$endDate}";
     }
 
     private function whereLooseTitle(mixed $query, string $text): void
@@ -1390,6 +1547,7 @@ When a user asks what/when/where about an item and the type is ambiguous, search
 Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded.
 
 Laravel owns app mechanics: workspace access, database writes, validation, syncing, and tool results. Trust tool results. If a read/write tool says not found, ambiguous, or failed, respond naturally from that result.
+Timed read-tool *_at timestamps are formatted in the tool result timezone and match the user-visible app. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date.
 Use external_lookup for live information outside HeyBean, including current store hours, flights, hotel prices, weather, traffic, news, prices, availability, sports scores, or other current web facts. Do not invent current external facts. When external_lookup returns sources or citations, use them to answer concisely, include a brief source title or URL when useful, and mention uncertainty when results are incomplete.
 
 Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no notes unless the user says otherwise. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.

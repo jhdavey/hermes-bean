@@ -14,13 +14,18 @@ class DashboardContextSnapshotService
 {
     public function __construct(private readonly GoogleCalendarSyncService $googleCalendar) {}
 
-    public function snapshot(User $user, Workspace $workspace): array
+    public function snapshot(User $user, Workspace $workspace, ?array $clientContext = null): array
     {
-        $now = now();
-        $todayStart = $now->copy()->startOfDay();
-        $todayEnd = $now->copy()->endOfDay();
-        $weekEnd = $now->copy()->addDays(7)->endOfDay();
-        $monthEnd = $now->copy()->endOfMonth();
+        $timezone = $this->displayTimezone($clientContext);
+        $now = now($timezone);
+        $todayStartLocal = $now->copy()->startOfDay();
+        $todayEndLocal = $now->copy()->endOfDay();
+        $weekEndLocal = $now->copy()->addDays(7)->endOfDay();
+        $monthEndLocal = $now->copy()->endOfMonth();
+        $todayStart = $todayStartLocal->copy()->utc();
+        $todayEnd = $todayEndLocal->copy()->utc();
+        $weekEnd = $weekEndLocal->copy()->utc();
+        $monthEnd = $monthEndLocal->copy()->utc();
 
         $tasksQuery = Task::query()
             ->where('workspace_id', $workspace->id)
@@ -71,8 +76,9 @@ class DashboardContextSnapshotService
 
         return [
             'generated_at' => $now->toIso8601String(),
-            'today' => $todayStart->toDateString(),
-            'timezone' => config('app.timezone'),
+            'generated_at_utc' => now()->utc()->toIso8601String(),
+            'today' => $todayStartLocal->toDateString(),
+            'timezone' => $timezone,
             'workspace' => [
                 'id' => $workspace->id,
                 'name' => $workspace->name,
@@ -86,65 +92,69 @@ class DashboardContextSnapshotService
             'calendar_today' => $calendarEvents
                 ->filter(fn (CalendarEvent $event): bool => $this->overlaps($event->starts_at, $event->ends_at, $todayStart, $todayEnd))
                 ->take(12)
-                ->map(fn (CalendarEvent $event): array => $this->calendarEventPayload($event))
+                ->map(fn (CalendarEvent $event): array => $this->calendarEventPayload($event, $timezone))
                 ->values()
                 ->all(),
             'calendar_upcoming' => $calendarEvents
                 ->filter(fn (CalendarEvent $event): bool => $event->starts_at?->gt($todayEnd))
                 ->take(12)
-                ->map(fn (CalendarEvent $event): array => $this->calendarEventPayload($event))
+                ->map(fn (CalendarEvent $event): array => $this->calendarEventPayload($event, $timezone))
                 ->values()
                 ->all(),
             'tasks_overdue' => $tasks
                 ->filter(fn (Task $task): bool => $task->due_at?->lt($todayStart) ?? false)
                 ->take(12)
-                ->map(fn (Task $task): array => $this->taskPayload($task))
+                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone))
                 ->values()
                 ->all(),
             'tasks_due_today' => $tasks
                 ->filter(fn (Task $task): bool => $task->due_at ? $task->due_at->betweenIncluded($todayStart, $todayEnd) : false)
                 ->take(12)
-                ->map(fn (Task $task): array => $this->taskPayload($task))
+                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone))
                 ->values()
                 ->all(),
             'tasks_upcoming_month' => $tasks
                 ->filter(fn (Task $task): bool => $task->due_at?->gt($todayEnd) ?? false)
                 ->take(12)
-                ->map(fn (Task $task): array => $this->taskPayload($task))
+                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone))
                 ->values()
                 ->all(),
             'critical_unscheduled_tasks' => $tasks
                 ->filter(fn (Task $task): bool => $task->due_at === null && (bool) $task->is_critical)
                 ->take(8)
-                ->map(fn (Task $task): array => $this->taskPayload($task))
+                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone))
                 ->values()
                 ->all(),
             'reminders_due' => $reminders
                 ->take(15)
-                ->map(fn (Reminder $reminder): array => $this->reminderPayload($reminder))
+                ->map(fn (Reminder $reminder): array => $this->reminderPayload($reminder, $timezone))
                 ->values()
                 ->all(),
         ];
     }
 
-    public function promptText(User $user, Workspace $workspace): string
+    public function promptText(User $user, Workspace $workspace, ?array $clientContext = null): string
     {
-        $snapshot = $this->snapshot($user, $workspace);
+        $snapshot = $this->snapshot($user, $workspace, $clientContext);
         $json = json_encode($snapshot, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         return <<<TEXT
 Dashboard context snapshot for fast read-only answers.
 Use this snapshot to answer simple questions about today's calendar, upcoming events, current tasks, and reminders without calling tools. If the user asks for anything outside this snapshot, needs a write/change, or needs fresh external data, call queue_bean_work. Treat this snapshot as current as of generated_at.
+Timed *_at timestamps in this snapshot are formatted in the snapshot timezone and match the user-visible dashboard. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date.
 {$json}
 TEXT;
     }
 
-    private function taskPayload(Task $task): array
+    private function taskPayload(Task $task, string $timezone): array
     {
         return [
             'id' => $task->id,
             'title' => $task->title,
-            'due_at' => $task->due_at?->toIso8601String(),
+            'due_at' => $this->localIso($task->due_at, $timezone),
+            'due_at_utc' => $this->utcIso($task->due_at),
+            'display_due_date' => $this->localDate($task->due_at, $timezone),
+            'display_due_time' => $this->localTime($task->due_at, $timezone),
             'type' => $task->type,
             'category' => $task->category,
             'critical' => (bool) $task->is_critical,
@@ -152,24 +162,39 @@ TEXT;
         ];
     }
 
-    private function reminderPayload(Reminder $reminder): array
+    private function reminderPayload(Reminder $reminder, string $timezone): array
     {
         return [
             'id' => $reminder->id,
             'title' => $reminder->title,
-            'remind_at' => $reminder->remind_at?->toIso8601String(),
+            'remind_at' => $this->localIso($reminder->remind_at, $timezone),
+            'remind_at_utc' => $this->utcIso($reminder->remind_at),
+            'display_remind_date' => $this->localDate($reminder->remind_at, $timezone),
+            'display_remind_time' => $this->localTime($reminder->remind_at, $timezone),
             'category' => $reminder->category,
             'critical' => (bool) $reminder->is_critical,
         ];
     }
 
-    private function calendarEventPayload(CalendarEvent $event): array
+    private function calendarEventPayload(CalendarEvent $event, string $timezone): array
     {
+        $allDay = $this->eventAllDay($event);
+        $displayStartDate = $allDay ? $this->storedDate($event->starts_at) : $this->localDate($event->starts_at, $timezone);
+        $displayEndDate = $this->eventDisplayEndDate($event, $timezone, $allDay);
+
         return [
             'id' => $event->id,
             'title' => $event->title,
-            'starts_at' => $event->starts_at?->toIso8601String(),
-            'ends_at' => $event->ends_at?->toIso8601String(),
+            'starts_at' => $allDay ? $displayStartDate : $this->localIso($event->starts_at, $timezone),
+            'ends_at' => $allDay ? $displayEndDate : $this->localIso($event->ends_at, $timezone),
+            'starts_at_utc' => $this->utcIso($event->starts_at),
+            'ends_at_utc' => $this->utcIso($event->ends_at),
+            'display_start_date' => $displayStartDate,
+            'display_end_date' => $displayEndDate,
+            'display_start_time' => $allDay ? null : $this->localTime($event->starts_at, $timezone),
+            'display_end_time' => $allDay ? null : $this->localTime($event->ends_at, $timezone),
+            'display_date_range' => $this->displayDateRange($displayStartDate, $displayEndDate),
+            'all_day' => $allDay,
             'location' => $event->location,
             'category' => $event->category,
             'critical' => (bool) $event->is_critical,
@@ -185,6 +210,107 @@ TEXT;
         $end = $endsAt ?: $startsAt;
 
         return $startsAt->lte($rangeEnd) && $end->gte($rangeStart);
+    }
+
+    private function displayTimezone(?array $clientContext): string
+    {
+        $timezone = data_get($clientContext ?? [], 'timezone');
+        if (is_string($timezone) && $this->validTimezone($timezone)) {
+            return $timezone;
+        }
+
+        $offset = data_get($clientContext ?? [], 'timezone_offset');
+        if (is_string($offset) && preg_match('/^[+-]\d{2}:?\d{2}$/', $offset)) {
+            return strlen($offset) === 5
+                ? substr($offset, 0, 3).':'.substr($offset, 3, 2)
+                : $offset;
+        }
+
+        $minutes = data_get($clientContext ?? [], 'timezone_offset_minutes');
+        if (is_numeric($minutes)) {
+            $totalMinutes = (int) $minutes;
+            $sign = $totalMinutes < 0 ? '-' : '+';
+            $absolute = abs($totalMinutes);
+
+            return sprintf('%s%02d:%02d', $sign, intdiv($absolute, 60), $absolute % 60);
+        }
+
+        $fallback = (string) config('app.timezone', 'UTC');
+
+        return $this->validTimezone($fallback) ? $fallback : 'UTC';
+    }
+
+    private function validTimezone(string $timezone): bool
+    {
+        try {
+            new \DateTimeZone($timezone);
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    private function localIso(?Carbon $value, string $timezone): ?string
+    {
+        return $value?->copy()->setTimezone($timezone)->toIso8601String();
+    }
+
+    private function utcIso(?Carbon $value): ?string
+    {
+        return $value?->copy()->utc()->toIso8601String();
+    }
+
+    private function localDate(?Carbon $value, string $timezone): ?string
+    {
+        return $value?->copy()->setTimezone($timezone)->toDateString();
+    }
+
+    private function localTime(?Carbon $value, string $timezone): ?string
+    {
+        return $value?->copy()->setTimezone($timezone)->format('H:i');
+    }
+
+    private function eventAllDay(CalendarEvent $event): bool
+    {
+        $value = data_get($event->metadata ?? [], 'all_day', data_get($event->metadata ?? [], 'allDay'));
+
+        return $value === true
+            || $value === 1
+            || in_array(strtolower((string) $value), ['true', '1', 'yes'], true);
+    }
+
+    private function eventDisplayEndDate(CalendarEvent $event, string $timezone, bool $allDay): ?string
+    {
+        if (! $event->ends_at) {
+            return $allDay ? $this->storedDate($event->starts_at) : $this->localDate($event->starts_at, $timezone);
+        }
+
+        if ($allDay) {
+            return $event->ends_at->copy()->utc()->subDay()->toDateString();
+        }
+
+        $end = $event->ends_at->copy()->setTimezone($timezone);
+
+        return $end->toDateString();
+    }
+
+    private function storedDate(?Carbon $value): ?string
+    {
+        return $value?->copy()->utc()->toDateString();
+    }
+
+    private function displayDateRange(?string $startDate, ?string $endDate): ?string
+    {
+        if ($startDate === null) {
+            return $endDate;
+        }
+
+        if ($endDate === null || $endDate === $startDate) {
+            return $startDate;
+        }
+
+        return "{$startDate} through {$endDate}";
     }
 
     private function scopeVisibleGoogleCalendars(Builder $query, User $user, Workspace $workspace): void
