@@ -4635,6 +4635,9 @@ if (mount) {
         const text = String(message || '').trim();
         if (/session\.type|missing required parameter|invalid_request_error/i.test(text)) {
             reportKioskRealtimeIssue('realtime_protocol_error', { message: text });
+            if (kioskRealtimeConnected()) {
+                return { phase: 'armed', text: 'Bean voice ready' };
+            }
             return state.kioskVoiceEnabled
                 ? { phase: 'working', text: 'Reconnecting' }
                 : { phase: 'error', text: 'Voice unavailable' };
@@ -5065,7 +5068,10 @@ if (mount) {
         if (!instructions) return false;
         dataChannel.send(JSON.stringify({
             type: 'session.update',
-            session: { instructions },
+            session: {
+                type: 'realtime',
+                instructions,
+            },
         }));
         return true;
     }
