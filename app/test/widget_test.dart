@@ -1730,7 +1730,7 @@ void main() {
     expect(find.textContaining('Work'), findsWidgets);
   });
 
-  testWidgets('uncategorized task and reminder saves use bean-green color', (
+  testWidgets('uncategorized task and reminder saves use theme color', (
     WidgetTester tester,
   ) async {
     final api = _TaskReminderCategoryFakeHermesApiClient();
@@ -1753,7 +1753,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.updatedTask?.category, isNull);
-    expect(api.updatedTask?.color, '#34C759');
+    expect(api.updatedTask?.color, '#16A34A');
 
     await tester.tap(find.byKey(const Key('nav-reminders')));
     await tester.pumpAndSettle();
@@ -1766,7 +1766,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.updatedReminder?.category, isNull);
-    expect(api.updatedReminder?.color, '#34C759');
+    expect(api.updatedReminder?.color, '#16A34A');
   });
 
   testWidgets('new task date saves on the task without creating a reminder', (
@@ -3314,7 +3314,7 @@ void main() {
   );
 
   testWidgets(
-    'new shared workspace events keep no category bean-green by default',
+    'new shared workspace events keep no category theme color by default',
     (WidgetTester tester) async {
       final api = _SharedWorkspaceCategoryFakeHermesApiClient();
       await tester.pumpWidget(
@@ -3342,7 +3342,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.createdEvent?.category, isNull);
-      expect(api.createdEvent?.color, '#34C759');
+      expect(api.createdEvent?.color, '#16A34A');
     },
   );
 

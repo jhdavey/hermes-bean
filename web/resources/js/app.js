@@ -370,6 +370,10 @@ if (mount) {
         document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme.accent);
     }
 
+    function themeAccentColor() {
+        return themeForKey(currentThemeKey()).accent;
+    }
+
     function themeSettingsMarkup() {
         const selectedTheme = currentThemeKey();
         return `
@@ -1716,7 +1720,7 @@ if (mount) {
     }
 
     function glanceEventMarkup(event) {
-        const color = safeColor(event.color);
+        const color = itemColor(event);
         return `
             <button class="hb-glance-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
@@ -1956,7 +1960,7 @@ if (mount) {
     }
 
     function monthAllDayEventMarkup(event) {
-        const color = safeColor(event.color);
+        const color = itemColor(event);
         return `
             <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <span class="hb-month-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
@@ -1964,7 +1968,7 @@ if (mount) {
     }
 
     function monthMultiDayEventMarkup(event, day) {
-        const color = safeColor(event.color);
+        const color = itemColor(event);
         const time = multiDayEventDayTime(event, day, { showEndTime: false });
         return `
             <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
@@ -1974,7 +1978,7 @@ if (mount) {
     }
 
     function monthEventMarkup(event) {
-        const color = safeColor(event.color);
+        const color = itemColor(event);
         return `
             <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <span class="hb-month-event-time">${escapeHtml(eventStartTime(event))}</span>
@@ -2040,7 +2044,7 @@ if (mount) {
 
     function itemMarkup(item, kind) {
         const completed = kind === 'task' ? taskCompleted(item) : reminderCompleted(item);
-        const color = safeColor(item.color);
+        const color = itemColor(item);
         const overdue = itemOverdue(item, kind);
         const baseSubtitle = kind === 'task' ? taskSubtitle(item) : reminderSubtitle(item);
         const subtitle = overdue ? ['overdue', baseSubtitle].filter(Boolean).join(' · ') : baseSubtitle;
@@ -2073,7 +2077,7 @@ if (mount) {
     }
 
     function eventMarkup(event) {
-        const color = safeColor(event.color);
+        const color = itemColor(event);
         return `
             <button class="hb-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
@@ -2085,7 +2089,7 @@ if (mount) {
         if (eventAllDay(event)) return '';
         const style = timelineEventStyle(event, day, startHour, endHour);
         if (!style) return '';
-        const color = safeColor(event.color);
+        const color = itemColor(event);
         const shortClass = style.minutes <= 30 ? ' hb-timed-event-short' : '';
         return `
             <button class="hb-event hb-timed-event${shortClass}" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
@@ -2095,12 +2099,12 @@ if (mount) {
     }
 
     function allDayEventMarkup(event) {
-        const color = safeColor(event.color);
+        const color = itemColor(event);
         return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</button>`;
     }
 
     function multiDayEventMarkup(event, day) {
-        const color = safeColor(event.color);
+        const color = itemColor(event);
         const time = multiDayEventDayTime(event, day);
         return `
             <button class="hb-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
@@ -2339,7 +2343,7 @@ if (mount) {
                     ${isEvent ? eventTimeFieldsMarkup(item, when, end) : labelInput(isReminder ? 'Remind me at' : 'Due date', 'time', 'datetime-local', when, isReminder ? 'required' : '')}
                     <div class="hb-field-row">
                         ${categorySelectMarkup(item)}
-                        ${labelInput('Color', 'color', 'color', safeColor(item?.color || categoryColor(item?.category)))}
+                        ${labelInput('Color', 'color', 'color', itemColor(item))}
                     </div>
                     ${categoryManagerToggleMarkup()}
                     ${!isReminder ? `<label class="hb-checkbox-row"><input type="checkbox" name="critical" ${item?.is_critical || item?.isCritical ? 'checked' : ''}> Critical</label>` : ''}
@@ -2423,7 +2427,7 @@ if (mount) {
                     </div>
                     <div class="hb-inline-category-create">
                         <label class="hb-label">New category<input class="hb-input" type="text" data-inline-category-name placeholder="Category name"></label>
-                        <label class="hb-label">Color<input class="hb-input hb-color-input" type="color" data-inline-category-color value="#16A34A"></label>
+                        <label class="hb-label">Color<input class="hb-input hb-color-input" type="color" data-inline-category-color value="${escapeAttr(themeAccentColor())}"></label>
                         <button class="hb-button-secondary" type="button" data-inline-category-create>Add</button>
                     </div>
                     <div class="hb-list hb-category-list" data-inline-category-list>${inlineCategoryRowsMarkup()}</div>
@@ -2653,7 +2657,7 @@ if (mount) {
                 <section class="hb-card hb-modal">
                     ${sectionTitle(icons.tune, 'Categories', 'Create, recolor, or delete item categories.')}
                     <form class="hb-form hb-category-create" data-modal-form="category-create">
-                        <div class="hb-field-row">${labelInput('Name', 'name', 'text', '', 'required')}${labelInput('Color', 'color', 'color', '#16A34A')}</div>
+                        <div class="hb-field-row">${labelInput('Name', 'name', 'text', '', 'required')}${labelInput('Color', 'color', 'color', themeAccentColor())}</div>
                         <button class="hb-button" type="submit">Add category</button>
                     </form>
                     <div class="hb-list hb-category-list">
@@ -3016,7 +3020,7 @@ if (mount) {
         const nameInput = panel?.querySelector('[data-inline-category-name]');
         const colorInput = panel?.querySelector('[data-inline-category-color]');
         const name = String(nameInput?.value || '').trim();
-        const color = safeColor(colorInput?.value || '#16A34A');
+        const color = safeColor(colorInput?.value || themeAccentColor());
         if (!panel || !name) {
             setInlineCategoryMessage(panel, 'Add a category name.', 'error');
             return;
@@ -3025,7 +3029,7 @@ if (mount) {
             const category = await api('/event-categories', { method: 'POST', body: { name, color } });
             cacheCategory(category);
             nameInput.value = '';
-            colorInput.value = '#16A34A';
+            colorInput.value = themeAccentColor();
             refreshInlineCategoryControls(panel, name, color);
             setInlineCategoryMessage(panel, 'Added.', '');
         });
@@ -3036,7 +3040,7 @@ if (mount) {
         const row = button.closest('[data-inline-category-row]');
         const panel = button.closest('[data-category-manager]');
         const name = String(row?.querySelector('[data-inline-category-row-name]')?.value || '').trim();
-        const color = safeColor(row?.querySelector('[data-inline-category-row-color]')?.value || '#16A34A');
+        const color = safeColor(row?.querySelector('[data-inline-category-row-color]')?.value || themeAccentColor());
         if (!row || !name) {
             setInlineCategoryMessage(panel, 'Category name is required.', 'error');
             return;
@@ -3191,7 +3195,7 @@ if (mount) {
                 await api(`/workspace-invitations/${encodeURIComponent(token)}/accept`, { method: 'POST' });
                 await loadSignedIn();
             } else if (kind === 'category-create') {
-                await api('/event-categories', { method: 'POST', body: { name: data.name, color: data.color || '#16A34A' } });
+                await api('/event-categories', { method: 'POST', body: { name: data.name, color: data.color || themeAccentColor() } });
                 await refreshOnly(false);
                 state.modal = { type: 'categories' };
                 render();
@@ -3423,7 +3427,7 @@ if (mount) {
     }
 
     async function saveItem(kind, item, data, form) {
-        const color = data.color || '#34C759';
+        const color = data.color || themeAccentColor();
         if (kind === 'task') {
             const syncTo = selectedSyncWorkspaceIds(form);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
@@ -7202,6 +7206,12 @@ if (mount) {
         return state.categories.find((category) => category.name === name)?.color || '';
     }
 
+    function itemColor(item = {}) {
+        const category = String(item?.category || '').trim();
+        if (!category) return themeAccentColor();
+        return safeColor(item?.color || categoryColor(category));
+    }
+
     function findById(list, id) {
         return list.find((item) => String(item.id) === String(id));
     }
@@ -7663,8 +7673,8 @@ if (mount) {
         return `${dateOnly(end)}T00:00:00.000Z`;
     }
 
-    function safeColor(value) {
-        return /^#[0-9a-f]{6}$/i.test(value || '') ? value : '#34C759';
+    function safeColor(value, fallback = themeAccentColor()) {
+        return /^#[0-9a-f]{6}$/i.test(value || '') ? value : fallback;
     }
 
     function hexAlpha(hex, alpha) {

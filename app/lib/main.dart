@@ -171,6 +171,11 @@ Map<String, Object?> _clientTemporalContext() {
   };
 }
 
+String _themeCategoryColorHex() {
+  final value = HeyBeanTheme.accent.toARGB32() & 0xFFFFFF;
+  return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+}
+
 Map<String, Object?> _flutterChatMetadata({
   Map<String, Object?> additional = const {},
 }) => {
@@ -2562,7 +2567,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     List<String> googleCalendarIds = const [],
   }) async {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
-    final normalizedColor = category == null ? _beanGreenCategoryColor : color;
+    final normalizedColor = category == null ? _themeCategoryColorHex() : color;
     final metadata = <String, Object?>{
       ...?task?.metadata,
       ...?recurrenceMetadata,
@@ -2756,7 +2761,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (mounted) setState(() => _error = 'Reminder time is required.');
       return;
     }
-    final normalizedColor = category == null ? _beanGreenCategoryColor : color;
+    final normalizedColor = category == null ? _themeCategoryColorHex() : color;
     final metadata = <String, Object?>{
       ...?reminder?.metadata,
       ...?recurrenceMetadata,
@@ -2927,7 +2932,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             (event) => event.category == category.name
                 ? event.copyWith(
                     clearCategory: true,
-                    color: _beanGreenCategoryColor,
+                    color: _themeCategoryColorHex(),
                   )
                 : event,
           )
@@ -2937,7 +2942,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             (task) => task.category == category.name
                 ? task.copyWith(
                     clearCategory: true,
-                    color: _beanGreenCategoryColor,
+                    color: _themeCategoryColorHex(),
                   )
                 : task,
           )
@@ -2947,7 +2952,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             (reminder) => reminder.category == category.name
                 ? reminder.copyWith(
                     clearCategory: true,
-                    color: _beanGreenCategoryColor,
+                    color: _themeCategoryColorHex(),
                   )
                 : reminder,
           )
@@ -2974,7 +2979,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }) async {
     final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
     final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
-    final normalizedColor = category == null ? _beanGreenCategoryColor : color;
+    final normalizedColor = category == null ? _themeCategoryColorHex() : color;
     try {
       final createdEvent = await widget.apiClient.createCalendarEvent(
         title: title,
@@ -3050,7 +3055,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }) async {
     final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
     final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
-    final normalizedColor = category == null ? _beanGreenCategoryColor : color;
+    final normalizedColor = category == null ? _themeCategoryColorHex() : color;
     final previousCalendar = _calendar;
     final optimisticEvent = event.copyWith(
       title: title,
@@ -8380,10 +8385,12 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         )
         .map((category) => category.color)
         .firstOrNull;
-    final initialColor = event.color ?? matchingCategoryColor;
+    final initialColor = (event.category ?? '').trim().isEmpty
+        ? _themeCategoryColorHex()
+        : event.color ?? matchingCategoryColor;
     _color = _isHexColor(initialColor)
         ? initialColor!.toUpperCase()
-        : _beanGreenCategoryColor;
+        : _themeCategoryColorHex();
     _recurrence =
         _recurrences.any((recurrence) => recurrence.value == event.recurrence)
         ? event.recurrence!
@@ -8677,7 +8684,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       setState(() {
         if (_category.text.trim() == category.name) {
           _category.clear();
-          _color = _beanGreenCategoryColor;
+          _color = _themeCategoryColorHex();
         }
       });
       return;
@@ -8705,7 +8712,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             .toList();
         if (_category.text.trim() == category.name) {
           _category.clear();
-          _color = _beanGreenCategoryColor;
+          _color = _themeCategoryColorHex();
         }
       });
     } finally {
@@ -9591,7 +9598,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 onTap: () {
                                   setState(() {
                                     _category.text = '';
-                                    _color = _beanGreenCategoryColor;
+                                    _color = _themeCategoryColorHex();
                                   });
                                 },
                               ),
@@ -11711,8 +11718,8 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   final notesController = TextEditingController(text: initialNotes);
   var selectedCategory = initialCategory?.trim() ?? '';
   var selectedColor = selectedCategory.isEmpty
-      ? _beanGreenCategoryColor
-      : initialColor?.trim() ?? _beanGreenCategoryColor;
+      ? _themeCategoryColorHex()
+      : initialColor?.trim() ?? _themeCategoryColorHex();
   var modalCategories = [...categories];
   var savingCategory = false;
   var isCritical = initialCritical;
@@ -11791,9 +11798,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                               ? null
                               : selectedCategory,
                           'color': selectedCategory.isEmpty
-                              ? _beanGreenCategoryColor
+                              ? _themeCategoryColorHex()
                               : (selectedColor.isEmpty
-                                    ? _beanGreenCategoryColor
+                                    ? _themeCategoryColorHex()
                                     : selectedColor),
                           'isCritical': isCritical,
                           if (showRecurrence)
@@ -11949,7 +11956,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                           selected: selectedCategory.isEmpty,
                           onTap: () => setModalState(() {
                             selectedCategory = '';
-                            selectedColor = _beanGreenCategoryColor;
+                            selectedColor = _themeCategoryColorHex();
                           }),
                         ),
                         for (final category in modalCategories)
@@ -12340,9 +12347,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                   ? null
                                   : selectedCategory,
                               'color': selectedCategory.isEmpty
-                                  ? _beanGreenCategoryColor
+                                  ? _themeCategoryColorHex()
                                   : (selectedColor.isEmpty
-                                        ? _beanGreenCategoryColor
+                                        ? _themeCategoryColorHex()
                                         : selectedColor),
                               'isCritical': isCritical,
                               if (showRecurrence)
@@ -12388,9 +12395,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                               ? null
                               : selectedCategory,
                           'color': selectedCategory.isEmpty
-                              ? _beanGreenCategoryColor
+                              ? _themeCategoryColorHex()
                               : (selectedColor.isEmpty
-                                    ? _beanGreenCategoryColor
+                                    ? _themeCategoryColorHex()
                                     : selectedColor),
                           'isCritical': isCritical,
                           if (showRecurrence)
@@ -15214,7 +15221,7 @@ String _intervalUnitLabel(String unit, int interval) {
 Color _safeCategoryColor(String? value) {
   final color = value?.trim() ?? '';
   if (!RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(color)) {
-    return _colorFromHex(_beanGreenCategoryColor);
+    return _colorFromHex(_themeCategoryColorHex());
   }
   return Color(int.parse('FF${color.substring(1)}', radix: 16));
 }
