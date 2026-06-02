@@ -60,15 +60,17 @@ class IssueReportController extends Controller
     public function update(Request $request, IssueReport $issueReport): JsonResponse
     {
         $data = $request->validate([
-            'status' => ['required', 'string', Rule::in(['open', 'closed', 'archived'])],
+            'status' => ['required', 'string', Rule::in(['open', 'closed'])],
         ]);
 
         $status = $data['status'];
         $metadata = $issueReport->metadata ?? [];
         $metadata['last_status_changed_by_user_id'] = $request->user()->id;
         $metadata['last_status_changed_at'] = now()->toIso8601String();
-        if ($status === 'archived') {
+        if ($status === 'closed') {
             $metadata['archived_at'] = now()->toIso8601String();
+        } else {
+            unset($metadata['archived_at']);
         }
 
         $issueReport->forceFill([

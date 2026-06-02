@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AdminModelRegistryService;
 use App\Services\AdminSettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class AdminSettingsController extends Controller
 {
@@ -14,7 +16,12 @@ class AdminSettingsController extends Controller
         return response()->json(['data' => $settings->payload()]);
     }
 
-    public function update(Request $request, AdminSettingsService $settings): JsonResponse
+    public function models(AdminModelRegistryService $registry): JsonResponse
+    {
+        return response()->json(['data' => $registry->payload()]);
+    }
+
+    public function update(Request $request, AdminSettingsService $settings, AdminModelRegistryService $registry): JsonResponse
     {
         $data = $request->validate([
             'model_settings' => ['required', 'array'],
@@ -33,6 +40,11 @@ class AdminSettingsController extends Controller
             'beta_limits.daily_hard_cost_usd' => ['required', 'numeric', 'min:0.01', 'max:100000'],
             'apply_main_model_to_profiles' => ['sometimes', 'boolean'],
         ]);
+
+        $modelErrors = $registry->validationErrors($data['model_settings']);
+        if ($modelErrors !== []) {
+            throw ValidationException::withMessages($modelErrors);
+        }
 
         $payload = $settings->update(
             $data['model_settings'],

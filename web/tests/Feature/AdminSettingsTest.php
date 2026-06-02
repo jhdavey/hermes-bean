@@ -7,6 +7,7 @@ use App\Models\AgentProfile;
 use App\Models\User;
 use App\Services\AiUsageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AdminSettingsTest extends TestCase
@@ -15,6 +16,7 @@ class AdminSettingsTest extends TestCase
 
     public function test_admin_can_update_runtime_models_and_beta_limits(): void
     {
+        config()->set('services.hermes_runtime.api_key', '');
         $adminToken = $this->apiToken('settings-admin@example.com');
         $userToken = $this->apiToken('settings-user@example.com');
         $admin = User::where('email', 'settings-admin@example.com')->firstOrFail();
@@ -47,10 +49,50 @@ class AdminSettingsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.settings.models.main_model.value', 'gpt-5.4')
             ->assertJsonPath('data.settings.beta_limits.api_per_minute.value', 12);
+
+        $this->withToken($adminToken)->patchJson('/api/admin/settings', $this->settingsPayload([
+            'realtime_model' => 'gpt-5.4',
+        ]))->assertUnprocessable()
+            ->assertJsonValidationErrors('model_settings.realtime_model');
+    }
+
+    public function test_admin_model_registry_is_admin_only_and_groups_openai_models(): void
+    {
+        config()->set('services.hermes_runtime.api_key', 'test-openai-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+
+        Http::fake([
+            'https://api.openai.test/v1/models' => Http::response([
+                'data' => [
+                    ['id' => 'gpt-5.2'],
+                    ['id' => 'gpt-5-mini'],
+                    ['id' => 'gpt-realtime'],
+                    ['id' => 'gpt-4o-mini-search-preview'],
+                    ['id' => 'text-embedding-3-small'],
+                ],
+            ], 200),
+        ]);
+
+        $adminToken = $this->apiToken('models-admin@example.com');
+        $userToken = $this->apiToken('models-user@example.com');
+        User::where('email', 'models-admin@example.com')->firstOrFail()->forceFill(['is_admin' => true])->save();
+
+        $this->withToken($userToken)->getJson('/api/admin/settings/models')
+            ->assertForbidden();
+
+        $this->withToken($adminToken)->getJson('/api/admin/settings/models')
+            ->assertOk()
+            ->assertJsonPath('data.source', 'openai_and_curated')
+            ->assertJsonPath('data.openai_available', true)
+            ->assertJsonPath('data.groups.main_model.label', 'Main Bean reasoning/chat')
+            ->assertJsonFragment(['id' => 'gpt-5.2', 'source' => 'openai'])
+            ->assertJsonFragment(['id' => 'gpt-realtime', 'source' => 'openai'])
+            ->assertJsonFragment(['id' => 'gpt-4o-mini-search-preview', 'source' => 'openai']);
     }
 
     public function test_beta_users_use_admin_beta_budget_settings(): void
     {
+        config()->set('services.hermes_runtime.api_key', '');
         $adminToken = $this->apiToken('budget-settings-admin@example.com');
         $betaToken = $this->apiToken('budget-settings-beta@example.com');
         User::where('email', 'budget-settings-admin@example.com')->firstOrFail()->forceFill(['is_admin' => true])->save();

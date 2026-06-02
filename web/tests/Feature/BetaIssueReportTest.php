@@ -58,7 +58,7 @@ class BetaIssueReportTest extends TestCase
         Storage::disk('public')->assertExists($report->screenshots[0]['path']);
     }
 
-    public function test_admin_summary_includes_issue_reports(): void
+    public function test_admin_summary_includes_open_and_archived_issue_reports(): void
     {
         $token = $this->apiToken('admin-beta@example.com');
         $user = User::where('email', 'admin-beta@example.com')->firstOrFail();
@@ -73,13 +73,25 @@ class BetaIssueReportTest extends TestCase
             'page_url' => 'https://heybean.test/app',
         ]);
 
+        IssueReport::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'beta_user_id' => BetaUser::where('user_id', $user->id)->firstOrFail()->id,
+            'status' => 'closed',
+            'message' => 'This closed report should be archived.',
+            'page_url' => 'https://heybean.test/app',
+            'resolved_at' => now(),
+        ]);
+
         $this->withToken($token)->getJson('/api/admin/usage/summary')
             ->assertOk()
             ->assertJsonPath('data.totals.open_issue_reports', 1)
-            ->assertJsonPath('data.issue_reports.0.message', 'The beta banner report flow works.');
+            ->assertJsonPath('data.totals.archived_issue_reports', 1)
+            ->assertJsonPath('data.issue_reports.0.message', 'The beta banner report flow works.')
+            ->assertJsonPath('data.archived_issue_reports.0.message', 'This closed report should be archived.');
     }
 
-    public function test_admin_can_close_reopen_and_archive_issue_reports(): void
+    public function test_admin_can_close_and_reopen_issue_reports(): void
     {
         $adminToken = $this->apiToken('admin-issue-status@example.com');
         $userToken = $this->apiToken('normal-issue-status@example.com');
@@ -106,10 +118,13 @@ class BetaIssueReportTest extends TestCase
             ->assertJsonPath('data.status', 'closed');
 
         $this->assertNotNull($report->refresh()->resolved_at);
+        $this->assertNotEmpty($report->metadata['archived_at'] ?? null);
 
         $this->withToken($adminToken)->getJson('/api/admin/usage/summary')
             ->assertOk()
-            ->assertJsonPath('data.totals.open_issue_reports', 0);
+            ->assertJsonPath('data.totals.open_issue_reports', 0)
+            ->assertJsonPath('data.totals.archived_issue_reports', 1)
+            ->assertJsonPath('data.archived_issue_reports.0.id', $report->id);
 
         $this->withToken($adminToken)->patchJson("/api/admin/issue-reports/{$report->id}", [
             'status' => 'open',
@@ -119,10 +134,9 @@ class BetaIssueReportTest extends TestCase
 
         $this->withToken($adminToken)->patchJson("/api/admin/issue-reports/{$report->id}", [
             'status' => 'archived',
-        ])->assertOk()
-            ->assertJsonPath('data.status', 'archived');
+        ])->assertUnprocessable();
 
         $this->assertSame($admin->id, $report->refresh()->metadata['last_status_changed_by_user_id'] ?? null);
-        $this->assertNotEmpty($report->metadata['archived_at'] ?? null);
+        $this->assertArrayNotHasKey('archived_at', $report->metadata ?? []);
     }
 }

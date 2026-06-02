@@ -35,14 +35,17 @@ class AdminUsageController extends Controller
                 'cost_month' => round((float) (clone $logs)->where('created_at', '>=', $month)->sum('estimated_cost_usd'), 4),
                 'open_alerts' => AiUsageAlert::whereNull('acknowledged_at')->count(),
                 'open_issue_reports' => IssueReport::where('status', 'open')->count(),
+                'archived_issue_reports' => IssueReport::where('status', 'closed')->count(),
             ],
             'by_model' => $this->groupedUsage('model', $month),
             'by_route_tier' => $this->groupedUsage('route_tier', $month),
+            'user_growth' => $this->userGrowth(),
             'top_users' => $this->topUsers($month),
             'top_workspaces' => $this->topWorkspaces($month),
             'recent_logs' => $this->logsQuery()->limit(25)->get()->map(fn (AiUsageLog $log): array => $this->logPayload($log))->values(),
             'alerts' => $this->alertsQuery()->limit(20)->get(),
-            'issue_reports' => $this->issueReportsQuery()->limit(20)->get(),
+            'issue_reports' => $this->issueReportsQuery('open')->limit(20)->get(),
+            'archived_issue_reports' => $this->issueReportsQuery('closed')->limit(100)->get(),
             'settings' => $this->settings->payload(),
         ]]);
     }
@@ -75,6 +78,29 @@ class AdminUsageController extends Controller
                 'tokens' => (int) $row->getAttribute('tokens'),
                 'cost' => round((float) $row->getAttribute('cost'), 4),
             ]);
+    }
+
+    private function userGrowth(): array
+    {
+        $start = now()->subDays(29)->startOfDay();
+        $dailySignups = User::query()
+            ->selectRaw('DATE(created_at) as day, COUNT(*) as signups')
+            ->where('created_at', '>=', $start)
+            ->groupBy('day')
+            ->pluck('signups', 'day');
+        $runningTotal = User::query()->where('created_at', '<', $start)->count();
+
+        return collect(range(0, 29))->map(function (int $offset) use ($start, $dailySignups, &$runningTotal): array {
+            $day = $start->copy()->addDays($offset)->toDateString();
+            $signups = (int) ($dailySignups[$day] ?? 0);
+            $runningTotal += $signups;
+
+            return [
+                'day' => $day,
+                'new_users' => $signups,
+                'total_users' => $runningTotal,
+            ];
+        })->all();
     }
 
     private function topUsers(mixed $since)
@@ -136,10 +162,11 @@ class AdminUsageController extends Controller
             ->latest('id');
     }
 
-    private function issueReportsQuery()
+    private function issueReportsQuery(string $status)
     {
         return IssueReport::query()
             ->with(['user:id,name,email', 'workspace:id,name,type'])
+            ->where('status', $status)
             ->latest('id');
     }
 
@@ -153,6 +180,8 @@ class AdminUsageController extends Controller
             ->values();
 
         $payload['request_preview'] = $request !== '' ? str($request)->limit(140)->toString() : null;
+        $payload['request_full'] = $request !== '' ? $request : null;
+        $payload['input_prompt_full'] = data_get($log->metadata, 'input_prompt') ?: $payload['request_full'];
         $payload['use_case'] = $this->useCaseForLog($log, $request, $actionTypes->all());
         $payload['action_summary'] = $actionTypes->isNotEmpty()
             ? $actionTypes->map(fn (string $action): string => $this->humanActionName($action))->unique()->take(4)->implode(', ')

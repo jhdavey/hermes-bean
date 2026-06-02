@@ -101,6 +101,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
 
         Route::middleware('admin')->prefix('admin')->group(function (): void {
             Route::get('/settings', [AdminSettingsController::class, 'show']);
+            Route::get('/settings/models', [AdminSettingsController::class, 'models']);
             Route::patch('/settings', [AdminSettingsController::class, 'update']);
             Route::get('/usage/summary', [AdminUsageController::class, 'summary']);
             Route::get('/usage/logs', [AdminUsageController::class, 'logs']);

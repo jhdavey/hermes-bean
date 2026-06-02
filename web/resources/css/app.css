@@ -2132,6 +2132,84 @@
     margin-top: 22px;
 }
 
+.hb-admin-log-modal {
+    width: min(760px, 100%);
+}
+
+.hb-admin-log-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.hb-admin-log-detail-grid span {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--hb-border);
+    border-radius: 12px;
+    background: var(--hb-surface2);
+}
+
+.hb-admin-log-detail-grid small,
+.hb-admin-log-detail-grid strong {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-admin-log-detail-grid small {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.hb-admin-log-detail-grid strong {
+    margin-top: 3px;
+    color: var(--hb-ink);
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.hb-admin-log-prompt-block {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.hb-admin-log-prompt-block strong,
+.hb-admin-log-metadata summary {
+    color: var(--hb-ink);
+    font-size: 13px;
+    font-weight: 950;
+}
+
+.hb-admin-log-prompt-block pre,
+.hb-admin-log-metadata pre {
+    max-height: 320px;
+    margin: 0;
+    overflow: auto;
+    padding: 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, .04);
+    color: var(--hb-text);
+    font: 750 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.hb-admin-log-metadata {
+    margin-top: 14px;
+}
+
+.hb-admin-log-metadata summary {
+    cursor: pointer;
+}
+
 .hb-label-optional {
     color: var(--hb-muted);
     font-size: 12px;
@@ -2943,6 +3021,94 @@
     gap: 14px;
 }
 
+.hb-admin-growth-card {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, .86), rgba(248, 253, 249, .74));
+}
+
+.hb-admin-growth-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.hb-admin-growth-header strong {
+    color: var(--hb-ink);
+    font-size: 16px;
+    font-weight: 950;
+}
+
+.hb-admin-growth-header small,
+.hb-admin-growth-stats small {
+    display: block;
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.hb-admin-growth-stats {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.hb-admin-growth-stats span {
+    min-width: 84px;
+    padding: 8px 10px;
+    border: 1px solid rgba(12, 23, 45, .08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .76);
+    text-align: right;
+}
+
+.hb-admin-growth-stats strong {
+    color: var(--hb-text);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.hb-admin-growth-chart {
+    width: 100%;
+    height: 230px;
+    display: block;
+}
+
+.hb-admin-growth-axis,
+.hb-admin-growth-grid {
+    stroke: rgba(100, 116, 139, .22);
+    stroke-width: 1;
+}
+
+.hb-admin-growth-area {
+    fill: url("#hb-admin-growth-fill");
+}
+
+.hb-admin-growth-line {
+    fill: none;
+    stroke: var(--hb-accent);
+    stroke-width: 4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.hb-admin-growth-dot {
+    fill: #fff;
+    stroke: var(--hb-accent);
+    stroke-width: 3;
+}
+
+.hb-admin-growth-label {
+    fill: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 800;
+}
+
 .hb-admin-metrics {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
@@ -3017,6 +3183,23 @@
     font-weight: 900;
 }
 
+.hb-admin-model-field small {
+    color: var(--hb-muted);
+    font-size: 11px;
+    line-height: 1.25;
+    font-weight: 750;
+}
+
+.hb-admin-model-note {
+    padding: 10px 12px;
+    border: 1px solid rgba(245, 158, 11, .28);
+    border-radius: 12px;
+    background: rgba(255, 251, 235, .86);
+    color: #92400e;
+    font-size: 12px;
+    font-weight: 850;
+}
+
 .hb-admin-apply-row {
     display: inline-flex;
     align-items: center;
@@ -3037,9 +3220,52 @@
     gap: 10px;
 }
 
+.hb-admin-list-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.hb-admin-inline-link {
+    border: 0;
+    background: transparent;
+    color: var(--hb-accent);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.hb-admin-inline-link:hover,
+.hb-admin-inline-link:focus-visible {
+    color: var(--hb-accent-strong);
+    text-decoration: underline;
+}
+
+.hb-admin-inline-link:focus-visible {
+    outline: 2px solid rgba(22, 163, 74, .35);
+    outline-offset: 3px;
+    border-radius: 6px;
+}
+
 .hb-admin-list {
     display: grid;
     gap: 8px;
+}
+
+.hb-admin-archived-issues {
+    display: grid;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(12, 23, 45, .08);
+}
+
+.hb-admin-archived-issues > strong {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 950;
+    text-transform: uppercase;
 }
 
 .hb-admin-row {
@@ -3163,10 +3389,27 @@
 }
 
 .hb-admin-log-row {
+    width: 100%;
+    border: 0;
     border-top: 1px solid var(--hb-border);
+    background: transparent;
     color: var(--hb-text);
     font-size: 13px;
     font-weight: 760;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background .16s ease, box-shadow .16s ease;
+}
+
+.hb-admin-log-row:hover,
+.hb-admin-log-row:focus-visible {
+    background: rgba(22, 163, 74, .06);
+}
+
+.hb-admin-log-row:focus-visible {
+    outline: 2px solid rgba(22, 163, 74, .45);
+    outline-offset: -2px;
 }
 
 .hb-admin-log-row > span {
@@ -3847,8 +4090,26 @@
         grid-template-columns: 1fr;
     }
 
+    .hb-admin-growth-header,
+    .hb-admin-growth-stats {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .hb-admin-growth-stats span {
+        text-align: left;
+    }
+
+    .hb-admin-growth-chart {
+        height: 190px;
+    }
+
     .hb-admin-metric strong {
         font-size: 20px;
+    }
+
+    .hb-admin-log-detail-grid {
+        grid-template-columns: 1fr;
     }
 
     .hb-approval-sheet {

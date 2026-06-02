@@ -138,6 +138,7 @@ class AiUsageService
                 'model_route' => $modelRoute,
                 'billing_model' => $billingModel,
                 'context_mode' => $modelRoute['context_mode'] ?? null,
+                'input_prompt' => $prompt,
             ],
         ]);
 
