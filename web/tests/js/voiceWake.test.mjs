@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import {
     commandAfterWakePhrase,
+    realtimeSpokenAnswerAllowsBackgroundQueue,
     voiceCommandNeedsAgentWork,
     voiceCommandRequiresBackgroundWork,
     voiceCommandWantsDetailedChat,
@@ -76,3 +77,39 @@ assert.equal(voiceCommandWantsDetailedChat('give me a 30 minute full body workou
 assert.equal(voiceCommandWantsDetailedChat('can you give me a taco recipe'), true);
 assert.equal(voiceCommandWantsDetailedChat('what should we have for dinner tonight'), false);
 assert.equal(voiceCommandWantsDetailedChat('move my task from 7pm to 5pm'), false);
+
+assert.equal(
+    realtimeSpokenAnswerAllowsBackgroundQueue(
+        'what is on my todo list today',
+        'You have three tasks today: pack lunches, call the vet, and review the budget.',
+    ),
+    false,
+);
+assert.equal(
+    realtimeSpokenAnswerAllowsBackgroundQueue(
+        'what is on my calendar today',
+        'You have dentist at 2 PM and dinner at 6 PM today.',
+    ),
+    false,
+);
+assert.equal(
+    realtimeSpokenAnswerAllowsBackgroundQueue(
+        'what is the weather like',
+        "It's 88 degrees and partly cloudy right now.",
+    ),
+    false,
+);
+assert.equal(
+    realtimeSpokenAnswerAllowsBackgroundQueue(
+        'move my task from 7pm to 5pm',
+        "Sure, I'll update that task now.",
+    ),
+    true,
+);
+assert.equal(
+    realtimeSpokenAnswerAllowsBackgroundQueue(
+        'cheapest flights from MCO to Dublin tomorrow',
+        "I'll check the latest flight options now.",
+    ),
+    true,
+);

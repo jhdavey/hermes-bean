@@ -101,6 +101,7 @@ class RealtimeAssistantFlowTest extends TestCase
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Yes, I can hear you.')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'current time/date questions')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Dashboard context snapshot')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Conversation contract')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Take out trash')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Dentist')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'timezone_offset'));
@@ -302,7 +303,7 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertJsonPath('data.snapshot.counts.reminders_next_7_days', 1)
             ->assertJsonPath('data.snapshot.timezone', '-04:00')
             ->assertJson(fn ($json) => $json
-                ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'Dashboard context snapshot'))
+                ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'Dashboard context snapshot') && str_contains($value, 'the turn is complete'))
                 ->where('data.instructions', fn (string $value): bool => str_contains($value, 'Call insurance') && str_contains($value, 'Only respond when the user is clearly talking to Bean'))
                 ->etc()
             );

@@ -101,7 +101,7 @@ class QuickVoiceReplyController extends Controller
                     'kind' => $weatherResult['kind'] ?? null,
                     'weather_location' => $weatherResult['location'] ?? null,
                     'request_preview' => str($content)->limit(200)->toString(),
-                    'response_contract' => ($weatherResult['ok'] ?? false) ? 'complete' : 'background',
+                    'response_contract' => ($weatherResult['ok'] ?? false) ? 'complete' : 'acknowledged_background',
                 ], ['voice_turn', 'open_meteo_weather'], ($weatherResult['ok'] ?? false) ? 'completed' : 'failed');
 
                 if (($weatherResult['ok'] ?? false) === true) {
@@ -217,13 +217,16 @@ class QuickVoiceReplyController extends Controller
         }
 
         $continueAgent = $stage === 'bridge' || $this->shouldContinueAgent($content);
+        $responseContract = $stage === 'bridge'
+            ? 'bridge'
+            : ($continueAgent ? 'acknowledged_background' : 'complete');
         $usage->recordDirectCall($user, $workspace->id, 'voice_turn', (string) data_get($response->json(), 'model', $model), [
             ...$usage->usageFromOpenAiResponse($response->json() ?: []),
             'tool_call_count' => 0,
         ], [
             'stage' => $stage,
             'voice_seconds' => min(60, max(1, ((int) ($data['elapsed_ms'] ?? 0)) / 1000)),
-            'response_contract' => $stage === 'bridge' ? 'bridge' : ($continueAgent ? 'background' : 'complete'),
+            'response_contract' => $responseContract,
             'request_preview' => str($content)->limit(200)->toString(),
         ], ['voice_turn']);
 
@@ -232,9 +235,7 @@ class QuickVoiceReplyController extends Controller
                 'text' => $text,
                 'model' => $model,
                 'continue_agent' => $continueAgent,
-                'response_contract' => $stage === 'bridge'
-                    ? 'bridge'
-                    : ($continueAgent ? 'background' : 'complete'),
+                'response_contract' => $responseContract,
             ],
         ]);
     }
@@ -313,7 +314,7 @@ If the user asks a normal conversational question, answer with a useful first th
 For casual questions, do not start with "Got it"; answer directly.
 For casual questions that do not need app data, live external data, or an app change, give a compact complete answer in one or two short sentences.
 If the user asks for advice, a recipe, a workout, a plan, a list, or instructions, give a useful first answer and do not ask whether they want you to create the thing they just requested.
-If the user asks for current app data, live external data, or an app change, respond naturally with what you are about to check or do, without claiming it is already done.
+If the user asks for current app data, live external data, or an app change that is not already available to this quick voice layer, respond with a short acknowledgement of what you are about to check or do, without claiming it is already done.
 Finish complete thoughts. Do not end with a comma, colon, or unfinished list.
 Keep it under 45 words.
 PROMPT;

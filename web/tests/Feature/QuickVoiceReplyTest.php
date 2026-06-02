@@ -93,7 +93,7 @@ class QuickVoiceReplyTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.text', "I'll check one-way flights from MCO to Dublin for tomorrow.")
             ->assertJsonPath('data.continue_agent', true)
-            ->assertJsonPath('data.response_contract', 'background');
+            ->assertJsonPath('data.response_contract', 'acknowledged_background');
     }
 
     public function test_quick_voice_reply_answers_current_weather_from_open_meteo(): void
@@ -168,7 +168,7 @@ class QuickVoiceReplyTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.text', "I'll check what I can access for that current outside information.")
             ->assertJsonPath('data.continue_agent', true)
-            ->assertJsonPath('data.response_contract', 'background');
+            ->assertJsonPath('data.response_contract', 'acknowledged_background');
     }
 
     public function test_quick_voice_reply_continues_to_agent_for_app_requests(): void
@@ -194,7 +194,7 @@ class QuickVoiceReplyTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.text', "I'll check your calendar for today.")
             ->assertJsonPath('data.continue_agent', true)
-            ->assertJsonPath('data.response_contract', 'background');
+            ->assertJsonPath('data.response_contract', 'acknowledged_background');
     }
 
     public function test_quick_voice_reply_continues_to_agent_for_trash_pickup_questions(): void
@@ -220,7 +220,7 @@ class QuickVoiceReplyTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.text', "I'll check what trash pickup you are supposed to take out.")
             ->assertJsonPath('data.continue_agent', true)
-            ->assertJsonPath('data.response_contract', 'background');
+            ->assertJsonPath('data.response_contract', 'acknowledged_background');
     }
 
     public function test_quick_voice_reply_failure_returns_502_for_frontend_skip(): void

@@ -1,6 +1,7 @@
 import {
     commandAfterWakePhrase,
     normalizedVoiceCommand,
+    realtimeSpokenAnswerAllowsBackgroundQueue,
     voiceCommandNeedsAgentWork,
     voiceCommandRequiresBackgroundWork,
     voiceCommandWantsDetailedChat,
@@ -5287,7 +5288,10 @@ if (mount) {
         const pendingUserContent = String(kioskRealtimePendingUser?.content || '').trim();
         const functionCallsAreBackgroundQueueOnly = functionCalls.length > 0
             && functionCalls.every((item) => item?.name === 'queue_bean_work');
-        const backgroundRequired = voiceCommandRequiresBackgroundWork(pendingUserContent);
+        const backgroundQueueAllowed = realtimeSpokenAnswerAllowsBackgroundQueue(
+            pendingUserContent,
+            kioskRealtimeAssistantDraft?.content || '',
+        );
         if (kioskRealtimeIgnoreNextFunctionCalls) {
             kioskRealtimeIgnoreNextFunctionCalls = false;
             if (hasFunctionCall) {
@@ -5303,7 +5307,7 @@ if (mount) {
                 return;
             }
         }
-        if (assistantAnswered && functionCallsAreBackgroundQueueOnly && !backgroundRequired) {
+        if (assistantAnswered && functionCallsAreBackgroundQueueOnly && !backgroundQueueAllowed) {
             clearRealtimeToolFallback();
             functionCalls.forEach((item) => {
                 sendRealtimeFunctionOutput(item.call_id, {
@@ -5414,6 +5418,17 @@ if (mount) {
             args = typeof rawArguments === 'string' ? JSON.parse(rawArguments || '{}') : (rawArguments || {});
         } catch (_) {
             args = {};
+        }
+        if (name === 'queue_bean_work' && quickReplyText && !realtimeSpokenAnswerAllowsBackgroundQueue(userContent, quickReplyText)) {
+            sendRealtimeFunctionOutput(callId, {
+                ok: true,
+                skipped: true,
+                message: 'Bean already answered this turn directly.',
+            }, { createResponse: false });
+            persistRealtimeConversationTurn();
+            kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(quickReplyText);
+            finishRealtimeTurnStatus();
+            return;
         }
         if (name === 'queue_bean_work') {
             setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent });
@@ -6283,7 +6298,10 @@ if (mount) {
         if (explicitContract === 'complete' || (hasQuickReply && quickReply?.continueAgent === false && !likelyNeedsAgentWork)) {
             return { shouldContinueAgent: false, quickReplyMode: 'complete' };
         }
-        if (likelyNeedsAgentWork || explicitContract === 'background') {
+        if (['acknowledged_background', 'pending_background', 'background'].includes(explicitContract)) {
+            return { shouldContinueAgent: true, quickReplyMode: hasQuickReply ? 'acknowledged_background' : 'pending_background' };
+        }
+        if (likelyNeedsAgentWork) {
             return { shouldContinueAgent: true, quickReplyMode: hasQuickReply ? 'acknowledged_background' : 'pending_background' };
         }
         if (hasQuickReply) {

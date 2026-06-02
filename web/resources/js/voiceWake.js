@@ -85,6 +85,27 @@ export function voiceCommandRequiresBackgroundWork(transcript) {
         && /\b(?:day|today|tomorrow|week|schedule|work|tasks|calendar|morning|afternoon|evening)\b/.test(command);
 }
 
+export function realtimeSpokenAnswerAllowsBackgroundQueue(userTranscript, assistantText) {
+    const spoken = normalizedVoiceCommand(assistantText);
+    if (!spoken) return true;
+    if (spoken.length > 180) return false;
+    if (/[;:]/.test(String(assistantText || '')) || /\b\d+\b/.test(spoken)) return false;
+    if (/\b(?:you have|you've got|you got|there are|there is|here are|here's|heres|it is|it's|its|looks like|right now|today you|due|scheduled|starts|ends|temperature|degrees|percent|mph)\b/.test(spoken)) {
+        return false;
+    }
+    if (/\b(?:i(?:'|’)?ll|i will|i(?:'|’)?m going to|i am going to|let me|i(?:'|’)?m checking|i am checking|i(?:'|’)?ll check|i can check|checking|pulling|gathering|looking|working|finding|one moment|give me|hang on|hold on)\b/.test(spoken)) {
+        return true;
+    }
+    if (/\b(?:sure|absolutely|yeah|okay|ok|got it)\b/.test(spoken)
+        && /\b(?:check|look|pull|gather|find|work|handle|start|do that|take care)\b/.test(spoken)) {
+        return true;
+    }
+    const userWords = new Set(comparableVoiceWords(userTranscript));
+    const spokenWords = comparableVoiceWords(spoken);
+    const novelWords = spokenWords.filter((word) => !userWords.has(word));
+    return novelWords.length <= 2 && spokenWords.length <= 10;
+}
+
 export function voiceCommandWantsDetailedChat(transcript) {
     const command = normalizedVoiceCommand(transcript);
     if (!command || voiceCommandNeedsAgentWork(command)) return false;
@@ -92,4 +113,17 @@ export function voiceCommandWantsDetailedChat(transcript) {
         || (/\b(?:give|make|build|write|create)\b/.test(command)
             && /\b(?:plan|guide|list|schedule)\b/.test(command)
             && !/\b(?:calendar|event|task|reminder)\b/.test(command));
+}
+
+function comparableVoiceWords(value) {
+    const stopWords = new Set([
+        'about', 'after', 'again', 'also', 'and', 'are', 'bean', 'been', 'being', 'can', 'could',
+        'for', 'from', 'get', 'got', 'have', 'here', 'into', 'just', 'like', 'now', 'okay',
+        'one', 'out', 'right', 'sure', 'that', 'the', 'then', 'there', 'this', 'with', 'you',
+        'your', 'youre', 'ill', 'ive', 'its',
+    ]);
+    return normalizedVoiceCommand(value)
+        .split(' ')
+        .map((word) => word.replace(/'s$/, ''))
+        .filter((word) => word.length > 2 && !stopWords.has(word));
 }
