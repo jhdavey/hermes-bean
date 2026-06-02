@@ -95,6 +95,7 @@ class RealtimeSessionController extends Controller
         ];
 
         $response = Http::withToken($apiKey)
+            ->withHeaders($this->openAiServerHeaders($user->id))
             ->acceptJson()
             ->asJson()
             ->timeout(15)
@@ -174,16 +175,21 @@ class RealtimeSessionController extends Controller
         $sessionConfig = $this->realtimeSessionConfig($localSession, $user->id, $workspace->id, $voice);
         $sdp = $this->normalizeSdp((string) $data['sdp']);
         $sessionJson = json_encode($sessionConfig, JSON_UNESCAPED_SLASHES);
-        $boundary = 'heybean-realtime-'.bin2hex(random_bytes(12));
-        $body = $this->multipartBody($boundary, [
-            'sdp' => $sdp,
-            'session' => (string) $sessionJson,
-        ]);
 
         $response = Http::withToken($apiKey)
-            ->withBody($body, 'multipart/form-data; boundary='.$boundary)
+            ->withHeaders($this->openAiServerHeaders($user->id))
+            ->asMultipart()
             ->timeout(20)
-            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/realtime/calls');
+            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/realtime/calls', [
+                [
+                    'name' => 'sdp',
+                    'contents' => $sdp,
+                ],
+                [
+                    'name' => 'session',
+                    'contents' => (string) $sessionJson,
+                ],
+            ]);
 
         if (! $response->successful()) {
             $upstreamStatus = $response->status();
@@ -436,19 +442,11 @@ PROMPT;
         ];
     }
 
-    /**
-     * @param  array<string, string>  $fields
-     */
-    private function multipartBody(string $boundary, array $fields): string
+    private function openAiServerHeaders(int $userId): array
     {
-        $body = '';
-        foreach ($fields as $name => $contents) {
-            $body .= "--{$boundary}\r\n";
-            $body .= 'Content-Disposition: form-data; name="'.$name."\"\r\n\r\n";
-            $body .= $contents."\r\n";
-        }
-
-        return $body."--{$boundary}--\r\n";
+        return [
+            'OpenAI-Safety-Identifier' => hash('sha256', 'heybean-user-'.$userId),
+        ];
     }
 
     private function normalizeSdp(string $sdp): string

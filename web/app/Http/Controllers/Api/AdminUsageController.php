@@ -22,6 +22,7 @@ class AdminUsageController extends Controller
         $today = now()->startOfDay();
         $month = now()->startOfMonth();
         $logs = AiUsageLog::query();
+        $userGrowthRange = $this->userGrowthRange((string) $request->query('user_growth_range', 'last_30_days'));
 
         return response()->json(['data' => [
             'totals' => [
@@ -39,7 +40,8 @@ class AdminUsageController extends Controller
             ],
             'by_model' => $this->groupedUsage('model', $month),
             'by_route_tier' => $this->groupedUsage('route_tier', $month),
-            'user_growth' => $this->userGrowth(),
+            'user_growth_range' => $userGrowthRange,
+            'user_growth' => $this->userGrowth($userGrowthRange),
             'top_users' => $this->topUsers($month),
             'top_workspaces' => $this->topWorkspaces($month),
             'recent_logs' => $this->logsQuery()->limit(25)->get()->map(fn (AiUsageLog $log): array => $this->logPayload($log))->values(),
@@ -80,9 +82,25 @@ class AdminUsageController extends Controller
             ]);
     }
 
-    private function userGrowth(): array
+    private function userGrowthRange(string $range): string
     {
-        $start = now()->subDays(29)->startOfDay();
+        return in_array($range, ['today', 'last_7_days', 'last_30_days', 'all_time'], true)
+            ? $range
+            : 'last_30_days';
+    }
+
+    private function userGrowth(string $range): array
+    {
+        if ($range === 'all_time') {
+            return $this->allTimeUserGrowth();
+        }
+
+        $days = match ($range) {
+            'today' => 1,
+            'last_7_days' => 7,
+            default => 30,
+        };
+        $start = now()->subDays($days - 1)->startOfDay();
         $dailySignups = User::query()
             ->selectRaw('DATE(created_at) as day, COUNT(*) as signups')
             ->where('created_at', '>=', $start)
@@ -90,9 +108,38 @@ class AdminUsageController extends Controller
             ->pluck('signups', 'day');
         $runningTotal = User::query()->where('created_at', '<', $start)->count();
 
-        return collect(range(0, 29))->map(function (int $offset) use ($start, $dailySignups, &$runningTotal): array {
+        return collect(range(0, $days - 1))->map(function (int $offset) use ($start, $dailySignups, &$runningTotal): array {
             $day = $start->copy()->addDays($offset)->toDateString();
             $signups = (int) ($dailySignups[$day] ?? 0);
+            $runningTotal += $signups;
+
+            return [
+                'day' => $day,
+                'new_users' => $signups,
+                'total_users' => $runningTotal,
+            ];
+        })->all();
+    }
+
+    private function allTimeUserGrowth(): array
+    {
+        $firstUser = User::query()->oldest('created_at')->first(['created_at']);
+        if (! $firstUser?->created_at) {
+            return [];
+        }
+
+        $start = $firstUser->created_at->copy()->startOfMonth();
+        $end = now()->startOfMonth();
+        $months = max(1, (int) $start->diffInMonths($end) + 1);
+        $monthlySignups = User::query()
+            ->pluck('created_at')
+            ->map(fn ($createdAt): string => $createdAt->copy()->startOfMonth()->toDateString())
+            ->countBy();
+        $runningTotal = 0;
+
+        return collect(range(0, $months - 1))->map(function (int $offset) use ($start, $monthlySignups, &$runningTotal): array {
+            $day = $start->copy()->addMonths($offset)->toDateString();
+            $signups = (int) ($monthlySignups[$day] ?? 0);
             $runningTotal += $signups;
 
             return [

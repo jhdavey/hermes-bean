@@ -17,6 +17,11 @@ class AdminHermesController extends Controller
     {
         $result = $maintenance->update();
 
-        return response()->json(['data' => $result], $result['status'] === 'completed' ? 200 : 502);
+        return response()->json([
+            'message' => $result['status'] === 'completed'
+                ? 'Hermes update completed.'
+                : 'Hermes update failed. Review the CLI output below.',
+            'data' => $result,
+        ], $result['status'] === 'completed' ? 200 : 502);
     }
 }

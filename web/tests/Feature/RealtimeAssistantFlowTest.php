@@ -80,6 +80,8 @@ class RealtimeAssistantFlowTest extends TestCase
 
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/realtime/client_secrets'
             && $request->hasHeader('Authorization', 'Bearer test-key')
+            && $request->hasHeader('OpenAI-Safety-Identifier')
+            && data_get($request->data(), 'session.type') === 'realtime'
             && data_get($request->data(), 'session.tools.0.name') === 'queue_bean_work'
             && data_get($request->data(), 'session.audio.input.transcription.model') === 'gpt-4o-mini-transcribe'
             && data_get($request->data(), 'session.audio.input.transcription.prompt') === null
@@ -183,9 +185,11 @@ class RealtimeAssistantFlowTest extends TestCase
 
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/realtime/calls'
             && $request->hasHeader('Authorization', 'Bearer test-key')
+            && $request->hasHeader('OpenAI-Safety-Identifier')
             && str_contains((string) $request->body(), 'name="sdp"')
             && str_contains((string) $request->body(), "v=0\r\no=- offer")
             && str_contains((string) $request->body(), 'name="session"')
+            && str_contains((string) $request->body(), '"type":"realtime"')
             && str_contains((string) $request->body(), '"model":"gpt-realtime-test"')
             && str_contains((string) $request->body(), '"voice":"coral"')
             && str_contains((string) $request->body(), '"group_id":"conversation_session_'.$sessionId.'"'));

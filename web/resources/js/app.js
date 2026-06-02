@@ -68,6 +68,7 @@ if (mount) {
         adminModelRegistry: null,
         adminHermesStatus: null,
         adminHermesUpdating: false,
+        adminUserGrowthRange: 'last_30_days',
         adminArchivedIssuesOpen: false,
         issueReportSubmitting: false,
         ttsPreviewing: false,
@@ -991,37 +992,46 @@ if (mount) {
     }
 
     function adminUserGrowthChartMarkup(points) {
+        const selectedRange = state.adminUserGrowthRange || 'last_30_days';
         const values = normalizeList(points).map((point) => ({
             day: point.day || point.date || '',
             newUsers: Number(point.new_users ?? point.newUsers ?? 0),
             totalUsers: Number(point.total_users ?? point.totalUsers ?? 0),
         }));
         const latest = values[values.length - 1] || { totalUsers: 0, newUsers: 0, day: '' };
-        const lastSeven = values.slice(-7).reduce((sum, point) => sum + point.newUsers, 0);
-        const lastThirty = values.reduce((sum, point) => sum + point.newUsers, 0);
-        const width = 640;
-        const height = 190;
-        const padX = 28;
-        const padY = 26;
-        const max = Math.max(1, ...values.map((point) => point.totalUsers));
-        const xFor = (index) => values.length <= 1 ? padX : padX + (index / (values.length - 1)) * (width - padX * 2);
-        const yFor = (value) => height - padY - (value / max) * (height - padY * 2);
+        const totalNew = values.reduce((sum, point) => sum + point.newUsers, 0);
+        const width = 760;
+        const height = 260;
+        const padLeft = 58;
+        const padRight = 28;
+        const padTop = 28;
+        const padBottom = 38;
+        const max = niceChartMax(Math.max(1, ...values.map((point) => point.totalUsers)));
+        const yTicks = chartYTicks(max, max <= 5 ? max : 5);
+        const xFor = (index) => values.length <= 1 ? padLeft : padLeft + (index / (values.length - 1)) * (width - padLeft - padRight);
+        const yFor = (value) => height - padBottom - (value / max) * (height - padTop - padBottom);
         const path = values.map((point, index) => `${index === 0 ? 'M' : 'L'} ${xFor(index).toFixed(1)} ${yFor(point.totalUsers).toFixed(1)}`).join(' ');
-        const area = path ? `${path} L ${xFor(values.length - 1).toFixed(1)} ${height - padY} L ${padX} ${height - padY} Z` : '';
+        const area = path ? `${path} L ${xFor(values.length - 1).toFixed(1)} ${height - padBottom} L ${padLeft} ${height - padBottom} Z` : '';
         const startLabel = values[0]?.day ? monthDayLabel(values[0].day) : '';
         const endLabel = latest.day ? monthDayLabel(latest.day) : '';
+        const rangeLabel = userGrowthRangeLabel(selectedRange);
 
         return `
             <div class="hb-admin-growth-card">
                 <div class="hb-admin-growth-header">
                     <div>
                         <strong>User growth</strong>
-                        <small>Last 30 days, cumulative accounts</small>
+                        <small>${escapeHtml(rangeLabel)}, cumulative accounts</small>
+                    </div>
+                    <div class="hb-admin-growth-range" role="group" aria-label="User growth range">
+                        ${userGrowthRangeButtonMarkup('today', 'Today')}
+                        ${userGrowthRangeButtonMarkup('last_7_days', '7 days')}
+                        ${userGrowthRangeButtonMarkup('last_30_days', '30 days')}
+                        ${userGrowthRangeButtonMarkup('all_time', 'All time')}
                     </div>
                     <div class="hb-admin-growth-stats">
                         <span><strong>${escapeHtml(latest.totalUsers)}</strong><small>Total users</small></span>
-                        <span><strong>+${escapeHtml(lastSeven)}</strong><small>7 days</small></span>
-                        <span><strong>+${escapeHtml(lastThirty)}</strong><small>30 days</small></span>
+                        <span><strong>+${escapeHtml(totalNew)}</strong><small>${escapeHtml(rangeLabel)}</small></span>
                     </div>
                 </div>
                 <svg class="hb-admin-growth-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="User growth line chart">
@@ -1031,16 +1041,46 @@ if (mount) {
                             <stop offset="100%" stop-color="rgba(22, 163, 74, 0)"></stop>
                         </linearGradient>
                     </defs>
-                    <line x1="${padX}" y1="${height - padY}" x2="${width - padX}" y2="${height - padY}" class="hb-admin-growth-axis"></line>
-                    <line x1="${padX}" y1="${padY}" x2="${width - padX}" y2="${padY}" class="hb-admin-growth-grid"></line>
+                    ${yTicks.map((tick) => `
+                        <line x1="${padLeft}" y1="${yFor(tick).toFixed(1)}" x2="${width - padRight}" y2="${yFor(tick).toFixed(1)}" class="${tick === 0 ? 'hb-admin-growth-axis' : 'hb-admin-growth-grid'}"></line>
+                        <text x="${padLeft - 10}" y="${(yFor(tick) + 4).toFixed(1)}" text-anchor="end" class="hb-admin-growth-label">${escapeHtml(formatCompactNumber(tick))}</text>
+                    `).join('')}
                     ${area ? `<path d="${escapeAttr(area)}" class="hb-admin-growth-area"></path>` : ''}
                     ${path ? `<path d="${escapeAttr(path)}" class="hb-admin-growth-line"></path>` : ''}
                     ${values.map((point, index) => `<circle cx="${xFor(index).toFixed(1)}" cy="${yFor(point.totalUsers).toFixed(1)}" r="${index === values.length - 1 ? 4.8 : 2.8}" class="hb-admin-growth-dot"><title>${escapeHtml(`${monthDayLabel(point.day)}: ${point.totalUsers} users, +${point.newUsers}`)}</title></circle>`).join('')}
-                    <text x="${padX}" y="${height - 6}" class="hb-admin-growth-label">${escapeHtml(startLabel)}</text>
-                    <text x="${width - padX}" y="${height - 6}" text-anchor="end" class="hb-admin-growth-label">${escapeHtml(endLabel)}</text>
-                    <text x="${width - padX}" y="${padY - 8}" text-anchor="end" class="hb-admin-growth-label">${escapeHtml(`${max} users`)}</text>
+                    <text x="${padLeft}" y="${height - 8}" class="hb-admin-growth-label">${escapeHtml(startLabel)}</text>
+                    <text x="${width - padRight}" y="${height - 8}" text-anchor="end" class="hb-admin-growth-label">${escapeHtml(endLabel)}</text>
                 </svg>
             </div>`;
+    }
+
+    function userGrowthRangeButtonMarkup(range, label) {
+        const active = (state.adminUserGrowthRange || 'last_30_days') === range;
+        return `<button class="hb-admin-growth-range-button" type="button" data-user-growth-range="${escapeAttr(range)}" aria-pressed="${active}">${escapeHtml(label)}</button>`;
+    }
+
+    function userGrowthRangeLabel(range) {
+        return {
+            today: 'Today',
+            last_7_days: 'Last 7 days',
+            last_30_days: 'Last 30 days',
+            all_time: 'All time',
+        }[range] || 'Last 30 days';
+    }
+
+    function niceChartMax(value) {
+        const numeric = Math.max(1, Number(value || 1));
+        const exponent = Math.floor(Math.log10(numeric));
+        const base = 10 ** exponent;
+        const fraction = numeric / base;
+        const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+        return niceFraction * base;
+    }
+
+    function chartYTicks(max, segments = 4) {
+        const count = Math.max(1, Number(segments || 1));
+        return Array.from({ length: count + 1 }, (_, index) => Math.round((max / count) * index))
+            .filter((tick, index, ticks) => index === 0 || tick !== ticks[index - 1]);
     }
 
     function adminSettingsMarkup(settings) {
@@ -2072,6 +2112,7 @@ if (mount) {
         if (modal.type === 'issue-report') return issueReportModalMarkup();
         if (modal.type === 'issue-report-success') return issueReportSuccessModalMarkup();
         if (modal.type === 'admin-usage-log') return adminUsageLogModalMarkup(modal.log);
+        if (modal.type === 'admin-hermes-update') return adminHermesUpdateModalMarkup(modal);
         if (modal.type === 'profile') return profileModalMarkup();
         if (modal.type === 'agent') return agentModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
@@ -2119,6 +2160,41 @@ if (mount) {
 
     function adminLogDetailItemMarkup(label, value) {
         return `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(value || 'None')}</strong></span>`;
+    }
+
+    function adminHermesUpdateModalMarkup(modal = {}) {
+        const running = modal.status === 'running';
+        const result = modal.result || {};
+        const before = result.before || {};
+        const after = result.after || {};
+        const output = result.output || (running ? 'Running hermes update --yes...' : '');
+        const error = result.error || modal.error || '';
+        const exitCode = result.exit_code ?? result.exitCode;
+
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Hermes update activity">
+                <section class="hb-card hb-modal hb-admin-log-modal">
+                    ${sectionTitle(icons.activity, 'Hermes update', running ? 'Running the configured Hermes CLI update command' : 'CLI update activity and result')}
+                    <div class="hb-admin-log-detail-grid">
+                        ${adminLogDetailItemMarkup('Command', 'hermes update --yes')}
+                        ${adminLogDetailItemMarkup('Status', running ? 'running' : result.status || 'finished')}
+                        ${adminLogDetailItemMarkup('Exit code', running ? 'pending' : exitCode ?? 'unknown')}
+                        ${adminLogDetailItemMarkup('Ran at', running ? 'now' : formatDateTime(result.ran_at || result.ranAt))}
+                        ${adminLogDetailItemMarkup('Before', before.version || 'Unknown')}
+                        ${adminLogDetailItemMarkup('After', after.version || 'Unknown')}
+                        ${adminLogDetailItemMarkup('CLI path', after.cli_path || after.cliPath || before.cli_path || before.cliPath || 'hermes')}
+                        ${adminLogDetailItemMarkup('Users home', after.users_home || after.usersHome || before.users_home || before.usersHome || 'Not configured')}
+                    </div>
+                    <div class="hb-admin-log-prompt-block">
+                        <strong>stdout</strong>
+                        <pre>${escapeHtml(output || 'No stdout returned.')}</pre>
+                    </div>
+                    ${error ? `<div class="hb-admin-log-prompt-block"><strong>stderr</strong><pre>${escapeHtml(error)}</pre></div>` : ''}
+                    <div class="hb-modal-actions">
+                        <button class="hb-button-secondary" type="button" data-close-modal ${running ? 'disabled' : ''}>Close</button>
+                    </div>
+                </section>
+            </div>`;
     }
 
     function issueReportModalMarkup() {
@@ -2635,6 +2711,7 @@ if (mount) {
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelector('[data-admin-settings-form]')?.addEventListener('submit', saveAdminSettings);
         mount.querySelector('[data-update-hermes]')?.addEventListener('click', updateHermesRuntime);
+        mount.querySelectorAll('[data-user-growth-range]').forEach((button) => button.addEventListener('click', () => setAdminUserGrowthRange(button.dataset.userGrowthRange)));
         mount.querySelector('[data-toggle-archived-issues]')?.addEventListener('click', () => { state.adminArchivedIssuesOpen = !state.adminArchivedIssuesOpen; render(); });
         mount.querySelectorAll('[data-issue-status]').forEach((button) => button.addEventListener('click', () => updateIssueReportStatus(button.dataset.issueStatus, button.dataset.status)));
         mount.querySelectorAll('[data-admin-log-id]').forEach((button) => button.addEventListener('click', () => openAdminUsageLog(button.dataset.adminLogId)));
@@ -2755,6 +2832,7 @@ if (mount) {
         });
         mount.querySelector('.hb-modal-backdrop')?.addEventListener('click', (event) => {
             if (event.target.classList.contains('hb-modal-backdrop')) {
+                if (state.modal?.type === 'admin-hermes-update' && state.modal?.status === 'running') return;
                 state.modal = null;
                 render();
             }
@@ -3186,17 +3264,41 @@ if (mount) {
         state.adminHermesUpdating = true;
         state.error = '';
         state.notice = '';
+        state.modal = {
+            type: 'admin-hermes-update',
+            status: 'running',
+        };
         render();
         try {
             const result = await api('/admin/hermes/update', { method: 'POST' });
             state.adminHermesStatus = result.after || state.adminHermesStatus;
+            state.modal = {
+                type: 'admin-hermes-update',
+                status: 'completed',
+                result,
+            };
             state.notice = 'Hermes update completed.';
         } catch (error) {
-            state.error = friendlyError(error, 'update Hermes');
+            const result = error.payload?.data || null;
+            if (result?.after) {
+                state.adminHermesStatus = result.after;
+            }
+            state.modal = {
+                type: 'admin-hermes-update',
+                status: 'failed',
+                result,
+                error: friendlyError(error, 'update Hermes'),
+            };
         } finally {
             state.adminHermesUpdating = false;
             render();
         }
+    }
+
+    function setAdminUserGrowthRange(range) {
+        if (!['today', 'last_7_days', 'last_30_days', 'all_time'].includes(range) || state.adminUserGrowthRange === range) return;
+        state.adminUserGrowthRange = range;
+        loadAdminUsage(true);
     }
 
     async function saveItem(kind, item, data, form) {
@@ -6177,8 +6279,9 @@ if (mount) {
         state.error = '';
         render();
         try {
+            const growthRange = encodeURIComponent(state.adminUserGrowthRange || 'last_30_days');
             const [usage, modelRegistry, hermesStatus] = await Promise.all([
-                api('/admin/usage/summary'),
+                api(`/admin/usage/summary?user_growth_range=${growthRange}`),
                 api('/admin/settings/models'),
                 api('/admin/hermes/status').catch((error) => ({
                     configured: false,
@@ -7129,6 +7232,13 @@ if (mount) {
         if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(tokens >= 10000000 ? 0 : 1)}M`;
         if (tokens >= 1000) return `${(tokens / 1000).toFixed(tokens >= 10000 ? 0 : 1)}K`;
         return tokens.toLocaleString();
+    }
+
+    function formatCompactNumber(value) {
+        const number = Number(value || 0);
+        if (number >= 1000000) return `${(number / 1000000).toFixed(number >= 10000000 ? 0 : 1)}M`;
+        if (number >= 1000) return `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}K`;
+        return number.toLocaleString();
     }
 
     function formatTime(value) {

@@ -33,13 +33,19 @@ class HermesMaintenanceService
         $result = $this->run(['update', '--yes'], timeout: (float) config('services.hermes_runtime.cli_timeout', 120));
         $after = $this->status();
 
-        Log::info('Admin Hermes update executed.', [
+        $logContext = [
             'exit_code' => $result['exit_code'],
             'cli_path' => $this->cliPath(),
             'workdir' => $this->workdir(),
             'users_home' => config('services.hermes_runtime.users_home'),
             'base_home' => config('services.hermes_runtime.base_home'),
-        ]);
+        ];
+        if ($result['exit_code'] !== 0) {
+            $logContext['output'] = str($result['output'])->limit(4000)->toString();
+            $logContext['error'] = str($result['error'])->limit(4000)->toString();
+        }
+
+        Log::log($result['exit_code'] === 0 ? 'info' : 'warning', 'Admin Hermes update executed.', $logContext);
 
         return [
             'status' => $result['exit_code'] === 0 ? 'completed' : 'failed',

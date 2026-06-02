@@ -23,6 +23,7 @@ class AiUsageGuardrailTest extends TestCase
         $user = User::where('email', 'usage-user@example.com')->firstOrFail();
         $admin = User::where('email', 'usage-admin@example.com')->firstOrFail();
         $admin->forceFill(['is_admin' => true, 'subscription_tier' => 'pro'])->save();
+        User::factory()->create(['created_at' => now()->subMonths(2)->startOfMonth()->addDay()]);
         $workspace = Workspace::where('personal_owner_user_id', $user->id)->firstOrFail();
         $session = ConversationSession::create([
             'user_id' => $user->id,
@@ -63,6 +64,7 @@ class AiUsageGuardrailTest extends TestCase
             ->assertJsonPath('data.totals.tokens_month', 160)
             ->assertJsonPath('data.by_model.0.key', 'gpt-5.4-mini')
             ->assertJsonPath('data.top_users.0.email', 'usage-user@example.com')
+            ->assertJsonPath('data.user_growth_range', 'last_30_days')
             ->assertJsonCount(30, 'data.user_growth')
             ->assertJsonPath('data.user_growth.29.total_users', User::count())
             ->assertJsonPath('data.recent_logs.0.status', 'completed')
@@ -71,6 +73,29 @@ class AiUsageGuardrailTest extends TestCase
             ->assertJsonPath('data.recent_logs.0.request_full', 'Please add take out the trash as a task for tonight.')
             ->assertJsonPath('data.recent_logs.0.input_prompt_full', 'Please add take out the trash as a task for tonight.')
             ->assertJsonPath('data.recent_logs.0.action_summary', 'Task Create');
+
+        $this->withToken($adminToken)->getJson('/api/admin/usage/summary?user_growth_range=today')
+            ->assertOk()
+            ->assertJsonPath('data.user_growth_range', 'today')
+            ->assertJsonCount(1, 'data.user_growth')
+            ->assertJsonPath('data.user_growth.0.total_users', User::count());
+
+        $this->withToken($adminToken)->getJson('/api/admin/usage/summary?user_growth_range=last_7_days')
+            ->assertOk()
+            ->assertJsonPath('data.user_growth_range', 'last_7_days')
+            ->assertJsonCount(7, 'data.user_growth')
+            ->assertJsonPath('data.user_growth.6.total_users', User::count());
+
+        $this->withToken($adminToken)->getJson('/api/admin/usage/summary?user_growth_range=all_time')
+            ->assertOk()
+            ->assertJsonPath('data.user_growth_range', 'all_time')
+            ->assertJsonCount(3, 'data.user_growth')
+            ->assertJsonPath('data.user_growth.2.total_users', User::count());
+
+        $this->withToken($adminToken)->getJson('/api/admin/usage/summary?user_growth_range=bad')
+            ->assertOk()
+            ->assertJsonPath('data.user_growth_range', 'last_30_days')
+            ->assertJsonCount(30, 'data.user_growth');
     }
 
     public function test_daily_hard_budget_alert_does_not_block_tool_runtime_invocation(): void

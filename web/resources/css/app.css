@@ -3035,6 +3035,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
+    flex-wrap: wrap;
 }
 
 .hb-admin-growth-header strong {
@@ -3056,6 +3057,43 @@
     align-items: center;
     justify-content: flex-end;
     gap: 10px;
+}
+
+.hb-admin-growth-range {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.hb-admin-growth-range-button {
+    min-height: 32px;
+    padding: 6px 10px;
+    border: 1px solid rgba(12, 23, 45, .1);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .72);
+    color: var(--hb-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.hb-admin-growth-range-button[aria-pressed="true"] {
+    border-color: rgba(22, 163, 74, .32);
+    background: rgba(220, 252, 231, .9);
+    color: var(--hb-accent-strong);
+}
+
+.hb-admin-growth-range-button:hover,
+.hb-admin-growth-range-button:focus-visible {
+    border-color: rgba(22, 163, 74, .42);
+    color: var(--hb-accent-strong);
+}
+
+.hb-admin-growth-range-button:focus-visible {
+    outline: 2px solid rgba(22, 163, 74, .28);
+    outline-offset: 2px;
 }
 
 .hb-admin-growth-stats span {
@@ -4138,9 +4176,14 @@
     }
 
     .hb-admin-growth-header,
+    .hb-admin-growth-range,
     .hb-admin-growth-stats {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .hb-admin-growth-range-button {
+        width: 100%;
     }
 
     .hb-admin-growth-stats span {
