@@ -50,6 +50,7 @@ return [
         'cli_path' => env('HERMES_CLI_PATH', 'hermes'),
         'cli_workdir' => env('HERMES_CLI_WORKDIR', base_path()),
         'cli_timeout' => (float) env('HERMES_CLI_TIMEOUT', 120),
+        'update_timeout' => (float) env('HERMES_UPDATE_TIMEOUT', 600),
         'users_home' => env('HERMES_USERS_HOME', storage_path('app/hermes-users')),
         'base_home' => env('HERMES_BASE_HOME'),
         'timeout' => (float) env('HERMES_AGENT_TIMEOUT', 120),

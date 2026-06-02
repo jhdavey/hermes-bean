@@ -750,6 +750,17 @@ if (mount) {
     }
 
     function modalIdentity(modal = {}) {
+        if (modal.type === 'admin-hermes-update') {
+            return [
+                modal.type,
+                modal.status || '',
+                modal.result?.status || '',
+                modal.result?.exit_code ?? modal.result?.exitCode ?? '',
+                modal.result?.ran_at || modal.result?.ranAt || '',
+                modal.error || '',
+            ].map((part) => String(part)).join(':');
+        }
+
         return [
             modal.type || '',
             modal.mode || '',
@@ -2167,7 +2178,7 @@ if (mount) {
         const result = modal.result || {};
         const before = result.before || {};
         const after = result.after || {};
-        const output = result.output || (running ? 'Running hermes update --yes...' : '');
+        const output = result.output || (running ? 'Running hermes update --yes...\nThis can take several minutes. CLI output will appear here when the process finishes.' : '');
         const error = result.error || modal.error || '';
         const exitCode = result.exit_code ?? result.exitCode;
 

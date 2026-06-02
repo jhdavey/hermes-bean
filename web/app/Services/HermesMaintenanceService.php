@@ -30,7 +30,7 @@ class HermesMaintenanceService
     public function update(): array
     {
         $before = $this->status();
-        $result = $this->run(['update', '--yes'], timeout: (float) config('services.hermes_runtime.cli_timeout', 120));
+        $result = $this->run(['update', '--yes'], timeout: (float) config('services.hermes_runtime.update_timeout', 600));
         $after = $this->status();
 
         $logContext = [
