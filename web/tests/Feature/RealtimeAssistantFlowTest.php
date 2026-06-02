@@ -308,6 +308,80 @@ class RealtimeAssistantFlowTest extends TestCase
             );
     }
 
+    public function test_realtime_dashboard_context_warms_current_weather_from_default_location(): void
+    {
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                return Http::response([
+                    'results' => [[
+                        'id' => 4167147,
+                        'name' => 'Orlando',
+                        'latitude' => 28.5383,
+                        'longitude' => -81.3792,
+                        'admin1' => 'Florida',
+                        'country_code' => 'US',
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')) {
+                return Http::response([
+                    'timezone' => 'America/New_York',
+                    'current' => [
+                        'time' => '2026-06-02T14:00',
+                        'temperature_2m' => 88.2,
+                        'relative_humidity_2m' => 62,
+                        'apparent_temperature' => 91.6,
+                        'precipitation' => 0,
+                        'weather_code' => 2,
+                        'cloud_cover' => 50,
+                        'wind_speed_10m' => 8.4,
+                        'wind_direction_10m' => 135,
+                        'wind_gusts_10m' => 15.2,
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('realtime-context-weather@example.com');
+        $user = User::where('email', 'realtime-context-weather@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        $profile = app(\App\Services\AgentProfileService::class)->ensureForWorkspace($workspace, $user);
+        $settings = $profile->settings ?? [];
+        data_set($settings, 'onboarding.context', 'I live in Orlando, Florida.');
+        data_set($settings, 'memory.user_preferences.summary', 'Additional user context: I live in Orlando, Florida.');
+        $profile->forceFill(['settings' => $settings])->save();
+
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-06-02T14:00:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                ],
+            ],
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->getJson("/api/assistant/realtime/dashboard-context?session_id={$sessionId}")
+            ->assertOk()
+            ->assertJsonPath('data.snapshot.weather_current.ok', true)
+            ->assertJsonPath('data.snapshot.weather_current.provider', 'open_meteo')
+            ->assertJsonPath('data.snapshot.weather_current.kind', 'weather_current')
+            ->assertJsonPath('data.snapshot.weather_current.location', 'Orlando, Florida, US')
+            ->assertJsonPath('data.snapshot.weather_current.weather.temperature_f', 88)
+            ->assertJsonPath('data.snapshot.weather_current.weather.description', 'partly cloudy')
+            ->assertJson(fn ($json) => $json
+                ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'weather_current.ok is true'))
+                ->where('data.instructions', fn (string $value): bool => str_contains($value, 'weather_current.ok=true') && str_contains($value, 'Orlando, Florida, US'))
+                ->etc()
+            );
+
+        Http::assertSentCount(2);
+    }
+
     public function test_realtime_dashboard_context_uses_client_visible_dates_for_multi_day_items(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-06-01T16:00:00Z'));

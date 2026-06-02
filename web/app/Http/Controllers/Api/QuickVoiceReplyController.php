@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\AiUsageService;
 use App\Services\AdminSettingsService;
+use App\Services\DashboardContextSnapshotService;
 use App\Services\AgentProfileService;
+use App\Services\OpenMeteoWeatherService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +17,15 @@ use Illuminate\Validation\Rule;
 
 class QuickVoiceReplyController extends Controller
 {
-    public function store(Request $request, WorkspaceService $workspaces, AgentProfileService $profiles, AdminSettingsService $adminSettings, AiUsageService $usage): JsonResponse
+    public function store(
+        Request $request,
+        WorkspaceService $workspaces,
+        AgentProfileService $profiles,
+        AdminSettingsService $adminSettings,
+        AiUsageService $usage,
+        DashboardContextSnapshotService $dashboardContext,
+        OpenMeteoWeatherService $weather,
+    ): JsonResponse
     {
         $data = $request->validate([
             'content' => ['required', 'string', 'max:1000'],
@@ -65,6 +75,57 @@ class QuickVoiceReplyController extends Controller
                 'message' => $preflight['reason'],
                 'code' => 'bean_voice_usage_limit',
             ], 429);
+        }
+
+        if ($stage === 'first' && (bool) config('services.hermes_runtime.weather_lookup_enabled', true)) {
+            $weatherResult = $weather->currentWeatherForQuery(
+                $content,
+                '',
+                $dashboardContext->defaultWeatherLocation(
+                    $user,
+                    $workspace,
+                    is_array($data['client_context'] ?? null) ? $data['client_context'] : null,
+                ) ?? '',
+                [
+                    'source' => 'quick_voice_reply',
+                    'user_id' => $user->id,
+                    'workspace_id' => $workspace->id,
+                ],
+            );
+            if ($weatherResult !== null) {
+                $usage->recordDirectCall($user, $workspace->id, 'voice_turn', 'open-meteo', [
+                    'tool_call_count' => 1,
+                ], [
+                    'stage' => $stage,
+                    'provider' => 'open_meteo',
+                    'kind' => $weatherResult['kind'] ?? null,
+                    'weather_location' => $weatherResult['location'] ?? null,
+                    'request_preview' => str($content)->limit(200)->toString(),
+                    'response_contract' => ($weatherResult['ok'] ?? false) ? 'complete' : 'background',
+                ], ['voice_turn', 'open_meteo_weather'], ($weatherResult['ok'] ?? false) ? 'completed' : 'failed');
+
+                if (($weatherResult['ok'] ?? false) === true) {
+                    return response()->json([
+                        'data' => [
+                            'text' => $this->personableVoiceText((string) ($weatherResult['text'] ?? '')),
+                            'model' => 'open-meteo',
+                            'continue_agent' => false,
+                            'response_contract' => 'complete',
+                        ],
+                    ]);
+                }
+
+                if (($weatherResult['error_code'] ?? null) === 'weather_location_missing') {
+                    return response()->json([
+                        'data' => [
+                            'text' => 'What location should I check?',
+                            'model' => 'open-meteo',
+                            'continue_agent' => false,
+                            'response_contract' => 'complete',
+                        ],
+                    ]);
+                }
+            }
         }
 
         $payload = [

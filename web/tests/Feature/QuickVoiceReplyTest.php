@@ -96,30 +96,53 @@ class QuickVoiceReplyTest extends TestCase
             ->assertJsonPath('data.response_contract', 'background');
     }
 
-    public function test_quick_voice_reply_continues_to_agent_for_current_weather_requests(): void
+    public function test_quick_voice_reply_answers_current_weather_from_open_meteo(): void
     {
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response([
-                'id' => 'chatcmpl-weather',
-                'model' => 'gpt-quick-test',
-                'choices' => [[
-                    'finish_reason' => 'stop',
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => 'I will check the current weather in Orlando.',
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                return Http::response([
+                    'results' => [[
+                        'name' => 'Orlando',
+                        'latitude' => 28.5383,
+                        'longitude' => -81.3792,
+                        'admin1' => 'Florida',
+                        'country_code' => 'US',
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')) {
+                return Http::response([
+                    'current' => [
+                        'time' => '2026-06-02T14:00',
+                        'temperature_2m' => 88.2,
+                        'relative_humidity_2m' => 62,
+                        'apparent_temperature' => 91.6,
+                        'precipitation' => 0,
+                        'weather_code' => 2,
+                        'cloud_cover' => 50,
+                        'wind_speed_10m' => 8.4,
+                        'wind_direction_10m' => 135,
+                        'wind_gusts_10m' => 15.2,
                     ],
-                ]],
-            ], 200),
-        ]);
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
 
         $token = $this->apiToken('quick-voice-weather@example.com');
 
         $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
             'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
         ])->assertOk()
-            ->assertJsonPath('data.text', "I'll check the current weather in Orlando.")
-            ->assertJsonPath('data.continue_agent', true)
-            ->assertJsonPath('data.response_contract', 'background');
+            ->assertJsonPath('data.text', "It's 88°F and partly cloudy in Orlando, Florida, US right now. Feels like 92°F, humidity is 62%, wind is 8 mph from the southeast.")
+            ->assertJsonPath('data.model', 'open-meteo')
+            ->assertJsonPath('data.continue_agent', false)
+            ->assertJsonPath('data.response_contract', 'complete');
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        Http::assertSentCount(2);
     }
 
     public function test_quick_voice_reply_continues_to_agent_for_generic_live_external_requests(): void

@@ -62,6 +62,7 @@ return [
         'weather_lookup_enabled' => (bool) env('HERMES_WEATHER_LOOKUP_ENABLED', true),
         'weather_lookup_timeout' => (float) env('HERMES_WEATHER_LOOKUP_TIMEOUT', 6),
         'weather_lookup_connect_timeout' => (float) env('HERMES_WEATHER_LOOKUP_CONNECT_TIMEOUT', 3),
+        'weather_warm_cache_seconds' => (int) env('HERMES_WEATHER_WARM_CACHE_SECONDS', 300),
     ],
 
     'hermes_realtime' => [

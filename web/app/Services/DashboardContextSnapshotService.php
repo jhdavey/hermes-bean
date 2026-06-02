@@ -12,7 +12,11 @@ use Illuminate\Support\Carbon;
 
 class DashboardContextSnapshotService
 {
-    public function __construct(private readonly GoogleCalendarSyncService $googleCalendar) {}
+    public function __construct(
+        private readonly GoogleCalendarSyncService $googleCalendar,
+        private readonly AgentProfileService $agentProfiles,
+        private readonly OpenMeteoWeatherService $weather,
+    ) {}
 
     public function snapshot(User $user, Workspace $workspace, ?array $clientContext = null): array
     {
@@ -74,6 +78,15 @@ class DashboardContextSnapshotService
             ->reject(fn (CalendarEvent $event): bool => (bool) (($event->metadata ?? [])['recurrence_source_hidden'] ?? false))
             ->values();
 
+        $weatherLocation = $this->defaultWeatherLocation($user, $workspace, $clientContext);
+        $weatherCurrent = $weatherLocation !== null && (bool) config('services.hermes_runtime.weather_lookup_enabled', true)
+            ? $this->weather->currentWeather($weatherLocation, [
+                'source' => 'dashboard_context_snapshot',
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+            ])
+            : null;
+
         return [
             'generated_at' => $now->toIso8601String(),
             'generated_at_utc' => now()->utc()->toIso8601String(),
@@ -89,6 +102,7 @@ class DashboardContextSnapshotService
                 'calendar_events_next_7_days' => $calendarEvents->count(),
                 'reminders_next_7_days' => $reminders->count(),
             ],
+            'weather_current' => $weatherCurrent,
             'calendar_today' => $calendarEvents
                 ->filter(fn (CalendarEvent $event): bool => $this->overlaps($event->starts_at, $event->ends_at, $todayStart, $todayEnd))
                 ->take(12)
@@ -135,15 +149,97 @@ class DashboardContextSnapshotService
 
     public function promptText(User $user, Workspace $workspace, ?array $clientContext = null): string
     {
-        $snapshot = $this->snapshot($user, $workspace, $clientContext);
+        return $this->promptTextFromSnapshot($this->snapshot($user, $workspace, $clientContext));
+    }
+
+    public function promptTextFromSnapshot(array $snapshot): string
+    {
         $json = json_encode($snapshot, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         return <<<TEXT
 Dashboard context snapshot for fast read-only answers.
 Use this snapshot to answer simple questions about today's calendar, upcoming events, current tasks, and reminders without calling tools. If the user asks for anything outside this snapshot, needs a write/change, or needs fresh external data, call queue_bean_work. Treat this snapshot as current as of generated_at.
+If weather_current.ok is true and the user asks for current weather without naming a location, use weather_current as the default location and answer immediately without tools. Also answer immediately when they name the same place as weather_current.location. If they ask for a different location or a forecast not covered by weather_current, call queue_bean_work.
 Timed *_at timestamps in this snapshot are formatted in the snapshot timezone and match the user-visible dashboard. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date.
 {$json}
 TEXT;
+    }
+
+    public function defaultWeatherLocation(User $user, Workspace $workspace, ?array $clientContext): ?string
+    {
+        $clientLocation = $this->firstString([
+            data_get($clientContext ?? [], 'weather.location'),
+            data_get($clientContext ?? [], 'weather_location'),
+            data_get($clientContext ?? [], 'default_weather_location'),
+            data_get($clientContext ?? [], 'home_location'),
+            data_get($clientContext ?? [], 'location.weather'),
+        ]);
+        if ($clientLocation !== null) {
+            return $clientLocation;
+        }
+
+        $profile = $this->agentProfiles->ensureForWorkspace($workspace, $user);
+        $settings = $profile->settings ?? [];
+        $storedLocation = $this->firstString([
+            data_get($settings, 'weather.location'),
+            data_get($settings, 'weather_location'),
+            data_get($settings, 'default_weather_location'),
+            data_get($settings, 'home_location'),
+            data_get($settings, 'location'),
+            data_get($settings, 'memory.user_preferences.weather_location'),
+            data_get($settings, 'memory.user_preferences.home_location'),
+            data_get($settings, 'memory.user_preferences.current_location'),
+            data_get($settings, 'memory.user_preferences.location'),
+            data_get($settings, 'memory.user_preferences.city'),
+        ]);
+        if ($storedLocation !== null) {
+            return $storedLocation;
+        }
+
+        return $this->locationFromText($this->firstString([
+            data_get($settings, 'onboarding.context'),
+            data_get($settings, 'memory.user_preferences.summary'),
+        ]) ?? '');
+    }
+
+    private function firstString(array $values): ?string
+    {
+        foreach ($values as $value) {
+            if (! is_string($value)) {
+                continue;
+            }
+
+            $trimmed = trim(preg_replace('/\s+/', ' ', $value) ?: '');
+            if ($trimmed !== '') {
+                return $trimmed;
+            }
+        }
+
+        return null;
+    }
+
+    private function locationFromText(string $text): ?string
+    {
+        $sentences = preg_split('/[.;\n]+/', $text) ?: [];
+        foreach ($sentences as $sentence) {
+            if (preg_match('/\b(?:live|lives|living|based|located)\s+(?:in|near|around)\s+([A-Za-z][A-Za-z .\'-]+(?:,\s*[A-Za-z]{2,}| [A-Z]{2})?)/i', $sentence, $matches) === 1) {
+                return $this->cleanLocationCandidate((string) ($matches[1] ?? ''));
+            }
+
+            if (preg_match('/\b(?:home|weather location|default location)\s+(?:is|in|near|around)\s+([A-Za-z][A-Za-z .\'-]+(?:,\s*[A-Za-z]{2,}| [A-Z]{2})?)/i', $sentence, $matches) === 1) {
+                return $this->cleanLocationCandidate((string) ($matches[1] ?? ''));
+            }
+        }
+
+        return null;
+    }
+
+    private function cleanLocationCandidate(string $candidate): ?string
+    {
+        $candidate = trim(preg_replace('/\b(?:and|but|with|where|because)\b.*$/i', '', $candidate) ?: '');
+        $candidate = trim($candidate, " \t\n\r\0\x0B,.?!'\"");
+
+        return $candidate !== '' ? $candidate : null;
     }
 
     private function taskPayload(Task $task, string $timezone): array

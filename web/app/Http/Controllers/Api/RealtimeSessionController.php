@@ -260,11 +260,13 @@ class RealtimeSessionController extends Controller
         $clientContext = is_array(data_get($session?->metadata ?? [], 'client_context'))
             ? data_get($session?->metadata ?? [], 'client_context')
             : null;
+        $snapshot = $this->dashboardContext->snapshot($user, $workspace, $clientContext);
+        $promptText = $this->dashboardContext->promptTextFromSnapshot($snapshot);
 
         return response()->json(['data' => [
-            'snapshot' => $this->dashboardContext->snapshot($user, $workspace, $clientContext),
-            'prompt_text' => $this->dashboardContext->promptText($user, $workspace, $clientContext),
-            'instructions' => $session ? $this->realtimeInstructions($session) : null,
+            'snapshot' => $snapshot,
+            'prompt_text' => $promptText,
+            'instructions' => $session ? $this->realtimeInstructions($session, $promptText) : null,
         ]]);
     }
 
@@ -460,15 +462,18 @@ class RealtimeSessionController extends Controller
         ]], $preflight['allowed'] ? 201 : 429);
     }
 
-    private function realtimeInstructions(ConversationSession $session): string
+    private function realtimeInstructions(ConversationSession $session, ?string $dashboardContext = null): string
     {
         $clientContext = json_encode(data_get($session->metadata ?? [], 'client_context', []), JSON_UNESCAPED_SLASHES);
         $user = User::findOrFail($session->user_id);
         $workspace = $session->workspace ?: $this->workspaces->resolveWorkspace($user, $session->workspace_id);
-        $dashboardClientContext = is_array(data_get($session->metadata ?? [], 'client_context'))
-            ? data_get($session->metadata ?? [], 'client_context')
-            : null;
-        $dashboardContext = $this->dashboardContext->promptText($user, $workspace, $dashboardClientContext);
+        $dashboardContext ??= $this->dashboardContext->promptText(
+            $user,
+            $workspace,
+            is_array(data_get($session->metadata ?? [], 'client_context'))
+                ? data_get($session->metadata ?? [], 'client_context')
+                : null,
+        );
 
         return <<<PROMPT
 You are Bean, the realtime voice interface for HeyBean.
@@ -480,6 +485,7 @@ For simple conversational inputs, greetings, mic checks, current time/date quest
 If the user asks whether you can hear them, say "Yes, I can hear you." Never say "I can read you" during a voice conversation.
 If the user asks what time it is, answer from the client temporal context below. Do not call tools for current time/date questions.
 Use the dashboard context snapshot below to answer simple read-only questions about the current dashboard, calendar, tasks, and reminders immediately. Do not call queue_bean_work if the answer is clearly present in the snapshot.
+If dashboard context includes weather_current.ok=true and the user asks current weather without naming a location, answer from weather_current immediately as the default location. Also answer immediately when they name the same place as weather_current.location. Do not call queue_bean_work for warmed current weather unless the user asks for a different location, a broader forecast, or more detail than the snapshot contains.
 Call queue_bean_work when the answer is not in the snapshot, the user asks to use live external data, or the user asks to create, update, delete, plan, remember, schedule, or otherwise change app data. Trash, garbage, recycling, and household pickup questions may be answered from the snapshot if present; otherwise queue background work because they may be stored as tasks or reminders.
 When queue_bean_work is needed, first acknowledge naturally in one short sentence, then call the tool. Do not claim the task is complete until the app sends completion context later.
 After calling queue_bean_work, do not add another filler response. Stay quiet until completion context or progress context arrives. When completion context arrives, answer with the completed result.
