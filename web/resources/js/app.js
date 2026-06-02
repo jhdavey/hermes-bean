@@ -1135,7 +1135,6 @@ if (mount) {
         return `
             <article class="hb-chat-onboarding-card hb-chat-onboarding-complete">
                 <div class="hb-chat-onboarding-kicker">${icons.checkCircle}<span>Onboarding saved</span></div>
-                <strong>Bean is ready for this workspace.</strong>
                 <p>Your preferences are saved. You can keep chatting or head back to the dashboard.</p>
                 <div class="hb-message-actions">
                     <button class="hb-button" type="button" data-onboarding-dashboard>Go to dashboard</button>
