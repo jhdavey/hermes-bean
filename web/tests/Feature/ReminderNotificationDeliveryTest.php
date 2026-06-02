@@ -124,6 +124,7 @@ class ReminderNotificationDeliveryTest extends TestCase
 
         $this->assertDatabaseHas('push_notification_device_tokens', [
             'token' => 'fcm-device-token-1',
+            'token_hash' => hash('sha256', 'fcm-device-token-1'),
             'platform' => 'ios',
             'enabled' => true,
         ]);
@@ -134,6 +135,7 @@ class ReminderNotificationDeliveryTest extends TestCase
 
         $this->assertDatabaseHas('push_notification_device_tokens', [
             'token' => 'fcm-device-token-1',
+            'token_hash' => hash('sha256', 'fcm-device-token-1'),
             'enabled' => false,
         ]);
     }
@@ -167,6 +169,7 @@ class ReminderNotificationDeliveryTest extends TestCase
         PushNotificationDeviceToken::create([
             'user_id' => $user->id,
             'token' => 'fcm-device-token-2',
+            'token_hash' => hash('sha256', 'fcm-device-token-2'),
             'platform' => 'android',
             'enabled' => true,
             'last_seen_at' => now(),

@@ -18,11 +18,13 @@ class PushNotificationDeviceTokenController extends Controller
             'device_id' => ['nullable', 'string', 'max:255'],
             'app_version' => ['nullable', 'string', 'max:64'],
         ]);
+        $tokenHash = hash('sha256', $data['token']);
 
         $deviceToken = PushNotificationDeviceToken::updateOrCreate(
-            ['token' => $data['token']],
+            ['token_hash' => $tokenHash],
             [
                 'user_id' => $request->user()->id,
+                'token' => $data['token'],
                 'platform' => $data['platform'] ?? null,
                 'device_id' => $data['device_id'] ?? null,
                 'app_version' => $data['app_version'] ?? null,
@@ -41,7 +43,7 @@ class PushNotificationDeviceTokenController extends Controller
         ]);
 
         PushNotificationDeviceToken::where('user_id', $request->user()->id)
-            ->where('token', $data['token'])
+            ->where('token_hash', hash('sha256', $data['token']))
             ->update(['enabled' => false]);
 
         return response()->json(null, 204);

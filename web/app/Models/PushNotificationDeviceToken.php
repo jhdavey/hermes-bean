@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['user_id', 'token', 'platform', 'device_id', 'app_version', 'enabled', 'last_seen_at'])]
+#[Fillable(['user_id', 'token', 'token_hash', 'platform', 'device_id', 'app_version', 'enabled', 'last_seen_at'])]
 class PushNotificationDeviceToken extends Model
 {
     protected function casts(): array
