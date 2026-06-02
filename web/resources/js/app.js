@@ -4881,6 +4881,7 @@ if (mount) {
             return;
         }
         if (type === 'response.created') {
+            clearRealtimeToolFallback();
             markRealtimeAssistantOutputActive(5000, { started: true });
             setKioskVoiceStatus('responding', 'Bean is answering');
             return;
@@ -5525,6 +5526,11 @@ if (mount) {
         }
         if (!hasFunctionCall && assistantAnswered) {
             clearRealtimeToolFallback();
+            if (backgroundQueueAllowed && voiceCommandRequiresBackgroundWork(pendingUserContent)) {
+                persistRealtimeConversationTurn();
+                queueRealtimeFallbackWork(pendingUserContent, responseAssistantText);
+                return;
+            }
             persistRealtimeConversationTurn();
             kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(responseAssistantText);
         } else if (!assistantAnswered && !kioskRealtimeToolFallbackContent && voiceCommandNeedsAgentWork(pendingUserContent)) {
@@ -5758,9 +5764,21 @@ if (mount) {
         kioskRealtimeToolFallbackContent = '';
     }
 
-    async function queueRealtimeFallbackWork(content) {
+    async function queueRealtimeFallbackWork(content, quickReplyTextOverride = '') {
         if (!state.session?.id) return;
-        const quickReplyText = String(kioskRealtimeAssistantDraft?.content || '').trim();
+        const quickReplyText = String(quickReplyTextOverride || kioskRealtimeAssistantDraft?.content || '').trim();
+        if (quickReplyText && !realtimeSpokenAnswerAllowsBackgroundQueue(content, quickReplyText)) {
+            logKioskRealtimeVoiceTrace('realtime_voice_fallback_skipped', {
+                summary: 'Skipped realtime fallback work because the spoken answer was complete.',
+                user_content: content,
+                assistant_text: quickReplyText,
+                reason: 'spoken_answer_complete',
+            });
+            persistRealtimeConversationTurn();
+            kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(quickReplyText);
+            finishRealtimeTurnStatus();
+            return;
+        }
         setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent: content });
         showRealtimeWorkingInBackgroundWhenReady();
         try {
