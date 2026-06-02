@@ -622,10 +622,20 @@ if (mount) {
         };
     }
 
+    function syncSummaryAgentProfileFromUser(user = state.user) {
+        const profile = currentAgentProfileFromUser(user);
+        if (!profile) return;
+        state.summary = {
+            ...(state.summary || {}),
+            agent_profile: profile,
+            agentProfile: profile,
+        };
+    }
+
     function currentAgentProfile() {
-        return state.summary?.agent_profile
+        return currentAgentProfileFromUser(state.user)
+            || state.summary?.agent_profile
             || state.summary?.agentProfile
-            || currentAgentProfileFromUser(state.user)
             || {};
     }
 
@@ -7557,6 +7567,7 @@ if (mount) {
             });
             state.notice = homeCity ? 'Home city saved.' : 'Home city cleared.';
             state.error = '';
+            syncSummaryAgentProfileFromUser();
             render();
             refreshRealtimeDashboardContext('home_city_updated').catch(() => {});
         } catch (error) {
