@@ -197,7 +197,8 @@ class DomainResourceController extends Controller
         $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
 
-        if (array_key_exists('status', $validated)) {
+        $statusProvided = array_key_exists('status', $validated);
+        if ($statusProvided) {
             $willBeCompleted = $this->taskStatusIsCompleted($validated['status']);
             if ($willBeCompleted && $this->advanceRecurringTaskCompletion($model, $validated)) {
                 $willBeCompleted = false;
@@ -216,6 +217,9 @@ class DomainResourceController extends Controller
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
+        if ($statusProvided) {
+            $this->propagateLinkedStatusUpdate($request, $model->refresh(), 'tasks', $validated);
+        }
         if ($syncToProvided) {
             $this->replaceSyncTo($request, $model->refresh(), 'tasks', $syncTo);
         }
@@ -279,6 +283,9 @@ class DomainResourceController extends Controller
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
+        if (array_key_exists('status', $validated)) {
+            $this->propagateLinkedStatusUpdate($request, $model->refresh(), 'reminders', $validated);
+        }
         if ($syncToProvided) {
             $this->replaceSyncTo($request, $model->refresh(), 'reminders', $syncTo);
         }
@@ -830,6 +837,23 @@ class DomainResourceController extends Controller
         }
 
         return response()->json(status: 204);
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function propagateLinkedStatusUpdate(Request $request, Model $model, string $type, array $validated): void
+    {
+        $updates = collect(['status', 'completed_at', 'due_at', 'metadata'])
+            ->filter(fn (string $key): bool => array_key_exists($key, $validated))
+            ->mapWithKeys(fn (string $key): array => [$key => $validated[$key]])
+            ->all();
+
+        if ($updates === []) {
+            return;
+        }
+
+        app(WorkspaceItemSyncService::class)->propagateStatusUpdate($model, $updates, $this->accessibleWorkspaceIds($request));
     }
 
     private function linkedItemsByWorkspace(Model $model, string $type, array $accessibleWorkspaceIds)

@@ -458,6 +458,42 @@ class WorkspaceSchemaTest extends TestCase
             ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $family->id]);
     }
 
+    public function test_completing_linked_task_copy_applies_to_all_linked_workspaces(): void
+    {
+        $token = $this->apiToken('complete-linked-task@example.com');
+        $user = User::where('email', 'complete-linked-task@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+
+        $taskId = $this->withToken($token)->postJson('/api/tasks', [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'Clean counters',
+            'type' => 'todo',
+            'due_at' => '2026-05-21T14:00:00Z',
+            'sync_to_workspace_ids' => [$family->id],
+        ])->assertCreated()->json('data.id');
+        $familyCopyId = Task::where('workspace_id', $family->id)->value('id');
+
+        $this->withToken($token)->patchJson('/api/tasks/'.$familyCopyId, [
+            'status' => 'completed',
+        ])->assertOk()
+            ->assertJsonPath('data.id', $familyCopyId)
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertDatabaseHas('tasks', ['id' => $taskId, 'status' => 'completed']);
+        $this->assertDatabaseHas('tasks', ['id' => $familyCopyId, 'status' => 'completed']);
+        $this->assertNotNull(Task::findOrFail($taskId)->completed_at);
+        $this->assertNotNull(Task::findOrFail($familyCopyId)->completed_at);
+
+        $this->withToken($token)->patchJson('/api/tasks/'.$taskId, [
+            'status' => 'open',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'open');
+
+        $this->assertDatabaseHas('tasks', ['id' => $taskId, 'status' => 'open', 'completed_at' => null]);
+        $this->assertDatabaseHas('tasks', ['id' => $familyCopyId, 'status' => 'open', 'completed_at' => null]);
+    }
+
     public function test_reminder_update_can_replace_selected_linked_workspaces(): void
     {
         $token = $this->apiToken('update-linked-reminder@example.com');
@@ -485,6 +521,39 @@ class WorkspaceSchemaTest extends TestCase
         $this->withToken($token)->getJson('/api/reminders?workspace_id='.$personalWorkspaceId)
             ->assertOk()
             ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $work->id]);
+    }
+
+    public function test_completing_linked_reminder_copy_applies_to_all_linked_workspaces(): void
+    {
+        $token = $this->apiToken('complete-linked-reminder@example.com');
+        $user = User::where('email', 'complete-linked-reminder@example.com')->firstOrFail();
+        $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+
+        $reminderId = $this->withToken($token)->postJson('/api/reminders', [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'Check oven',
+            'remind_at' => '2026-05-21T14:00:00Z',
+            'sync_to_workspace_ids' => [$family->id],
+        ])->assertCreated()->json('data.id');
+        $familyCopyId = Reminder::where('workspace_id', $family->id)->value('id');
+
+        $this->withToken($token)->patchJson('/api/reminders/'.$familyCopyId, [
+            'status' => 'completed',
+        ])->assertOk()
+            ->assertJsonPath('data.id', $familyCopyId)
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertDatabaseHas('reminders', ['id' => $reminderId, 'status' => 'completed']);
+        $this->assertDatabaseHas('reminders', ['id' => $familyCopyId, 'status' => 'completed']);
+
+        $this->withToken($token)->patchJson('/api/reminders/'.$reminderId, [
+            'status' => 'pending',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'pending');
+
+        $this->assertDatabaseHas('reminders', ['id' => $reminderId, 'status' => 'pending']);
+        $this->assertDatabaseHas('reminders', ['id' => $familyCopyId, 'status' => 'pending']);
     }
 
     public function test_calendar_event_update_can_replace_selected_linked_workspaces(): void

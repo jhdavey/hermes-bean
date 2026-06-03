@@ -22,7 +22,11 @@ class StructuredHermesActionService
 {
     private const DEFAULT_CATEGORY_COLOR = '#34C759';
 
-    public function __construct(private readonly GoogleCalendarSyncService $googleCalendar) {}
+    public function __construct(
+        private readonly GoogleCalendarSyncService $googleCalendar,
+        private readonly WorkspaceItemSyncService $workspaceItemSync,
+        private readonly WorkspaceService $workspaces,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $envelope
@@ -326,6 +330,40 @@ class StructuredHermesActionService
         };
     }
 
+    private function taskStatusIsCompleted(?string $status): bool
+    {
+        return in_array(strtolower(str_replace('_', '-', (string) $status)), ['completed', 'complete', 'done'], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $updates
+     * @return array<string, mixed>
+     */
+    private function statusPropagationUpdates(array $updates): array
+    {
+        return collect(['status', 'completed_at', 'due_at', 'metadata'])
+            ->filter(fn (string $key): bool => array_key_exists($key, $updates))
+            ->mapWithKeys(fn (string $key): array => [$key => $updates[$key]])
+            ->all();
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function accessibleWorkspaceIds(ConversationSession $session): array
+    {
+        $user = User::find($session->user_id);
+        if (! $user) {
+            return array_values(array_filter([(int) $session->workspace_id]));
+        }
+
+        return $this->workspaces
+            ->accessibleWorkspaces($user)
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
     private function requireCalendarCreateFields(string $type, array $parameters): void
     {
         $this->requireActionFields($type, $parameters, ['title']);
@@ -563,7 +601,7 @@ class StructuredHermesActionService
     private function updateTask(ConversationSession $session, array $parameters): ActivityEvent
     {
         $task = $this->taskForUpdate($session, $parameters);
-        $updates = $this->onlyPresent($parameters, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'metadata']);
+        $updates = $this->onlyPresent($parameters, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'completed_at', 'metadata']);
         $updates = $this->withDefaultUncategorizedColor($updates);
         if (array_key_exists('recurrence', $parameters) || array_key_exists('metadata', $parameters)) {
             $updates['metadata'] = $this->metadataWithRecurrence($parameters, is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($task->metadata ?? []));
@@ -571,7 +609,18 @@ class StructuredHermesActionService
         if (array_key_exists('due_at', $parameters)) {
             $updates['due_at'] = $parameters['due_at'] ? $this->parseDashboardDateTime($session, $parameters['due_at']) : null;
         }
+        if (array_key_exists('status', $updates)) {
+            if ($this->taskStatusIsCompleted($updates['status']) && empty($updates['completed_at']) && $task->completed_at === null) {
+                $updates['completed_at'] = now();
+            }
+            if (! $this->taskStatusIsCompleted($updates['status']) && ! array_key_exists('completed_at', $updates)) {
+                $updates['completed_at'] = null;
+            }
+        }
         $task->update($updates);
+        if (array_key_exists('status', $updates)) {
+            $this->workspaceItemSync->propagateStatusUpdate($task->refresh(), $this->statusPropagationUpdates($updates), $this->accessibleWorkspaceIds($session));
+        }
 
         return $this->recordEvent($session, 'assistant.task.updated', ['task_id' => $task->id, 'title' => $task->title], 'tasks.update', 'succeeded');
     }
@@ -629,6 +678,9 @@ class StructuredHermesActionService
             $updates['remind_at'] = $this->parseDashboardDateTime($session, $parameters['remind_at']);
         }
         $reminder->update($updates);
+        if (array_key_exists('status', $updates)) {
+            $this->workspaceItemSync->propagateStatusUpdate($reminder->refresh(), $this->statusPropagationUpdates($updates), $this->accessibleWorkspaceIds($session));
+        }
 
         return $this->recordEvent($session, 'assistant.reminder.updated', ['reminder_id' => $reminder->id, 'title' => $reminder->title], 'reminders.update', 'succeeded');
     }

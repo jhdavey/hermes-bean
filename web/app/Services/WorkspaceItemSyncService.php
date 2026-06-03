@@ -93,6 +93,21 @@ class WorkspaceItemSyncService
         return $results;
     }
 
+    /**
+     * @param  array<string, mixed>  $updates
+     * @param  array<int, int>  $accessibleWorkspaceIds
+     */
+    public function propagateStatusUpdate(Model $source, array $updates, array $accessibleWorkspaceIds): void
+    {
+        if ($updates === []) {
+            return;
+        }
+
+        $this->linkedItemsByWorkspace($source, $accessibleWorkspaceIds)
+            ->reject(fn (Model $item): bool => (int) $item->id === (int) $source->id)
+            ->each(fn (Model $item): bool => $item->forceFill($updates)->save());
+    }
+
     public function syncAll(Workspace $source, Workspace $target, User $actor, array $resourceTypes): array
     {
         $summary = ['tasks' => 0, 'reminders' => 0, 'calendar_events' => 0];
@@ -145,6 +160,66 @@ class WorkspaceItemSyncService
                 }
             })
             ->first();
+    }
+
+    /**
+     * @param  array<int, int>  $accessibleWorkspaceIds
+     */
+    private function linkedItemsByWorkspace(Model $source, array $accessibleWorkspaceIds)
+    {
+        $type = $this->typeFor($source);
+        $relatedIds = collect([(int) $source->id]);
+        $links = $this->itemLinksFor($source, $type);
+        $sourcePairs = collect();
+
+        foreach ($links as $link) {
+            $relatedIds->push((int) $link->source_id, (int) $link->target_id);
+            $sourcePairs->push([(int) $link->source_workspace_id, (int) $link->source_id]);
+        }
+
+        $sourcePairs = $sourcePairs->unique(fn (array $pair): string => $pair[0].':'.$pair[1])->values();
+        if ($sourcePairs->isNotEmpty()) {
+            WorkspaceItemLink::query()
+                ->where('source_type', $type)
+                ->where('target_type', $type)
+                ->where('link_type', 'copy')
+                ->where(function ($query) use ($sourcePairs): void {
+                    foreach ($sourcePairs as [$workspaceId, $sourceId]) {
+                        $query->orWhere(function ($query) use ($workspaceId, $sourceId): void {
+                            $query->where('source_workspace_id', $workspaceId)
+                                ->where('source_id', $sourceId);
+                        });
+                    }
+                })
+                ->get()
+                ->each(function (WorkspaceItemLink $link) use ($relatedIds): void {
+                    $relatedIds->push((int) $link->source_id, (int) $link->target_id);
+                });
+        }
+
+        return $source::query()
+            ->whereIn('id', $relatedIds->unique()->values()->all())
+            ->whereIn('workspace_id', $accessibleWorkspaceIds)
+            ->get()
+            ->keyBy(fn (Model $item): int => (int) $item->workspace_id);
+    }
+
+    private function itemLinksFor(Model $source, string $type)
+    {
+        return WorkspaceItemLink::query()
+            ->where('source_type', $type)
+            ->where('target_type', $type)
+            ->where('link_type', 'copy')
+            ->where(function ($query) use ($source): void {
+                $query->where(function ($query) use ($source): void {
+                    $query->where('source_workspace_id', $source->workspace_id)
+                        ->where('source_id', $source->id);
+                })->orWhere(function ($query) use ($source): void {
+                    $query->where('target_workspace_id', $source->workspace_id)
+                        ->where('target_id', $source->id);
+                });
+            })
+            ->get();
     }
 
     private function typeFor(Model $model): string

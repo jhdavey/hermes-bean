@@ -200,6 +200,11 @@
     border-width: 2px;
 }
 
+.hb-button .hb-spinner {
+    border-color: rgba(255, 255, 255, .34);
+    border-top-color: #fff;
+}
+
 @keyframes hb-spin {
     to { transform: rotate(360deg); }
 }

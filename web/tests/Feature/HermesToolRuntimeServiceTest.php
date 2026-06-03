@@ -7,6 +7,7 @@ use App\Models\ConversationMessage;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -345,7 +346,8 @@ class HermesToolRuntimeServiceTest extends TestCase
         $token = $this->apiToken('tool-update@example.com');
         $user = User::where('email', 'tool-update@example.com')->firstOrFail();
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user);
-        Task::create([
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+        $task = Task::create([
             'user_id' => $user->id,
             'workspace_id' => $workspace->id,
             'created_by_user_id' => $user->id,
@@ -353,6 +355,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'type' => 'todo',
             'status' => 'open',
         ]);
+        $familyCopy = app(WorkspaceItemSyncService::class)->sync($task, $family, $user);
 
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
@@ -369,6 +372,14 @@ class HermesToolRuntimeServiceTest extends TestCase
             'title' => 'Litter Box',
             'status' => 'completed',
         ]);
+        $this->assertDatabaseHas('tasks', [
+            'id' => $familyCopy->id,
+            'workspace_id' => $family->id,
+            'title' => 'Litter Box',
+            'status' => 'completed',
+        ]);
+        $this->assertNotNull(Task::findOrFail($task->id)->completed_at);
+        $this->assertNotNull(Task::findOrFail($familyCopy->id)->completed_at);
 
         Http::assertSentCount(2);
     }

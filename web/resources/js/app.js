@@ -2426,7 +2426,7 @@ if (mount) {
                     <div class="hb-modal-actions">
                         ${editing ? `<button class="hb-button-danger" type="button" data-modal-delete="${kind}" data-id="${item.id}">Delete</button>` : ''}
                         <button class="hb-button-secondary" type="button" data-close-modal>Cancel</button>
-                        <button class="hb-button" type="submit">${editing ? 'Save' : 'Create'}</button>
+                        <button class="hb-button" type="submit" data-modal-save-button>${editing ? 'Save' : 'Create'}</button>
                     </div>
                 </form>
             </div>`;
@@ -3282,6 +3282,8 @@ if (mount) {
                 render();
                 return;
             } else {
+                if (form.dataset.saving === 'true') return;
+                setItemModalSaving(form, true);
                 const saved = await saveItem(kind, state.modal?.item, data, form);
                 cacheSavedItem(kind, saved);
             }
@@ -3297,6 +3299,23 @@ if (mount) {
             state.error = friendlyError(error, 'save that change');
             state.modal = null;
             render();
+        }
+    }
+
+    function setItemModalSaving(form, saving) {
+        form.dataset.saving = saving ? 'true' : 'false';
+        form.querySelectorAll('button').forEach((button) => {
+            button.disabled = saving;
+        });
+        const saveButton = form.querySelector('[data-modal-save-button]');
+        if (!saveButton) return;
+        if (saving) {
+            saveButton.dataset.originalLabel = saveButton.textContent || 'Save';
+            saveButton.innerHTML = '<span class="hb-spinner hb-spinner-tiny" aria-hidden="true"></span><span>Saving...</span>';
+            saveButton.setAttribute('aria-label', 'Saving');
+        } else {
+            saveButton.textContent = saveButton.dataset.originalLabel || 'Save';
+            saveButton.removeAttribute('aria-label');
         }
     }
 
