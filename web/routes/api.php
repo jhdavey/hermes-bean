@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminUsageController;
 use App\Http\Controllers\Api\AssistantRunController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\ConversationMessageController;
 use App\Http\Controllers\Api\ConversationSessionController;
 use App\Http\Controllers\Api\DashboardChangeController;
@@ -26,6 +27,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
     Route::get('/google-calendar/callback', [GoogleCalendarController::class, 'callback']);
+    Route::post('/billing/stripe/webhook', [BillingController::class, 'webhook']);
 
     Route::middleware('auth.bearer')->group(function (): void {
         Route::get('/auth/me', [AuthController::class, 'me']);
@@ -33,6 +35,9 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::delete('/account', [AuthController::class, 'destroy']);
         Route::get('/account/export', [AuthController::class, 'export']);
+        Route::get('/billing/subscription', [BillingController::class, 'show']);
+        Route::post('/billing/checkout-sessions', [BillingController::class, 'checkoutSession']);
+        Route::post('/billing/subscription/upgrade', [BillingController::class, 'upgrade']);
 
         Route::get('/workspaces', [WorkspaceController::class, 'index']);
         Route::post('/workspaces', [WorkspaceController::class, 'store']);

@@ -82,6 +82,17 @@ return [
         'credentials_json' => env('FIREBASE_CREDENTIALS_JSON'),
     ],
 
+    'stripe' => [
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'trial_days' => (int) env('STRIPE_TRIAL_DAYS', 7),
+        'prices' => [
+            'base' => env('STRIPE_PRICE_BASE'),
+            'premium' => env('STRIPE_PRICE_PREMIUM'),
+            'pro' => env('STRIPE_PRICE_PRO'),
+        ],
+    ],
+
     'beta' => [
         'enabled' => (bool) env('BETA_SIGNUPS_ENABLED', true),
     ],

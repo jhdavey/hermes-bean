@@ -141,26 +141,37 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('Bean usage limits are enforced by plan.', false)
             ->assertDontSee('Why usage limits matter', false)
             ->assertDontSee('Low daily Bean cost cap', false)
-            ->assertSee('7-day free trial on paid plans', false)
-            ->assertSee('Free', false)
+            ->assertSee('7-day free trial', false)
+            ->assertSee('Base', false)
             ->assertSee('Premium', false)
             ->assertSee('Pro', false)
+            ->assertSee('Enterprise', false)
             ->assertSee('Most popular', false)
-            ->assertSee('$10', false)
-            ->assertSee('$25', false)
+            ->assertSee('$4.99', false)
+            ->assertSee('$19.99', false)
+            ->assertSee('$49.99', false)
+            ->assertSee('Contact us', false)
+            ->assertSee('href="/register?plan=base"', false)
             ->assertSee('Start Premium trial', false)
             ->assertSee('href="/register?plan=premium"', false)
             ->assertSee('href="/register?plan=pro"', false)
-            ->assertSee('During beta, all users get unlimited use for free', false)
-            ->assertSee('These tiers show the planned post-beta structure', false)
-            ->assertSee('day-8 billing will apply after beta', false);
+            ->assertDontSee('During beta', false)
+            ->assertDontSee('Beta note', false)
+            ->assertDontSee('post-beta', false);
+    }
+
+    public function test_pricing_page_shows_flutter_upgrade_instruction_when_opened_from_app(): void
+    {
+        $this->get('/pricing?source=flutter')
+            ->assertOk()
+            ->assertSee('After upgrading on the site, close and reopen the Flutter app to apply your upgrade.', false);
     }
 
     public function test_register_route_preserves_selected_plan_for_spa(): void
     {
-        $this->get('/register?plan=premium')
+        $this->get('/register?plan=base')
             ->assertOk()
-            ->assertSee('data-selected-plan="premium"', false);
+            ->assertSee('data-selected-plan="base"', false);
     }
 
     public function test_visitors_can_request_early_access(): void

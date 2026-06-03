@@ -13,7 +13,7 @@ const mount = document.getElementById('heybean-web-app');
 if (mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const initialMode = mount.dataset.authMode || 'login';
-    const initialSelectedPlan = ['free', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
+    const initialSelectedPlan = ['base', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
     const dashboardChangeKey = 'heybean.dashboard.changeId';
@@ -35,10 +35,10 @@ if (mount) {
     ];
     const appThemesByKey = new Map(appThemes.map((theme) => [theme.key, theme]));
     const subscriptionPlans = {
-        free: {
-            label: 'Free',
+        base: {
+            label: 'Base',
             summary: '2 workspaces, Bean chat and voice, connected calendar planning, push reminders, and recent context.',
-            trial: 'Free plan selected',
+            trial: 'Base 7-day free trial selected',
         },
         premium: {
             label: 'Premium',
@@ -963,7 +963,7 @@ if (mount) {
         if (!plan) return '';
         return `
             <p>${escapeHtml(plan.trial)}.</p>
-            <p class="hb-item-meta">${escapeHtml(plan.summary)} ${state.selectedPlan === 'free' ? 'No card needed.' : 'Trial billing starts on day 8 until canceled once checkout is enabled.'}</p>
+            <p class="hb-item-meta">${escapeHtml(plan.summary)} Trial billing starts on day 8 until canceled once checkout is enabled.</p>
         `;
     }
 
@@ -1424,9 +1424,11 @@ if (mount) {
     }
 
     function adminOwnerRowMarkup(row) {
+        const tier = row.subscription_tier || row.subscriptionTier || 'base';
+        const displayTier = tier === 'free' ? 'base' : tier;
         return `
             <div class="hb-admin-row">
-                <div><strong>${escapeHtml(row.name || row.email || 'User')}</strong><small>${escapeHtml(`${row.email || ''} · ${row.subscription_tier || row.subscriptionTier || 'free'}`)}</small></div>
+                <div><strong>${escapeHtml(row.name || row.email || 'User')}</strong><small>${escapeHtml(`${row.email || ''} · ${displayTier}`)}</small></div>
                 <span>${escapeHtml(formatCurrency(row.cost))}</span>
             </div>`;
     }

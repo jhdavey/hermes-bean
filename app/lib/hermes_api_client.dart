@@ -1182,6 +1182,7 @@ class HermesUser {
     required this.id,
     required this.name,
     required this.email,
+    this.subscriptionTier = 'base',
     this.theme = 'green',
     this.onboardComplete = false,
     this.agentProfile,
@@ -1199,6 +1200,7 @@ class HermesUser {
   final int id;
   final String name;
   final String email;
+  final String subscriptionTier;
   final String theme;
   final bool onboardComplete;
   final HermesAgentProfile? agentProfile;
@@ -1218,6 +1220,7 @@ class HermesUser {
   HermesUser copyWith({
     String? name,
     String? email,
+    String? subscriptionTier,
     String? theme,
     bool? onboardComplete,
     HermesAgentProfile? agentProfile,
@@ -1234,6 +1237,7 @@ class HermesUser {
     id: id,
     name: name ?? this.name,
     email: email ?? this.email,
+    subscriptionTier: subscriptionTier ?? this.subscriptionTier,
     theme: theme ?? this.theme,
     onboardComplete: onboardComplete ?? this.onboardComplete,
     agentProfile: agentProfile ?? this.agentProfile,
@@ -1254,6 +1258,10 @@ class HermesUser {
     id: _expectInt(json['id']),
     name: _expectString(json['name']),
     email: _expectString(json['email']),
+    subscriptionTier: _readStringOrDefault(
+      json['subscription_tier'] ?? json['subscriptionTier'],
+      'base',
+    ),
     theme: _readStringOrDefault(json['theme'], 'green'),
     onboardComplete: json['onboard_complete'] == true,
     agentProfile: json['agent_profile'] is Map<String, Object?>

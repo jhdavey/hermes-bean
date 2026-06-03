@@ -2712,6 +2712,40 @@ void main() {
     );
   });
 
+  testWidgets('settings upgrade action opens pricing page from app', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final launchedUrls = <Uri>[];
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        launchExternalUrl: (url) async {
+          launchedUrls.add(url);
+          return true;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('settings-upgrade-plan-action')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Current plan: Base'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('settings-upgrade-plan-action')));
+    await tester.pumpAndSettle();
+
+    expect(launchedUrls, hasLength(1));
+    expect(launchedUrls.single.host, 'heybean.org');
+    expect(launchedUrls.single.path, '/pricing');
+    expect(launchedUrls.single.queryParameters['source'], 'flutter');
+  });
+
   testWidgets(
     'Google Calendar connect opens automatically when iOS launcher channel fails',
     (WidgetTester tester) async {

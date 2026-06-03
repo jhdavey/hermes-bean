@@ -53,7 +53,7 @@ class AuthController extends Controller
         $data = $request->validate([
             'name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'email' => ['required', 'string', 'email:rfc', 'max:255'],
-            'plan' => ['sometimes', 'nullable', Rule::in(['free', 'premium', 'pro'])],
+            'plan' => ['sometimes', 'nullable', Rule::in(['base', 'premium', 'pro'])],
         ]);
         $requestedPlan = $data['plan'] ?? null;
 

@@ -86,7 +86,7 @@ Route::get('/workspace-invitations/{token}/accept', function (string $token) {
 Route::post('/early-access', function (Request $request) {
     $validated = $request->validate([
         'email' => ['required', 'email:rfc', 'max:255'],
-        'plan' => ['sometimes', 'nullable', Rule::in(['free', 'premium', 'pro'])],
+        'plan' => ['sometimes', 'nullable', Rule::in(['base', 'premium', 'pro'])],
     ]);
     $requestedPlan = $validated['plan'] ?? null;
 

@@ -24,6 +24,7 @@ const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
 final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
 final Uri _termsOfServiceUrl = Uri.parse('https://heybean.org/terms');
 final Uri _supportUrl = Uri.parse('https://heybean.org/support');
+final Uri _pricingUrl = Uri.parse('https://heybean.org/pricing?source=flutter');
 const String _beanGreenCategoryColor = '#34C759';
 
 @pragma('vm:entry-point')
@@ -13125,6 +13126,10 @@ class _SettingsView extends StatelessWidget {
               title: user.name,
               subtitle: user.email,
             ),
+            _BillingSettingsCard(
+              user: user,
+              launchExternalUrl: launchExternalUrl,
+            ),
             _CompactItemTile(
               icon: Icons.tune_rounded,
               title: 'Bean preferences',
@@ -13172,6 +13177,37 @@ class _SettingsView extends StatelessWidget {
         launchExternalUrl: launchExternalUrl,
       ),
     ],
+  );
+}
+
+class _BillingSettingsCard extends StatelessWidget {
+  const _BillingSettingsCard({
+    required this.user,
+    required this.launchExternalUrl,
+  });
+
+  final HermesUser user;
+  final ExternalUrlLauncher launchExternalUrl;
+
+  String get _planLabel {
+    final tier = user.subscriptionTier.trim().toLowerCase();
+    return switch (tier) {
+      'premium' => 'Premium',
+      'pro' => 'Pro',
+      _ => 'Base',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) => _CompactItemTile(
+    icon: Icons.workspace_premium_outlined,
+    title: 'Plan',
+    subtitle: 'Current plan: $_planLabel',
+    trailing: FilledButton(
+      key: const Key('settings-upgrade-plan-action'),
+      onPressed: () => launchExternalUrl(_pricingUrl),
+      child: const Text('View plans'),
+    ),
   );
 }
 

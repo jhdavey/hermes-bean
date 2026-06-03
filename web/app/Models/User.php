@@ -12,8 +12,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'onboard_complete', 'is_admin', 'subscription_tier', 'default_workspace_id', 'notification_preferences', 'theme'])]
-#[Hidden(['password', 'remember_token'])]
+#[Fillable(['name', 'email', 'password', 'onboard_complete', 'is_admin', 'subscription_tier', 'default_workspace_id', 'notification_preferences', 'theme', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id', 'subscription_status', 'subscription_current_period_end', 'subscription_trial_ends_at', 'subscription_cancel_at_period_end'])]
+#[Hidden(['password', 'remember_token', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -27,6 +27,9 @@ class User extends Authenticatable
             'onboard_complete' => 'boolean',
             'is_admin' => 'boolean',
             'notification_preferences' => 'array',
+            'subscription_current_period_end' => 'datetime',
+            'subscription_trial_ends_at' => 'datetime',
+            'subscription_cancel_at_period_end' => 'boolean',
         ];
     }
 
@@ -37,7 +40,9 @@ class User extends Authenticatable
 
     public function subscriptionTier(): string
     {
-        return (string) ($this->subscription_tier ?: 'free');
+        $tier = strtolower((string) ($this->subscription_tier ?: 'base'));
+
+        return $tier === 'free' ? 'base' : $tier;
     }
 
     public function tokens(): HasMany
