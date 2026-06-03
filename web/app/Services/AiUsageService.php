@@ -75,38 +75,15 @@ class AiUsageService
 
         $estimatedCost ??= $this->estimatedCost($model, $inputTokens, $reservedOutputTokens);
         $budget = $this->budgetFor($user);
-        $today = now()->startOfDay();
-        $month = now()->startOfMonth();
-
-        $daily = $this->usageTotals($user->id, null, $today);
-        $monthly = $this->usageTotals($user->id, null, $month);
+        $daily = $this->usageTotals($user->id, null, now()->startOfDay());
         $dailyCounts = $this->dailyRequestCounts($user->id);
-        $projectedDailyTokens = $daily['tokens'] + $inputTokens + $reservedOutputTokens;
         $projectedDailyCost = $daily['cost'] + $estimatedCost;
-        $projectedMonthlyTokens = $monthly['tokens'] + $inputTokens + $reservedOutputTokens;
-        $projectedMonthlyCost = $monthly['cost'] + $estimatedCost;
-        $projectedMonthlyActions = $monthly['actions'] + 1;
-
-        foreach ($this->requestLimitChecks($requestType, $dailyCounts, $budget, $context) as [$key, $observed, $type]) {
-            $threshold = (float) ($budget[$key] ?? 0);
-            if ($threshold > 0 && $observed > $threshold) {
-                $reason = $this->humanLimitReason($type, $observed, $threshold);
-                $this->alertFromContext($user, $workspaceId, $context, $type, 'critical', $threshold, $observed, $reason, [
-                    'request_type' => $requestType,
-                    'model' => $model,
-                    'estimated_cost_usd' => $estimatedCost,
-                ]);
-
-                return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost, $reason, $budget);
-            }
-        }
+        $projectedDailyExternalCost = (float) ($dailyCounts['external_cost'] ?? 0)
+            + ($this->isExternalRequestType($requestType) ? $estimatedCost : 0.0);
 
         foreach ([
-            ['monthly_ai_actions', $projectedMonthlyActions, 'monthly_action_limit'],
-            ['monthly_tokens', $projectedMonthlyTokens, 'monthly_token_limit'],
-            ['monthly_cost_usd', $projectedMonthlyCost, 'monthly_cost_limit'],
-            ['daily_hard_tokens', $projectedDailyTokens, 'daily_token_hard_limit'],
-            ['daily_hard_cost_usd', $projectedDailyCost, 'daily_cost_hard_limit'],
+            ['daily_cost_limit', $projectedDailyCost, 'daily_cost_hard_limit'],
+            ['daily_external_cost_limit', $projectedDailyExternalCost, 'daily_external_cost_hard_limit'],
         ] as [$key, $observed, $type]) {
             $threshold = (float) ($budget[$key] ?? 0);
             if ($threshold > 0 && $observed > $threshold) {
@@ -117,19 +94,6 @@ class AiUsageService
                 ]);
 
                 return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost, $reason, $budget);
-            }
-        }
-
-        foreach ([
-            ['daily_soft_tokens', $projectedDailyTokens, 'daily_token_soft_warning'],
-            ['daily_soft_cost_usd', $projectedDailyCost, 'daily_cost_soft_warning'],
-        ] as [$key, $observed, $type]) {
-            $threshold = (float) ($budget[$key] ?? 0);
-            if ($threshold > 0 && $observed > $threshold) {
-                $this->alertFromContext($user, $workspaceId, $context, $type, 'warning', $threshold, $observed, $this->humanLimitReason($type, $observed, $threshold), [
-                    'model' => $model,
-                    'request_type' => $requestType,
-                ]);
             }
         }
 
@@ -319,10 +283,14 @@ class AiUsageService
      */
     public function budgetFor(User $user): array
     {
-        $tier = $user->isAdmin() ? 'admin' : $user->subscriptionTier();
-        $budgets = config('services.ai_usage.budgets', []);
+        $limits = $this->adminSettings->usageLimits();
+        $prefix = $this->usageLimitPrefix($user);
 
-        return (array) ($budgets[$tier] ?? $budgets['free'] ?? []);
+        return [
+            'tier' => $prefix,
+            'daily_cost_limit' => (float) ($limits[$prefix.'_cost_limit'] ?? $limits['base_cost_limit'] ?? 0.0),
+            'daily_external_cost_limit' => (float) ($limits[$prefix.'_external_cost_limit'] ?? $limits['base_external_cost_limit'] ?? 0.0),
+        ];
     }
 
     /**
@@ -347,7 +315,7 @@ class AiUsageService
     }
 
     /**
-     * @return array{text_requests:int,voice_turns:int,voice_seconds:float,external_tool_calls:int,web_search_calls:int}
+     * @return array{text_requests:int,voice_turns:int,voice_seconds:float,external_tool_calls:int,web_search_calls:int,external_cost:float}
      */
     public function dailyRequestCounts(int $userId): array
     {
@@ -355,14 +323,15 @@ class AiUsageService
             ->where('user_id', $userId)
             ->where('status', 'completed')
             ->where('created_at', '>=', now()->startOfDay())
-            ->get(['request_type', 'action_types', 'metadata']);
+            ->get(['request_type', 'action_types', 'metadata', 'estimated_cost_usd']);
 
         return [
             'text_requests' => $logs->where('request_type', 'text')->count(),
             'voice_turns' => $logs->whereIn('request_type', ['voice_turn', 'realtime_voice'])->count(),
             'voice_seconds' => (float) $logs->sum(fn (AiUsageLog $log): float => (float) data_get($log->metadata ?? [], 'voice_seconds', 0)),
-            'external_tool_calls' => $logs->filter(fn (AiUsageLog $log): bool => collect($log->action_types ?? [])->contains(fn (string $action): bool => in_array($action, ['external_lookup', 'open_meteo_weather', 'web_search'], true)))->count(),
+            'external_tool_calls' => $logs->filter(fn (AiUsageLog $log): bool => $this->isExternalUsageLog($log))->count(),
             'web_search_calls' => $logs->filter(fn (AiUsageLog $log): bool => collect($log->action_types ?? [])->contains('web_search'))->count(),
+            'external_cost' => (float) $logs->filter(fn (AiUsageLog $log): bool => $this->isExternalUsageLog($log))->sum('estimated_cost_usd'),
         ];
     }
 
@@ -503,28 +472,6 @@ class AiUsageService
         return 'text';
     }
 
-    private function requestLimitChecks(string $requestType, array $dailyCounts, array $budget, array $context = []): array
-    {
-        $checks = [];
-        if ($requestType === 'text') {
-            $checks[] = ['daily_text_requests', ($dailyCounts['text_requests'] ?? 0) + 1, 'daily_text_request_limit'];
-        }
-        if (in_array($requestType, ['voice_turn', 'realtime_voice'], true)) {
-            $voiceSeconds = (float) ($context['voice_seconds'] ?? 0);
-            $checks[] = ['daily_voice_turns', ($dailyCounts['voice_turns'] ?? 0) + 1, 'daily_voice_turn_limit'];
-            $checks[] = ['daily_voice_minutes', (($dailyCounts['voice_seconds'] ?? 0) + $voiceSeconds) / 60, 'daily_voice_minute_limit'];
-        }
-        if ($requestType === 'external_lookup') {
-            $checks[] = ['daily_external_tool_calls', ($dailyCounts['external_tool_calls'] ?? 0) + 1, 'daily_external_tool_limit'];
-        }
-        if ($requestType === 'web_search') {
-            $checks[] = ['daily_external_tool_calls', ($dailyCounts['external_tool_calls'] ?? 0) + 1, 'daily_external_tool_limit'];
-            $checks[] = ['daily_web_search_calls', ($dailyCounts['web_search_calls'] ?? 0) + 1, 'daily_web_search_limit'];
-        }
-
-        return $checks;
-    }
-
     private function alertFromContext(User $user, ?int $workspaceId, array $context, string $type, string $severity, float $threshold, float $observed, string $message, array $metadata = []): void
     {
         $session = $context['session'] ?? null;
@@ -575,19 +522,37 @@ class AiUsageService
     private function humanLimitReason(string $type, float $observed, float $threshold): string
     {
         return match ($type) {
-            'monthly_action_limit' => 'This account has reached its monthly Bean action limit.',
-            'monthly_token_limit' => 'This account has reached its monthly AI token budget.',
-            'monthly_cost_limit' => 'This account has reached its monthly AI usage budget.',
-            'daily_token_hard_limit' => 'This account has reached today\'s AI token limit.',
             'daily_cost_hard_limit' => 'This account has reached today\'s AI usage limit.',
-            'daily_token_soft_warning' => 'This account is approaching today\'s AI token limit.',
-            'daily_cost_soft_warning' => 'This account is approaching today\'s AI usage limit.',
-            'daily_text_request_limit' => 'This account has reached today\'s Bean text request limit.',
-            'daily_voice_turn_limit' => 'This account has reached today\'s Bean voice turn limit.',
-            'daily_voice_minute_limit' => 'This account has reached today\'s Bean voice minute limit.',
-            'daily_external_tool_limit' => 'This account has reached today\'s external lookup limit.',
-            'daily_web_search_limit' => 'This account has reached today\'s web search limit.',
+            'daily_external_cost_hard_limit' => 'This account has reached today\'s external lookup usage limit.',
             default => "AI usage limit reached ({$observed} / {$threshold}).",
         };
+    }
+
+    private function usageLimitPrefix(User $user): string
+    {
+        if ($user->isAdmin()) {
+            return 'pro';
+        }
+
+        return match ($user->subscriptionTier()) {
+            'pro' => 'pro',
+            'premium', 'mid' => 'premium',
+            default => 'base',
+        };
+    }
+
+    private function isExternalRequestType(string $requestType): bool
+    {
+        return in_array($requestType, ['external_lookup', 'web_search'], true);
+    }
+
+    private function isExternalUsageLog(AiUsageLog $log): bool
+    {
+        if ($this->isExternalRequestType((string) $log->request_type)) {
+            return true;
+        }
+
+        return collect($log->action_types ?? [])
+            ->contains(fn (string $action): bool => in_array($action, ['external_lookup', 'open_meteo_weather', 'web_search'], true));
     }
 }

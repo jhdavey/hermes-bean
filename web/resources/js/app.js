@@ -1219,7 +1219,7 @@ if (mount) {
 
     function adminSettingsMarkup(settings) {
         const models = settings.models || {};
-        const beta = settings.beta_limits || settings.betaLimits || {};
+        const usage = settings.usage_limits || settings.usageLimits || {};
         const killSwitches = settings.kill_switches || settings.killSwitches || {};
         const registry = state.adminModelRegistry || {};
         return `
@@ -1227,7 +1227,7 @@ if (mount) {
                 <div class="hb-section-action-row">
                     <div>
                         <strong>Runtime settings</strong>
-                        <small>Model routing and early access request limits</small>
+                        <small>Model routing and daily usage cost limits</small>
                     </div>
                     <button class="hb-button-secondary" type="submit" ${state.adminUsageLoading ? 'disabled' : ''}>Save settings</button>
                 </div>
@@ -1247,19 +1247,12 @@ if (mount) {
                     <span>Apply main model to existing workspace Bean profiles</span>
                 </label>
                 <div class="hb-admin-settings-grid hb-admin-limits-grid">
-                    <label><span>API/min</span><input class="hb-input" type="number" min="1" step="1" name="api_per_minute" value="${escapeAttr(settingValue(beta.api_per_minute || beta.apiPerMinute))}"></label>
-                    <label><span>Monthly hard cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="monthly_cost_usd" value="${escapeAttr(settingValue(beta.monthly_cost_usd || beta.monthlyCostUsd))}"></label>
-                    <label><span>Daily soft cost</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_soft_cost_usd" value="${escapeAttr(settingValue(beta.daily_soft_cost_usd || beta.dailySoftCostUsd))}"></label>
-                    <label><span>Daily burst cap</span><input class="hb-input" type="number" min="0.01" step="0.01" name="daily_hard_cost_usd" value="${escapeAttr(settingValue(beta.daily_hard_cost_usd || beta.dailyHardCostUsd))}"></label>
-                    <label><span>Daily text requests</span><input class="hb-input" type="number" min="1" step="1" name="daily_text_requests" value="${escapeAttr(settingValue(beta.daily_text_requests || beta.dailyTextRequests))}"></label>
-                    <label><span>Daily voice turns</span><input class="hb-input" type="number" min="1" step="1" name="daily_voice_turns" value="${escapeAttr(settingValue(beta.daily_voice_turns || beta.dailyVoiceTurns))}"></label>
-                    <label><span>Daily voice minutes</span><input class="hb-input" type="number" min="0.1" step="0.1" name="daily_voice_minutes" value="${escapeAttr(settingValue(beta.daily_voice_minutes || beta.dailyVoiceMinutes))}"></label>
-                    <label><span>Daily external lookups</span><input class="hb-input" type="number" min="0" step="1" name="daily_external_tool_calls" value="${escapeAttr(settingValue(beta.daily_external_tool_calls || beta.dailyExternalToolCalls))}"></label>
-                    <label><span>Daily web searches</span><input class="hb-input" type="number" min="0" step="1" name="daily_web_search_calls" value="${escapeAttr(settingValue(beta.daily_web_search_calls || beta.dailyWebSearchCalls))}"></label>
-                    <label><span>Monthly action safety cap</span><input class="hb-input" type="number" min="1" step="1" name="monthly_ai_actions" value="${escapeAttr(settingValue(beta.monthly_ai_actions || beta.monthlyAiActions))}"></label>
-                    <label><span>Monthly tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="monthly_tokens" value="${escapeAttr(settingValue(beta.monthly_tokens || beta.monthlyTokens))}"></label>
-                    <label><span>Daily soft tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="daily_soft_tokens" value="${escapeAttr(settingValue(beta.daily_soft_tokens || beta.dailySoftTokens))}"></label>
-                    <label><span>Daily hard tokens</span><input class="hb-input" type="number" min="1000" step="1000" name="daily_hard_tokens" value="${escapeAttr(settingValue(beta.daily_hard_tokens || beta.dailyHardTokens))}"></label>
+                    <label><span>Base daily AI cost</span><input class="hb-input" type="number" min="0" step="0.01" name="base_cost_limit" value="${escapeAttr(settingValue(usage.base_cost_limit || usage.baseCostLimit))}"></label>
+                    <label><span>Base daily external cost</span><input class="hb-input" type="number" min="0" step="0.01" name="base_external_cost_limit" value="${escapeAttr(settingValue(usage.base_external_cost_limit || usage.baseExternalCostLimit))}"></label>
+                    <label><span>Premium daily AI cost</span><input class="hb-input" type="number" min="0" step="0.01" name="premium_cost_limit" value="${escapeAttr(settingValue(usage.premium_cost_limit || usage.premiumCostLimit))}"></label>
+                    <label><span>Premium daily external cost</span><input class="hb-input" type="number" min="0" step="0.01" name="premium_external_cost_limit" value="${escapeAttr(settingValue(usage.premium_external_cost_limit || usage.premiumExternalCostLimit))}"></label>
+                    <label><span>Pro daily AI cost</span><input class="hb-input" type="number" min="0" step="0.01" name="pro_cost_limit" value="${escapeAttr(settingValue(usage.pro_cost_limit || usage.proCostLimit))}"></label>
+                    <label><span>Pro daily external cost</span><input class="hb-input" type="number" min="0" step="0.01" name="pro_external_cost_limit" value="${escapeAttr(settingValue(usage.pro_external_cost_limit || usage.proExternalCostLimit))}"></label>
                 </div>
             </form>`;
     }
@@ -3400,7 +3393,6 @@ if (mount) {
         event.preventDefault();
         const form = event.currentTarget;
         const value = (name) => String(new FormData(form).get(name) || '').trim();
-        const intValue = (name) => Number.parseInt(value(name), 10);
         const floatValue = (name) => Number.parseFloat(value(name));
         state.adminUsageLoading = true;
         state.error = '';
@@ -3421,20 +3413,13 @@ if (mount) {
                             bean_chat_enabled: Boolean(form.querySelector('input[name="bean_chat_enabled"]')?.checked),
                             bean_voice_enabled: Boolean(form.querySelector('input[name="bean_voice_enabled"]')?.checked),
                         },
-                        beta_limits: {
-                            api_per_minute: intValue('api_per_minute'),
-                            monthly_ai_actions: intValue('monthly_ai_actions'),
-                            monthly_tokens: intValue('monthly_tokens'),
-                            monthly_cost_usd: floatValue('monthly_cost_usd'),
-                            daily_text_requests: intValue('daily_text_requests'),
-                            daily_voice_turns: intValue('daily_voice_turns'),
-                            daily_voice_minutes: floatValue('daily_voice_minutes'),
-                            daily_external_tool_calls: intValue('daily_external_tool_calls'),
-                            daily_web_search_calls: intValue('daily_web_search_calls'),
-                            daily_soft_tokens: intValue('daily_soft_tokens'),
-                            daily_hard_tokens: intValue('daily_hard_tokens'),
-                            daily_soft_cost_usd: floatValue('daily_soft_cost_usd'),
-                            daily_hard_cost_usd: floatValue('daily_hard_cost_usd'),
+                        usage_limits: {
+                            base_cost_limit: floatValue('base_cost_limit'),
+                            base_external_cost_limit: floatValue('base_external_cost_limit'),
+                            premium_cost_limit: floatValue('premium_cost_limit'),
+                            premium_external_cost_limit: floatValue('premium_external_cost_limit'),
+                            pro_cost_limit: floatValue('pro_cost_limit'),
+                            pro_external_cost_limit: floatValue('pro_external_cost_limit'),
                         },
                         apply_main_model_to_profiles: Boolean(form.querySelector('input[name="apply_main_model_to_profiles"]')?.checked),
                     },

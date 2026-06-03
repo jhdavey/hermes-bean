@@ -868,9 +868,9 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonPath('data.assistant_message.content', 'The external lookup failed.');
     }
 
-    public function test_budget_hard_limits_block_tool_runtime_request(): void
+    public function test_daily_cost_limits_block_tool_runtime_request(): void
     {
-        config()->set('services.ai_usage.budgets.free.daily_hard_tokens', 1);
+        config()->set('services.ai_usage.limits.base_cost_limit', 0.000001);
 
         Http::fakeSequence()
             ->push([
@@ -892,7 +892,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => 'hello bean',
         ])->assertStatus(429)
             ->assertJsonPath('data.status', 'blocked')
-            ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI token limit.');
+            ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI usage limit.');
 
         Http::assertSentCount(0);
     }

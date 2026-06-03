@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\AiUsageLog;
+use App\Models\AdminSetting;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\AiUsageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -98,13 +100,13 @@ class AiUsageGuardrailTest extends TestCase
             ->assertJsonCount(30, 'data.user_growth');
     }
 
-    public function test_daily_hard_budget_blocks_tool_runtime_invocation(): void
+    public function test_daily_cost_limit_blocks_tool_runtime_invocation(): void
     {
         config()->set('services.hermes_runtime.default_provider', 'openai');
         config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
         config()->set('services.hermes_runtime.api_key', 'test-key');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
-        config()->set('services.ai_usage.budgets.free.daily_hard_tokens', 1);
+        config()->set('services.ai_usage.limits.base_cost_limit', 0.000001);
         Http::fakeSequence()->push([
             'id' => 'chatcmpl-budget',
             'model' => 'gpt-test-tools',
@@ -123,7 +125,7 @@ class AiUsageGuardrailTest extends TestCase
             'content' => 'Please plan my whole week.',
         ])->assertStatus(429)
             ->assertJsonPath('data.status', 'blocked')
-            ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI token limit.')
+            ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI usage limit.')
             ->assertJsonFragment(['event_type' => 'runtime.usage_blocked']);
 
         $this->assertDatabaseHas('ai_usage_logs', [
@@ -131,5 +133,64 @@ class AiUsageGuardrailTest extends TestCase
             'route_tier' => 'agent',
         ]);
         Http::assertSentCount(0);
+    }
+
+    public function test_admin_daily_usage_limits_are_enforced_by_tier(): void
+    {
+        AdminSetting::create([
+            'key' => 'usage.base_cost_limit',
+            'value' => ['value' => 0.01],
+            'type' => 'float',
+        ]);
+        AdminSetting::create([
+            'key' => 'usage.premium_cost_limit',
+            'value' => ['value' => 0.50],
+            'type' => 'float',
+        ]);
+        AdminSetting::create([
+            'key' => 'usage.pro_cost_limit',
+            'value' => ['value' => 1.50],
+            'type' => 'float',
+        ]);
+
+        $baseUser = User::factory()->create(['subscription_tier' => 'free']);
+        $premiumUser = User::factory()->create(['subscription_tier' => 'premium']);
+        $proUser = User::factory()->create(['subscription_tier' => 'pro']);
+        $usage = app(AiUsageService::class);
+
+        $basePreflight = $usage->preflightDirect($baseUser, null, 'gpt-test-tools', 0, 0, 0.02, 'text');
+        $premiumPreflight = $usage->preflightDirect($premiumUser, null, 'gpt-test-tools', 0, 0, 0.02, 'text');
+        $proPreflight = $usage->preflightDirect($proUser, null, 'gpt-test-tools', 0, 0, 0.75, 'text');
+
+        $this->assertFalse($basePreflight['allowed']);
+        $this->assertSame('This account has reached today\'s AI usage limit.', $basePreflight['reason']);
+        $this->assertTrue($premiumPreflight['allowed']);
+        $this->assertSame('premium', $premiumPreflight['budget']['tier']);
+        $this->assertTrue($proPreflight['allowed']);
+        $this->assertSame('pro', $proPreflight['budget']['tier']);
+    }
+
+    public function test_external_daily_cost_limit_blocks_external_lookup_without_blocking_regular_chat(): void
+    {
+        AdminSetting::create([
+            'key' => 'usage.base_cost_limit',
+            'value' => ['value' => 100.00],
+            'type' => 'float',
+        ]);
+        AdminSetting::create([
+            'key' => 'usage.base_external_cost_limit',
+            'value' => ['value' => 0.01],
+            'type' => 'float',
+        ]);
+
+        $user = User::factory()->create(['subscription_tier' => 'free']);
+        $usage = app(AiUsageService::class);
+
+        $chatPreflight = $usage->preflightDirect($user, null, 'gpt-test-tools', 0, 0, 0.02, 'text');
+        $externalPreflight = $usage->preflightDirect($user, null, 'gpt-test-tools', 0, 0, 0.02, 'external_lookup');
+
+        $this->assertTrue($chatPreflight['allowed']);
+        $this->assertFalse($externalPreflight['allowed']);
+        $this->assertSame('This account has reached today\'s external lookup usage limit.', $externalPreflight['reason']);
     }
 }

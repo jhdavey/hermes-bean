@@ -21,31 +21,17 @@ class AdminSettingsService
 
     public const BEAN_VOICE_ENABLED = 'kill_switches.bean_voice_enabled';
 
-    public const BETA_API_PER_MINUTE = 'beta.api_per_minute';
+    public const BASE_COST_LIMIT = 'usage.base_cost_limit';
 
-    public const BETA_MONTHLY_AI_ACTIONS = 'beta.monthly_ai_actions';
+    public const BASE_EXTERNAL_COST_LIMIT = 'usage.base_external_cost_limit';
 
-    public const BETA_MONTHLY_TOKENS = 'beta.monthly_tokens';
+    public const PREMIUM_COST_LIMIT = 'usage.premium_cost_limit';
 
-    public const BETA_MONTHLY_COST_USD = 'beta.monthly_cost_usd';
+    public const PREMIUM_EXTERNAL_COST_LIMIT = 'usage.premium_external_cost_limit';
 
-    public const BETA_DAILY_TEXT_REQUESTS = 'beta.daily_text_requests';
+    public const PRO_COST_LIMIT = 'usage.pro_cost_limit';
 
-    public const BETA_DAILY_VOICE_TURNS = 'beta.daily_voice_turns';
-
-    public const BETA_DAILY_VOICE_MINUTES = 'beta.daily_voice_minutes';
-
-    public const BETA_DAILY_EXTERNAL_TOOL_CALLS = 'beta.daily_external_tool_calls';
-
-    public const BETA_DAILY_WEB_SEARCH_CALLS = 'beta.daily_web_search_calls';
-
-    public const BETA_DAILY_SOFT_TOKENS = 'beta.daily_soft_tokens';
-
-    public const BETA_DAILY_HARD_TOKENS = 'beta.daily_hard_tokens';
-
-    public const BETA_DAILY_SOFT_COST_USD = 'beta.daily_soft_cost_usd';
-
-    public const BETA_DAILY_HARD_COST_USD = 'beta.daily_hard_cost_usd';
+    public const PRO_EXTERNAL_COST_LIMIT = 'usage.pro_external_cost_limit';
 
     private ?Collection $settings = null;
 
@@ -62,13 +48,13 @@ class AdminSettingsService
                 'bean_chat_enabled' => $this->settingPayload(self::BEAN_CHAT_ENABLED, true),
                 'bean_voice_enabled' => $this->settingPayload(self::BEAN_VOICE_ENABLED, true),
             ],
-            'beta_limits' => collect($this->betaLimitDefaults())
-                ->mapWithKeys(fn (mixed $default, string $key): array => [$key => $this->settingPayload('beta.'.$key, $default)])
+            'usage_limits' => collect($this->usageLimitDefaults())
+                ->mapWithKeys(fn (mixed $default, string $key): array => [$key => $this->settingPayload('usage.'.$key, $default)])
                 ->all(),
         ];
     }
 
-    public function update(array $modelSettings, array $betaLimits, ?User $actor = null, bool $applyMainModelToProfiles = false, array $killSwitches = []): array
+    public function update(array $modelSettings, array $usageLimits, ?User $actor = null, bool $applyMainModelToProfiles = false, array $killSwitches = []): array
     {
         foreach ([
             self::MAIN_MODEL => $modelSettings['main_model'] ?? null,
@@ -79,9 +65,9 @@ class AdminSettingsService
             $this->set($key, trim((string) $value), 'string', $actor);
         }
 
-        foreach ($this->betaLimitDefaults() as $name => $default) {
-            if (array_key_exists($name, $betaLimits)) {
-                $this->set('beta.'.$name, is_float($default) ? (float) $betaLimits[$name] : (int) $betaLimits[$name], is_float($default) ? 'float' : 'integer', $actor);
+        foreach ($this->usageLimitDefaults() as $name => $default) {
+            if (array_key_exists($name, $usageLimits)) {
+                $this->set('usage.'.$name, (float) $usageLimits[$name], 'float', $actor);
             }
         }
 
@@ -139,20 +125,13 @@ class AdminSettingsService
         return $this->boolValue(self::BEAN_VOICE_ENABLED, true);
     }
 
-    public function betaBudget(): array
+    public function usageLimits(): array
     {
-        return collect($this->betaLimitDefaults())
+        return collect($this->usageLimitDefaults())
             ->mapWithKeys(fn (mixed $default, string $key): array => [
-                $key => is_float($default)
-                    ? $this->floatValue('beta.'.$key, $default)
-                    : $this->intValue('beta.'.$key, (int) $default),
+                $key => $this->floatValue('usage.'.$key, (float) $default),
             ])
             ->all();
-    }
-
-    public function betaApiPerMinute(): int
-    {
-        return $this->intValue(self::BETA_API_PER_MINUTE, (int) config('security.rate_limits.api_per_minute', 60));
     }
 
     private function settingPayload(string $key, mixed $default): array
@@ -184,13 +163,6 @@ class AdminSettingsService
         $value = trim($value);
 
         return $value !== '' ? $value : null;
-    }
-
-    private function intValue(string $key, int $default): int
-    {
-        $value = $this->storedValue($key);
-
-        return is_numeric($value) ? (int) $value : $default;
     }
 
     private function floatValue(string $key, float $default): float
@@ -256,24 +228,17 @@ class AdminSettingsService
         return (string) config('services.hermes_runtime.external_lookup_model', 'gpt-5-mini');
     }
 
-    private function betaLimitDefaults(): array
+    private function usageLimitDefaults(): array
     {
-        $free = (array) config('services.ai_usage.budgets.free', []);
+        $limits = (array) config('services.ai_usage.limits', []);
 
         return [
-            'api_per_minute' => (int) config('security.rate_limits.api_per_minute', 60),
-            'monthly_ai_actions' => (int) ($free['monthly_ai_actions'] ?? 2_000),
-            'monthly_tokens' => (int) ($free['monthly_tokens'] ?? 1_000_000),
-            'monthly_cost_usd' => (float) ($free['monthly_cost_usd'] ?? 4.00),
-            'daily_text_requests' => (int) ($free['daily_text_requests'] ?? 50),
-            'daily_voice_turns' => (int) ($free['daily_voice_turns'] ?? 20),
-            'daily_voice_minutes' => (float) ($free['daily_voice_minutes'] ?? 10.00),
-            'daily_external_tool_calls' => (int) ($free['daily_external_tool_calls'] ?? 10),
-            'daily_web_search_calls' => (int) ($free['daily_web_search_calls'] ?? 3),
-            'daily_soft_tokens' => (int) ($free['daily_soft_tokens'] ?? 60_000),
-            'daily_hard_tokens' => (int) ($free['daily_hard_tokens'] ?? 180_000),
-            'daily_soft_cost_usd' => (float) ($free['daily_soft_cost_usd'] ?? 0.50),
-            'daily_hard_cost_usd' => (float) ($free['daily_hard_cost_usd'] ?? 1.00),
+            'base_cost_limit' => (float) ($limits['base_cost_limit'] ?? 1.00),
+            'base_external_cost_limit' => (float) ($limits['base_external_cost_limit'] ?? 0.25),
+            'premium_cost_limit' => (float) ($limits['premium_cost_limit'] ?? 5.00),
+            'premium_external_cost_limit' => (float) ($limits['premium_external_cost_limit'] ?? 1.00),
+            'pro_cost_limit' => (float) ($limits['pro_cost_limit'] ?? 20.00),
+            'pro_external_cost_limit' => (float) ($limits['pro_external_cost_limit'] ?? 5.00),
         ];
     }
 }
