@@ -31,7 +31,7 @@
                 <a class="button" href="#plans">Compare plans</a>
                 <a class="button secondary" href="/register?plan=premium">Start Premium trial</a>
             </div>
-            <div class="trial-note"><span>✓</span><div>No charge for 7 days on Premium or Pro. Billing starts on day 8 until canceled once checkout is enabled.</div></div>
+            <div class="trial-note"><span>✓</span><div>During beta, all users get unlimited use for free. The 7-day trial and day-8 billing will apply after beta once paid billing opens.</div></div>
         </section>
         <section class="visual" aria-label="HeyBean app preview">
             <div class="halo"></div>
@@ -45,6 +45,7 @@
             <h2>Simple tiers that scale with usage.</h2>
             <p>Bean usage limits are enforced by plan. Higher tiers include more AI capacity and more connected context.</p>
         </div>
+        <div class="trial-note"><span>✓</span><div><strong>Beta note:</strong> while HeyBean is in beta, every user gets unlimited Bean use for free. These tiers show the planned post-beta structure.</div></div>
 
         <div class="plans">
             <article class="plan">
@@ -110,7 +111,7 @@
             </div>
             <div class="info">
                 <b>Billing note</b>
-                <p>Pricing intent is captured during early access. Stripe checkout and subscription enforcement can be wired next using the same Free, Premium, and Pro plan keys.</p>
+                <p>During beta, all users get unlimited use for free. Pricing intent is captured during early access so Stripe checkout and subscription enforcement can be wired next using the same Free, Premium, and Pro plan keys.</p>
             </div>
         </div>
     </section>

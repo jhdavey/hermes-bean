@@ -144,7 +144,9 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Start Premium trial', false)
             ->assertSee('href="/register?plan=premium"', false)
             ->assertSee('href="/register?plan=pro"', false)
-            ->assertSee('Billing starts on day 8 until canceled', false);
+            ->assertSee('During beta, all users get unlimited use for free', false)
+            ->assertSee('These tiers show the planned post-beta structure', false)
+            ->assertSee('day-8 billing will apply after beta', false);
     }
 
     public function test_register_route_preserves_selected_plan_for_spa(): void
