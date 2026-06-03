@@ -37,17 +37,17 @@ if (mount) {
     const subscriptionPlans = {
         free: {
             label: 'Free',
-            summary: '2 workspaces, basic Bean chat and voice, push reminders, and a low daily Bean limit.',
+            summary: '2 workspaces, Bean chat and voice, connected calendar planning, push reminders, and recent context.',
             trial: 'Free plan selected',
         },
         premium: {
             label: 'Premium',
-            summary: '5 workspaces, higher Bean usage, email reminders, recurring items, multiple calendars, and 1 year of history.',
+            summary: '5 workspaces, expanded Bean capacity, email reminders, recurring routines, multiple calendars, and 1 year of history.',
             trial: 'Premium 7-day free trial selected',
         },
         pro: {
             label: 'Pro',
-            summary: 'Unlimited workspaces, highest Bean usage, higher external tool budget, full history, and priority background work.',
+            summary: 'Unlimited workspaces, maximum Bean capacity, unlimited connected accounts, full history, and priority background work.',
             trial: 'Pro 7-day free trial selected',
         },
     };
