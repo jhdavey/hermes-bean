@@ -1255,7 +1255,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           onRunQueued: (runId) {
             if (!mounted) return;
             setState(() {
-              _chatRunState = 'working in background';
+              _chatRunState = 'working...';
             });
             unawaited(_pollQueuedRun(runId, _chatRunToken));
             unawaited(_pollDashboardChanges());
@@ -1864,10 +1864,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         microphoneEnabled: true,
       );
       if (!mounted || !_beanVoiceListening) return;
-      _realtimeConversation.setMicrophoneEnabled(true);
+      _realtimeConversation.beginVoiceCapture();
       setState(() {
         _session = realtimeSession;
-        _chatRunState = 'Bean voice ready';
+        _chatRunState = 'listening';
       });
     } catch (error) {
       if (!mounted) return;
@@ -1930,7 +1930,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _finishBeanVoiceDraft() async {
     if (!_beanVoiceListening) return;
-    setState(() => _chatRunState = 'Bean voice ready');
+    _realtimeConversation.endVoiceCapture();
+    setState(() {
+      _beanVoiceListening = false;
+      _beanVoiceDraft = null;
+      _chatRunState = 'thinking';
+    });
   }
 
   Future<void> _sendChat(String content) async {
@@ -1965,7 +1970,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (result.status == 'queued') {
         setState(() {
           _session = result.session;
-          _chatRunState = 'Bean is working in the background...';
+          _chatRunState = 'working...';
           _events = _mergeEvents(result.events, _events);
           _messages.add(
             HermesMessage(
@@ -16408,6 +16413,8 @@ class _BeanFab extends StatefulWidget {
 class _BeanFabState extends State<_BeanFab>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseController;
+  bool _pressRecording = false;
+  bool _suppressNextTap = false;
 
   @override
   void initState() {
@@ -16445,8 +16452,33 @@ class _BeanFabState extends State<_BeanFab>
   @override
   Widget build(BuildContext context) => GestureDetector(
     key: const Key('nav-bean'),
-    onLongPressStart: (_) => widget.onLongPressStart(),
-    onLongPressEnd: (_) => widget.onLongPressEnd(),
+    onTapDown: (_) {
+      if (!widget.selected) return;
+      _pressRecording = true;
+      _suppressNextTap = true;
+      widget.onLongPressStart();
+    },
+    onTapUp: (_) {
+      if (!_pressRecording) return;
+      _pressRecording = false;
+      widget.onLongPressEnd();
+    },
+    onTapCancel: () {
+      if (!_pressRecording) return;
+      _pressRecording = false;
+      widget.onLongPressEnd();
+    },
+    onLongPressStart: (_) {
+      if (widget.selected || _pressRecording) return;
+      _pressRecording = true;
+      _suppressNextTap = true;
+      widget.onLongPressStart();
+    },
+    onLongPressEnd: (_) {
+      if (!_pressRecording) return;
+      _pressRecording = false;
+      widget.onLongPressEnd();
+    },
     child: SizedBox(
       width: 98,
       height: 98,
@@ -16487,7 +16519,13 @@ class _BeanFabState extends State<_BeanFab>
             color: Colors.transparent,
             child: InkWell(
               customBorder: const CircleBorder(),
-              onTap: widget.onPressed,
+              onTap: () {
+                if (_suppressNextTap) {
+                  _suppressNextTap = false;
+                  return;
+                }
+                widget.onPressed();
+              },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 key: const Key('heybean-center-bean-button'),

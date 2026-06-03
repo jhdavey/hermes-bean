@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
@@ -8,6 +9,27 @@ import 'hermes_api_client.dart';
 typedef RealtimeTranscriptCallback = void Function(String role, String text);
 typedef RealtimeStatusCallback = void Function(String status);
 typedef RealtimeRunQueuedCallback = void Function(int runId);
+
+class _RealtimeFunctionCall {
+  const _RealtimeFunctionCall({
+    required this.name,
+    required this.callKey,
+    this.callId,
+    this.arguments,
+  });
+
+  final String name;
+  final String callKey;
+  final String? callId;
+  final Object? arguments;
+}
+
+class _FinalVoice {
+  const _FinalVoice({required this.text, this.suppressFinal = false});
+
+  final String text;
+  final bool suppressFinal;
+}
 
 class BeanRealtimeConversation {
   BeanRealtimeConversation({
@@ -29,17 +51,29 @@ class BeanRealtimeConversation {
   HermesRealtimeSession? _session;
   Timer? _responseDebounce;
   Timer? _toolFallbackTimer;
+  Timer? _releaseTranscriptGraceTimer;
+  final _backgroundProgressTimers = <Timer>{};
   final _transcriptDrafts = <String, String>{};
   final _processedCalls = <String>{};
+  final _pendingFunctionCalls = <_RealtimeFunctionCall>[];
+  final _spokenSegments = <String>[];
   String _toolFallbackContent = '';
+  String? _currentUserContent;
   String? _pendingUserContent;
   String? _pendingUserItemId;
   String _assistantDraft = '';
   String? _assistantItemId;
+  String _lastAssistantText = '';
+  String _backgroundUserContent = '';
+  String _backgroundQuickReplyText = '';
   bool _active = false;
   bool _conversationActive = false;
+  bool _voiceCaptureActive = false;
+  bool _voiceReleasePending = false;
+  bool _backgroundWorkActive = false;
   bool _suppressNextAssistantPersist = false;
   bool _voiceOnlyAssistant = false;
+  bool _ignoreNextFunctionCalls = false;
 
   bool get active => _active;
   bool get conversationActive => _conversationActive;
@@ -200,6 +234,43 @@ class BeanRealtimeConversation {
     _sendResponseCreate(audioResponse: audioResponse, textResponse: true);
   }
 
+  void beginVoiceCapture() {
+    _conversationActive = true;
+    _voiceCaptureActive = true;
+    _voiceReleasePending = false;
+    _releaseTranscriptGraceTimer?.cancel();
+    setMicrophoneEnabled(true);
+    onStatus?.call('listening');
+  }
+
+  void endVoiceCapture() {
+    if (!_voiceCaptureActive && !_voiceReleasePending) return;
+    _voiceCaptureActive = false;
+    _voiceReleasePending = true;
+    setMicrophoneEnabled(false);
+    final content = _pendingUserContent?.trim() ?? '';
+    if (content.isNotEmpty) {
+      _scheduleResponseCreate(delay: const Duration(milliseconds: 180));
+      return;
+    }
+    onStatus?.call('thinking');
+    _releaseTranscriptGraceTimer?.cancel();
+    _releaseTranscriptGraceTimer = Timer(
+      const Duration(milliseconds: 1400),
+      () {
+        _releaseTranscriptGraceTimer = null;
+        if (!_voiceReleasePending) return;
+        final lateContent = _pendingUserContent?.trim() ?? '';
+        if (lateContent.isNotEmpty) {
+          _scheduleResponseCreate(delay: const Duration(milliseconds: 120));
+          return;
+        }
+        _voiceReleasePending = false;
+        onStatus?.call(_conversationActive ? 'listening' : 'Bean voice ready');
+      },
+    );
+  }
+
   void setMicrophoneEnabled(bool enabled) {
     for (final track
         in _localStream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
@@ -210,6 +281,8 @@ class BeanRealtimeConversation {
   Future<void> interrupt({bool endConversation = true}) async {
     _responseDebounce?.cancel();
     _toolFallbackTimer?.cancel();
+    _releaseTranscriptGraceTimer?.cancel();
+    _clearBackgroundProgressUpdates();
     _dataChannel?.send(
       RTCDataChannelMessage(jsonEncode({'type': 'response.cancel'})),
     );
@@ -218,9 +291,15 @@ class BeanRealtimeConversation {
     );
     _pendingUserContent = null;
     _pendingUserItemId = null;
+    _currentUserContent = null;
     _assistantDraft = '';
     _assistantItemId = null;
     _toolFallbackContent = '';
+    _pendingFunctionCalls.clear();
+    _backgroundWorkActive = false;
+    _voiceCaptureActive = false;
+    _voiceReleasePending = false;
+    _ignoreNextFunctionCalls = false;
     if (endConversation) _conversationActive = false;
     onStatus?.call(endConversation ? 'Bean voice ready' : 'Interrupted');
   }
@@ -263,6 +342,8 @@ class BeanRealtimeConversation {
     _conversationActive = false;
     _responseDebounce?.cancel();
     _toolFallbackTimer?.cancel();
+    _releaseTranscriptGraceTimer?.cancel();
+    _clearBackgroundProgressUpdates();
     _dataChannel?.close();
     await _peerConnection?.close();
     _localStream?.getTracks().forEach((track) => track.stop());
@@ -274,11 +355,19 @@ class BeanRealtimeConversation {
     _processedCalls.clear();
     _pendingUserContent = null;
     _pendingUserItemId = null;
+    _currentUserContent = null;
     _assistantDraft = '';
     _assistantItemId = null;
     _toolFallbackContent = '';
+    _pendingFunctionCalls.clear();
+    _spokenSegments.clear();
+    _lastAssistantText = '';
+    _backgroundWorkActive = false;
+    _voiceCaptureActive = false;
+    _voiceReleasePending = false;
     _suppressNextAssistantPersist = false;
     _voiceOnlyAssistant = false;
+    _ignoreNextFunctionCalls = false;
     onStatus?.call('Ready');
   }
 
@@ -333,12 +422,10 @@ class BeanRealtimeConversation {
         _finishAssistantTranscript(decoded);
         return;
       case 'response.function_call_arguments.done':
-        unawaited(
-          _processFunctionCall(
-            decoded['name']?.toString(),
-            decoded['call_id']?.toString(),
-            decoded['arguments'],
-          ),
+        _queueFunctionCall(
+          decoded['name']?.toString(),
+          decoded['call_id']?.toString(),
+          decoded['arguments'],
         );
         return;
       case 'response.done':
@@ -376,6 +463,7 @@ class BeanRealtimeConversation {
       return;
     }
     if (isWakeTurn) _conversationActive = true;
+    if (_voiceCaptureActive || _voiceReleasePending) _conversationActive = true;
 
     final content = (isWakeTurn ? command : raw).trim();
     if (content.isEmpty) {
@@ -397,8 +485,17 @@ class BeanRealtimeConversation {
           payload['item_id']?.toString() ??
           'audio-${DateTime.now().microsecondsSinceEpoch}';
     }
+    _currentUserContent = _pendingUserContent;
     onTranscript?.call('user', _pendingUserContent!);
-    _scheduleResponseCreate();
+    if (_voiceCaptureActive) {
+      onStatus?.call('listening');
+      return;
+    }
+    _scheduleResponseCreate(
+      delay: _voiceReleasePending
+          ? const Duration(milliseconds: 180)
+          : const Duration(milliseconds: 1200),
+    );
   }
 
   void _handleTranscriptDelta(Map<String, Object?> payload) {
@@ -425,13 +522,16 @@ class BeanRealtimeConversation {
     onStatus?.call('Heard: "$preview"');
   }
 
-  void _scheduleResponseCreate() {
+  void _scheduleResponseCreate({
+    Duration delay = const Duration(milliseconds: 1200),
+  }) {
     _responseDebounce?.cancel();
     _clearToolFallback();
     onStatus?.call('listening');
-    _responseDebounce = Timer(const Duration(milliseconds: 1200), () {
+    _responseDebounce = Timer(delay, () {
       final content = _pendingUserContent?.trim() ?? '';
       if (!_active || !_conversationActive || content.isEmpty) return;
+      _voiceReleasePending = false;
       _armToolFallback(content);
       onStatus?.call('thinking');
       _sendResponseCreate(audioResponse: true, textResponse: true);
@@ -463,6 +563,8 @@ class BeanRealtimeConversation {
     _assistantItemId =
         payload['response_id']?.toString() ?? payload['item_id']?.toString();
     _assistantDraft = text;
+    _lastAssistantText = text;
+    _recordSpokenSegment(text);
     if (!_voiceOnlyAssistant) {
       onTranscript?.call('assistant', text);
     }
@@ -470,45 +572,272 @@ class BeanRealtimeConversation {
 
   void _processResponseDone(Map<String, Object?> payload) {
     final output = _responseOutput(payload);
-    var hasFunctionCall = false;
-    for (final item in output) {
-      if (item['type']?.toString() == 'function_call') {
-        hasFunctionCall = true;
+    final responseAssistantText =
+        (_assistantDraft.trim().isNotEmpty
+                ? _assistantDraft
+                : _realtimeTextFromResponseOutput(output))
+            .trim();
+    final functionCalls = _mergeFunctionCalls([
+      ..._pendingFunctionCalls,
+      ...output
+          .where((item) => item['type']?.toString() == 'function_call')
+          .map(
+            (item) => _RealtimeFunctionCall(
+              name: item['name']?.toString() ?? '',
+              callId: item['call_id']?.toString(),
+              callKey:
+                  item['call_id']?.toString() ??
+                  '${item['name']}-${item['arguments']}',
+              arguments: item['arguments'],
+            ),
+          ),
+    ]);
+    _pendingFunctionCalls.clear();
+
+    final hasFunctionCall = functionCalls.isNotEmpty;
+    final assistantAnswered = responseAssistantText.isNotEmpty;
+    final pendingUserContent =
+        (_pendingUserContent ?? _currentUserContent ?? '').trim();
+    final queueOnly =
+        hasFunctionCall &&
+        functionCalls.every((call) => call.name == 'queue_bean_work');
+    final backgroundQueueAllowed = _realtimeSpokenAnswerAllowsBackgroundQueue(
+      pendingUserContent,
+      responseAssistantText,
+    );
+
+    unawaited(
+      _logClientEvent('flutter_realtime_response_done', {
+        'user_content': pendingUserContent,
+        'assistant_text': responseAssistantText,
+        'assistant_answered': assistantAnswered,
+        'background_queue_allowed': backgroundQueueAllowed,
+        'function_calls': functionCalls
+            .map(
+              (call) => {
+                'name': call.name,
+                'call_id': call.callId,
+                'arguments': call.arguments?.toString(),
+              },
+            )
+            .toList(),
+      }),
+    );
+
+    if (_ignoreNextFunctionCalls) {
+      _ignoreNextFunctionCalls = false;
+      if (hasFunctionCall) {
+        for (final call in functionCalls) {
+          _sendFunctionOutput(call.callId, {
+            'ok': true,
+            'skipped': true,
+            'message': 'This speech-only update should not call tools.',
+          }, createResponse: false);
+        }
+      }
+      unawaited(_persistRealtimeTurn());
+      _finishRealtimeTurnStatus();
+      return;
+    }
+
+    if (hasFunctionCall && pendingUserContent.isEmpty) {
+      _clearToolFallback();
+      for (final call in functionCalls) {
+        _sendFunctionOutput(call.callId, {
+          'ok': true,
+          'skipped': true,
+          'message': 'No active user turn is available for this tool call.',
+        }, createResponse: false);
+      }
+      _assistantDraft = '';
+      _assistantItemId = null;
+      _suppressNextAssistantPersist = false;
+      _voiceOnlyAssistant = false;
+      _finishRealtimeTurnStatus();
+      return;
+    }
+
+    if (assistantAnswered && queueOnly && !backgroundQueueAllowed) {
+      _clearToolFallback();
+      for (final call in functionCalls) {
+        _sendFunctionOutput(call.callId, {
+          'ok': true,
+          'skipped': true,
+          'message': 'Bean already answered this turn directly.',
+        }, createResponse: false);
+      }
+      unawaited(_persistRealtimeTurn());
+      _finishRealtimeTurnStatus();
+      return;
+    }
+
+    if (hasFunctionCall) {
+      final preservePendingUserForDeferredQueue =
+          queueOnly && responseAssistantText.isEmpty;
+      for (final call in functionCalls) {
         unawaited(
           _processFunctionCall(
-            item['name']?.toString(),
-            item['call_id']?.toString(),
-            item['arguments'],
+            call.name,
+            call.callId,
+            call.arguments,
+            assistantText: responseAssistantText,
+            userContent: pendingUserContent,
           ),
         );
       }
+      if (!preservePendingUserForDeferredQueue) {
+        _pendingUserContent = null;
+        _pendingUserItemId = null;
+        _currentUserContent = null;
+      }
+      return;
     }
-    if (!hasFunctionCall && _toolFallbackContent.isEmpty) {
+
+    if (!hasFunctionCall && assistantAnswered) {
+      _clearToolFallback();
+      if (backgroundQueueAllowed &&
+          _voiceCommandRequiresBackgroundWork(pendingUserContent)) {
+        unawaited(_persistRealtimeTurn());
+        unawaited(
+          _queueFallbackWork(pendingUserContent, responseAssistantText),
+        );
+        return;
+      }
+      unawaited(_persistRealtimeTurn());
+    } else if (!assistantAnswered &&
+        _toolFallbackContent.isEmpty &&
+        _voiceCommandNeedsAgentWork(pendingUserContent)) {
+      _pendingUserContent = null;
+      _pendingUserItemId = null;
+      _currentUserContent = null;
+      unawaited(_queueFallbackWork(pendingUserContent));
+      return;
+    } else if (_toolFallbackContent.isEmpty) {
       unawaited(_persistRealtimeTurn());
     } else {
       _pendingUserContent = null;
       _pendingUserItemId = null;
+      _currentUserContent = null;
     }
-    if (_conversationActive) {
-      onStatus?.call('listening');
-    } else {
-      onStatus?.call('Bean voice ready');
+
+    _finishRealtimeTurnStatus();
+  }
+
+  void _queueFunctionCall(String? name, String? callId, Object? arguments) {
+    final normalizedName = name?.trim() ?? '';
+    if (normalizedName.isEmpty) return;
+    final callKey = callId ?? '$normalizedName-$arguments';
+    final existingIndex = _pendingFunctionCalls.indexWhere(
+      (call) => call.callKey == callKey,
+    );
+    final call = _RealtimeFunctionCall(
+      name: normalizedName,
+      callId: callId,
+      callKey: callKey,
+      arguments: arguments,
+    );
+    if (existingIndex >= 0) {
+      _pendingFunctionCalls[existingIndex] = call;
+      return;
     }
+    _pendingFunctionCalls.add(call);
+  }
+
+  List<_RealtimeFunctionCall> _mergeFunctionCalls(
+    List<_RealtimeFunctionCall> calls,
+  ) {
+    final byKey = <String, _RealtimeFunctionCall>{};
+    for (final call in calls) {
+      if (call.name.isEmpty) continue;
+      byKey[call.callKey] = call;
+    }
+    return byKey.values.toList();
   }
 
   Future<void> _processFunctionCall(
     String? name,
     String? callId,
-    Object? rawArguments,
-  ) async {
+    Object? rawArguments, {
+    String assistantText = '',
+    String userContent = '',
+    bool deferForTranscript = true,
+  }) async {
     _clearToolFallback();
     final callKey = callId ?? '$name-$rawArguments';
     if (name == null || name.isEmpty || _processedCalls.contains(callKey)) {
       return;
     }
+    final quickReplyText =
+        (assistantText.isNotEmpty
+                ? assistantText
+                : (_assistantDraft.trim().isNotEmpty
+                      ? _assistantDraft
+                      : _lastAssistantText))
+            .trim();
+    final activeUserContent =
+        (userContent.isNotEmpty
+                ? userContent
+                : (_pendingUserContent ?? _currentUserContent ?? ''))
+            .trim();
+
+    if (name == 'queue_bean_work' && activeUserContent.isEmpty) {
+      _processedCalls.add(callKey);
+      _sendFunctionOutput(callId, {
+        'ok': true,
+        'skipped': true,
+        'message': 'No active user turn is available for this background work.',
+      }, createResponse: false);
+      _finishRealtimeTurnStatus();
+      return;
+    }
+
+    if (name == 'queue_bean_work' &&
+        quickReplyText.isEmpty &&
+        deferForTranscript) {
+      Timer(const Duration(milliseconds: 650), () {
+        unawaited(
+          _processFunctionCall(
+            name,
+            callId,
+            rawArguments,
+            assistantText: _assistantDraft.trim().isNotEmpty
+                ? _assistantDraft
+                : _lastAssistantText,
+            userContent: activeUserContent,
+            deferForTranscript: false,
+          ),
+        );
+      });
+      return;
+    }
+
     _processedCalls.add(callKey);
     final args = _decodeArguments(rawArguments);
-    onStatus?.call('working in background');
+
+    if (name == 'queue_bean_work' &&
+        quickReplyText.isNotEmpty &&
+        !_realtimeSpokenAnswerAllowsBackgroundQueue(
+          activeUserContent,
+          quickReplyText,
+        )) {
+      _sendFunctionOutput(callId, {
+        'ok': true,
+        'skipped': true,
+        'message': 'Bean already answered this turn directly.',
+      }, createResponse: false);
+      unawaited(_persistRealtimeTurn());
+      _finishRealtimeTurnStatus();
+      return;
+    }
+
+    if (name == 'queue_bean_work') {
+      _setBackgroundWorkActive(
+        true,
+        userContent: activeUserContent,
+        quickReplyText: quickReplyText,
+      );
+    }
+    _showWorkingStatusWhenReady();
     try {
       final result = await apiClient.submitRealtimeToolCall(
         sessionId: _session!.session.id,
@@ -523,13 +852,31 @@ class BeanRealtimeConversation {
           },
         },
       );
-      _sendFunctionOutput(callId, result);
+      _sendFunctionOutput(
+        callId,
+        result,
+        createResponse: name != 'queue_bean_work' || result['run_id'] == null,
+      );
       final runId = result['run_id'];
       if (runId is int) {
+        _pendingUserContent = null;
+        _pendingUserItemId = null;
+        _currentUserContent = null;
         onRunQueued?.call(runId);
-        unawaited(_watchRun(runId));
+        unawaited(
+          _watchRun(
+            runId,
+            userContent: activeUserContent,
+            quickReplyText: quickReplyText,
+          ),
+        );
+      } else if (name == 'queue_bean_work') {
+        _setBackgroundWorkActive(false);
       }
     } catch (error) {
+      if (name == 'queue_bean_work') {
+        _setBackgroundWorkActive(false);
+      }
       _sendFunctionOutput(callId, {
         'ok': false,
         'message': 'Bean could not start that background work.',
@@ -546,7 +893,7 @@ class BeanRealtimeConversation {
 
   void _armToolFallback(String content) {
     _clearToolFallback();
-    if (!_voiceCommandNeedsAgentWork(content)) return;
+    if (!_voiceCommandRequiresBackgroundWork(content)) return;
     _toolFallbackContent = content;
     _toolFallbackTimer = Timer(const Duration(milliseconds: 2600), () {
       final pending = _toolFallbackContent;
@@ -562,10 +909,25 @@ class BeanRealtimeConversation {
     _toolFallbackContent = '';
   }
 
-  Future<void> _queueFallbackWork(String content) async {
+  Future<void> _queueFallbackWork(
+    String content, [
+    String quickReplyText = '',
+  ]) async {
     final sessionId = _session?.session.id;
     if (sessionId == null) return;
-    onStatus?.call('working in background');
+    final cleanQuickReply = quickReplyText.trim();
+    if (cleanQuickReply.isNotEmpty &&
+        !_realtimeSpokenAnswerAllowsBackgroundQueue(content, cleanQuickReply)) {
+      unawaited(_persistRealtimeTurn());
+      _finishRealtimeTurnStatus();
+      return;
+    }
+    _setBackgroundWorkActive(
+      true,
+      userContent: content,
+      quickReplyText: cleanQuickReply,
+    );
+    _showWorkingStatusWhenReady();
     try {
       final result = await apiClient.submitRealtimeToolCall(
         sessionId: sessionId,
@@ -579,9 +941,18 @@ class BeanRealtimeConversation {
       final runId = result['run_id'];
       if (runId is int) {
         onRunQueued?.call(runId);
-        unawaited(_watchRun(runId));
+        unawaited(
+          _watchRun(
+            runId,
+            userContent: content,
+            quickReplyText: cleanQuickReply,
+          ),
+        );
+      } else {
+        _setBackgroundWorkActive(false);
       }
     } catch (error) {
+      _setBackgroundWorkActive(false);
       onStatus?.call('work failed');
       unawaited(
         _logClientEvent('realtime_tool_fallback_failure', {
@@ -591,7 +962,12 @@ class BeanRealtimeConversation {
     }
   }
 
-  Future<void> _watchRun(int runId, [int attempt = 0]) async {
+  Future<void> _watchRun(
+    int runId, {
+    String userContent = '',
+    String quickReplyText = '',
+    int attempt = 0,
+  }) async {
     await Future<void>.delayed(
       attempt == 0
           ? const Duration(milliseconds: 900)
@@ -601,21 +977,66 @@ class BeanRealtimeConversation {
     try {
       final run = await apiClient.getAssistantRun(runId);
       if (run.status == 'queued' || run.status == 'running') {
-        if (attempt < 45) unawaited(_watchRun(runId, attempt + 1));
+        if (attempt < 45) {
+          _showWorkingStatusWhenReady();
+          unawaited(
+            _watchRun(
+              runId,
+              userContent: userContent,
+              quickReplyText: quickReplyText,
+              attempt: attempt + 1,
+            ),
+          );
+        }
         return;
       }
       if (run.status == 'completed') {
         final content = run.assistantMessage?.content?.trim() ?? '';
-        if (content.isEmpty) return;
+        if (content.isEmpty) {
+          _setBackgroundWorkActive(false);
+          return;
+        }
         unawaited(refreshDashboardContext());
-        _deliverBackgroundResult(content);
+        final finalVoice = _finalVoiceForTurn(
+          userContent,
+          quickReplyText,
+          content,
+        );
+        _setBackgroundWorkActive(false);
+        if (finalVoice.suppressFinal) {
+          _finishRealtimeTurnStatus();
+          return;
+        }
+        _deliverBackgroundResult(
+          finalVoice.text.isNotEmpty ? finalVoice.text : content,
+          runId,
+        );
+        return;
+      }
+      if (run.status == 'failed') {
+        _setBackgroundWorkActive(false);
+        _deliverBackgroundResult('I could not finish that request.', runId);
+        return;
+      }
+      if (run.status == 'cancelled') {
+        _setBackgroundWorkActive(false);
+        _deliverBackgroundResult('That request was cancelled.', runId);
       }
     } catch (_) {
-      if (attempt < 8) unawaited(_watchRun(runId, attempt + 1));
+      if (attempt < 8) {
+        unawaited(
+          _watchRun(
+            runId,
+            userContent: userContent,
+            quickReplyText: quickReplyText,
+            attempt: attempt + 1,
+          ),
+        );
+      }
     }
   }
 
-  void _deliverBackgroundResult(String content) {
+  void _deliverBackgroundResult(String content, [int? runId]) {
     if (!_conversationActive) return;
     final channel = _dataChannel;
     if (channel?.state != RTCDataChannelState.RTCDataChannelOpen) return;
@@ -623,6 +1044,11 @@ class BeanRealtimeConversation {
     if (text.isEmpty) return;
     _suppressNextAssistantPersist = true;
     _voiceOnlyAssistant = true;
+    _ignoreNextFunctionCalls = true;
+    final alreadySpoken = {
+      ..._spokenSegments,
+      _lastAssistantText,
+    }.where((item) => item.trim().isNotEmpty).take(6).toList();
     channel!.send(
       RTCDataChannelMessage(
         jsonEncode({
@@ -633,8 +1059,18 @@ class BeanRealtimeConversation {
             'content': [
               {
                 'type': 'input_text',
-                'text':
-                    'Background work for my previous request is complete. Tell me this result naturally and concisely, without mentioning background work: $text',
+                'text': jsonEncode({
+                  'realtime_background_complete': true,
+                  'result': text,
+                  'already_spoken': alreadySpoken,
+                  'instruction':
+                      'Continue naturally with the completed result. Do not repeat or paraphrase anything already spoken. If the result is long, give a concise voice summary and refer to chat.',
+                  'rules': [
+                    'Do not call tools.',
+                    'Do not mention tools, models, connections, or voice.',
+                    'Do not use generic filler.',
+                  ],
+                }),
               },
             ],
           },
@@ -644,7 +1080,173 @@ class BeanRealtimeConversation {
     _sendResponseCreate(audioResponse: true, textResponse: true);
   }
 
-  void _sendFunctionOutput(String? callId, Map<String, Object?> result) {
+  void _recordSpokenSegment(String text) {
+    final clean = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (clean.isEmpty) return;
+    final last = _spokenSegments.isEmpty ? '' : _spokenSegments.last;
+    if (_normalizeComparableSpeech(last) == _normalizeComparableSpeech(clean)) {
+      return;
+    }
+    _spokenSegments.add(clean);
+    if (_spokenSegments.length > 8) {
+      _spokenSegments.removeRange(0, _spokenSegments.length - 8);
+    }
+  }
+
+  void _setBackgroundWorkActive(
+    bool active, {
+    String userContent = '',
+    String quickReplyText = '',
+  }) {
+    _backgroundWorkActive = active;
+    if (!active) {
+      _clearBackgroundProgressUpdates();
+      _backgroundUserContent = '';
+      _backgroundQuickReplyText = '';
+      return;
+    }
+    _backgroundUserContent = userContent.trim();
+    _backgroundQuickReplyText = quickReplyText.trim();
+    _scheduleBackgroundProgressUpdates();
+    _showWorkingStatusWhenReady();
+  }
+
+  void _showWorkingStatusWhenReady() {
+    if (!_backgroundWorkActive) return;
+    onStatus?.call('working...');
+  }
+
+  void _scheduleBackgroundProgressUpdates() {
+    _clearBackgroundProgressUpdates();
+    const checkpoints = <({Duration delay, String instruction})>[
+      (
+        delay: Duration(seconds: 8),
+        instruction:
+            'Give one brief, natural progress update. Reassure the user that Bean is still working. Do not repeat prior wording.',
+      ),
+      (
+        delay: Duration(seconds: 18),
+        instruction:
+            'Give one brief progress update that acknowledges this is taking a little longer. Do not repeat prior wording.',
+      ),
+      (
+        delay: Duration(seconds: 30),
+        instruction:
+            'Briefly say this is taking longer than expected and that the result will be placed in chat if needed. Do not repeat prior wording.',
+      ),
+    ];
+    for (final checkpoint in checkpoints) {
+      late Timer timer;
+      timer = Timer(checkpoint.delay, () {
+        _backgroundProgressTimers.remove(timer);
+        _sendBackgroundProgressUpdate(
+          elapsedMs: checkpoint.delay.inMilliseconds,
+          instruction: checkpoint.instruction,
+        );
+      });
+      _backgroundProgressTimers.add(timer);
+    }
+  }
+
+  void _clearBackgroundProgressUpdates() {
+    for (final timer in _backgroundProgressTimers) {
+      timer.cancel();
+    }
+    _backgroundProgressTimers.clear();
+  }
+
+  void _sendBackgroundProgressUpdate({
+    required int elapsedMs,
+    required String instruction,
+  }) {
+    if (!_backgroundWorkActive || !_conversationActive) return;
+    final channel = _dataChannel;
+    if (channel?.state != RTCDataChannelState.RTCDataChannelOpen) return;
+    final alreadySpoken = {
+      ..._spokenSegments,
+      _backgroundQuickReplyText,
+      _lastAssistantText,
+    }.where((item) => item.trim().isNotEmpty).take(6).toList();
+    _suppressNextAssistantPersist = true;
+    _voiceOnlyAssistant = true;
+    _ignoreNextFunctionCalls = true;
+    unawaited(
+      _logClientEvent('flutter_realtime_progress_prompt', {
+        'user_request': _backgroundUserContent,
+        'elapsed_ms': elapsedMs,
+        'already_spoken': alreadySpoken,
+        'instruction': instruction,
+      }),
+    );
+    channel!.send(
+      RTCDataChannelMessage(
+        jsonEncode({
+          'type': 'conversation.item.create',
+          'item': {
+            'type': 'message',
+            'role': 'user',
+            'content': [
+              {
+                'type': 'input_text',
+                'text': jsonEncode({
+                  'realtime_progress_update': true,
+                  'user_request': _backgroundUserContent,
+                  'elapsed_ms': elapsedMs,
+                  'already_spoken': alreadySpoken,
+                  'instruction': instruction,
+                  'rules': [
+                    'Speak one short sentence only.',
+                    'Do not call tools.',
+                    'Do not mention tools, models, connections, or voice.',
+                    'Do not repeat or paraphrase anything in already_spoken.',
+                  ],
+                }),
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    _sendResponseCreate(audioResponse: true, textResponse: true);
+  }
+
+  _FinalVoice _finalVoiceForTurn(
+    String userContent,
+    String quickReplyText,
+    String assistantContent,
+  ) {
+    final text = _speechTextFromAssistant(assistantContent);
+    if (text.isEmpty) return const _FinalVoice(text: '');
+    if (quickReplyText.trim().isEmpty) return _FinalVoice(text: text);
+    if (_quickReplyCoversFinal(quickReplyText, text)) {
+      return const _FinalVoice(text: '', suppressFinal: true);
+    }
+    final continuation = _finalContinuationAfterQuickReply(
+      quickReplyText,
+      text,
+    );
+    if (continuation.isEmpty) {
+      return const _FinalVoice(text: '', suppressFinal: true);
+    }
+    if (_finalResponseIsDetailed(assistantContent, text)) {
+      return _FinalVoice(text: _finalDetailNotice(userContent));
+    }
+    return _FinalVoice(text: continuation);
+  }
+
+  void _finishRealtimeTurnStatus() {
+    if (_backgroundWorkActive) {
+      _showWorkingStatusWhenReady();
+      return;
+    }
+    onStatus?.call(_conversationActive ? 'listening' : 'Bean voice ready');
+  }
+
+  void _sendFunctionOutput(
+    String? callId,
+    Map<String, Object?> result, {
+    bool createResponse = true,
+  }) {
     final channel = _dataChannel;
     if (callId == null ||
         callId.isEmpty ||
@@ -663,7 +1265,9 @@ class BeanRealtimeConversation {
         }),
       ),
     );
-    _sendResponseCreate(audioResponse: true, textResponse: true);
+    if (createResponse) {
+      _sendResponseCreate(audioResponse: true, textResponse: true);
+    }
   }
 
   bool _sendResponseCreate({
@@ -903,6 +1507,123 @@ bool _voiceCommandNeedsAgentWork(String transcript) {
   ).hasMatch(command);
 }
 
+bool _voiceCommandRequiresBackgroundWork(String transcript) {
+  final command = _normalizedVoiceCommand(transcript);
+  if (command.isEmpty) return false;
+  if (RegExp(
+    r'\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b',
+  ).hasMatch(command)) {
+    return true;
+  }
+  if (RegExp(
+        r'\b(?:today|tonight|tomorrow|current|currently|latest|now|right now|near me|nearby|local)\b',
+      ).hasMatch(command) &&
+      RegExp(
+        r'\b(?:open|opens|closed|closes|close|closing|hours|hour|available|availability|price|prices|cost|costs|status|delay|delays)\b',
+      ).hasMatch(command)) {
+    return true;
+  }
+  if (RegExp(
+    r'\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b',
+  ).hasMatch(command)) {
+    return true;
+  }
+  return RegExp(r'\b(?:plan|organize|prioritize)\b').hasMatch(command) &&
+      RegExp(
+        r'\b(?:day|today|tomorrow|week|schedule|work|tasks|calendar|morning|afternoon|evening)\b',
+      ).hasMatch(command);
+}
+
+bool _realtimeSpokenAnswerAllowsBackgroundQueue(
+  String userTranscript,
+  String assistantText,
+) {
+  final spoken = _normalizedVoiceCommand(assistantText);
+  if (spoken.isEmpty) return true;
+  if (spoken.length > 180) return false;
+  if (_spokenContainsConcreteAnswer(spoken, assistantText)) return false;
+  if (RegExp(
+    r"\b(?:i don t have|i do not have|i can t see|i cannot see|i don t know|i do not know|let me check|let me get|let me look|i(?:'|’)?ll check|i will check|i(?:'|’)?ll get|i will get|i(?:'|’)?m going to check|i am going to check|i need to check|i can check|checking|pulling|gathering|looking|working|finding|one moment|give me|hang on|hold on)\b",
+  ).hasMatch(spoken)) {
+    return true;
+  }
+  if (RegExp(
+    r"\b(?:i(?:'|’)?ll|i will|i(?:'|’)?m going to|i am going to|let me|i(?:'|’)?m checking|i am checking)\b",
+  ).hasMatch(spoken)) {
+    return true;
+  }
+  if (RegExp(r'\b(?:sure|absolutely|yeah|okay|ok|got it)\b').hasMatch(spoken) &&
+      RegExp(
+        r'\b(?:check|look|pull|gather|find|work|handle|start|do that|take care)\b',
+      ).hasMatch(spoken)) {
+    return true;
+  }
+  final userWords = _comparableVoiceWords(userTranscript).toSet();
+  final spokenWords = _comparableVoiceWords(spoken);
+  final novelWords = spokenWords.where((word) => !userWords.contains(word));
+  return novelWords.length <= 2 && spokenWords.length <= 10;
+}
+
+bool _spokenContainsConcreteAnswer(String spoken, String originalText) {
+  final raw = originalText;
+  if (RegExp(r'[;:]').hasMatch(raw) ||
+      RegExp(r'\b\d+\b').hasMatch(spoken) ||
+      RegExp(r'\d').hasMatch(raw)) {
+    return true;
+  }
+  return RegExp(
+    r"\b(?:you have|you ve got|you've got|you got|you have got|you have \w+ tasks|you ve \w+ tasks|there are|there is|here are|here s|here's|heres|it is|it s|it's|its|looks like|today you|today there|for today|on your list|todo list|to do list|tasks today|due|scheduled|starts|ends|temperature|degrees|degree|percent|humidity|wind|mph|clear skies|partly cloudy|cloudy|sunny|rain|raining|storm|storming|forecast says|weather is)\b",
+  ).hasMatch(spoken);
+}
+
+List<String> _comparableVoiceWords(String value) {
+  const stopWords = {
+    'about',
+    'after',
+    'again',
+    'also',
+    'and',
+    'are',
+    'bean',
+    'been',
+    'being',
+    'can',
+    'could',
+    'for',
+    'from',
+    'get',
+    'got',
+    'have',
+    'here',
+    'into',
+    'just',
+    'like',
+    'now',
+    'okay',
+    'one',
+    'out',
+    'right',
+    'sure',
+    'that',
+    'the',
+    'then',
+    'there',
+    'this',
+    'with',
+    'you',
+    'your',
+    'youre',
+    'ill',
+    'ive',
+    'its',
+  };
+  return _normalizedVoiceCommand(value)
+      .split(' ')
+      .map((word) => word.replaceFirst(RegExp(r"'s$"), ''))
+      .where((word) => word.length > 2 && !stopWords.contains(word))
+      .toList();
+}
+
 bool _transcriptLooksSynthetic(String transcript) {
   final normalized = transcript
       .toLowerCase()
@@ -947,3 +1668,223 @@ String _speechTextFromAssistant(String content) => content
     .replaceAll(RegExp(r'[#*_>`]'), '')
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
+
+String _realtimeTextFromResponseOutput(List<Map<String, Object?>> output) {
+  final strings = <String>[];
+  void visit(Object? value) {
+    if (strings.join(' ').length > 2000) return;
+    if (value is String) {
+      final clean = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (clean.isNotEmpty) strings.add(clean);
+      return;
+    }
+    if (value is List) {
+      for (final item in value) {
+        visit(item);
+      }
+      return;
+    }
+    if (value is Map) {
+      visit(value['transcript']);
+      visit(value['text']);
+      visit(value['content']);
+      visit(value['output']);
+    }
+  }
+
+  for (final item in output) {
+    visit(item);
+  }
+  return strings.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
+String _normalizeComparableSpeech(String value) => value
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim();
+
+bool _quickReplyCoversFinal(String quickReplyText, String finalText) {
+  final quick = _normalizeComparableSpeech(quickReplyText);
+  final fin = _normalizeComparableSpeech(finalText);
+  if (quick.isEmpty || fin.isEmpty) return false;
+  if (fin.startsWith(
+    quick.substring(0, quick.length < 100 ? quick.length : 100),
+  )) {
+    return fin.length <= quick.length + 100 ||
+        _novelContentRatio(fin, quick) < 0.18;
+  }
+  if (quick.length >= 24 &&
+      fin.length <= quick.length + 180 &&
+      _quickSimilarity(quick, fin) > 0.58 &&
+      _novelContentRatio(fin, quick) < 0.32) {
+    return true;
+  }
+  return quick.length >= 40 &&
+      _quickSimilarity(quick, fin) > 0.68 &&
+      _novelContentRatio(fin, quick) < 0.24;
+}
+
+String _finalContinuationAfterQuickReply(
+  String quickReplyText,
+  String finalText,
+) {
+  final quick = _normalizeComparableSpeech(quickReplyText);
+  final fin = _normalizeComparableSpeech(finalText);
+  if (quick.isEmpty || fin.isEmpty) return finalText.trim();
+  if (fin.startsWith(quick)) {
+    return finalText
+        .trim()
+        .substring(
+          quickReplyText.trim().length.clamp(0, finalText.trim().length),
+        )
+        .replaceFirst(RegExp(r'^[\s,.;:-]+'), '')
+        .trim();
+  }
+  final sentences = RegExp(r'[^.!?]+[.!?]+|[^.!?]+$')
+      .allMatches(finalText.replaceAll(RegExp(r'\s+'), ' ').trim())
+      .map((match) => match.group(0) ?? '')
+      .where((sentence) => sentence.trim().isNotEmpty)
+      .toList();
+  final kept = <String>[];
+  for (final sentence in sentences) {
+    final cleaned = _stripQuickReplyOverlap(sentence, quick);
+    if (cleaned.isNotEmpty) kept.add(cleaned);
+  }
+  final continuation = kept.join(' ').trim();
+  if (continuation.isEmpty) return '';
+  final normalized = _normalizeComparableSpeech(continuation);
+  if (normalized.isNotEmpty &&
+      _quickSimilarity(quick, normalized) > 0.74 &&
+      _novelContentRatio(normalized, quick) < 0.28) {
+    return '';
+  }
+  return continuation;
+}
+
+String _stripQuickReplyOverlap(String sentence, String normalizedQuickReply) {
+  final original = sentence.replaceAll(RegExp(r'\s+'), ' ').trim();
+  final normalizedSentence = _normalizeComparableSpeech(original);
+  if (original.isEmpty ||
+      normalizedSentence.isEmpty ||
+      normalizedQuickReply.isEmpty) {
+    return original;
+  }
+  if (normalizedQuickReply.contains(normalizedSentence)) return '';
+  final similarity = _quickSimilarity(normalizedQuickReply, normalizedSentence);
+  final novelty = _novelContentRatio(normalizedSentence, normalizedQuickReply);
+  if (similarity > 0.58 && novelty < 0.34) return '';
+  if (similarity > 0.72 && normalizedSentence.split(' ').length <= 14) {
+    return '';
+  }
+  final clauses = original
+      .split(RegExp(r'(?<=,|;|:)\s+|\s+(?:and|then)\s+', caseSensitive: false))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
+  if (clauses.length <= 1) return original;
+  final kept = clauses.where((clause) {
+    final normalizedClause = _normalizeComparableSpeech(clause);
+    if (normalizedClause.isEmpty) return false;
+    if (normalizedQuickReply.contains(normalizedClause)) return false;
+    return !(_quickSimilarity(normalizedQuickReply, normalizedClause) > 0.6 &&
+        _novelContentRatio(normalizedClause, normalizedQuickReply) < 0.3);
+  });
+  return kept.join(', ').replaceFirst(RegExp(r'^[\s,.;:-]+'), '').trim();
+}
+
+bool _finalResponseIsDetailed(String rawContent, String spokenText) =>
+    spokenText.length > 520 ||
+    rawContent.length > 700 ||
+    RegExp(r'(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S').hasMatch(rawContent) ||
+    RegExp(r'\n').allMatches(rawContent).length >= 3;
+
+String _finalDetailNotice(String userContent) {
+  final command = userContent.toLowerCase();
+  if (RegExp(
+    r'\b(?:workout|exercise|routine|training|stretch|stretches)\b',
+  ).hasMatch(command)) {
+    return "I've written the full workout plan in chat.";
+  }
+  if (RegExp(r'\b(?:recipe|cook|meal)\b').hasMatch(command)) {
+    return "I've written the full recipe in chat.";
+  }
+  if (RegExp(r'\b(?:plan|guide|steps|instructions)\b').hasMatch(command)) {
+    return "I've written the full plan in chat.";
+  }
+  return "I've written the full details in chat.";
+}
+
+double _quickSimilarity(String a, String b) {
+  final aWords = _comparableContentWords(a).toSet();
+  final bWords = _comparableContentWords(b).toSet();
+  if (aWords.isEmpty || bWords.isEmpty) return 0;
+  var overlap = 0;
+  for (final word in aWords) {
+    if (bWords.contains(word)) overlap++;
+  }
+  return overlap / math.min(aWords.length, bWords.length);
+}
+
+double _novelContentRatio(String candidate, String reference) {
+  final candidateWords = _comparableContentWords(candidate);
+  if (candidateWords.isEmpty) return 0;
+  final referenceWords = _comparableContentWords(reference).toSet();
+  final novelCount = candidateWords
+      .where((word) => !referenceWords.contains(word))
+      .length;
+  return novelCount / candidateWords.length;
+}
+
+List<String> _comparableContentWords(String value) {
+  const stopWords = {
+    'about',
+    'after',
+    'again',
+    'also',
+    'and',
+    'are',
+    'bean',
+    'been',
+    'being',
+    'can',
+    'could',
+    'for',
+    'from',
+    'get',
+    'got',
+    'have',
+    'here',
+    'into',
+    'just',
+    'like',
+    'now',
+    'okay',
+    'one',
+    'out',
+    'right',
+    'sure',
+    'that',
+    'the',
+    'then',
+    'there',
+    'this',
+    'with',
+    'you',
+    'your',
+    'youre',
+    'ill',
+    'i',
+    'll',
+    'ive',
+    've',
+    'its',
+    'it',
+    's',
+  };
+  return _normalizeComparableSpeech(value)
+      .split(' ')
+      .map((word) => word.replaceFirst(RegExp(r"'s$"), ''))
+      .where((word) => word.length > 2 && !stopWords.contains(word))
+      .toList();
+}

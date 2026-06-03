@@ -1329,12 +1329,14 @@ void main() {
     expect(realtime.started, isTrue);
     expect(find.byKey(const Key('chat-view')), findsOneWidget);
     expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
-    expect(find.text('Bean voice ready'), findsWidgets);
+    expect(find.text('listening'), findsWidgets);
 
     await gesture.up();
     await tester.pump();
 
-    expect(realtime.microphoneEnabled, isTrue);
+    expect(realtime.captureStarted, isTrue);
+    expect(realtime.captureEnded, isTrue);
+    expect(realtime.microphoneEnabled, isFalse);
   });
 
   testWidgets('typed Bean chat uses realtime text when available', (
@@ -7029,6 +7031,8 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   bool started = false;
   bool stopped = false;
   bool microphoneEnabled = false;
+  bool captureStarted = false;
+  bool captureEnded = false;
   final startMicrophoneValues = <bool>[];
   final sentTexts = <String>[];
 
@@ -7053,6 +7057,18 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   @override
   void setMicrophoneEnabled(bool enabled) {
     microphoneEnabled = enabled;
+  }
+
+  @override
+  void beginVoiceCapture() {
+    captureStarted = true;
+    microphoneEnabled = true;
+  }
+
+  @override
+  void endVoiceCapture() {
+    captureEnded = true;
+    microphoneEnabled = false;
   }
 
   @override
