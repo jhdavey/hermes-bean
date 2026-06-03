@@ -1814,6 +1814,33 @@ void main() {
     expect(find.text('Reminder repeats'), findsOneWidget);
   });
 
+  testWidgets('task editor shows saving state while save is pending', (
+    WidgetTester tester,
+  ) async {
+    final api = _TaskReminderCategoryFakeHermesApiClient()
+      ..updateTaskCompleter = Completer<void>();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-edit-action-501')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.pump();
+
+    expect(find.text('Saving...'), findsNWidgets(2));
+    expect(api.updatedTask, isNull);
+
+    api.updateTaskCompleter!.complete();
+    await tester.pumpAndSettle();
+
+    expect(api.updatedTask?.title, 'Categorize proposal');
+    expect(find.byKey(const Key('title-time-editor-title')), findsNothing);
+  });
+
   testWidgets(
     'focused old HeyBean views render home calendar, tasks, reminders, chat, and settings',
     (WidgetTester tester) async {
@@ -3277,6 +3304,36 @@ void main() {
     expect(api.createdEvent?.metadata?['google_calendar_id'], 'primary');
     expect(find.textContaining('Client kickoff'), findsOneWidget);
   });
+
+  testWidgets(
+    'calendar event editor shows saving state while save is pending',
+    (WidgetTester tester) async {
+      final api = _EditableCalendarFakeHermesApiClient()
+        ..createEventCompleter = Completer<void>();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('calendar-add-event-action')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('event-title-field')),
+        'Waiting save',
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pump();
+
+      expect(find.text('Saving...'), findsOneWidget);
+      expect(api.createdEvent, isNull);
+
+      api.createEventCompleter!.complete();
+      await tester.pumpAndSettle();
+
+      expect(api.createdEvent?.title, 'Waiting save');
+      expect(find.byKey(const Key('calendar-event-detail-page')), findsNothing);
+    },
+  );
 
   testWidgets(
     'calendar plus action preserves unchanged default local time after reload',
@@ -5866,6 +5923,10 @@ class _TaskReminderCategoryFakeHermesApiClient
   HermesReminder? updatedReminder;
   HermesReminder? createdReminder;
   HermesEventCategory? savedCategory;
+  Completer<void>? createTaskCompleter;
+  Completer<void>? updateTaskCompleter;
+  Completer<void>? createReminderCompleter;
+  Completer<void>? updateReminderCompleter;
 
   @override
   Future<List<HermesEventCategory>> listEventCategories() async => [
@@ -5922,6 +5983,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     int? workspaceId,
     List<Object> syncToWorkspaceIds = const [],
   }) async {
+    await createTaskCompleter?.future;
     createdTask = HermesTask(
       id: 801,
       title: title,
@@ -5949,6 +6011,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     int? workspaceId,
     List<Object> syncToWorkspaceIds = const [],
   }) async {
+    await createReminderCompleter?.future;
     createdReminder = HermesReminder(
       id: 701,
       title: title,
@@ -5980,6 +6043,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     bool clearColor = false,
     bool clearNotes = false,
   }) async {
+    await updateTaskCompleter?.future;
     final existing = (await listTasks()).firstWhere(
       (item) => item.id == taskId,
     );
@@ -6013,6 +6077,7 @@ class _TaskReminderCategoryFakeHermesApiClient
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
+    await updateReminderCompleter?.future;
     final existing = (await listReminders()).firstWhere(
       (item) => item.id == reminderId,
     );
@@ -6378,6 +6443,8 @@ class _EditableCalendarFakeHermesApiClient
   HermesCalendarEvent? createdEvent;
   Map<String, Object?>? createdReminder;
   HermesEventCategory? savedCategory;
+  Completer<void>? createEventCompleter;
+  Completer<void>? updateEventCompleter;
   int? deletedCategoryId;
   int? deletedEventId;
   List<Object> deletedEventWorkspaceIds = const [];
@@ -6397,6 +6464,7 @@ class _EditableCalendarFakeHermesApiClient
     Map<String, Object?>? metadata,
     List<Object>? syncToWorkspaceIds,
   }) async {
+    await updateEventCompleter?.future;
     updatedEvent = HermesCalendarEvent(
       id: eventId,
       title: title,
@@ -6424,6 +6492,7 @@ class _EditableCalendarFakeHermesApiClient
     int? workspaceId,
     List<Object> syncToWorkspaceIds = const [],
   }) async {
+    await createEventCompleter?.future;
     createdEvent = HermesCalendarEvent(
       id: 44,
       title: title,

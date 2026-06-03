@@ -2738,7 +2738,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   Future<void> _showNewTaskEditor() async {
-    final result = await _showTitleTimeEditor(
+    await _showTitleTimeEditor(
       context,
       title: 'New task',
       titleLabel: 'Task title',
@@ -2758,34 +2758,36 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       recurrenceTitle: 'Task recurrence',
       recurrenceSubtitle: 'Repeat this task when needed.',
       recurrenceInfoTitle: 'Task recurrence',
-    );
-    if (result == null) return;
-    final title = (result['title'] as String).trim();
-    if (title.isEmpty) return;
-    await _createOrUpdateTask(
-      null,
-      title: title,
-      dueAt: result['time'] as String?,
-      notes: result['notes'] as String?,
-      category: result['category'] as String?,
-      color: result['color'] as String?,
-      isCritical: result['isCritical'] as bool?,
-      recurrenceMetadata: result['recurrenceMetadata'] as Map<String, Object?>?,
-      syncToWorkspaceIds:
-          (result['syncToWorkspaceIds'] as List?)
-              ?.whereType<Object>()
-              .toList() ??
-          const [],
-      googleCalendarIds:
-          (result['googleCalendarIds'] as List?)
-              ?.map((value) => value.toString())
-              .toList() ??
-          const [],
+      onSave: (result) async {
+        final title = (result['title'] as String).trim();
+        if (title.isEmpty) return;
+        await _createOrUpdateTask(
+          null,
+          title: title,
+          dueAt: result['time'] as String?,
+          notes: result['notes'] as String?,
+          category: result['category'] as String?,
+          color: result['color'] as String?,
+          isCritical: result['isCritical'] as bool?,
+          recurrenceMetadata:
+              result['recurrenceMetadata'] as Map<String, Object?>?,
+          syncToWorkspaceIds:
+              (result['syncToWorkspaceIds'] as List?)
+                  ?.whereType<Object>()
+                  .toList() ??
+              const [],
+          googleCalendarIds:
+              (result['googleCalendarIds'] as List?)
+                  ?.map((value) => value.toString())
+                  .toList() ??
+              const [],
+        );
+      },
     );
   }
 
   Future<void> _showNewReminderEditor() async {
-    final result = await _showTitleTimeEditor(
+    await _showTitleTimeEditor(
       context,
       title: 'New reminder',
       titleLabel: 'Reminder title',
@@ -2804,29 +2806,31 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       recurrenceTitle: 'Reminder repeats',
       recurrenceSubtitle: 'Repeat this reminder when needed.',
       recurrenceInfoTitle: 'Reminder recurrence',
-    );
-    if (result == null) return;
-    final title = (result['title'] as String).trim();
-    final time = (result['time'] as String?)?.trim() ?? '';
-    if (title.isEmpty || time.isEmpty) return;
-    await _createOrUpdateReminder(
-      null,
-      title: title,
-      remindAt: time,
-      status: 'pending',
-      category: result['category'] as String?,
-      color: result['color'] as String?,
-      recurrenceMetadata: result['recurrenceMetadata'] as Map<String, Object?>?,
-      syncToWorkspaceIds:
-          (result['syncToWorkspaceIds'] as List?)
-              ?.whereType<Object>()
-              .toList() ??
-          const [],
-      googleCalendarIds:
-          (result['googleCalendarIds'] as List?)
-              ?.map((value) => value.toString())
-              .toList() ??
-          const [],
+      onSave: (result) async {
+        final title = (result['title'] as String).trim();
+        final time = (result['time'] as String?)?.trim() ?? '';
+        if (title.isEmpty || time.isEmpty) return;
+        await _createOrUpdateReminder(
+          null,
+          title: title,
+          remindAt: time,
+          status: 'pending',
+          category: result['category'] as String?,
+          color: result['color'] as String?,
+          recurrenceMetadata:
+              result['recurrenceMetadata'] as Map<String, Object?>?,
+          syncToWorkspaceIds:
+              (result['syncToWorkspaceIds'] as List?)
+                  ?.whereType<Object>()
+                  .toList() ??
+              const [],
+          googleCalendarIds:
+              (result['googleCalendarIds'] as List?)
+                  ?.map((value) => value.toString())
+                  .toList() ??
+              const [],
+        );
+      },
     );
   }
 
@@ -6374,6 +6378,7 @@ class _TodayHomeView extends StatelessWidget {
     HermesTask? task,
     HermesTask? parentTask,
   }) async {
+    var savedInsideEditor = false;
     final result = await _showTitleTimeEditor(
       context,
       title: parentTask != null
@@ -6410,6 +6415,33 @@ class _TodayHomeView extends StatelessWidget {
               workspaceId: task.workspaceId,
               activeWorkspaceId: user.activeWorkspace?.id,
             ),
+      onSave: (result) async {
+        final title = (result['title'] as String).trim();
+        if (title.isEmpty) return;
+        await onTaskSaved(
+          task,
+          title: title,
+          dueAt: result['time'] as String?,
+          notes: result['notes'] as String?,
+          category: result['category'] as String?,
+          color: result['color'] as String?,
+          isCritical: result['isCritical'] as bool?,
+          parentTaskId: parentTask?.id,
+          recurrenceMetadata:
+              result['recurrenceMetadata'] as Map<String, Object?>?,
+          syncToWorkspaceIds:
+              (result['syncToWorkspaceIds'] as List?)
+                  ?.whereType<Object>()
+                  .toList() ??
+              const [],
+          googleCalendarIds:
+              (result['googleCalendarIds'] as List?)
+                  ?.map((value) => value.toString())
+                  .toList() ??
+              const [],
+        );
+        savedInsideEditor = true;
+      },
     );
     if (result == null || !context.mounted) return;
     if (result['delete'] == true && task != null) {
@@ -6426,6 +6458,7 @@ class _TodayHomeView extends StatelessWidget {
       await onTaskDeleted(task, deleteFromWorkspaceIds: deleteFromWorkspaceIds);
       return;
     }
+    if (savedInsideEditor) return;
     final title = (result['title'] as String).trim();
     if (title.isEmpty) return;
     await onTaskSaved(
@@ -8211,30 +8244,32 @@ class _TimelineEventBlock extends StatelessWidget {
   }
 }
 
+typedef _CalendarEventSaveCallback =
+    Future<void> Function(
+      HermesCalendarEvent event, {
+      required String title,
+      required String startsAt,
+      String? endsAt,
+      String? category,
+      String? color,
+      String? recurrence,
+      Map<String, Object?>? metadata,
+      bool? isCritical,
+      int? reminderMinutesBefore,
+      String? reminderRecurrence,
+      List<String>? reminderSpecificDays,
+      int? reminderInterval,
+      String? reminderIntervalUnit,
+      List<Object> syncToWorkspaceIds,
+    });
+
 Future<void> _showCalendarEventDetails(
   BuildContext context,
   HermesCalendarEvent event, {
   required List<HermesEventCategory> eventCategories,
   GoogleCalendarSyncStatus? googleCalendarStatus,
   String? occurrenceDate,
-  required Future<void> Function(
-    HermesCalendarEvent event, {
-    required String title,
-    required String startsAt,
-    String? endsAt,
-    String? category,
-    String? color,
-    String? recurrence,
-    Map<String, Object?>? metadata,
-    bool? isCritical,
-    int? reminderMinutesBefore,
-    String? reminderRecurrence,
-    List<String>? reminderSpecificDays,
-    int? reminderInterval,
-    String? reminderIntervalUnit,
-    List<Object> syncToWorkspaceIds,
-  })
-  onSave,
+  required _CalendarEventSaveCallback onSave,
   required Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -8265,6 +8300,7 @@ Future<void> _showCalendarEventDetails(
         googleCalendarStatus: googleCalendarStatus,
         workspaces: workspaces,
         activeWorkspaceId: activeWorkspaceId,
+        onSave: onSave,
         onEventCategorySaved: onEventCategorySaved,
         onEventCategoryDeleted: onEventCategoryDeleted,
         onCriticalChanged: onCriticalChanged,
@@ -8300,31 +8336,7 @@ Future<void> _showCalendarEventDetails(
     return;
   }
 
-  if (result != null) {
-    await onSave(
-      event,
-      title: result['title'] as String,
-      startsAt: result['startsAt'] as String,
-      endsAt: result['endsAt'] as String?,
-      category: result['category'] as String?,
-      color: result['color'] as String?,
-      recurrence: result['recurrence'] as String?,
-      metadata: result['metadata'] as Map<String, Object?>?,
-      isCritical: result['isCritical'] as bool?,
-      reminderMinutesBefore: result['reminderMinutesBefore'] as int?,
-      reminderRecurrence: result['reminderRecurrence'] as String?,
-      reminderSpecificDays: (result['reminderSpecificDays'] as List?)
-          ?.whereType<String>()
-          .toList(),
-      reminderInterval: result['reminderInterval'] as int?,
-      reminderIntervalUnit: result['reminderIntervalUnit'] as String?,
-      syncToWorkspaceIds:
-          (result['syncToWorkspaceIds'] as List?)
-              ?.whereType<Object>()
-              .toList() ??
-          const [],
-    );
-  }
+  return;
 }
 
 class _CalendarEventDetailPage extends StatefulWidget {
@@ -8335,6 +8347,7 @@ class _CalendarEventDetailPage extends StatefulWidget {
     this.googleCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
+    required this.onSave,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
     this.onCriticalChanged,
@@ -8347,6 +8360,7 @@ class _CalendarEventDetailPage extends StatefulWidget {
   final GoogleCalendarSyncStatus? googleCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
+  final _CalendarEventSaveCallback onSave;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -8392,6 +8406,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   late bool _allDay;
   final Set<String> _eventSpecificDays = <String>{};
   final Set<String> _reminderSpecificDays = <String>{};
+  bool _saving = false;
   bool _savingCategory = false;
 
   static const _colors = <({String value, String label})>[
@@ -8528,7 +8543,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving) return;
     late final String startsAt;
     String? endsAt;
     DateTime? parsedStart;
@@ -8634,24 +8650,42 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         'unit': _eventIntervalUnit,
     };
 
-    Navigator.of(context).pop(<String, Object?>{
-      'title': _title.text.trim().isEmpty
-          ? widget.event.title
-          : _title.text.trim(),
-      'startsAt': startsAt,
-      'endsAt': endsAt,
-      'category': _category.text.trim().isEmpty ? null : _category.text.trim(),
-      'color': _color,
-      'recurrence': _recurrence,
-      'metadata': eventMetadata,
-      'isCritical': _isCritical,
-      'reminderMinutesBefore': int.tryParse(_reminder.text.trim()),
-      'reminderRecurrence': _reminderRecurrence,
-      'reminderSpecificDays': _reminderSpecificDays.toList()..sort(),
-      'reminderInterval': int.tryParse(_reminderInterval.text.trim()),
-      'reminderIntervalUnit': _reminderIntervalUnit,
-      'syncToWorkspaceIds': _syncWorkspaceIds.toList(),
+    setState(() {
+      _saving = true;
+      _validationError = null;
     });
+    try {
+      await widget.onSave(
+        widget.event,
+        title: _title.text.trim().isEmpty
+            ? widget.event.title
+            : _title.text.trim(),
+        startsAt: startsAt,
+        endsAt: endsAt,
+        category: _category.text.trim().isEmpty ? null : _category.text.trim(),
+        color: _color,
+        recurrence: _recurrence,
+        metadata: eventMetadata,
+        isCritical: _isCritical,
+        reminderMinutesBefore: int.tryParse(_reminder.text.trim()),
+        reminderRecurrence: _reminderRecurrence,
+        reminderSpecificDays: _reminderSpecificDays.toList()..sort(),
+        reminderInterval: int.tryParse(_reminderInterval.text.trim()),
+        reminderIntervalUnit: _reminderIntervalUnit,
+        syncToWorkspaceIds: _syncWorkspaceIds.toList(),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(<String, Object?>{'action': 'saved'});
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _validationError = beanFriendlyErrorMessage(
+          error,
+          action: 'save that event',
+        );
+      });
+    }
   }
 
   Future<void> _saveCategoryValues({
@@ -9759,7 +9793,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: _saving ? null : () => Navigator.of(context).pop(),
                   child: const Text('Cancel'),
                 ),
               ),
@@ -9769,21 +9803,24 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                   key: const Key('event-delete-action'),
                   tooltip: 'Delete event',
                   style: _destructiveIconButtonStyle(),
-                  onPressed: () async {
-                    final deleteOptions = await _confirmCalendarEventDelete();
-                    if (!context.mounted || deleteOptions == null) {
-                      return;
-                    }
-                    Navigator.of(context).pop({
-                      'action': 'delete',
-                      'deleteFromWorkspaceIds':
-                          deleteOptions['deleteFromWorkspaceIds'],
-                      'recurringDeleteMode':
-                          deleteOptions['recurringDeleteMode'],
-                      'recurringOccurrenceDate':
-                          deleteOptions['recurringOccurrenceDate'],
-                    });
-                  },
+                  onPressed: _saving
+                      ? null
+                      : () async {
+                          final deleteOptions =
+                              await _confirmCalendarEventDelete();
+                          if (!context.mounted || deleteOptions == null) {
+                            return;
+                          }
+                          Navigator.of(context).pop({
+                            'action': 'delete',
+                            'deleteFromWorkspaceIds':
+                                deleteOptions['deleteFromWorkspaceIds'],
+                            'recurringDeleteMode':
+                                deleteOptions['recurringDeleteMode'],
+                            'recurringOccurrenceDate':
+                                deleteOptions['recurringOccurrenceDate'],
+                          });
+                        },
                   icon: const Icon(Icons.delete_outline_rounded),
                 ),
               ],
@@ -9791,9 +9828,15 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
               Expanded(
                 child: FilledButton.icon(
                   key: const Key('event-save-action'),
-                  onPressed: _save,
-                  icon: const Icon(Icons.check_rounded),
-                  label: const Text('Save event'),
+                  onPressed: _saving ? null : _save,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.check_rounded),
+                  label: Text(_saving ? 'Saving...' : 'Save event'),
                 ),
               ),
             ],
@@ -11823,6 +11866,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   GoogleCalendarSyncStatus? googleCalendarStatus,
   List<String> initialGoogleCalendarIds = const [],
   List<Object> initialSyncWorkspaceIds = const [],
+  Future<void> Function(Map<String, Object?> result)? onSave,
 }) async {
   final titleController = TextEditingController(text: initialTitle);
   final timeController = TextEditingController(text: initialTime);
@@ -11833,6 +11877,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
       : initialColor?.trim() ?? _themeCategoryColorHex();
   var modalCategories = [...categories];
   var savingCategory = false;
+  var saving = false;
   var isCritical = initialCritical;
   var recurrence = _recurrenceFromMetadata(initialMetadata);
   final recurrenceSpecificDays = _recurrenceDaysFromMetadata(initialMetadata);
@@ -11850,6 +11895,87 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
       .where((workspace) => workspace.id != activeWorkspaceId)
       .toList();
   String? validationError;
+
+  Map<String, Object?>? buildPayload(
+    StateSetter setModalState, {
+    bool complete = false,
+  }) {
+    final title = titleController.text.trim();
+    final time = timeController.text.trim();
+    if (title.isEmpty) {
+      setModalState(() => validationError = 'A title is required.');
+      return null;
+    }
+    if (!allowEmptyTime && time.isEmpty) {
+      setModalState(() => validationError = 'A time is required.');
+      return null;
+    }
+    if (time.isNotEmpty && _taskReminderInputToWireValue(time) == null) {
+      setModalState(
+        () => validationError =
+            'Use a recognizable date/time, like Today 5:00 PM.',
+      );
+      return null;
+    }
+
+    return {
+      'title': title,
+      'time': time.isEmpty ? null : time,
+      'notes': notesController.text.trim().isEmpty
+          ? null
+          : notesController.text.trim(),
+      if (complete) 'complete': true,
+      'category': selectedCategory.isEmpty ? null : selectedCategory,
+      'color': selectedCategory.isEmpty
+          ? _themeCategoryColorHex()
+          : (selectedColor.isEmpty ? _themeCategoryColorHex() : selectedColor),
+      'isCritical': isCritical,
+      if (showRecurrence)
+        'recurrenceMetadata': _metadataWithRecurrence(
+          initialMetadata,
+          recurrence: recurrence,
+          days: recurrenceSpecificDays,
+          interval: int.tryParse(recurrenceIntervalController.text.trim()) ?? 1,
+          unit: recurrenceIntervalUnit,
+        ),
+      'syncToWorkspaceIds': syncWorkspaceIds.toList(),
+      'googleCalendarIds': googleCalendarIds.toList()..sort(),
+    };
+  }
+
+  Future<void> submitPayload(
+    BuildContext context,
+    StateSetter setModalState, {
+    bool complete = false,
+  }) async {
+    if (saving) return;
+    final payload = buildPayload(setModalState, complete: complete);
+    if (payload == null) return;
+    if (onSave == null) {
+      Navigator.of(context).pop(payload);
+      return;
+    }
+
+    setModalState(() {
+      saving = true;
+      validationError = null;
+    });
+    try {
+      await onSave(payload);
+      if (context.mounted) {
+        Navigator.of(context).pop(payload);
+      }
+    } catch (error) {
+      if (!context.mounted) return;
+      setModalState(() {
+        saving = false;
+        validationError = beanFriendlyErrorMessage(
+          error,
+          action: 'save that change',
+        );
+      });
+    }
+  }
 
   return showModalBottomSheet<Map<String, Object?>>(
     context: context,
@@ -11884,55 +12010,17 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                     alignment: Alignment.centerRight,
                     child: FilledButton.icon(
                       key: const Key('title-time-editor-save'),
-                      onPressed: () async {
-                        final title = titleController.text.trim();
-                        final time = timeController.text.trim();
-                        if (title.isEmpty ||
-                            (!allowEmptyTime && time.isEmpty)) {
-                          return;
-                        }
-                        if (time.isNotEmpty &&
-                            _taskReminderInputToWireValue(time) == null) {
-                          setModalState(
-                            () => validationError =
-                                'Use a recognizable date/time, like Today 5:00 PM.',
-                          );
-                          return;
-                        }
-                        Navigator.of(context).pop({
-                          'title': title,
-                          'time': time.isEmpty ? null : time,
-                          'notes': notesController.text.trim().isEmpty
-                              ? null
-                              : notesController.text.trim(),
-                          'category': selectedCategory.isEmpty
-                              ? null
-                              : selectedCategory,
-                          'color': selectedCategory.isEmpty
-                              ? _themeCategoryColorHex()
-                              : (selectedColor.isEmpty
-                                    ? _themeCategoryColorHex()
-                                    : selectedColor),
-                          'isCritical': isCritical,
-                          if (showRecurrence)
-                            'recurrenceMetadata': _metadataWithRecurrence(
-                              initialMetadata,
-                              recurrence: recurrence,
-                              days: recurrenceSpecificDays,
-                              interval:
-                                  int.tryParse(
-                                    recurrenceIntervalController.text.trim(),
-                                  ) ??
-                                  1,
-                              unit: recurrenceIntervalUnit,
-                            ),
-                          'syncToWorkspaceIds': syncWorkspaceIds.toList(),
-                          'googleCalendarIds': googleCalendarIds.toList()
-                            ..sort(),
-                        });
-                      },
-                      icon: const Icon(Icons.check_rounded),
-                      label: const Text('Save'),
+                      onPressed: saving
+                          ? null
+                          : () => submitPayload(context, setModalState),
+                      icon: saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.check_rounded),
+                      label: Text(saving ? 'Saving...' : 'Save'),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -12415,8 +12503,11 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                           child: FilledButton.icon(
                             key: const Key('title-time-editor-delete'),
                             style: _destructiveFilledButtonStyle(),
-                            onPressed: () =>
-                                Navigator.of(context).pop({'delete': true}),
+                            onPressed: saving
+                                ? null
+                                : () => Navigator.of(
+                                    context,
+                                  ).pop({'delete': true}),
                             icon: const Icon(Icons.delete_outline_rounded),
                             label: Text(deleteLabel),
                           ),
@@ -12425,64 +12516,19 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                       Expanded(
                         child: FilledButton.icon(
                           key: const Key('title-time-editor-save-bottom'),
-                          onPressed: () {
-                            final title = titleController.text.trim();
-                            final time = timeController.text.trim();
-                            if (title.isEmpty) {
-                              setModalState(
-                                () => validationError = 'A title is required.',
-                              );
-                              return;
-                            }
-                            if (!allowEmptyTime && time.isEmpty) {
-                              setModalState(
-                                () => validationError = 'A time is required.',
-                              );
-                              return;
-                            }
-                            if (time.isNotEmpty &&
-                                _taskReminderInputToWireValue(time) == null) {
-                              setModalState(
-                                () => validationError =
-                                    'Use a recognizable date/time, like Today 5:00 PM.',
-                              );
-                              return;
-                            }
-                            Navigator.of(context).pop({
-                              'title': title,
-                              'time': time.isEmpty ? null : time,
-                              'notes': notesController.text.trim().isEmpty
-                                  ? null
-                                  : notesController.text.trim(),
-                              'category': selectedCategory.isEmpty
-                                  ? null
-                                  : selectedCategory,
-                              'color': selectedCategory.isEmpty
-                                  ? _themeCategoryColorHex()
-                                  : (selectedColor.isEmpty
-                                        ? _themeCategoryColorHex()
-                                        : selectedColor),
-                              'isCritical': isCritical,
-                              if (showRecurrence)
-                                'recurrenceMetadata': _metadataWithRecurrence(
-                                  initialMetadata,
-                                  recurrence: recurrence,
-                                  days: recurrenceSpecificDays,
-                                  interval:
-                                      int.tryParse(
-                                        recurrenceIntervalController.text
-                                            .trim(),
-                                      ) ??
-                                      1,
-                                  unit: recurrenceIntervalUnit,
-                                ),
-                              'syncToWorkspaceIds': syncWorkspaceIds.toList(),
-                              'googleCalendarIds': googleCalendarIds.toList()
-                                ..sort(),
-                            });
-                          },
-                          icon: const Icon(Icons.check_rounded),
-                          label: const Text('Save'),
+                          onPressed: saving
+                              ? null
+                              : () => submitPayload(context, setModalState),
+                          icon: saving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.check_rounded),
+                          label: Text(saving ? 'Saving...' : 'Save'),
                         ),
                       ),
                     ],
@@ -12491,43 +12537,13 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                     const SizedBox(height: 8),
                     TextButton.icon(
                       key: const Key('title-time-editor-complete'),
-                      onPressed: () {
-                        final title = titleController.text.trim();
-                        final time = timeController.text.trim();
-                        if (title.isEmpty || time.isEmpty) return;
-                        Navigator.of(context).pop({
-                          'title': title,
-                          'time': time,
-                          'notes': notesController.text.trim().isEmpty
-                              ? null
-                              : notesController.text.trim(),
-                          'complete': true,
-                          'category': selectedCategory.isEmpty
-                              ? null
-                              : selectedCategory,
-                          'color': selectedCategory.isEmpty
-                              ? _themeCategoryColorHex()
-                              : (selectedColor.isEmpty
-                                    ? _themeCategoryColorHex()
-                                    : selectedColor),
-                          'isCritical': isCritical,
-                          if (showRecurrence)
-                            'recurrenceMetadata': _metadataWithRecurrence(
-                              initialMetadata,
-                              recurrence: recurrence,
-                              days: recurrenceSpecificDays,
-                              interval:
-                                  int.tryParse(
-                                    recurrenceIntervalController.text.trim(),
-                                  ) ??
-                                  1,
-                              unit: recurrenceIntervalUnit,
+                      onPressed: saving
+                          ? null
+                          : () => submitPayload(
+                              context,
+                              setModalState,
+                              complete: true,
                             ),
-                          'syncToWorkspaceIds': syncWorkspaceIds.toList(),
-                          'googleCalendarIds': googleCalendarIds.toList()
-                            ..sort(),
-                        });
-                      },
                       icon: const Icon(Icons.done_all_rounded),
                       label: Text(completeLabel),
                     ),
@@ -12684,6 +12700,7 @@ class _TaskListCardState extends State<_TaskListCard> {
     HermesTask? task,
     HermesTask? parentTask,
   }) async {
+    var savedInsideEditor = false;
     final result = await _showTitleTimeEditor(
       context,
       title: parentTask != null
@@ -12719,6 +12736,33 @@ class _TaskListCardState extends State<_TaskListCard> {
               workspaceId: task.workspaceId,
               activeWorkspaceId: widget.activeWorkspaceId,
             ),
+      onSave: (result) async {
+        final title = (result['title'] as String).trim();
+        if (title.isEmpty) return;
+        await widget.onTaskSaved(
+          task,
+          title: title,
+          dueAt: result['time'] as String?,
+          notes: result['notes'] as String?,
+          category: result['category'] as String?,
+          color: result['color'] as String?,
+          isCritical: result['isCritical'] as bool?,
+          parentTaskId: parentTask?.id,
+          recurrenceMetadata:
+              result['recurrenceMetadata'] as Map<String, Object?>?,
+          syncToWorkspaceIds:
+              (result['syncToWorkspaceIds'] as List?)
+                  ?.whereType<Object>()
+                  .toList() ??
+              const [],
+          googleCalendarIds:
+              (result['googleCalendarIds'] as List?)
+                  ?.map((value) => value.toString())
+                  .toList() ??
+              const [],
+        );
+        savedInsideEditor = true;
+      },
     );
     if (result == null || !context.mounted) return;
     if (result['delete'] == true && task != null) {
@@ -12738,6 +12782,7 @@ class _TaskListCardState extends State<_TaskListCard> {
       );
       return;
     }
+    if (savedInsideEditor) return;
     final title = (result['title'] as String).trim();
     if (title.isEmpty) return;
     await widget.onTaskSaved(
@@ -12884,6 +12929,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
     BuildContext context, {
     HermesReminder? reminder,
   }) async {
+    var savedInsideEditor = false;
     final result = await _showTitleTimeEditor(
       context,
       title: reminder == null ? 'New reminder' : 'Edit reminder',
@@ -12917,6 +12963,37 @@ class _ReminderListCardState extends State<_ReminderListCard> {
               workspaceId: reminder.workspaceId,
               activeWorkspaceId: widget.activeWorkspaceId,
             ),
+      onSave: (result) async {
+        final title = (result['title'] as String).trim();
+        final time = (result['time'] as String?)?.trim() ?? '';
+        if (title.isEmpty || time.isEmpty) return;
+        final status = result['complete'] == true
+            ? (reminder != null && _reminderIsCompleted(reminder)
+                  ? 'pending'
+                  : 'completed')
+            : (reminder?.status ?? 'pending');
+        await widget.onReminderSaved(
+          reminder,
+          title: title,
+          remindAt: time,
+          status: status,
+          category: result['category'] as String?,
+          color: result['color'] as String?,
+          recurrenceMetadata:
+              result['recurrenceMetadata'] as Map<String, Object?>?,
+          syncToWorkspaceIds:
+              (result['syncToWorkspaceIds'] as List?)
+                  ?.whereType<Object>()
+                  .toList() ??
+              const [],
+          googleCalendarIds:
+              (result['googleCalendarIds'] as List?)
+                  ?.map((value) => value.toString())
+                  .toList() ??
+              const [],
+        );
+        savedInsideEditor = true;
+      },
     );
     if (result == null || !context.mounted) return;
     if (result['delete'] == true && reminder != null) {
@@ -12936,6 +13013,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       );
       return;
     }
+    if (savedInsideEditor) return;
     final title = (result['title'] as String).trim();
     final time = (result['time'] as String?)?.trim() ?? '';
     if (title.isEmpty || time.isEmpty) return;
