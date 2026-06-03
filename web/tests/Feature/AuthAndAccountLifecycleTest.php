@@ -23,16 +23,19 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->postJson('/api/auth/register', [
             'name' => 'Bean User',
             'email' => 'bean@example.com',
+            'plan' => 'pro',
         ])->assertCreated()
             ->assertJsonPath('data.message', "You're on the early access list. We'll email you as soon as we can give you access.")
             ->assertJsonPath('data.early_access_signup.email', 'bean@example.com')
             ->assertJsonPath('data.early_access_signup.name', 'Bean User')
-            ->assertJsonPath('data.early_access_signup.source', 'app_register');
+            ->assertJsonPath('data.early_access_signup.source', 'pricing_register')
+            ->assertJsonPath('data.early_access_signup.requested_plan', 'pro');
 
         $this->assertDatabaseHas('early_access_signups', [
             'email' => 'bean@example.com',
             'name' => 'Bean User',
-            'source' => 'app_register',
+            'requested_plan' => 'pro',
+            'source' => 'pricing_register',
         ]);
         $this->assertDatabaseMissing('users', ['email' => 'bean@example.com']);
     }

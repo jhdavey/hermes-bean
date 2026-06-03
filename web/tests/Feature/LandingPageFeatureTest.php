@@ -98,7 +98,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('Apple-style', false)
             ->assertDontSee('Google Calendar', false)
             ->assertDontSee('iOS', false)
-            ->assertSee('<nav class="navlinks" aria-label="Primary navigation"><a href="#how">How it works</a><a href="#features">Features</a><a href="/login">Log in</a></nav>', false)
+            ->assertSee('<nav class="navlinks" aria-label="Primary navigation"><a href="#how">How it works</a><a href="#features">Features</a><a href="/pricing">Pricing</a><a href="/login">Log in</a></nav>', false)
             ->assertSee('<div class="mobile-menu-panel">', false)
             ->assertDontSee('<a href="/privacy">Privacy</a>', false)
             ->assertDontSee('<a href="/terms">Terms</a>', false)
@@ -129,10 +129,36 @@ class LandingPageFeatureTest extends TestCase
         }
     }
 
+    public function test_pricing_page_shows_plans_and_trial_ctas(): void
+    {
+        $this->get('/pricing')
+            ->assertOk()
+            ->assertSee('Pick how much help Bean can give your day.', false)
+            ->assertSee('7-day free trial on paid plans', false)
+            ->assertSee('Free', false)
+            ->assertSee('Premium', false)
+            ->assertSee('Pro', false)
+            ->assertSee('Most popular', false)
+            ->assertSee('$10', false)
+            ->assertSee('$25', false)
+            ->assertSee('Start Premium trial', false)
+            ->assertSee('href="/register?plan=premium"', false)
+            ->assertSee('href="/register?plan=pro"', false)
+            ->assertSee('Billing starts on day 8 until canceled', false);
+    }
+
+    public function test_register_route_preserves_selected_plan_for_spa(): void
+    {
+        $this->get('/register?plan=premium')
+            ->assertOk()
+            ->assertSee('data-selected-plan="premium"', false);
+    }
+
     public function test_visitors_can_request_early_access(): void
     {
         $response = $this->post(route('early-access.store'), [
             'email' => 'harley@example.com',
+            'plan' => 'premium',
         ]);
 
         $response->assertRedirect('/#early-access');
@@ -142,6 +168,8 @@ class LandingPageFeatureTest extends TestCase
             'email' => 'harley@example.com',
             'name' => null,
             'use_case' => null,
+            'requested_plan' => 'premium',
+            'source' => 'pricing',
         ]);
     }
 

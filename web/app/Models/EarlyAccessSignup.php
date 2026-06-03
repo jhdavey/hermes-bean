@@ -10,6 +10,7 @@ class EarlyAccessSignup extends Model
         'name',
         'email',
         'use_case',
+        'requested_plan',
         'source',
     ];
 }

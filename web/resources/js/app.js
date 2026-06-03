@@ -13,6 +13,7 @@ const mount = document.getElementById('heybean-web-app');
 if (mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const initialMode = mount.dataset.authMode || 'login';
+    const initialSelectedPlan = ['free', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
     const dashboardChangeKey = 'heybean.dashboard.changeId';
@@ -33,6 +34,23 @@ if (mount) {
         { key: 'indigo', label: 'Indigo', accent: '#4f46e5' },
     ];
     const appThemesByKey = new Map(appThemes.map((theme) => [theme.key, theme]));
+    const subscriptionPlans = {
+        free: {
+            label: 'Free',
+            summary: '2 workspaces, basic Bean chat and voice, push reminders, and a low daily Bean limit.',
+            trial: 'Free plan selected',
+        },
+        premium: {
+            label: 'Premium',
+            summary: '5 workspaces, higher Bean usage, email reminders, recurring items, multiple calendars, and 1 year of history.',
+            trial: 'Premium 7-day free trial selected',
+        },
+        pro: {
+            label: 'Pro',
+            summary: 'Unlimited workspaces, highest Bean usage, higher external tool budget, full history, and priority background work.',
+            trial: 'Pro 7-day free trial selected',
+        },
+    };
 
     const icons = {
         add: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -60,6 +78,7 @@ if (mount) {
 
     const state = {
         authMode: initialMode,
+        selectedPlan: initialSelectedPlan,
         token: readToken(),
         remember: localStorage.getItem(rememberKey) === 'true',
         phase: 'loading',
@@ -905,7 +924,7 @@ if (mount) {
                             ${register ? `<span class="hb-section-icon">${icons.user}</span>` : `<img src="${escapeAttr(logoUrl)}" alt="">`}
                             <div>
                                 <h1>${forgot ? 'Reset password' : register ? 'We are currently accepting early access beta users' : 'Login'}</h1>
-                                ${register ? "<p>Sign up for early access and we'll email you as soon as we can give you access.</p>" : ''}
+                                ${register ? selectedPlanMarkup() || "<p>Sign up for early access and we'll email you as soon as we can give you access.</p>" : ''}
                             </div>
                         </div>
                         ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
@@ -926,6 +945,7 @@ if (mount) {
             <form class="hb-form" data-action="${register ? 'register' : 'login'}">
                 ${register ? labelInput('Name', 'name', 'text', '', 'autocomplete="name"') : ''}
                 ${labelInput('Email', 'email', 'email', '', 'required autocomplete="email"')}
+                ${register && state.selectedPlan ? `<input type="hidden" name="plan" value="${escapeAttr(state.selectedPlan)}">` : ''}
                 ${register ? '' : `
                     ${labelInput('Password', 'password', 'password', '', 'required autocomplete="current-password" minlength="1"')}
                     <label class="hb-checkbox-row"><input type="checkbox" name="remember" ${state.remember ? 'checked' : ''}> Remember me</label>
@@ -936,6 +956,15 @@ if (mount) {
                     <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
                 </div>
             </form>`;
+    }
+
+    function selectedPlanMarkup() {
+        const plan = subscriptionPlans[state.selectedPlan];
+        if (!plan) return '';
+        return `
+            <p>${escapeHtml(plan.trial)}.</p>
+            <p class="hb-item-meta">${escapeHtml(plan.summary)} ${state.selectedPlan === 'free' ? 'No card needed.' : 'Trial billing starts on day 8 until canceled once checkout is enabled.'}</p>
+        `;
     }
 
     function forgotFormMarkup() {
@@ -2781,7 +2810,7 @@ if (mount) {
                 return;
             }
             const payload = action === 'register'
-                ? { name: data.name, email: data.email }
+                ? { name: data.name, email: data.email, ...(data.plan ? { plan: data.plan } : {}) }
                 : { email: data.email, password: data.password };
             const result = await api(`/auth/${action}`, { method: 'POST', body: payload });
             if (action === 'register') {

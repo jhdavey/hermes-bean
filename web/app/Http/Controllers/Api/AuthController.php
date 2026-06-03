@@ -53,14 +53,17 @@ class AuthController extends Controller
         $data = $request->validate([
             'name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'email' => ['required', 'string', 'email:rfc', 'max:255'],
+            'plan' => ['sometimes', 'nullable', Rule::in(['free', 'premium', 'pro'])],
         ]);
+        $requestedPlan = $data['plan'] ?? null;
 
         $signup = EarlyAccessSignup::updateOrCreate(
             ['email' => $data['email']],
             [
                 'name' => $data['name'] ?: null,
                 'use_case' => null,
-                'source' => 'app_register',
+                'requested_plan' => $requestedPlan,
+                'source' => $requestedPlan ? 'pricing_register' : 'app_register',
             ],
         );
 

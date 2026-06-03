@@ -10,12 +10,14 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
+Route::view('/pricing', 'pricing')->name('pricing');
 Route::view('/login', 'app')->name('login');
 Route::view('/register', 'app')->name('register');
 Route::view('/forgot-password', 'app')->name('password.request');
@@ -84,14 +86,17 @@ Route::get('/workspace-invitations/{token}/accept', function (string $token) {
 Route::post('/early-access', function (Request $request) {
     $validated = $request->validate([
         'email' => ['required', 'email:rfc', 'max:255'],
+        'plan' => ['sometimes', 'nullable', Rule::in(['free', 'premium', 'pro'])],
     ]);
+    $requestedPlan = $validated['plan'] ?? null;
 
     EarlyAccessSignup::updateOrCreate(
         ['email' => strtolower($validated['email'])],
         [
             'name' => null,
             'use_case' => null,
-            'source' => 'landing',
+            'requested_plan' => $requestedPlan,
+            'source' => $requestedPlan ? 'pricing' : 'landing',
         ],
     );
 
