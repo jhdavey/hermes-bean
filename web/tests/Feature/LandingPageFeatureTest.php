@@ -133,7 +133,7 @@ class LandingPageFeatureTest extends TestCase
     {
         $this->get('/pricing')
             ->assertOk()
-            ->assertSee('Choose the Bean plan for the way your day actually runs.', false)
+            ->assertSee('<h1>Pricing</h1>', false)
             ->assertSee('More context, more coordination, more Bean.', false)
             ->assertSee('Why upgrade', false)
             ->assertDontSee('Start light', false)

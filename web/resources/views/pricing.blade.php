@@ -25,7 +25,7 @@
     <main class="wrap hero">
         <section>
             <span class="pill">7-day free trial on paid plans</span>
-            <h1>Choose the Bean plan for the way your day actually runs.</h1>
+            <h1>Pricing</h1>
             <p>From personal follow-through to full household coordination, Bean brings your calendar, tasks, reminders, chat, and voice help into one calm daily command center.</p>
             <div class="hero-actions">
                 <a class="button" href="#plans">Compare plans</a>
