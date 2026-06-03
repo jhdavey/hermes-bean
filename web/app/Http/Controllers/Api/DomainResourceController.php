@@ -12,6 +12,7 @@ use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\PlanLimitService;
 use App\Services\RecurringCalendarEventService;
 use App\Services\StructuredHermesActionService;
 use App\Services\WorkspaceItemSyncService;
@@ -33,6 +34,7 @@ class DomainResourceController extends Controller
         private readonly StructuredHermesActionService $actions,
         private readonly GoogleCalendarSyncService $googleCalendar,
         private readonly RecurringCalendarEventService $recurringCalendarEvents,
+        private readonly PlanLimitService $planLimits,
     ) {}
 
     public function listTasks(Request $request): JsonResponse
@@ -56,10 +58,12 @@ class DomainResourceController extends Controller
 
     public function listPastTasks(Request $request): JsonResponse
     {
+        $historyDays = $this->planLimits->historyDaysFor($request->user());
+
         return $this->listed(
             $this->scoped(Task::query(), $request)
                 ->whereNotNull('completed_at')
-                ->where('completed_at', '>=', now()->subDays(10))
+                ->when($historyDays !== null, fn ($query) => $query->where('completed_at', '>=', now()->subDays($historyDays)))
                 ->where(function ($query): void {
                     $query->whereIn('status', ['completed', 'complete', 'done'])
                         ->orWhereIn('status', ['COMPLETED', 'Complete', 'Done']);
@@ -163,6 +167,9 @@ class DomainResourceController extends Controller
 
         $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
         $validated = $this->withDefaultUncategorizedColor($validated, true);
+        if ($this->taskRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringTasks($request->user())) {
+            return $this->planLimits->limitResponse('Recurring tasks are available on Premium, Pro, and Enterprise plans.');
+        }
 
         if ($this->taskStatusIsCompleted($validated['status'] ?? null) && empty($validated['completed_at'])) {
             $validated['completed_at'] = now();
@@ -196,6 +203,9 @@ class DomainResourceController extends Controller
 
         $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
+        if ($this->taskRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringTasks($request->user())) {
+            return $this->planLimits->limitResponse('Recurring tasks are available on Premium, Pro, and Enterprise plans.');
+        }
 
         $statusProvided = array_key_exists('status', $validated);
         if ($statusProvided) {
@@ -253,6 +263,10 @@ class DomainResourceController extends Controller
         ]);
         $this->normalizeDateFields($validated, ['remind_at']);
         $validated = $this->withDefaultUncategorizedColor($validated, true);
+        if ($this->reminderRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringReminders($request->user())) {
+            return $this->planLimits->limitResponse('Recurring reminders are available on Premium, Pro, and Enterprise plans.');
+        }
+
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $reminder = Reminder::create($this->owned($request, $validated));
@@ -279,6 +293,10 @@ class DomainResourceController extends Controller
         ]);
         $this->normalizeDateFields($validated, ['remind_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
+        if ($this->reminderRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringReminders($request->user())) {
+            return $this->planLimits->limitResponse('Recurring reminders are available on Premium, Pro, and Enterprise plans.');
+        }
+
         $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
@@ -321,6 +339,10 @@ class DomainResourceController extends Controller
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
         $validated = $this->withDefaultUncategorizedColor($validated, true);
+        if ($this->calendarRecurrenceRequested($validated['recurrence'] ?? null) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
+            return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
+        }
+
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
         $event = CalendarEvent::create($this->owned($request, $validated));
@@ -357,6 +379,10 @@ class DomainResourceController extends Controller
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
+        if (array_key_exists('recurrence', $validated) && $this->calendarRecurrenceRequested($validated['recurrence']) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
+            return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
+        }
+
         $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
@@ -1068,6 +1094,37 @@ class DomainResourceController extends Controller
     private function taskStatusIsCompleted(?string $status): bool
     {
         return in_array(strtolower(str_replace('_', '-', (string) $status)), ['completed', 'complete', 'done'], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function taskRecurrenceRequested(array $attributes): bool
+    {
+        $recurrence = $this->taskRecurrenceValue((array) ($attributes['metadata'] ?? []));
+
+        return $recurrence !== null && $recurrence !== 'none';
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function reminderRecurrenceRequested(array $attributes): bool
+    {
+        $recurrence = $this->taskRecurrenceValue((array) ($attributes['metadata'] ?? []));
+
+        return $recurrence !== null && $recurrence !== 'none';
+    }
+
+    private function calendarRecurrenceRequested(mixed $recurrence): bool
+    {
+        if (! is_scalar($recurrence)) {
+            return false;
+        }
+
+        $normalized = strtolower(trim((string) $recurrence));
+
+        return ! in_array($normalized, ['', 'none', 'no', 'never', 'once', 'one_time'], true);
     }
 
     /**

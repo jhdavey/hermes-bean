@@ -16,7 +16,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
     public function test_creating_recurring_calendar_event_materializes_event_blocks_for_one_year(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
-        $token = $this->apiToken('recurring-create@example.com');
+        $token = $this->premiumApiToken('recurring-create@example.com');
         $user = User::where('email', 'recurring-create@example.com')->firstOrFail();
         $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
 
@@ -110,7 +110,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
     public function test_deleting_a_generated_occurrence_can_remove_only_that_event(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
-        $token = $this->apiToken('recurring-delete-single@example.com');
+        $token = $this->premiumApiToken('recurring-delete-single@example.com');
         $user = User::where('email', 'recurring-delete-single@example.com')->firstOrFail();
         $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
 
@@ -142,7 +142,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
     public function test_deleting_a_linked_generated_occurrence_removes_that_date_from_selected_workspaces(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
-        $token = $this->apiToken('recurring-delete-linked-single@example.com');
+        $token = $this->premiumApiToken('recurring-delete-linked-single@example.com');
         $user = User::where('email', 'recurring-delete-linked-single@example.com')->firstOrFail();
         $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
@@ -195,7 +195,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
     public function test_deleting_generated_occurrence_future_removes_that_and_following_events(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
-        $token = $this->apiToken('recurring-delete-future@example.com');
+        $token = $this->premiumApiToken('recurring-delete-future@example.com');
         $user = User::where('email', 'recurring-delete-future@example.com')->firstOrFail();
         $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
 
@@ -231,7 +231,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
     public function test_deleting_generated_occurrence_all_removes_the_series(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
-        $token = $this->apiToken('recurring-delete-all@example.com');
+        $token = $this->premiumApiToken('recurring-delete-all@example.com');
         $user = User::where('email', 'recurring-delete-all@example.com')->firstOrFail();
         $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
 
@@ -262,7 +262,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
     public function test_deleting_source_single_hides_only_the_original_occurrence(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));
-        $token = $this->apiToken('recurring-delete-source-single@example.com');
+        $token = $this->premiumApiToken('recurring-delete-source-single@example.com');
         $user = User::where('email', 'recurring-delete-source-single@example.com')->firstOrFail();
         $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
 

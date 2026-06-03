@@ -195,7 +195,7 @@ class AssistantDomainApiTest extends TestCase
 
     public function test_calendar_events_support_editable_details_categories_recurrence_and_reminders(): void
     {
-        $token = $this->apiToken();
+        $token = $this->premiumApiToken('calendar-details@example.com');
 
         $categoryId = $this->withToken($token)->postJson('/api/event-categories', [
             'name' => 'Family',
@@ -346,7 +346,7 @@ class AssistantDomainApiTest extends TestCase
             ]),
         ], 'Updated the event and added a reminder.');
 
-        $token = $this->apiToken();
+        $token = $this->premiumApiToken('agent-calendar-recurrence@example.com');
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Design review',
             'starts_at' => '2026-05-14T15:00:00Z',
@@ -488,7 +488,7 @@ class AssistantDomainApiTest extends TestCase
 
     public function test_task_list_shows_overdue_open_tasks_while_today_stays_date_scoped(): void
     {
-        $token = $this->apiToken();
+        $token = $this->premiumApiToken('task-list-recurring@example.com');
 
         $this->withToken($token)->postJson('/api/tasks', [
             'title' => 'Yesterday one-off',
@@ -568,7 +568,7 @@ class AssistantDomainApiTest extends TestCase
     public function test_completing_recurring_tasks_advances_due_date_instead_of_archiving(): void
     {
         Carbon::setTestNow('2026-06-01T16:00:00Z');
-        $token = $this->apiToken();
+        $token = $this->premiumApiToken('recurring-task-complete@example.com');
 
         $monthlyTaskId = $this->withToken($token)->postJson('/api/tasks', [
             'title' => 'Replace air filter',
@@ -600,7 +600,7 @@ class AssistantDomainApiTest extends TestCase
     public function test_recurring_tasks_support_multi_month_and_yearly_advancement(): void
     {
         Carbon::setTestNow('2026-06-01T16:00:00Z');
-        $token = $this->apiToken();
+        $token = $this->premiumApiToken('recurring-task-intervals@example.com');
 
         $biMonthlyTaskId = $this->withToken($token)->postJson('/api/tasks', [
             'title' => 'Service water filter',

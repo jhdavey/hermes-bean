@@ -529,6 +529,9 @@ class HermesApiClient {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     bool? isCritical,
@@ -544,6 +547,9 @@ class HermesApiClient {
         'title': title,
         'starts_at': startsAt,
         'ends_at': endsAt,
+        'description': notes,
+        if (location != null) 'location': location,
+        if (status != null) 'status': status,
         'category': category,
         'color': color,
         'recurrence': recurrence,
@@ -663,12 +669,17 @@ class HermesApiClient {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     bool? isCritical,
     String? recurrence,
     Map<String, Object?>? metadata,
     List<Object>? syncToWorkspaceIds,
+    bool clearNotes = false,
+    bool clearLocation = false,
   }) async {
     final data = await _sendJson(
       'PATCH',
@@ -677,6 +688,9 @@ class HermesApiClient {
         'title': title,
         'starts_at': startsAt,
         'ends_at': endsAt,
+        if (notes != null || clearNotes) 'description': notes,
+        if (location != null || clearLocation) 'location': location,
+        if (status != null) 'status': status,
         'category': category,
         'color': color,
         'recurrence': recurrence,
@@ -1958,6 +1972,9 @@ class HermesCalendarEvent {
     this.linkedWorkspaceIds = const [],
     this.startsAt,
     this.endsAt,
+    this.notes,
+    this.location,
+    this.status,
     this.category,
     this.color,
     this.isCritical = false,
@@ -1971,6 +1988,9 @@ class HermesCalendarEvent {
   final List<int> linkedWorkspaceIds;
   final String? startsAt;
   final String? endsAt;
+  final String? notes;
+  final String? location;
+  final String? status;
   final String? category;
   final String? color;
   final bool isCritical;
@@ -2013,6 +2033,9 @@ class HermesCalendarEvent {
       ).map(_readIntOrNull).whereType<int>().toList(),
       startsAt: (json['starts_at'] ?? json['startsAt']) as String?,
       endsAt: (json['ends_at'] ?? json['endsAt']) as String?,
+      notes: (json['description'] ?? json['notes']) as String?,
+      location: json['location'] as String?,
+      status: json['status'] as String?,
       category:
           json['category'] as String? ?? (metadata?['category'] as String?),
       color: json['color'] as String? ?? (metadata?['color'] as String?),
@@ -2032,14 +2055,20 @@ class HermesCalendarEvent {
     String? title,
     String? startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     bool? isCritical,
     String? recurrence,
     Map<String, Object?>? metadata,
     bool clearEndsAt = false,
+    bool clearNotes = false,
     bool clearCategory = false,
     bool clearColor = false,
+    bool clearLocation = false,
+    bool clearStatus = false,
     bool clearRecurrence = false,
     bool clearMetadata = false,
   }) => HermesCalendarEvent(
@@ -2049,6 +2078,9 @@ class HermesCalendarEvent {
     linkedWorkspaceIds: linkedWorkspaceIds,
     startsAt: startsAt ?? this.startsAt,
     endsAt: clearEndsAt ? null : endsAt ?? this.endsAt,
+    notes: clearNotes ? null : notes ?? this.notes,
+    location: clearLocation ? null : location ?? this.location,
+    status: clearStatus ? null : status ?? this.status,
     category: clearCategory ? null : category ?? this.category,
     color: clearColor ? null : color ?? this.color,
     isCritical: isCritical ?? this.isCritical,

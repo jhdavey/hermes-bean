@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\ActivityEventController;
 use App\Http\Controllers\Api\AdminCommandRunController;
 use App\Http\Controllers\Api\AdminHermesController;
+use App\Http\Controllers\Api\AdminPlanLimitController;
 use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminUsageController;
 use App\Http\Controllers\Api\AssistantRunController;
@@ -115,6 +116,11 @@ Route::middleware('api.rate_limit')->group(function (): void {
             Route::get('/settings', [AdminSettingsController::class, 'show']);
             Route::get('/settings/models', [AdminSettingsController::class, 'models']);
             Route::patch('/settings', [AdminSettingsController::class, 'update']);
+            Route::get('/plan-limits', [AdminPlanLimitController::class, 'show']);
+            Route::patch('/plan-limits/plans', [AdminPlanLimitController::class, 'updatePlans']);
+            Route::post('/plan-limits/enterprise-customers', [AdminPlanLimitController::class, 'storeEnterpriseCustomer']);
+            Route::patch('/plan-limits/enterprise-customers/{enterpriseCustomerLimit}', [AdminPlanLimitController::class, 'updateEnterpriseCustomer']);
+            Route::delete('/plan-limits/enterprise-customers/{enterpriseCustomerLimit}', [AdminPlanLimitController::class, 'destroyEnterpriseCustomer']);
             Route::get('/hermes/status', [AdminHermesController::class, 'show']);
             Route::post('/hermes/update', [AdminHermesController::class, 'update']);
             Route::get('/command-runs/{commandRun}', [AdminCommandRunController::class, 'show']);

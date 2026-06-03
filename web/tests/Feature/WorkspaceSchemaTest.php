@@ -152,7 +152,7 @@ class WorkspaceSchemaTest extends TestCase
 
     public function test_workspace_list_includes_google_calendar_mappings_after_selection(): void
     {
-        $token = $this->apiToken('workspace-calendar-map@example.com');
+        $token = $this->premiumApiToken('workspace-calendar-map@example.com');
         $user = User::where('email', 'workspace-calendar-map@example.com')->firstOrFail();
         $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $connectionId = DB::table('google_calendar_connections')->insertGetId([
@@ -405,7 +405,7 @@ class WorkspaceSchemaTest extends TestCase
 
     public function test_task_update_from_linked_copy_updates_original_without_creating_reverse_duplicate(): void
     {
-        $token = $this->apiToken('update-linked-task-copy@example.com');
+        $token = $this->premiumApiToken('update-linked-task-copy@example.com');
         $user = User::where('email', 'update-linked-task-copy@example.com')->firstOrFail();
         $personalWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $family = app(WorkspaceService::class)->createHousehold($user, 'Family');

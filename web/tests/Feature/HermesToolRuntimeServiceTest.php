@@ -966,7 +966,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 ]],
             ], 200);
 
-        $token = $this->apiToken('tool-recurrence@example.com');
+        $token = $this->premiumApiToken('tool-recurrence@example.com');
         $user = User::where('email', 'tool-recurrence@example.com')->firstOrFail();
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
@@ -985,6 +985,58 @@ class HermesToolRuntimeServiceTest extends TestCase
         $event = CalendarEvent::where('user_id', $user->id)->where('title', 'Family standup')->firstOrFail();
         $this->assertSame('weekly', $event->recurrence);
         $this->assertSame('weekly', $event->metadata['recurrence'] ?? null);
+    }
+
+    public function test_base_plan_blocks_recurring_resources_from_bean_tool_calls(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_task',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_task',
+                                'arguments' => json_encode([
+                                    'title' => 'Pay rent',
+                                    'recurrence' => 'monthly',
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Recurring tasks need an upgraded plan.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-base-recurrence@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'add pay rent every month',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.action.failed'])
+            ->assertJsonFragment(['reason' => 'Recurring tasks are available on Premium, Pro, and Enterprise plans.']);
+
+        $this->assertDatabaseMissing('tasks', [
+            'title' => 'Pay rent',
+        ]);
     }
 
     public function test_successful_tool_execution_returns_fallback_if_final_narration_call_fails(): void

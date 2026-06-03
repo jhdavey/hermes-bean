@@ -26,6 +26,7 @@ class StructuredHermesActionService
         private readonly GoogleCalendarSyncService $googleCalendar,
         private readonly WorkspaceItemSyncService $workspaceItemSync,
         private readonly WorkspaceService $workspaces,
+        private readonly PlanLimitService $planLimits,
     ) {}
 
     /**
@@ -508,6 +509,7 @@ class StructuredHermesActionService
         $metadata = $this->metadataWithRecurrence($parameters, [
             'created_by' => 'structured_hermes_action',
         ]);
+        $this->guardRecurringTaskAccess($session, $metadata);
 
         $task = Task::create([
             'user_id' => $session->user_id,
@@ -536,6 +538,7 @@ class StructuredHermesActionService
         $metadata = $this->metadataWithRecurrence($parameters, [
             'created_by' => 'structured_hermes_action',
         ]);
+        $this->guardRecurringReminderAccess($session, $metadata);
 
         $reminder = Reminder::create([
             'user_id' => $session->user_id,
@@ -570,6 +573,7 @@ class StructuredHermesActionService
         $metadata = $this->metadataWithRecurrence($parameters, [
             'created_by' => 'structured_hermes_action',
         ]);
+        $this->guardRecurringCalendarAccess($session, $recurrence);
 
         $calendarEvent = CalendarEvent::create([
             'user_id' => $session->user_id,
@@ -605,6 +609,7 @@ class StructuredHermesActionService
         $updates = $this->withDefaultUncategorizedColor($updates);
         if (array_key_exists('recurrence', $parameters) || array_key_exists('metadata', $parameters)) {
             $updates['metadata'] = $this->metadataWithRecurrence($parameters, is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($task->metadata ?? []));
+            $this->guardRecurringTaskAccess($session, $updates['metadata']);
         }
         if (array_key_exists('due_at', $parameters)) {
             $updates['due_at'] = $parameters['due_at'] ? $this->parseDashboardDateTime($session, $parameters['due_at']) : null;
@@ -673,6 +678,7 @@ class StructuredHermesActionService
         $updates = $this->withDefaultUncategorizedColor($updates);
         if (array_key_exists('recurrence', $parameters) || array_key_exists('metadata', $parameters)) {
             $updates['metadata'] = $this->metadataWithRecurrence($parameters, is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($reminder->metadata ?? []));
+            $this->guardRecurringReminderAccess($session, $updates['metadata']);
         }
         if (array_key_exists('remind_at', $parameters)) {
             $updates['remind_at'] = $this->parseDashboardDateTime($session, $parameters['remind_at']);
@@ -693,6 +699,7 @@ class StructuredHermesActionService
         if (array_key_exists('recurrence', $parameters) || array_key_exists('metadata', $parameters)) {
             $updates['recurrence'] = $this->recurrenceValueFromParameters($parameters);
             $updates['metadata'] = $this->metadataWithRecurrence($parameters, is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($calendarEvent->metadata ?? []));
+            $this->guardRecurringCalendarAccess($session, $updates['recurrence']);
         }
         if (array_key_exists('starts_at', $parameters)) {
             $updates['starts_at'] = $this->parseDashboardDateTime($session, $parameters['starts_at']);
@@ -1144,6 +1151,39 @@ class StructuredHermesActionService
             : ($metadata['recurrence'] ?? null);
 
         return $this->normalizeRecurrence($raw)['value'];
+    }
+
+    private function guardRecurringTaskAccess(ConversationSession $session, array $metadata): void
+    {
+        if ($this->recurrenceRequested($metadata['recurrence'] ?? null) && ! $this->planLimits->canUseRecurringTasks($this->sessionUser($session))) {
+            throw new InvalidArgumentException('Recurring tasks are available on Premium, Pro, and Enterprise plans.');
+        }
+    }
+
+    private function guardRecurringReminderAccess(ConversationSession $session, array $metadata): void
+    {
+        if ($this->recurrenceRequested($metadata['recurrence'] ?? null) && ! $this->planLimits->canUseRecurringReminders($this->sessionUser($session))) {
+            throw new InvalidArgumentException('Recurring reminders are available on Premium, Pro, and Enterprise plans.');
+        }
+    }
+
+    private function guardRecurringCalendarAccess(ConversationSession $session, mixed $recurrence): void
+    {
+        if ($this->recurrenceRequested($recurrence) && ! $this->planLimits->canUseRecurringCalendar($this->sessionUser($session))) {
+            throw new InvalidArgumentException('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
+        }
+    }
+
+    private function recurrenceRequested(mixed $recurrence): bool
+    {
+        $normalized = $this->normalizeRecurrenceValue($recurrence);
+
+        return $normalized !== null && $normalized !== 'none';
+    }
+
+    private function sessionUser(ConversationSession $session): User
+    {
+        return User::findOrFail($session->user_id);
     }
 
     /**

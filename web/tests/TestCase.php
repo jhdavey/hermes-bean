@@ -32,4 +32,15 @@ abstract class TestCase extends BaseTestCase
 
         return $token;
     }
+
+    protected function premiumApiToken(string $email): string
+    {
+        $token = $this->apiToken($email);
+
+        User::where('email', $email)->firstOrFail()
+            ->forceFill(['subscription_tier' => 'premium'])
+            ->save();
+
+        return $token;
+    }
 }

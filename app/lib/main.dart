@@ -313,6 +313,10 @@ String beanFriendlyErrorMessage(Object error, {String? action}) {
   final prefix = action == null || action.trim().isEmpty
       ? 'Bean hit a little snag.'
       : 'Bean could not ${action.trim()}.';
+  final subscriptionLimitMessage = _subscriptionLimitMessageFromError(error);
+  if (subscriptionLimitMessage != null) {
+    return '$prefix $subscriptionLimitMessage';
+  }
   final guidance = _beanErrorGuidance(error);
   return '$prefix $guidance Don’t worry — your data is safe, and if this keeps happening we’ll fix it as soon as possible.';
 }
@@ -324,6 +328,10 @@ String beanFriendlyChatFailureMessage(Object error) {
 
 String _beanErrorGuidance(Object error) {
   if (error is HermesApiException) {
+    final subscriptionLimitMessage = _subscriptionLimitMessageFromApiBody(
+      error.body,
+    );
+    if (subscriptionLimitMessage != null) return subscriptionLimitMessage;
     final validationMessage = error.statusCode == 400 || error.statusCode == 422
         ? _validationHintFromApiBody(error.body)
         : null;
@@ -365,6 +373,46 @@ String _beanErrorGuidance(Object error) {
     return 'Bean could not open that on this device. Please update the app or try again.';
   }
   return 'Something unexpected happened. Please try again in a moment.';
+}
+
+String? _subscriptionLimitMessageFromError(Object error) {
+  if (error is HermesApiException) {
+    return _subscriptionLimitMessageFromApiBody(error.body);
+  }
+  return null;
+}
+
+String? _subscriptionLimitMessageFromApiBody(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, Object?>) {
+      final error = decoded['error'];
+      final code = error is Map ? error['code']?.toString() : null;
+      final message =
+          (error is Map ? error['message'] : null) ?? decoded['message'];
+      if (code == 'subscription_limit_reached' && message is String) {
+        return _safeValidationSentence(message);
+      }
+      if (code == 'bean_usage_limit' && message is String) {
+        return _safeValidationSentence(message);
+      }
+      final topCode = decoded['code']?.toString();
+      if (topCode == 'bean_usage_limit' && message is String) {
+        return _safeValidationSentence(message);
+      }
+    }
+  } catch (_) {
+    // Raw error bodies are intentionally never shown to users.
+  }
+  return null;
+}
+
+bool _isPlanLimitMessage(String? message) {
+  final normalized = (message ?? '').toLowerCase();
+  return normalized.contains('current plan includes') ||
+      normalized.contains('available on premium') ||
+      normalized.contains('ai usage limit') ||
+      normalized.contains('external lookup usage limit');
 }
 
 String? _validationHintFromApiBody(String body) {
@@ -858,6 +906,34 @@ List<Object> _initialSyncWorkspaceIds({
       .toList();
 }
 
+Object _workspaceValue(HermesWorkspace workspace) =>
+    workspace.numericId ?? workspace.id;
+
+bool _workspaceValuesMatch(Object? first, Object? second) {
+  if (first == null || second == null) return first == second;
+  return first.toString() == second.toString();
+}
+
+int? _workspaceValueToInt(Object? value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  return int.tryParse(value.toString());
+}
+
+Object? _workspaceValueForId(
+  List<HermesWorkspace> workspaces,
+  String? workspaceId,
+) {
+  if (workspaceId == null) return null;
+  for (final workspace in workspaces) {
+    if (workspace.id == workspaceId ||
+        workspace.numericId?.toString() == workspaceId) {
+      return _workspaceValue(workspace);
+    }
+  }
+  return int.tryParse(workspaceId) ?? workspaceId;
+}
+
 Future<List<Object>?> _confirmWorkspaceDeleteSelection(
   BuildContext context, {
   required String itemTitle,
@@ -1058,6 +1134,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _error;
   String? _loadingStatusText;
   bool _busy = false;
+  bool _dashboardLoading = false;
   String _chatRunState = 'Ready';
   int _chatRunToken = 0;
   _HomeDestination _selectedDestination = _HomeDestination.today;
@@ -1166,6 +1243,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         pending.startsAt,
       ) &&
       refreshed.category == pending.category &&
+      refreshed.notes == pending.notes &&
       refreshed.color == pending.color &&
       refreshed.recurrence == pending.recurrence &&
       refreshed.isCritical == pending.isCritical;
@@ -1433,6 +1511,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = const [];
         _events = const [];
         _phase = _AuthPhase.signedIn;
+        _dashboardLoading = true;
         _loadingStatusText = null;
       });
 
@@ -1513,6 +1592,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = summary.approvals;
         _events = results[6] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
+        _dashboardLoading = false;
         _loadingStatusText = null;
         _error = refreshError == null
             ? null
@@ -1548,6 +1628,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = const [];
         _events = const [];
         _phase = _AuthPhase.signedOut;
+        _dashboardLoading = false;
         _loadingStatusText = null;
       });
     }
@@ -2012,10 +2093,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _user = refreshedUser;
         _session = result.session;
+        _error = null;
         if (result.status == 'cancelled') {
           _chatRunState = 'Stopped';
         } else if (result.assistantMessage != null) {
           _messages.add(_displayableAssistantMessage(result.assistantMessage!));
+          final assistantContent = result.assistantMessage!.content;
+          if (_isPlanLimitMessage(assistantContent)) {
+            _error = assistantContent;
+          }
         } else if (result.status == 'blocked' && result.blocker != null) {
           final reason = _readBlockerReason(result.blocker);
           _messages.add(
@@ -2382,6 +2468,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (_phase != _AuthPhase.signedIn || session == null) return;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
+    setState(() => _dashboardLoading = true);
     try {
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected();
       final results = await Future.wait<Object>([
@@ -2423,18 +2510,24 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
         _events = results[6] as List<HermesActivityEvent>;
+        _dashboardLoading = false;
         _error = null;
       });
       _syncReminderNotifications();
       _cacheCurrentDashboardSnapshot();
     } catch (error) {
       if (!mounted) return;
-      setState(
-        () => _error = beanFriendlyErrorMessage(
+      setState(() {
+        _dashboardLoading = false;
+        _error = beanFriendlyErrorMessage(
           error,
           action: 'refresh your latest data',
-        ),
-      );
+        );
+      });
+    } finally {
+      if (mounted && refreshGeneration == _dashboardRefreshGeneration) {
+        setState(() => _dashboardLoading = false);
+      }
     }
   }
 
@@ -2446,6 +2539,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final generation = ++_workspaceRefreshGeneration;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
+    setState(() => _dashboardLoading = true);
     try {
       final user = await widget.apiClient.me();
       final sessionDetails = await _loadDailySessionForUser(
@@ -2511,6 +2605,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
         _events = results[6] as List<HermesActivityEvent>;
+        _dashboardLoading = false;
         _error = null;
       });
       _syncReminderNotifications();
@@ -2521,9 +2616,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           generation != _workspaceRefreshGeneration) {
         return;
       }
-      setState(
-        () => _error = beanFriendlyErrorMessage(error, action: errorAction),
-      );
+      setState(() {
+        _dashboardLoading = false;
+        _error = beanFriendlyErrorMessage(error, action: errorAction);
+      });
+    } finally {
+      if (mounted && generation == _workspaceRefreshGeneration) {
+        setState(() => _dashboardLoading = false);
+      }
     }
   }
 
@@ -2673,6 +2773,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String? color,
     bool? isCritical,
     int? parentTaskId,
+    int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds = const [],
     List<String> googleCalendarIds = const [],
@@ -2697,7 +2798,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               color: normalizedColor,
               isCritical: isCritical ?? false,
               metadata: metadata.isEmpty ? null : metadata,
-              workspaceId: _user?.activeWorkspace?.numericId,
+              workspaceId: workspaceId,
               syncToWorkspaceIds: syncToWorkspaceIds,
             )
           : await widget.apiClient.updateTask(
@@ -2754,6 +2855,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       onEventCategorySaved: _saveEventCategory,
       workspaces: _user?.workspaces ?? const [],
       activeWorkspaceId: _user?.activeWorkspace?.id,
+      showPrimaryWorkspaceSelector: true,
+      initialPrimaryWorkspaceId: _user?.activeWorkspace == null
+          ? null
+          : _workspaceValue(_user!.activeWorkspace!),
       googleCalendarStatus: _googleCalendarStatus,
       showRecurrence: true,
       recurrenceTitle: 'Task recurrence',
@@ -2770,6 +2875,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           category: result['category'] as String?,
           color: result['color'] as String?,
           isCritical: result['isCritical'] as bool?,
+          workspaceId: result['workspaceId'] as int?,
           recurrenceMetadata:
               result['recurrenceMetadata'] as Map<String, Object?>?,
           syncToWorkspaceIds:
@@ -2802,6 +2908,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       onEventCategorySaved: _saveEventCategory,
       workspaces: _user?.workspaces ?? const [],
       activeWorkspaceId: _user?.activeWorkspace?.id,
+      showPrimaryWorkspaceSelector: true,
+      initialPrimaryWorkspaceId: _user?.activeWorkspace == null
+          ? null
+          : _workspaceValue(_user!.activeWorkspace!),
       googleCalendarStatus: _googleCalendarStatus,
       showRecurrence: true,
       recurrenceTitle: 'Reminder repeats',
@@ -2818,6 +2928,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           status: 'pending',
           category: result['category'] as String?,
           color: result['color'] as String?,
+          workspaceId: result['workspaceId'] as int?,
           recurrenceMetadata:
               result['recurrenceMetadata'] as Map<String, Object?>?,
           syncToWorkspaceIds:
@@ -2867,6 +2978,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String status = 'pending',
     String? category,
     String? color,
+    int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds = const [],
     List<String> googleCalendarIds = const [],
@@ -2892,7 +3004,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               category: category,
               color: normalizedColor,
               metadata: metadata.isEmpty ? null : metadata,
-              workspaceId: _user?.activeWorkspace?.numericId,
+              workspaceId: workspaceId,
               syncToWorkspaceIds: syncToWorkspaceIds,
             )
           : await widget.apiClient.updateReminder(
@@ -3080,6 +3192,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -3100,6 +3215,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         title: title,
         startsAt: wireStartsAt,
         endsAt: wireEndsAt,
+        notes: notes,
+        location: location,
+        status: status,
         category: category,
         color: normalizedColor,
         recurrence: recurrence,
@@ -3156,6 +3274,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -3176,12 +3297,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       title: title,
       startsAt: wireStartsAt,
       endsAt: wireEndsAt,
+      notes: notes,
+      location: location,
+      status: status,
       category: category,
       color: normalizedColor,
       recurrence: recurrence,
       metadata: metadata,
       isCritical: isCritical ?? event.isCritical,
       clearEndsAt: wireEndsAt == null,
+      clearNotes: notes == null,
+      clearLocation: location == null,
       clearCategory: category == null,
       clearColor: false,
       clearRecurrence: recurrence == null,
@@ -3203,11 +3329,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         title: title,
         startsAt: wireStartsAt,
         endsAt: wireEndsAt,
+        notes: notes,
+        location: location,
+        status: status,
         category: category,
         color: normalizedColor,
         recurrence: recurrence,
         metadata: metadata,
         isCritical: isCritical,
+        clearNotes: notes == null,
+        clearLocation: location == null,
         syncToWorkspaceIds: syncToWorkspaceIds,
       );
       if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
@@ -3392,6 +3523,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             required String title,
             required String startsAt,
             String? endsAt,
+            String? notes,
+            String? location,
+            String? status,
             String? category,
             String? color,
             String? recurrence,
@@ -3407,6 +3541,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             title: title,
             startsAt: startsAt,
             endsAt: endsAt,
+            notes: notes,
+            location: location,
+            status: status,
             category: category,
             color: color,
             recurrence: recurrence,
@@ -3505,6 +3642,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _busy = false;
           _phase = _AuthPhase.signedOut;
           _loadingStatusText = null;
+          _dashboardLoading = false;
           _user = null;
           _session = null;
           _messages.clear();
@@ -3527,6 +3665,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _busy = false;
           _phase = _AuthPhase.signedOut;
           _loadingStatusText = null;
+          _dashboardLoading = false;
           _user = null;
           _session = null;
           _messages.clear();
@@ -3968,6 +4107,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     events: _events,
     messages: _messages,
     busy: _busy,
+    dashboardLoading: _dashboardLoading,
     chatRunState: _chatRunState,
     error: _error,
     selectedDestination: _selectedDestination,
@@ -4905,6 +5045,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.events,
     required this.messages,
     required this.busy,
+    required this.dashboardLoading,
     required this.chatRunState,
     required this.selectedDestination,
     required this.selectedCalendarDay,
@@ -4957,6 +5098,7 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
   final bool busy;
+  final bool dashboardLoading;
   final String chatRunState;
   final _HomeDestination selectedDestination;
   final DateTime selectedCalendarDay;
@@ -4986,6 +5128,7 @@ class _CommandCenterContent extends StatelessWidget {
     String? color,
     bool? isCritical,
     int? parentTaskId,
+    int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
     List<String> googleCalendarIds,
@@ -5003,6 +5146,7 @@ class _CommandCenterContent extends StatelessWidget {
     String status,
     String? category,
     String? color,
+    int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
     List<String> googleCalendarIds,
@@ -5018,6 +5162,9 @@ class _CommandCenterContent extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -5036,6 +5183,9 @@ class _CommandCenterContent extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -5161,6 +5311,37 @@ class _CommandCenterContent extends StatelessWidget {
             error: error,
           ),
         };
+        final limitBanner = _isPlanLimitMessage(error)
+            ? _PlanLimitErrorBanner(
+                message: error,
+                launchExternalUrl: launchExternalUrl,
+              )
+            : null;
+        final panelChildren = <Widget>[
+          if (dashboardLoading) ...[
+            const _SignedInLoadingStrip(),
+            const SizedBox(height: 12),
+          ],
+          if (limitBanner != null &&
+              selectedDestination != _HomeDestination.settings) ...[
+            limitBanner,
+            const SizedBox(height: 12),
+          ],
+          if (selectedDestination == _HomeDestination.bean)
+            Expanded(child: selectedPanel)
+          else
+            selectedPanel,
+        ];
+        final selectedPanelWithStatus =
+            panelChildren.length == 1 && panelChildren.single == selectedPanel
+            ? selectedPanel
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: selectedDestination == _HomeDestination.bean
+                    ? MainAxisSize.max
+                    : MainAxisSize.min,
+                children: panelChildren,
+              );
         final right = Column(
           children: [
             _AccountCard(
@@ -5195,12 +5376,12 @@ class _CommandCenterContent extends StatelessWidget {
         );
         if (constraints.maxWidth < 900 ||
             selectedDestination != _HomeDestination.bean) {
-          return selectedPanel;
+          return selectedPanelWithStatus;
         }
         // The Bean chat tab owns the full screen; activity/approvals live inside
         // its top menu and bottom approval dock instead of side dashboard cards.
         if (selectedDestination == _HomeDestination.bean) {
-          return selectedPanel;
+          return selectedPanelWithStatus;
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -6142,11 +6323,183 @@ class _ProgressCard extends StatelessWidget {
           ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
         ),
         Text('$taskCount live tasks loaded'),
-        if (error != null)
-          Text(error!, style: const TextStyle(color: HeyBeanTheme.warning)),
+        if (error != null) _InlinePlanLimitError(message: error!),
       ],
     ),
   );
+}
+
+class _SignedInLoadingStrip extends StatelessWidget {
+  const _SignedInLoadingStrip();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('signed-in-loading-strip'),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: const Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox.square(
+          dimension: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        SizedBox(width: 10),
+        Text(
+          'Loading...',
+          style: TextStyle(
+            color: HeyBeanTheme.muted,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _PlanLimitErrorBanner extends StatelessWidget {
+  const _PlanLimitErrorBanner({
+    required this.message,
+    required this.launchExternalUrl,
+  });
+
+  final String? message;
+  final ExternalUrlLauncher launchExternalUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = message;
+    if (!_isPlanLimitMessage(text)) return const SizedBox.shrink();
+
+    return Container(
+      key: const Key('plan-limit-error-banner'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.accent.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .24)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: HeyBeanTheme.accent.withValues(alpha: .14),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.workspace_premium_rounded,
+                  color: HeyBeanTheme.accentStrong,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Upgrade to keep going',
+                      style: TextStyle(
+                        color: HeyBeanTheme.text,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      text!,
+                      style: const TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontWeight: FontWeight.w700,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: const Key('plan-limit-upgrade-action'),
+              onPressed: () => launchExternalUrl(_pricingUrl),
+              icon: const Icon(Icons.arrow_upward_rounded),
+              label: const Text('Upgrade plan'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InlinePlanLimitError extends StatelessWidget {
+  const _InlinePlanLimitError({
+    super.key,
+    required this.message,
+    this.launchExternalUrl = _defaultLaunchExternalUrl,
+  });
+
+  final String message;
+  final ExternalUrlLauncher launchExternalUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isPlanLimitMessage(message)) {
+      return Text(message, style: const TextStyle(color: Colors.redAccent));
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.accent.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .24)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Upgrade to keep going',
+            style: TextStyle(
+              color: HeyBeanTheme.text,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            style: const TextStyle(
+              color: HeyBeanTheme.muted,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              key: const Key('inline-plan-limit-upgrade-action'),
+              onPressed: () => launchExternalUrl(_pricingUrl),
+              icon: const Icon(Icons.arrow_upward_rounded),
+              label: const Text('Upgrade plan'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ActivityCard extends StatelessWidget {
@@ -6222,6 +6575,7 @@ class _TodayHomeView extends StatelessWidget {
     String? color,
     bool? isCritical,
     int? parentTaskId,
+    int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
     List<String> googleCalendarIds,
@@ -6236,6 +6590,9 @@ class _TodayHomeView extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -6254,6 +6611,9 @@ class _TodayHomeView extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -6407,6 +6767,12 @@ class _TodayHomeView extends StatelessWidget {
       onEventCategorySaved: onEventCategorySaved,
       workspaces: user.workspaces,
       activeWorkspaceId: user.activeWorkspace?.id,
+      showPrimaryWorkspaceSelector: task == null,
+      initialPrimaryWorkspaceId: task == null
+          ? (user.activeWorkspace == null
+                ? null
+                : _workspaceValue(user.activeWorkspace!))
+          : null,
       googleCalendarStatus: googleCalendarStatus,
       initialGoogleCalendarIds: task?.googleCalendarIds ?? const [],
       initialSyncWorkspaceIds: task == null
@@ -6428,6 +6794,7 @@ class _TodayHomeView extends StatelessWidget {
           color: result['color'] as String?,
           isCritical: result['isCritical'] as bool?,
           parentTaskId: parentTask?.id,
+          workspaceId: result['workspaceId'] as int?,
           recurrenceMetadata:
               result['recurrenceMetadata'] as Map<String, Object?>?,
           syncToWorkspaceIds:
@@ -6471,6 +6838,7 @@ class _TodayHomeView extends StatelessWidget {
       color: result['color'] as String?,
       isCritical: result['isCritical'] as bool?,
       parentTaskId: parentTask?.id,
+      workspaceId: result['workspaceId'] as int?,
       recurrenceMetadata: result['recurrenceMetadata'] as Map<String, Object?>?,
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
@@ -6662,6 +7030,9 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -7046,6 +7417,9 @@ class _TwoDayTimelinePage extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -7525,6 +7899,9 @@ class _MultiDayEventSpanRow extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -7674,6 +8051,9 @@ class _MultiDayEventSpan extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -7723,6 +8103,9 @@ class _MultiDayEventSpan extends StatelessWidget {
               required String title,
               required String startsAt,
               String? endsAt,
+              String? notes,
+              String? location,
+              String? status,
               String? category,
               String? color,
               String? recurrence,
@@ -7739,6 +8122,9 @@ class _MultiDayEventSpan extends StatelessWidget {
               title: title,
               startsAt: startsAt,
               endsAt: endsAt,
+              notes: notes,
+              location: location,
+              status: status,
               category: category,
               color: color,
               recurrence: recurrence,
@@ -7757,6 +8143,9 @@ class _MultiDayEventSpan extends StatelessWidget {
           startsAt:
               savedEvent.startsAt ?? DateTime.now().toUtc().toIso8601String(),
           endsAt: savedEvent.endsAt,
+          notes: savedEvent.notes,
+          location: savedEvent.location,
+          status: savedEvent.status,
           category: savedEvent.category,
           color: savedEvent.color,
           recurrence: savedEvent.recurrence,
@@ -7865,6 +8254,9 @@ class _AllDayEventRow extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -7930,6 +8322,9 @@ class _AllDayEventRow extends StatelessWidget {
                   required String title,
                   required String startsAt,
                   String? endsAt,
+                  String? notes,
+                  String? location,
+                  String? status,
                   String? category,
                   String? color,
                   String? recurrence,
@@ -7946,6 +8341,9 @@ class _AllDayEventRow extends StatelessWidget {
                   title: title,
                   startsAt: startsAt,
                   endsAt: endsAt,
+                  notes: notes,
+                  location: location,
+                  status: status,
                   category: category,
                   color: color,
                   recurrence: recurrence,
@@ -7965,6 +8363,9 @@ class _AllDayEventRow extends StatelessWidget {
                   savedEvent.startsAt ??
                   DateTime.now().toUtc().toIso8601String(),
               endsAt: savedEvent.endsAt,
+              notes: savedEvent.notes,
+              location: savedEvent.location,
+              status: savedEvent.status,
               category: savedEvent.category,
               color: savedEvent.color,
               recurrence: savedEvent.recurrence,
@@ -8054,6 +8455,9 @@ class _TimelineEventBlock extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -8140,6 +8544,9 @@ class _TimelineEventBlock extends StatelessWidget {
                 required String title,
                 required String startsAt,
                 String? endsAt,
+                String? notes,
+                String? location,
+                String? status,
                 String? category,
                 String? color,
                 String? recurrence,
@@ -8156,6 +8563,9 @@ class _TimelineEventBlock extends StatelessWidget {
                 title: title,
                 startsAt: startsAt,
                 endsAt: endsAt,
+                notes: notes,
+                location: location,
+                status: status,
                 category: category,
                 color: color,
                 recurrence: recurrence,
@@ -8174,6 +8584,9 @@ class _TimelineEventBlock extends StatelessWidget {
             startsAt:
                 savedEvent.startsAt ?? DateTime.now().toUtc().toIso8601String(),
             endsAt: savedEvent.endsAt,
+            notes: savedEvent.notes,
+            location: savedEvent.location,
+            status: savedEvent.status,
             category: savedEvent.category,
             color: savedEvent.color,
             recurrence: savedEvent.recurrence,
@@ -8251,6 +8664,9 @@ typedef _CalendarEventSaveCallback =
       required String title,
       required String startsAt,
       String? endsAt,
+      String? notes,
+      String? location,
+      String? status,
       String? category,
       String? color,
       String? recurrence,
@@ -8390,12 +8806,15 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   late final TextEditingController _title;
   late final TextEditingController _startsAt;
   late final TextEditingController _endsAt;
+  late final TextEditingController _notes;
+  late final TextEditingController _location;
   late final TextEditingController _category;
   late final TextEditingController _reminder;
   late final TextEditingController _eventInterval;
   late final TextEditingController _reminderInterval;
   late String _color;
   late String _recurrence;
+  late String _status;
   late List<HermesEventCategory> _categories;
   String _eventIntervalUnit = 'days';
   String _reminderRecurrence = 'none';
@@ -8437,6 +8856,12 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     (value: 'interval', label: 'Every X'),
   ];
 
+  static const _statuses = <({String value, String label})>[
+    (value: 'confirmed', label: 'Confirmed'),
+    (value: 'tentative', label: 'Tentative'),
+    (value: 'cancelled', label: 'Cancelled'),
+  ];
+
   static const _weekdays = <({String value, String label})>[
     (value: 'mon', label: 'Mon'),
     (value: 'tue', label: 'Tue'),
@@ -8470,6 +8895,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
           ? _formatCalendarEventEndDate(event.startsAt, event.endsAt)
           : _formatCalendarEventDateTime(event.endsAt),
     );
+    _notes = TextEditingController(text: event.notes ?? '');
+    _location = TextEditingController(text: event.location ?? '');
     _categories = [...widget.eventCategories];
     _category = TextEditingController(text: event.category ?? '');
     _reminder = TextEditingController();
@@ -8522,6 +8949,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         _recurrences.any((recurrence) => recurrence.value == event.recurrence)
         ? event.recurrence!
         : 'none';
+    _status = _statuses.any((status) => status.value == event.status)
+        ? event.status!
+        : 'confirmed';
     _eventSpecificDays.addAll(
       ((eventMetadata['days'] as List?) ?? const <Object?>[])
           .whereType<String>(),
@@ -8537,6 +8967,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _title.dispose();
     _startsAt.dispose();
     _endsAt.dispose();
+    _notes.dispose();
+    _location.dispose();
     _category.dispose();
     _reminder.dispose();
     _eventInterval.dispose();
@@ -8663,6 +9095,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             : _title.text.trim(),
         startsAt: startsAt,
         endsAt: endsAt,
+        notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+        location: _location.text.trim().isEmpty ? null : _location.text.trim(),
+        status: _status,
         category: _category.text.trim().isEmpty ? null : _category.text.trim(),
         color: _color,
         recurrence: _recurrence,
@@ -9145,18 +9580,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     required String? originalValue,
     String? referenceValue,
   }) async {
-    final initial =
-        _calendarEventDateInputToDate(
-          controller.text,
-          originalValue: originalValue,
-          referenceValue: _calendarEventDateInputToDate(referenceValue ?? ''),
-        ) ??
-        _dateOnly(DateTime.now());
-    final selected = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(initial.year - 2),
-      lastDate: DateTime(initial.year + 5),
+    final selected = await _showStandardDateTimeDock(
+      context,
+      initialText: controller.text,
+      originalValue: originalValue,
+      referenceValue: referenceValue,
+      keyPrefix: 'event-date',
+      dateOnly: true,
     );
     if (selected != null && mounted) {
       setState(() {
@@ -9315,10 +9745,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             ),
                             const SizedBox(height: 18),
                             if (_validationError != null) ...[
-                              Text(
-                                _validationError!,
+                              _InlinePlanLimitError(
                                 key: const Key('event-validation-error'),
-                                style: const TextStyle(color: Colors.redAccent),
+                                message: _validationError!,
                               ),
                               const SizedBox(height: 8),
                             ],
@@ -9374,6 +9803,56 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                   Icons.expand_less_rounded,
                                 ),
                               ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _ShellCard(
+                        child: TextField(
+                          key: const Key('event-notes-field'),
+                          controller: _notes,
+                          minLines: 3,
+                          maxLines: 6,
+                          decoration: const InputDecoration(
+                            labelText: 'Description',
+                            hintText: 'Add event description',
+                            prefixIcon: Icon(Icons.notes_rounded),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _ShellCard(
+                        child: Column(
+                          children: [
+                            TextField(
+                              key: const Key('event-location-field'),
+                              controller: _location,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Location',
+                                prefixIcon: Icon(Icons.place_rounded),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            DropdownButtonFormField<String>(
+                              key: const Key('event-status-field'),
+                              initialValue: _status,
+                              decoration: const InputDecoration(
+                                labelText: 'Status',
+                                prefixIcon: Icon(Icons.event_available_rounded),
+                              ),
+                              items: [
+                                for (final status in _statuses)
+                                  DropdownMenuItem(
+                                    value: status.value,
+                                    child: Text(status.label),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setState(() => _status = value);
+                              },
                             ),
                           ],
                         ),
@@ -11385,6 +11864,9 @@ class _CalendarAgenda extends StatelessWidget {
     required String title,
     required String startsAt,
     String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
     String? category,
     String? color,
     String? recurrence,
@@ -11447,6 +11929,9 @@ class _CalendarAgenda extends StatelessWidget {
                           required String title,
                           required String startsAt,
                           String? endsAt,
+                          String? notes,
+                          String? location,
+                          String? status,
                           String? category,
                           String? color,
                           String? recurrence,
@@ -11463,6 +11948,9 @@ class _CalendarAgenda extends StatelessWidget {
                           title: title,
                           startsAt: startsAt,
                           endsAt: endsAt,
+                          notes: notes,
+                          location: location,
+                          status: status,
                           category: category,
                           color: color,
                           recurrence: recurrence,
@@ -11482,6 +11970,9 @@ class _CalendarAgenda extends StatelessWidget {
                           savedEvent.startsAt ??
                           DateTime.now().toUtc().toIso8601String(),
                       endsAt: savedEvent.endsAt,
+                      notes: savedEvent.notes,
+                      location: savedEvent.location,
+                      status: savedEvent.status,
                       category: savedEvent.category,
                       color: savedEvent.color,
                       recurrence: savedEvent.recurrence,
@@ -11502,6 +11993,7 @@ Future<DateTime?> _showStandardDateTimeDock(
   String? originalValue,
   String? referenceValue,
   String keyPrefix = 'standard',
+  bool dateOnly = false,
 }) async {
   final parsed =
       _parseCalendarEventDateTime(initialText, referenceValue) ??
@@ -11577,7 +12069,7 @@ Future<DateTime?> _showStandardDateTimeDock(
               ),
               const SizedBox(height: 14),
               Text(
-                'Choose date and time',
+                dateOnly ? 'Choose date' : 'Choose date and time',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: HeyBeanTheme.text,
                   fontWeight: FontWeight.w900,
@@ -11640,68 +12132,70 @@ Future<DateTime?> _showStandardDateTimeDock(
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 190,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CupertinoPicker(
-                        key: Key('$keyPrefix-time-hour-dial'),
-                        scrollController: hourController,
-                        itemExtent: 42,
-                        magnification: 1.08,
-                        useMagnifier: true,
-                        looping: true,
-                        onSelectedItemChanged: (index) =>
-                            selectedHourIndex = index % 12,
-                        children: [
-                          for (var hour = 1; hour <= 12; hour++)
-                            Center(child: Text(hour.toString())),
-                        ],
+              if (!dateOnly) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 190,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: CupertinoPicker(
+                          key: Key('$keyPrefix-time-hour-dial'),
+                          scrollController: hourController,
+                          itemExtent: 42,
+                          magnification: 1.08,
+                          useMagnifier: true,
+                          looping: true,
+                          onSelectedItemChanged: (index) =>
+                              selectedHourIndex = index % 12,
+                          children: [
+                            for (var hour = 1; hour <= 12; hour++)
+                              Center(child: Text(hour.toString())),
+                          ],
+                        ),
                       ),
-                    ),
-                    Text(
-                      ':',
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w900),
-                    ),
-                    Expanded(
-                      child: CupertinoPicker(
-                        key: Key('$keyPrefix-time-minute-dial'),
-                        scrollController: minuteController,
-                        itemExtent: 42,
-                        magnification: 1.08,
-                        useMagnifier: true,
-                        looping: true,
-                        onSelectedItemChanged: (index) =>
-                            selectedMinuteIndex = index % 12,
-                        children: [
-                          for (var minute = 0; minute < 60; minute += 5)
-                            Center(
-                              child: Text(minute.toString().padLeft(2, '0')),
-                            ),
-                        ],
+                      Text(
+                        ':',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w900),
                       ),
-                    ),
-                    Expanded(
-                      child: CupertinoPicker(
-                        key: Key('$keyPrefix-time-meridiem-dial'),
-                        scrollController: meridiemController,
-                        itemExtent: 42,
-                        magnification: 1.08,
-                        useMagnifier: true,
-                        onSelectedItemChanged: (index) =>
-                            selectedMeridiemIndex = index,
-                        children: const [
-                          Center(child: Text('AM')),
-                          Center(child: Text('PM')),
-                        ],
+                      Expanded(
+                        child: CupertinoPicker(
+                          key: Key('$keyPrefix-time-minute-dial'),
+                          scrollController: minuteController,
+                          itemExtent: 42,
+                          magnification: 1.08,
+                          useMagnifier: true,
+                          looping: true,
+                          onSelectedItemChanged: (index) =>
+                              selectedMinuteIndex = index % 12,
+                          children: [
+                            for (var minute = 0; minute < 60; minute += 5)
+                              Center(
+                                child: Text(minute.toString().padLeft(2, '0')),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                      Expanded(
+                        child: CupertinoPicker(
+                          key: Key('$keyPrefix-time-meridiem-dial'),
+                          scrollController: meridiemController,
+                          itemExtent: 42,
+                          magnification: 1.08,
+                          useMagnifier: true,
+                          onSelectedItemChanged: (index) =>
+                              selectedMeridiemIndex = index,
+                          children: const [
+                            Center(child: Text('AM')),
+                            Center(child: Text('PM')),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -11716,14 +12210,18 @@ Future<DateTime?> _showStandardDateTimeDock(
                     child: FilledButton(
                       key: Key('$keyPrefix-time-dock-done'),
                       onPressed: () {
-                        final hour12 = selectedHourIndex + 1;
-                        final minute = selectedMinuteIndex * 5;
-                        var hour24 = hour12 % 12;
-                        if (selectedMeridiemIndex == 1) hour24 += 12;
                         final year = yearStart + selectedYearIndex;
                         final month = selectedMonthIndex + 1;
                         final maxDay = DateTime(year, month + 1, 0).day;
                         final day = (selectedDayIndex + 1).clamp(1, maxDay);
+                        if (dateOnly) {
+                          Navigator.of(context).pop(DateTime(year, month, day));
+                          return;
+                        }
+                        final hour12 = selectedHourIndex + 1;
+                        final minute = selectedMinuteIndex * 5;
+                        var hour24 = hour12 % 12;
+                        if (selectedMeridiemIndex == 1) hour24 += 12;
                         Navigator.of(
                           context,
                         ).pop(DateTime(year, month, day, hour24, minute));
@@ -11864,6 +12362,8 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   onEventCategorySaved,
   List<HermesWorkspace> workspaces = const [],
   String? activeWorkspaceId,
+  bool showPrimaryWorkspaceSelector = false,
+  Object? initialPrimaryWorkspaceId,
   GoogleCalendarSyncStatus? googleCalendarStatus,
   List<String> initialGoogleCalendarIds = const [],
   List<Object> initialSyncWorkspaceIds = const [],
@@ -11889,12 +12389,10 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
     initialMetadata,
   );
   final syncWorkspaceIds = <Object>{...initialSyncWorkspaceIds};
+  Object? selectedPrimaryWorkspaceId = initialPrimaryWorkspaceId;
   final googleCalendarIds = <String>{...initialGoogleCalendarIds};
   final writableGoogleCalendars =
       googleCalendarStatus?.writableCalendars ?? const <GoogleCalendarInfo>[];
-  final syncTargets = workspaces
-      .where((workspace) => workspace.id != activeWorkspaceId)
-      .toList();
   String? validationError;
 
   Map<String, Object?>? buildPayload(
@@ -11940,6 +12438,8 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
           unit: recurrenceIntervalUnit,
         ),
       'syncToWorkspaceIds': syncWorkspaceIds.toList(),
+      if (showPrimaryWorkspaceSelector)
+        'workspaceId': _workspaceValueToInt(selectedPrimaryWorkspaceId),
       'googleCalendarIds': googleCalendarIds.toList()..sort(),
     };
   }
@@ -11978,338 +12478,601 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
     }
   }
 
+  Future<void> chooseDateTime(
+    BuildContext pickerContext,
+    StateSetter setModalState,
+  ) async {
+    final selected = await _showStandardDateTimeDock(
+      pickerContext,
+      initialText: timeController.text,
+      originalValue: initialTime,
+      keyPrefix: 'title-time',
+    );
+    if (selected == null) return;
+    setModalState(() {
+      timeController.text = _formatCalendarEventDateTime(
+        selected.toIso8601String(),
+      );
+      validationError = null;
+    });
+  }
+
   return showModalBottomSheet<Map<String, Object?>>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) => StatefulBuilder(
-      builder: (context, setModalState) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.92,
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-          decoration: const BoxDecoration(
-            color: HeyBeanTheme.surface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-            border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+      builder: (context, setModalState) {
+        final syncPrimaryWorkspaceId = showPrimaryWorkspaceSelector
+            ? selectedPrimaryWorkspaceId
+            : _workspaceValueForId(workspaces, activeWorkspaceId);
+        final syncTargets = workspaces
+            .where(
+              (workspace) => !_workspaceValuesMatch(
+                _workspaceValue(workspace),
+                syncPrimaryWorkspaceId,
+              ),
+            )
+            .toList();
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
           ),
-          child: SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _SectionTitle(
-                    icon: Icons.edit_note_rounded,
-                    title: title,
-                    subtitle: '',
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton.icon(
-                      key: const Key('title-time-editor-save'),
-                      onPressed: saving
-                          ? null
-                          : () => submitPayload(context, setModalState),
-                      icon: saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.check_rounded),
-                      label: Text(saving ? 'Saving...' : 'Save'),
+          child: Container(
+            height: MediaQuery.of(context).size.height * 0.92,
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            decoration: const BoxDecoration(
+              color: HeyBeanTheme.surface,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+              border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _SectionTitle(
+                      icon: Icons.edit_note_rounded,
+                      title: title,
+                      subtitle: '',
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  if (showCritical) ...[
                     Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilterChip(
-                        key: const Key('title-time-editor-critical-toggle'),
-                        avatar: Icon(
-                          isCritical
-                              ? Icons.star_rounded
-                              : Icons.star_border_rounded,
-                          color: isCritical
-                              ? HeyBeanTheme.warning
-                              : HeyBeanTheme.muted,
-                          size: 18,
-                        ),
-                        label: const Text('Critical'),
-                        selected: isCritical,
-                        onSelected: (selected) =>
-                            setModalState(() => isCritical = selected),
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.icon(
+                        key: const Key('title-time-editor-save'),
+                        onPressed: saving
+                            ? null
+                            : () => submitPayload(context, setModalState),
+                        icon: saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.check_rounded),
+                        label: Text(saving ? 'Saving...' : 'Save'),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                  ],
-                  TextFormField(
-                    key: const Key('title-time-editor-title'),
-                    controller: titleController,
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(labelText: titleLabel),
-                  ),
-                  const SizedBox(height: 12),
-                  if (modalCategories.isNotEmpty ||
-                      onEventCategorySaved != null) ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Category',
-                            style: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  color: HeyBeanTheme.text,
-                                  fontWeight: FontWeight.w800,
-                                ),
+                    const SizedBox(height: 14),
+                    if (showCritical) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FilterChip(
+                          key: const Key('title-time-editor-critical-toggle'),
+                          avatar: Icon(
+                            isCritical
+                                ? Icons.star_rounded
+                                : Icons.star_border_rounded,
+                            color: isCritical
+                                ? HeyBeanTheme.warning
+                                : HeyBeanTheme.muted,
+                            size: 18,
                           ),
+                          label: const Text('Critical'),
+                          selected: isCritical,
+                          onSelected: (selected) =>
+                              setModalState(() => isCritical = selected),
                         ),
-                        if (onEventCategorySaved != null)
-                          IconButton.filledTonal(
-                            key: const Key(
-                              'title-time-editor-category-add-action',
-                            ),
-                            tooltip: 'Create category',
-                            onPressed: savingCategory
-                                ? null
-                                : () async {
-                                    final categoryValues =
-                                        await showDialog<Map<String, String>>(
-                                          context: context,
-                                          builder: (context) =>
-                                              const _EventCategoryCreateDialog(
-                                                initialColor:
-                                                    _beanGreenCategoryColor,
-                                                colors: [
-                                                  (
-                                                    value:
-                                                        _beanGreenCategoryColor,
-                                                    label: 'Green',
-                                                  ),
-                                                  (
-                                                    value: '#007AFF',
-                                                    label: 'Blue',
-                                                  ),
-                                                  (
-                                                    value: '#FF9500',
-                                                    label: 'Orange',
-                                                  ),
-                                                  (
-                                                    value: '#AF52DE',
-                                                    label: 'Purple',
-                                                  ),
-                                                  (
-                                                    value: '#FF3B30',
-                                                    label: 'Red',
-                                                  ),
-                                                ],
-                                              ),
-                                        );
-                                    if (categoryValues == null) return;
-                                    final name =
-                                        categoryValues['name']?.trim() ?? '';
-                                    final color =
-                                        categoryValues['color']?.trim() ??
-                                        _beanGreenCategoryColor;
-                                    if (name.isEmpty) return;
-                                    setModalState(() => savingCategory = true);
-                                    try {
-                                      final saved = await onEventCategorySaved(
-                                        name: name,
-                                        color: color,
-                                      );
-                                      setModalState(() {
-                                        modalCategories = [
-                                          ...modalCategories.where(
-                                            (item) => item.id != saved.id,
-                                          ),
-                                          saved,
-                                        ];
-                                        selectedCategory = saved.name;
-                                        selectedColor = saved.color;
-                                        savingCategory = false;
-                                      });
-                                    } catch (_) {
-                                      setModalState(() {
-                                        savingCategory = false;
-                                        validationError =
-                                            'Could not create category.';
-                                      });
-                                    }
-                                  },
-                            icon: const Icon(Icons.add_rounded),
-                          ),
-                      ],
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    TextFormField(
+                      key: const Key('title-time-editor-title'),
+                      controller: titleController,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(labelText: titleLabel),
                     ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _CategoryOptionPill(
-                          key: const Key('title-time-editor-category-none'),
-                          label: 'No category',
-                          selected: selectedCategory.isEmpty,
-                          onTap: () => setModalState(() {
-                            selectedCategory = '';
-                            selectedColor = _themeCategoryColorHex();
-                          }),
+                    const SizedBox(height: 12),
+                    if (showTimeTextField)
+                      TextFormField(
+                        key: const Key('title-time-editor-time'),
+                        controller: timeController,
+                        readOnly: true,
+                        onTap: () => chooseDateTime(context, setModalState),
+                        decoration: InputDecoration(
+                          labelText: timeLabel,
+                          helperText: allowEmptyTime
+                              ? 'Optional · tap to choose date and time'
+                              : 'Required · tap to choose date and time',
+                          suffixIcon: IconButton(
+                            key: const Key('title-time-editor-open-picker'),
+                            tooltip: 'Choose date and time',
+                            onPressed: () =>
+                                chooseDateTime(context, setModalState),
+                            icon: const Icon(Icons.calendar_month_rounded),
+                          ),
                         ),
-                        for (final category in modalCategories)
+                      )
+                    else
+                      Container(
+                        key: const Key('title-time-editor-selected-time-label'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: HeyBeanTheme.surface2,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: HeyBeanTheme.border),
+                        ),
+                        child: Text(
+                          timeController.text.trim().isEmpty
+                              ? 'No date and time selected'
+                              : timeController.text.trim(),
+                          style: TextStyle(
+                            color: timeController.text.trim().isEmpty
+                                ? HeyBeanTheme.muted
+                                : HeyBeanTheme.text,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    if (modalCategories.isNotEmpty ||
+                        onEventCategorySaved != null) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Category',
+                              style: Theme.of(context).textTheme.labelLarge
+                                  ?.copyWith(
+                                    color: HeyBeanTheme.text,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                          ),
+                          if (onEventCategorySaved != null)
+                            IconButton.filledTonal(
+                              key: const Key(
+                                'title-time-editor-category-add-action',
+                              ),
+                              tooltip: 'Create category',
+                              onPressed: savingCategory
+                                  ? null
+                                  : () async {
+                                      final categoryValues =
+                                          await showDialog<Map<String, String>>(
+                                            context: context,
+                                            builder: (context) =>
+                                                const _EventCategoryCreateDialog(
+                                                  initialColor:
+                                                      _beanGreenCategoryColor,
+                                                  colors: [
+                                                    (
+                                                      value:
+                                                          _beanGreenCategoryColor,
+                                                      label: 'Green',
+                                                    ),
+                                                    (
+                                                      value: '#007AFF',
+                                                      label: 'Blue',
+                                                    ),
+                                                    (
+                                                      value: '#FF9500',
+                                                      label: 'Orange',
+                                                    ),
+                                                    (
+                                                      value: '#AF52DE',
+                                                      label: 'Purple',
+                                                    ),
+                                                    (
+                                                      value: '#FF3B30',
+                                                      label: 'Red',
+                                                    ),
+                                                  ],
+                                                ),
+                                          );
+                                      if (categoryValues == null) return;
+                                      final name =
+                                          categoryValues['name']?.trim() ?? '';
+                                      final color =
+                                          categoryValues['color']?.trim() ??
+                                          _beanGreenCategoryColor;
+                                      if (name.isEmpty) return;
+                                      setModalState(
+                                        () => savingCategory = true,
+                                      );
+                                      try {
+                                        final saved =
+                                            await onEventCategorySaved(
+                                              name: name,
+                                              color: color,
+                                            );
+                                        setModalState(() {
+                                          modalCategories = [
+                                            ...modalCategories.where(
+                                              (item) => item.id != saved.id,
+                                            ),
+                                            saved,
+                                          ];
+                                          selectedCategory = saved.name;
+                                          selectedColor = saved.color;
+                                          savingCategory = false;
+                                        });
+                                      } catch (_) {
+                                        setModalState(() {
+                                          savingCategory = false;
+                                          validationError =
+                                              'Could not create category.';
+                                        });
+                                      }
+                                    },
+                              icon: const Icon(Icons.add_rounded),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
                           _CategoryOptionPill(
-                            key: Key(
-                              'title-time-editor-category-${category.name.toLowerCase().replaceAll(' ', '-')}',
-                            ),
-                            dotKey: Key(
-                              'title-time-editor-category-dot-${category.name.toLowerCase().replaceAll(' ', '-')}',
-                            ),
-                            label: category.name,
-                            color: _safeCategoryColor(category.color),
-                            selected: selectedCategory == category.name,
+                            key: const Key('title-time-editor-category-none'),
+                            label: 'No category',
+                            selected: selectedCategory.isEmpty,
                             onTap: () => setModalState(() {
-                              selectedCategory = category.name;
-                              selectedColor = category.color;
+                              selectedCategory = '';
+                              selectedColor = _themeCategoryColorHex();
                             }),
                           ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  if (showTimeTextField)
-                    TextFormField(
-                      key: const Key('title-time-editor-time'),
-                      controller: timeController,
-                      textInputAction: TextInputAction.done,
-                      decoration: InputDecoration(
-                        labelText: timeLabel,
-                        helperText: allowEmptyTime
-                            ? 'Optional · examples: Today 5:00 PM, 5:00 PM, May 18 9 AM'
-                            : 'Required · examples: Today 5:00 PM, May 18 9 AM',
-                        suffixIcon: IconButton(
-                          key: const Key('title-time-editor-open-picker'),
-                          tooltip: 'Choose date and time',
-                          onPressed: () async {
-                            final selected = await _showStandardDateTimeDock(
-                              context,
-                              initialText: timeController.text,
-                              originalValue: initialTime,
-                              keyPrefix: 'title-time',
-                            );
-                            if (selected == null) return;
-                            setModalState(() {
-                              timeController.text =
-                                  _formatCalendarEventDateTime(
-                                    selected.toIso8601String(),
-                                  );
-                              validationError = null;
-                            });
-                          },
-                          icon: const Icon(Icons.calendar_month_rounded),
-                        ),
-                      ),
-                    )
-                  else
-                    Container(
-                      key: const Key('title-time-editor-selected-time-label'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: HeyBeanTheme.surface2,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: HeyBeanTheme.border),
-                      ),
-                      child: Text(
-                        timeController.text.trim().isEmpty
-                            ? 'No date and time selected'
-                            : timeController.text.trim(),
-                        style: TextStyle(
-                          color: timeController.text.trim().isEmpty
-                              ? HeyBeanTheme.muted
-                              : HeyBeanTheme.text,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  if (showNotes) ...[
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      key: const Key('title-time-editor-notes'),
-                      controller: notesController,
-                      minLines: 2,
-                      maxLines: 5,
-                      decoration: const InputDecoration(
-                        labelText: 'Notes',
-                        hintText: 'Add task details',
-                      ),
-                    ),
-                  ],
-                  if (showRecurrence) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      key: const Key('title-time-editor-recurrence-field'),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: HeyBeanTheme.surface2,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: HeyBeanTheme.border),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _SectionTitle(
-                            icon: Icons.repeat_rounded,
-                            title: recurrenceTitle,
-                            subtitle: recurrenceSubtitle,
-                            infoKey: const Key(
-                              'title-time-editor-recurrence-info',
+                          for (final category in modalCategories)
+                            _CategoryOptionPill(
+                              key: Key(
+                                'title-time-editor-category-${category.name.toLowerCase().replaceAll(' ', '-')}',
+                              ),
+                              dotKey: Key(
+                                'title-time-editor-category-dot-${category.name.toLowerCase().replaceAll(' ', '-')}',
+                              ),
+                              label: category.name,
+                              color: _safeCategoryColor(category.color),
+                              selected: selectedCategory == category.name,
+                              onTap: () => setModalState(() {
+                                selectedCategory = category.name;
+                                selectedColor = category.color;
+                              }),
                             ),
-                            infoTitle: recurrenceInfoTitle,
-                            infoBullets: const [
-                              'Choose None for a one-time item.',
-                              'Specific days repeats on the weekdays you select.',
-                              'Every X lets you build patterns like every 2 weeks or every 3 months.',
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final option in _titleTimeEditorRecurrences)
-                                ChoiceChip(
-                                  label: Text(option.label),
-                                  selected: recurrence == option.value,
-                                  onSelected: (_) => setModalState(() {
-                                    recurrence = option.value;
-                                  }),
-                                ),
-                            ],
-                          ),
-                          if (recurrence == 'specific_days') ...[
-                            const SizedBox(height: 10),
+                        ],
+                      ),
+                    ],
+                    if (showNotes) ...[
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        key: const Key('title-time-editor-notes'),
+                        controller: notesController,
+                        minLines: 2,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          labelText: 'Notes',
+                          hintText: 'Add task details',
+                        ),
+                      ),
+                    ],
+                    if (showRecurrence) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        key: const Key('title-time-editor-recurrence-field'),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: HeyBeanTheme.surface2,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: HeyBeanTheme.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _SectionTitle(
+                              icon: Icons.repeat_rounded,
+                              title: recurrenceTitle,
+                              subtitle: recurrenceSubtitle,
+                              infoKey: const Key(
+                                'title-time-editor-recurrence-info',
+                              ),
+                              infoTitle: recurrenceInfoTitle,
+                              infoBullets: const [
+                                'Choose None for a one-time item.',
+                                'Specific days repeats on the weekdays you select.',
+                                'Every X lets you build patterns like every 2 weeks or every 3 months.',
+                              ],
+                            ),
+                            const SizedBox(height: 12),
                             Wrap(
-                              key: const Key('title-time-editor-specific-days'),
                               spacing: 8,
                               runSpacing: 8,
                               children: [
-                                for (final day in _titleTimeEditorWeekdays)
+                                for (final option
+                                    in _titleTimeEditorRecurrences)
+                                  ChoiceChip(
+                                    label: Text(option.label),
+                                    selected: recurrence == option.value,
+                                    onSelected: (_) => setModalState(() {
+                                      recurrence = option.value;
+                                    }),
+                                  ),
+                              ],
+                            ),
+                            if (recurrence == 'specific_days') ...[
+                              const SizedBox(height: 10),
+                              Wrap(
+                                key: const Key(
+                                  'title-time-editor-specific-days',
+                                ),
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final day in _titleTimeEditorWeekdays)
+                                    FilterChip(
+                                      label: Text(day.label),
+                                      selected: recurrenceSpecificDays.contains(
+                                        day.value,
+                                      ),
+                                      onSelected: (selected) =>
+                                          setModalState(() {
+                                            if (selected) {
+                                              recurrenceSpecificDays.add(
+                                                day.value,
+                                              );
+                                            } else {
+                                              recurrenceSpecificDays.remove(
+                                                day.value,
+                                              );
+                                            }
+                                          }),
+                                    ),
+                                ],
+                              ),
+                            ],
+                            if (recurrence == 'interval') ...[
+                              const SizedBox(height: 10),
+                              Row(
+                                key: const Key(
+                                  'title-time-editor-interval-field',
+                                ),
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      key: const Key(
+                                        'title-time-editor-interval-count',
+                                      ),
+                                      controller: recurrenceIntervalController,
+                                      keyboardType: TextInputType.number,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Every',
+                                        prefixIcon: Icon(Icons.numbers_rounded),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  DropdownButton<String>(
+                                    key: const Key(
+                                      'title-time-editor-interval-unit',
+                                    ),
+                                    value: recurrenceIntervalUnit,
+                                    items: [
+                                      for (final unit
+                                          in _titleTimeEditorIntervalUnits)
+                                        DropdownMenuItem(
+                                          value: unit.value,
+                                          child: Text(unit.label),
+                                        ),
+                                    ],
+                                    onChanged: (value) => setModalState(() {
+                                      if (value != null) {
+                                        recurrenceIntervalUnit = value;
+                                      }
+                                    }),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        key: const Key('title-time-editor-picker-button'),
+                        onPressed: () => chooseDateTime(context, setModalState),
+                        icon: const Icon(Icons.schedule_rounded),
+                        label: const Text('Choose date and time'),
+                      ),
+                    ),
+                    if (writableGoogleCalendars.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        key: const Key(
+                          'title-time-editor-google-calendar-sync',
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: HeyBeanTheme.surface2,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: HeyBeanTheme.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Add to connected calendars',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Create or update this item on selected writable connected calendars.',
+                              style: TextStyle(color: HeyBeanTheme.muted),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final calendar in writableGoogleCalendars)
                                   FilterChip(
-                                    label: Text(day.label),
-                                    selected: recurrenceSpecificDays.contains(
-                                      day.value,
+                                    key: Key(
+                                      'title-time-editor-google-calendar-${calendar.id}',
+                                    ),
+                                    label: Text(calendar.summary),
+                                    selected: googleCalendarIds.contains(
+                                      calendar.id,
                                     ),
                                     onSelected: (selected) => setModalState(() {
                                       if (selected) {
-                                        recurrenceSpecificDays.add(day.value);
+                                        googleCalendarIds.add(calendar.id);
                                       } else {
-                                        recurrenceSpecificDays.remove(
-                                          day.value,
+                                        googleCalendarIds.remove(calendar.id);
+                                      }
+                                    }),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (showPrimaryWorkspaceSelector &&
+                        workspaces.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        key: const Key('title-time-editor-primary-workspace'),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: HeyBeanTheme.surface2,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: HeyBeanTheme.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Workspace',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Choose the primary workspace, or leave it unassigned.',
+                              style: TextStyle(color: HeyBeanTheme.muted),
+                            ),
+                            const SizedBox(height: 10),
+                            DropdownButtonFormField<String>(
+                              key: const Key(
+                                'title-time-editor-primary-workspace-select',
+                              ),
+                              initialValue:
+                                  selectedPrimaryWorkspaceId?.toString() ?? '',
+                              decoration: const InputDecoration(
+                                labelText: 'Primary workspace',
+                              ),
+                              items: [
+                                const DropdownMenuItem<String>(
+                                  value: '',
+                                  child: Text('No primary workspace'),
+                                ),
+                                for (final workspace in workspaces)
+                                  DropdownMenuItem<String>(
+                                    value: _workspaceValue(
+                                      workspace,
+                                    ).toString(),
+                                    child: Text(
+                                      workspace.isPersonal
+                                          ? 'Personal'
+                                          : workspace.name,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: saving
+                                  ? null
+                                  : (value) => setModalState(() {
+                                      selectedPrimaryWorkspaceId =
+                                          value == null || value.isEmpty
+                                          ? null
+                                          : value;
+                                      syncWorkspaceIds.removeWhere(
+                                        (workspaceId) => _workspaceValuesMatch(
+                                          workspaceId,
+                                          selectedPrimaryWorkspaceId,
+                                        ),
+                                      );
+                                    }),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (syncTargets.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        key: const Key('title-time-editor-workspace-sync'),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: HeyBeanTheme.surface2,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: HeyBeanTheme.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Sync to workspaces',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Copy this item only to selected workspaces.',
+                              style: TextStyle(color: HeyBeanTheme.muted),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final workspace in syncTargets)
+                                  FilterChip(
+                                    key: Key(
+                                      'title-time-editor-sync-workspace-${workspace.id}',
+                                    ),
+                                    label: Text(workspace.name),
+                                    selected: syncWorkspaceIds.any(
+                                      (workspaceId) => _workspaceValuesMatch(
+                                        workspaceId,
+                                        _workspaceValue(workspace),
+                                      ),
+                                    ),
+                                    onSelected: (selected) => setModalState(() {
+                                      final value = _workspaceValue(workspace);
+                                      if (selected) {
+                                        syncWorkspaceIds.add(value);
+                                      } else {
+                                        syncWorkspaceIds.removeWhere(
+                                          (workspaceId) =>
+                                              _workspaceValuesMatch(
+                                                workspaceId,
+                                                value,
+                                              ),
                                         );
                                       }
                                     }),
@@ -12317,244 +13080,73 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                               ],
                             ),
                           ],
-                          if (recurrence == 'interval') ...[
-                            const SizedBox(height: 10),
-                            Row(
-                              key: const Key(
-                                'title-time-editor-interval-field',
-                              ),
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    key: const Key(
-                                      'title-time-editor-interval-count',
-                                    ),
-                                    controller: recurrenceIntervalController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Every',
-                                      prefixIcon: Icon(Icons.numbers_rounded),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                DropdownButton<String>(
-                                  key: const Key(
-                                    'title-time-editor-interval-unit',
-                                  ),
-                                  value: recurrenceIntervalUnit,
-                                  items: [
-                                    for (final unit
-                                        in _titleTimeEditorIntervalUnits)
-                                      DropdownMenuItem(
-                                        value: unit.value,
-                                        child: Text(unit.label),
-                                      ),
-                                  ],
-                                  onChanged: (value) => setModalState(() {
-                                    if (value != null) {
-                                      recurrenceIntervalUnit = value;
-                                    }
-                                  }),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      key: const Key('title-time-editor-picker-button'),
-                      onPressed: () async {
-                        final selected = await _showStandardDateTimeDock(
-                          context,
-                          initialText: timeController.text,
-                          originalValue: initialTime,
-                          keyPrefix: 'title-time',
-                        );
-                        if (selected == null) return;
-                        setModalState(() {
-                          timeController.text = _formatCalendarEventDateTime(
-                            selected.toIso8601String(),
-                          );
-                          validationError = null;
-                        });
-                      },
-                      icon: const Icon(Icons.schedule_rounded),
-                      label: const Text('Choose date and time'),
-                    ),
-                  ),
-                  if (writableGoogleCalendars.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      key: const Key('title-time-editor-google-calendar-sync'),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: HeyBeanTheme.surface2,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: HeyBeanTheme.border),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Add to connected calendars',
-                            style: TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Create or update this item on selected writable connected calendars.',
-                            style: TextStyle(color: HeyBeanTheme.muted),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final calendar in writableGoogleCalendars)
-                                FilterChip(
-                                  key: Key(
-                                    'title-time-editor-google-calendar-${calendar.id}',
-                                  ),
-                                  label: Text(calendar.summary),
-                                  selected: googleCalendarIds.contains(
-                                    calendar.id,
-                                  ),
-                                  onSelected: (selected) => setModalState(() {
-                                    if (selected) {
-                                      googleCalendarIds.add(calendar.id);
-                                    } else {
-                                      googleCalendarIds.remove(calendar.id);
-                                    }
-                                  }),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  if (syncTargets.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      key: const Key('title-time-editor-workspace-sync'),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: HeyBeanTheme.surface2,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: HeyBeanTheme.border),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Sync to workspaces',
-                            style: TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Copy this item only to selected workspaces.',
-                            style: TextStyle(color: HeyBeanTheme.muted),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final workspace in syncTargets)
-                                FilterChip(
-                                  key: Key(
-                                    'title-time-editor-sync-workspace-${workspace.id}',
-                                  ),
-                                  label: Text(workspace.name),
-                                  selected: syncWorkspaceIds.contains(
-                                    workspace.numericId ?? workspace.id,
-                                  ),
-                                  onSelected: (selected) => setModalState(() {
-                                    final value =
-                                        workspace.numericId ?? workspace.id;
-                                    if (selected) {
-                                      syncWorkspaceIds.add(value);
-                                    } else {
-                                      syncWorkspaceIds.remove(value);
-                                    }
-                                  }),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  if (validationError != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      validationError!,
-                      style: const TextStyle(color: Colors.redAccent),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      if (deleteLabel != null)
-                        Expanded(
-                          child: FilledButton.icon(
-                            key: const Key('title-time-editor-delete'),
-                            style: _destructiveFilledButtonStyle(),
-                            onPressed: saving
-                                ? null
-                                : () => Navigator.of(
-                                    context,
-                                  ).pop({'delete': true}),
-                            icon: const Icon(Icons.delete_outline_rounded),
-                            label: Text(deleteLabel),
-                          ),
-                        ),
-                      if (deleteLabel != null) const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton.icon(
-                          key: const Key('title-time-editor-save-bottom'),
-                          onPressed: saving
-                              ? null
-                              : () => submitPayload(context, setModalState),
-                          icon: saving
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.check_rounded),
-                          label: Text(saving ? 'Saving...' : 'Save'),
                         ),
                       ),
                     ],
-                  ),
-                  if (completeLabel != null) ...[
-                    const SizedBox(height: 8),
-                    TextButton.icon(
-                      key: const Key('title-time-editor-complete'),
-                      onPressed: saving
-                          ? null
-                          : () => submitPayload(
-                              context,
-                              setModalState,
-                              complete: true,
+                    if (validationError != null) ...[
+                      const SizedBox(height: 8),
+                      _InlinePlanLimitError(message: validationError!),
+                    ],
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        if (deleteLabel != null)
+                          Expanded(
+                            child: FilledButton.icon(
+                              key: const Key('title-time-editor-delete'),
+                              style: _destructiveFilledButtonStyle(),
+                              onPressed: saving
+                                  ? null
+                                  : () => Navigator.of(
+                                      context,
+                                    ).pop({'delete': true}),
+                              icon: const Icon(Icons.delete_outline_rounded),
+                              label: Text(deleteLabel),
                             ),
-                      icon: const Icon(Icons.done_all_rounded),
-                      label: Text(completeLabel),
+                          ),
+                        if (deleteLabel != null) const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton.icon(
+                            key: const Key('title-time-editor-save-bottom'),
+                            onPressed: saving
+                                ? null
+                                : () => submitPayload(context, setModalState),
+                            icon: saving
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.check_rounded),
+                            label: Text(saving ? 'Saving...' : 'Save'),
+                          ),
+                        ),
+                      ],
                     ),
+                    if (completeLabel != null) ...[
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        key: const Key('title-time-editor-complete'),
+                        onPressed: saving
+                            ? null
+                            : () => submitPayload(
+                                context,
+                                setModalState,
+                                complete: true,
+                              ),
+                        icon: const Icon(Icons.done_all_rounded),
+                        label: Text(completeLabel),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     ),
   );
 }
@@ -12587,6 +13179,7 @@ class _TaskListCard extends StatefulWidget {
     String? color,
     bool? isCritical,
     int? parentTaskId,
+    int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
     List<String> googleCalendarIds,
@@ -12613,6 +13206,8 @@ class _TaskListCard extends StatefulWidget {
 class _TaskListCardState extends State<_TaskListCard> {
   bool _showCompleted = false;
   bool _showAll = false;
+  bool _showMoreThanSevenDays = false;
+  bool _showMoreThanThirtyDays = false;
 
   @override
   Widget build(BuildContext context) {
@@ -12625,9 +13220,36 @@ class _TaskListCardState extends State<_TaskListCard> {
         )
         .toList();
     visibleTasks.sort(_compareTasksByCompletionAndDueDate);
+    final currentTasks = <HermesTask>[];
+    final moreThanSevenDaysTasks = <HermesTask>[];
+    final moreThanThirtyDaysTasks = <HermesTask>[];
+    for (final task in visibleTasks) {
+      final daysAway = _taskDaysAway(task);
+      if (daysAway != null && daysAway > 30) {
+        moreThanThirtyDaysTasks.add(task);
+      } else if (daysAway != null && daysAway > 7) {
+        moreThanSevenDaysTasks.add(task);
+      } else {
+        currentTasks.add(task);
+      }
+    }
     final activeSubtasks = widget.tasks
         .where((task) => !_taskIsCompleted(task) && _taskIsSubtask(task))
         .toList();
+    Widget taskTile(HermesTask task) => _TaskItemTile(
+      task: task,
+      subtitle: _taskSubtitle(task),
+      subtasks: _subtasksFor(task, activeSubtasks),
+      pending: widget.pendingTaskIds.contains(task.id),
+      onTap: () => _showTaskEditor(context, task: task),
+      onCompleted: widget.onTaskCompleted,
+      onSubtaskCompleted: widget.onTaskCompleted,
+      onSubtaskTap: (subtask) => _showTaskEditor(context, task: subtask),
+      pendingTaskIds: widget.pendingTaskIds,
+      onAddSubtask: !_showCompleted && !_showAll && !_taskIsSubtask(task)
+          ? () => _showTaskEditor(context, parentTask: task)
+          : null,
+    );
     return Column(
       key: const Key('tasks-view'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -12674,24 +13296,37 @@ class _TaskListCardState extends State<_TaskListCard> {
                 ? 'No completed tasks'
                 : 'No active tasks',
           )
-        else
-          for (final task in visibleTasks)
-            _TaskItemTile(
-              task: task,
-              subtitle: _taskSubtitle(task),
-              subtasks: _subtasksFor(task, activeSubtasks),
-              pending: widget.pendingTaskIds.contains(task.id),
-              onTap: () => _showTaskEditor(context, task: task),
-              onCompleted: widget.onTaskCompleted,
-              onSubtaskCompleted: widget.onTaskCompleted,
-              onSubtaskTap: (subtask) =>
-                  _showTaskEditor(context, task: subtask),
-              pendingTaskIds: widget.pendingTaskIds,
-              onAddSubtask:
-                  !_showCompleted && !_showAll && !_taskIsSubtask(task)
-                  ? () => _showTaskEditor(context, parentTask: task)
-                  : null,
+        else ...[
+          for (final task in currentTasks) taskTile(task),
+          if (moreThanSevenDaysTasks.isNotEmpty)
+            _FutureTaskBucket(
+              key: const Key('task-future-seven-section'),
+              label: 'More than 7 days away',
+              count: moreThanSevenDaysTasks.length,
+              expanded: _showMoreThanSevenDays,
+              toggleKey: const Key('task-future-seven-toggle'),
+              onTap: () => setState(
+                () => _showMoreThanSevenDays = !_showMoreThanSevenDays,
+              ),
+              children: [
+                for (final task in moreThanSevenDaysTasks) taskTile(task),
+              ],
             ),
+          if (moreThanThirtyDaysTasks.isNotEmpty)
+            _FutureTaskBucket(
+              key: const Key('task-future-thirty-section'),
+              label: 'More than 30 days away',
+              count: moreThanThirtyDaysTasks.length,
+              expanded: _showMoreThanThirtyDays,
+              toggleKey: const Key('task-future-thirty-toggle'),
+              onTap: () => setState(
+                () => _showMoreThanThirtyDays = !_showMoreThanThirtyDays,
+              ),
+              children: [
+                for (final task in moreThanThirtyDaysTasks) taskTile(task),
+              ],
+            ),
+        ],
       ],
     );
   }
@@ -12729,6 +13364,10 @@ class _TaskListCardState extends State<_TaskListCard> {
       onEventCategorySaved: widget.onEventCategorySaved,
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
+      showPrimaryWorkspaceSelector: task == null,
+      initialPrimaryWorkspaceId: task == null
+          ? _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId)
+          : null,
       initialGoogleCalendarIds: task?.googleCalendarIds ?? const [],
       initialSyncWorkspaceIds: task == null
           ? const []
@@ -12749,6 +13388,7 @@ class _TaskListCardState extends State<_TaskListCard> {
           color: result['color'] as String?,
           isCritical: result['isCritical'] as bool?,
           parentTaskId: parentTask?.id,
+          workspaceId: result['workspaceId'] as int?,
           recurrenceMetadata:
               result['recurrenceMetadata'] as Map<String, Object?>?,
           syncToWorkspaceIds:
@@ -12795,6 +13435,7 @@ class _TaskListCardState extends State<_TaskListCard> {
       color: result['color'] as String?,
       isCritical: result['isCritical'] as bool?,
       parentTaskId: parentTask?.id,
+      workspaceId: result['workspaceId'] as int?,
       recurrenceMetadata: result['recurrenceMetadata'] as Map<String, Object?>?,
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
@@ -12806,6 +13447,110 @@ class _TaskListCardState extends State<_TaskListCard> {
               ?.map((value) => value.toString())
               .toList() ??
           const [],
+    );
+  }
+}
+
+class _FutureTaskBucket extends StatelessWidget {
+  const _FutureTaskBucket({
+    super.key,
+    required this.label,
+    required this.count,
+    required this.expanded,
+    required this.toggleKey,
+    required this.onTap,
+    required this.children,
+  });
+
+  final String label;
+  final int count;
+  final bool expanded;
+  final Key toggleKey;
+  final VoidCallback onTap;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final countLabel = '$count task${count == 1 ? '' : 's'}';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: HeyBeanTheme.surface2,
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              key: toggleKey,
+              borderRadius: BorderRadius.circular(14),
+              onTap: onTap,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: HeyBeanTheme.border),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      expanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      color: HeyBeanTheme.muted,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: HeyBeanTheme.text,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      countLabel,
+                      style: const TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (expanded) ...[
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  border: Border(
+                    left: BorderSide(color: HeyBeanTheme.border, width: 2),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: children,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -12831,6 +13576,7 @@ class _ReminderListCard extends StatefulWidget {
     String status,
     String? category,
     String? color,
+    int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
     List<String> googleCalendarIds,
@@ -12956,6 +13702,10 @@ class _ReminderListCardState extends State<_ReminderListCard> {
           : (_reminderIsCompleted(reminder) ? 'Mark pending' : 'Mark complete'),
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
+      showPrimaryWorkspaceSelector: reminder == null,
+      initialPrimaryWorkspaceId: reminder == null
+          ? _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId)
+          : null,
       initialGoogleCalendarIds: reminder?.googleCalendarIds ?? const [],
       initialSyncWorkspaceIds: reminder == null
           ? const []
@@ -12980,6 +13730,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
           status: status,
           category: result['category'] as String?,
           color: result['color'] as String?,
+          workspaceId: result['workspaceId'] as int?,
           recurrenceMetadata:
               result['recurrenceMetadata'] as Map<String, Object?>?,
           syncToWorkspaceIds:
@@ -13030,6 +13781,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       status: status,
       category: result['category'] as String?,
       color: result['color'] as String?,
+      workspaceId: result['workspaceId'] as int?,
       recurrenceMetadata: result['recurrenceMetadata'] as Map<String, Object?>?,
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
@@ -13118,7 +13870,10 @@ class _SettingsView extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             if (error != null) ...[
-              Text(error!, style: const TextStyle(color: HeyBeanTheme.warning)),
+              _InlinePlanLimitError(
+                message: error!,
+                launchExternalUrl: launchExternalUrl,
+              ),
               const SizedBox(height: 12),
             ],
             _CompactItemTile(
@@ -13151,6 +13906,7 @@ class _SettingsView extends StatelessWidget {
             const SizedBox(height: 8),
             _WorkspacesSettingsCard(
               apiClient: apiClient,
+              launchExternalUrl: launchExternalUrl,
               user: user,
               googleCalendarStatus: googleCalendarStatus,
               onChanged: onWorkspacesChanged,
@@ -13498,12 +14254,14 @@ class _NotificationPreferencesCardState
 class _WorkspacesSettingsCard extends StatefulWidget {
   const _WorkspacesSettingsCard({
     required this.apiClient,
+    required this.launchExternalUrl,
     required this.user,
     required this.onChanged,
     this.googleCalendarStatus,
   });
 
   final HermesApiClient apiClient;
+  final ExternalUrlLauncher launchExternalUrl;
   final HermesUser user;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
   final Future<void> Function() onChanged;
@@ -13929,9 +14687,9 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
             ),
             if (_message != null) ...[
               const SizedBox(height: 8),
-              Text(
-                _message!,
-                style: const TextStyle(color: HeyBeanTheme.muted),
+              _InlinePlanLimitError(
+                message: _message!,
+                launchExternalUrl: widget.launchExternalUrl,
               ),
             ],
             const SizedBox(height: 12),
@@ -14606,10 +15364,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
             ],
             if (_message != null) ...[
               const SizedBox(height: 8),
-              SelectableText(
-                _message!,
-                style: const TextStyle(color: HeyBeanTheme.muted),
-              ),
+              _InlinePlanLimitError(message: _message!),
             ],
             const SizedBox(height: 12),
             Wrap(
@@ -15220,6 +15975,14 @@ List<HermesTask> _tasksForMonthAgenda(List<HermesTask> tasks, DateTime month) {
   }).toList();
   visible.sort(_compareTasksByCompletionAndDueDate);
   return visible;
+}
+
+int? _taskDaysAway(HermesTask task) {
+  final dueAt = _parseTaskDueDate(task);
+  if (dueAt == null) return null;
+  final today = _dateOnly(DateTime.now());
+  final dueDay = _dateOnly(dueAt);
+  return dueDay.difference(today).inDays;
 }
 
 int _compareTasksByCompletionAndDueDate(HermesTask a, HermesTask b) {

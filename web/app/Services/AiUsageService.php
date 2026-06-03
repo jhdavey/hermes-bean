@@ -13,7 +13,10 @@ use Illuminate\Support\Facades\Log;
 
 class AiUsageService
 {
-    public function __construct(private readonly AdminSettingsService $adminSettings) {}
+    public function __construct(
+        private readonly AdminSettingsService $adminSettings,
+        private readonly PlanLimitService $planLimits,
+    ) {}
 
     public function estimateTokens(string $text): int
     {
@@ -65,11 +68,11 @@ class AiUsageService
         string $requestType = 'agent',
         array $context = [],
     ): array {
-        if (! $this->adminSettings->beanChatEnabled() && ! in_array($requestType, ['voice_turn', 'realtime_voice', 'tts'], true)) {
+        if (! $user->isAdmin() && ! $this->adminSettings->beanChatEnabled() && ! in_array($requestType, ['voice_turn', 'realtime_voice', 'tts'], true)) {
             return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost ?? 0.0, $this->beanPausedMessage('chat'), $this->budgetFor($user));
         }
 
-        if (! $this->adminSettings->beanVoiceEnabled() && in_array($requestType, ['voice_session', 'voice_turn', 'realtime_voice', 'tts'], true)) {
+        if (! $user->isAdmin() && ! $this->adminSettings->beanVoiceEnabled() && in_array($requestType, ['voice_session', 'voice_turn', 'realtime_voice', 'tts'], true)) {
             return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost ?? 0.0, $this->beanPausedMessage('voice'), $this->budgetFor($user));
         }
 
@@ -283,14 +286,7 @@ class AiUsageService
      */
     public function budgetFor(User $user): array
     {
-        $limits = $this->adminSettings->usageLimits();
-        $prefix = $this->usageLimitPrefix($user);
-
-        return [
-            'tier' => $prefix,
-            'daily_cost_limit' => (float) ($limits[$prefix.'_cost_limit'] ?? $limits['base_cost_limit'] ?? 0.0),
-            'daily_external_cost_limit' => (float) ($limits[$prefix.'_external_cost_limit'] ?? $limits['base_external_cost_limit'] ?? 0.0),
-        ];
+        return $this->planLimits->budgetFor($user);
     }
 
     /**
@@ -477,6 +473,7 @@ class AiUsageService
         $session = $context['session'] ?? null;
         if ($session instanceof ConversationSession) {
             $this->alert($session, $type, $severity, $threshold, $observed, $message, $metadata, 'user', $user->id);
+
             return;
         }
 
@@ -525,19 +522,6 @@ class AiUsageService
             'daily_cost_hard_limit' => 'This account has reached today\'s AI usage limit.',
             'daily_external_cost_hard_limit' => 'This account has reached today\'s external lookup usage limit.',
             default => "AI usage limit reached ({$observed} / {$threshold}).",
-        };
-    }
-
-    private function usageLimitPrefix(User $user): string
-    {
-        if ($user->isAdmin()) {
-            return 'pro';
-        }
-
-        return match ($user->subscriptionTier()) {
-            'pro' => 'pro',
-            'premium', 'mid' => 'premium',
-            default => 'base',
         };
     }
 

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Services\PlanLimitService;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -77,7 +78,8 @@ class User extends Authenticatable
 
     public function wantsReminderEmailNotifications(): bool
     {
-        return (bool) ($this->notification_preferences['reminder_email'] ?? true);
+        return (bool) ($this->notification_preferences['reminder_email'] ?? true)
+            && app(PlanLimitService::class)->canUseEmailReminders($this);
     }
 
     public function wantsReminderPushNotifications(): bool

@@ -21,7 +21,7 @@ class ReminderNotificationDeliveryTest extends TestCase
 
     public function test_user_notification_preferences_are_returned_and_can_be_updated(): void
     {
-        $token = $this->apiToken('notify-prefs@example.com');
+        $token = $this->premiumApiToken('notify-prefs@example.com');
 
         $this->withToken($token)->getJson('/api/auth/me')
             ->assertOk()
@@ -44,6 +44,7 @@ class ReminderNotificationDeliveryTest extends TestCase
         Carbon::setTestNow('2026-05-18 13:45:00');
         $user = User::factory()->create([
             'email' => 'reminder@example.com',
+            'subscription_tier' => 'premium',
             'notification_preferences' => [
                 'reminder_push' => true,
                 'reminder_email' => true,

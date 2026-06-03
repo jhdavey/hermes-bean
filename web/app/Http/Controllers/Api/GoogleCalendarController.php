@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,7 +13,10 @@ use Throwable;
 
 class GoogleCalendarController extends Controller
 {
-    public function __construct(private readonly GoogleCalendarSyncService $sync) {}
+    public function __construct(
+        private readonly GoogleCalendarSyncService $sync,
+        private readonly PlanLimitService $planLimits,
+    ) {}
 
     public function status(Request $request): JsonResponse
     {
@@ -21,6 +25,12 @@ class GoogleCalendarController extends Controller
 
     public function authUrl(Request $request): JsonResponse
     {
+        if (! $request->user()->googleCalendarConnection) {
+            if ($response = $this->planLimits->enforceConnectedAccountLimit($request->user(), 0)) {
+                return $response;
+            }
+        }
+
         return response()->json(['data' => ['auth_url' => $this->sync->authorizationUrl($request->user())]]);
     }
 
@@ -65,6 +75,9 @@ class GoogleCalendarController extends Controller
             'selected_calendar_ids.*' => ['required', 'string'],
             'default_calendar_id' => ['nullable', 'string'],
         ]);
+        if ($response = $this->planLimits->enforceCalendarSelectionLimit($request->user(), count(array_unique($validated['selected_calendar_ids'])))) {
+            return $response;
+        }
 
         return response()->json(['data' => $this->sync->updateSelectedCalendars(
             $request->user(),

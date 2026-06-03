@@ -133,7 +133,7 @@ class GoogleCalendarSyncTest extends TestCase
 
     public function test_user_can_select_google_calendars_and_sync_imports_only_selected_calendars(): void
     {
-        $token = $this->apiToken('calendar-select@example.com');
+        $token = $this->premiumApiToken('calendar-select@example.com');
         $user = User::where('email', 'calendar-select@example.com')->firstOrFail();
         GoogleCalendarConnection::create([
             'user_id' => $user->id,

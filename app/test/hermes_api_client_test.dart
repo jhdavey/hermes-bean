@@ -650,6 +650,7 @@ void main() {
             'title': 'Client kickoff',
             'starts_at': '2026-05-20T15:00:00Z',
             'ends_at': '2026-05-20T16:00:00Z',
+            'description': 'Bring the client brief.',
             'category': 'Work',
             'color': '#007AFF',
             'recurrence': 'none',
@@ -664,6 +665,7 @@ void main() {
                 'title': 'Client kickoff',
                 'starts_at': '2026-05-20T15:00:00Z',
                 'ends_at': '2026-05-20T16:00:00Z',
+                'description': 'Bring the client brief.',
                 'category': 'Work',
                 'color': '#007AFF',
                 'recurrence': 'none',
@@ -678,6 +680,7 @@ void main() {
         title: 'Client kickoff',
         startsAt: '2026-05-20T15:00:00Z',
         endsAt: '2026-05-20T16:00:00Z',
+        notes: 'Bring the client brief.',
         category: 'Work',
         color: '#007AFF',
         recurrence: 'none',
@@ -686,6 +689,7 @@ void main() {
       );
 
       expect(event.id, 77);
+      expect(event.notes, 'Bring the client brief.');
       expect(event.googleCalendarId, 'work@example.com');
       expect(requests, hasLength(1));
     },
@@ -1277,6 +1281,8 @@ void main() {
           if (request.path == '/calendar-events' && request.method == 'POST') {
             expect(request.body, containsPair('workspace_id', 1));
             expect(request.body, containsPair('sync_to_workspace_ids', [2]));
+            expect(request.body, containsPair('location', 'Conference Room B'));
+            expect(request.body, containsPair('status', 'tentative'));
             return HermesApiResponse(
               201,
               jsonEncode({
@@ -1287,6 +1293,8 @@ void main() {
           if (request.path == '/calendar-events/3' &&
               request.method == 'PATCH') {
             expect(request.body, containsPair('sync_to_workspace_ids', [2, 3]));
+            expect(request.body, containsPair('location', 'Main Hall'));
+            expect(request.body, containsPair('status', 'confirmed'));
             return HermesApiResponse(
               200,
               jsonEncode({
@@ -1352,6 +1360,8 @@ void main() {
       await client.createCalendarEvent(
         title: 'Meet',
         startsAt: '2026-05-20T10:00:00Z',
+        location: 'Conference Room B',
+        status: 'tentative',
         workspaceId: 1,
         syncToWorkspaceIds: [2],
       );
@@ -1359,6 +1369,8 @@ void main() {
         3,
         title: 'Meet',
         startsAt: '2026-05-20T10:00:00Z',
+        location: 'Main Hall',
+        status: 'confirmed',
         syncToWorkspaceIds: [2, 3],
       );
       await client.deleteTask(1, deleteFromWorkspaceIds: [1, 2, 3]);

@@ -99,6 +99,7 @@ if (mount) {
         blockers: [],
         activity: [],
         adminUsage: null,
+        adminPlanLimits: null,
         adminUsageLoading: false,
         adminModelRegistry: null,
         adminHermesStatus: null,
@@ -133,6 +134,10 @@ if (mount) {
         pendingReminderUpserts: new Map(),
         pendingReminderDeletes: new Set(),
         expandedTaskIds: new Set(),
+        futureTaskBucketsOpen: {
+            seven: false,
+            thirty: false,
+        },
         pendingCalendarUpserts: new Map(),
         pendingCalendarDeletes: new Set(),
         busy: false,
@@ -927,7 +932,7 @@ if (mount) {
                                 ${register ? selectedPlanMarkup() || "<p>Sign up for early access and we'll email you as soon as we can give you access.</p>" : ''}
                             </div>
                         </div>
-                        ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
+                        ${errorMarkup(state.error)}
                         ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
                         ${forgot ? forgotFormMarkup() : authFormMarkup(register)}
                         <div class="hb-auth-links">
@@ -1117,7 +1122,7 @@ if (mount) {
                     ${sectionTitle(icons.activity, 'Admin monitor', 'AI cost, usage limits, and user activity')}
                     <button class="hb-button-secondary" type="button" data-refresh-admin ${state.adminUsageLoading ? 'disabled' : ''}>${state.adminUsageLoading ? 'Refreshing...' : 'Refresh'}</button>
                 </div>
-                ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
+                ${errorMarkup(state.error)}
                 ${state.adminUsageLoading && !state.adminUsage ? '<div class="hb-empty hb-surface-soft">Loading AI usage metrics...</div>' : ''}
                 ${adminUserGrowthChartMarkup(userGrowth)}
                 <div class="hb-admin-metrics">
@@ -1133,6 +1138,7 @@ if (mount) {
                 </div>
                 ${adminHermesMaintenanceMarkup()}
                 ${adminSettingsMarkup(settings)}
+                ${adminPlanLimitsMarkup(state.adminPlanLimits)}
                 <div class="hb-admin-grid">
                     ${adminIssueReportsBlockMarkup(issueReports, archivedIssueReports)}
                     ${adminListBlockMarkup('Budget and spike alerts', alerts, adminAlertRowMarkup, 'No alerts yet.')}
@@ -1275,15 +1281,98 @@ if (mount) {
                     <input type="checkbox" name="apply_main_model_to_profiles">
                     <span>Apply main model to existing workspace Bean profiles</span>
                 </label>
-                <div class="hb-admin-settings-grid hb-admin-limits-grid">
-                    <label><span>Base daily AI cost</span><input class="hb-input" type="number" min="0" step="0.01" name="base_cost_limit" value="${escapeAttr(settingValue(usage.base_cost_limit || usage.baseCostLimit))}"></label>
-                    <label><span>Base daily external cost</span><input class="hb-input" type="number" min="0" step="0.01" name="base_external_cost_limit" value="${escapeAttr(settingValue(usage.base_external_cost_limit || usage.baseExternalCostLimit))}"></label>
-                    <label><span>Premium daily AI cost</span><input class="hb-input" type="number" min="0" step="0.01" name="premium_cost_limit" value="${escapeAttr(settingValue(usage.premium_cost_limit || usage.premiumCostLimit))}"></label>
-                    <label><span>Premium daily external cost</span><input class="hb-input" type="number" min="0" step="0.01" name="premium_external_cost_limit" value="${escapeAttr(settingValue(usage.premium_external_cost_limit || usage.premiumExternalCostLimit))}"></label>
-                    <label><span>Pro daily AI cost</span><input class="hb-input" type="number" min="0" step="0.01" name="pro_cost_limit" value="${escapeAttr(settingValue(usage.pro_cost_limit || usage.proCostLimit))}"></label>
-                    <label><span>Pro daily external cost</span><input class="hb-input" type="number" min="0" step="0.01" name="pro_external_cost_limit" value="${escapeAttr(settingValue(usage.pro_external_cost_limit || usage.proExternalCostLimit))}"></label>
-                </div>
             </form>`;
+    }
+
+    function adminPlanLimitsMarkup(planLimits) {
+        if (!planLimits) {
+            return '<div class="hb-admin-settings"><strong>Plan limits</strong><div class="hb-empty">Loading plan limits...</div></div>';
+        }
+        const plans = planLimits.plans || {};
+        const enterpriseCustomers = normalizeList(planLimits.enterprise_customers || planLimits.enterpriseCustomers);
+        return `
+            <section class="hb-admin-settings" data-admin-plan-limits-panel>
+                <form data-admin-plan-limits-form>
+                    <div class="hb-section-action-row">
+                        <div>
+                            <strong>Plan limits</strong>
+                            <small>Feature gates, workspace limits, history, and daily Bean budgets by tier</small>
+                        </div>
+                        <button class="hb-button-secondary" type="submit" ${state.adminUsageLoading ? 'disabled' : ''}>Save plan limits</button>
+                    </div>
+                    <div class="hb-admin-settings-grid">
+                        ${['base', 'premium', 'pro'].map((plan) => adminPlanLimitCardMarkup(plan, plans[plan] || {})).join('')}
+                    </div>
+                </form>
+                <div class="hb-section-action-row hb-admin-enterprise-heading">
+                    <div>
+                        <strong>Enterprise customers</strong>
+                        <small>Per-customer limits and agreed billing terms</small>
+                    </div>
+                </div>
+                <div class="hb-admin-settings-grid">
+                    ${enterpriseCustomers.map(adminEnterpriseLimitFormMarkup).join('')}
+                    ${adminEnterpriseLimitFormMarkup({})}
+                </div>
+            </section>`;
+    }
+
+    function adminPlanLimitCardMarkup(plan, payload) {
+        const limits = payload.value || payload.default || {};
+        const label = { base: 'Base', premium: 'Premium', pro: 'Pro' }[plan] || plan;
+        return `
+            <div class="hb-surface-soft hb-card-pad" data-plan-limit-card="${escapeAttr(plan)}">
+                <strong>${escapeHtml(label)}</strong>
+                <small>${payload.is_overridden ? 'Custom admin limits' : 'Using defaults'}</small>
+                ${adminLimitInputsMarkup(limits)}
+            </div>`;
+    }
+
+    function adminEnterpriseLimitFormMarkup(customer) {
+        const id = customer.id || '';
+        const user = customer.user || {};
+        const limits = customer.limits || {};
+        return `
+            <form class="hb-surface-soft hb-card-pad" data-enterprise-limit-form="${escapeAttr(id)}">
+                <div class="hb-section-action-row">
+                    <div>
+                        <strong>${escapeHtml(id ? (user.name || user.email || `User #${customer.user_id || customer.userId}`) : 'Add enterprise customer')}</strong>
+                        <small>${escapeHtml(id ? (user.email || `User #${customer.user_id || customer.userId}`) : 'Enter an existing user id')}</small>
+                    </div>
+                    ${id ? `<button class="hb-admin-mini-action" type="button" data-enterprise-limit-delete="${escapeAttr(id)}">Remove</button>` : ''}
+                </div>
+                <label><span>User id</span><input class="hb-input" type="number" min="1" name="user_id" value="${escapeAttr(customer.user_id || customer.userId || '')}" ${id ? 'readonly' : ''}></label>
+                <label><span>Billing type</span><select class="hb-input" name="billing_type">
+                    <option value="monthly" ${(customer.billing_type || customer.billingType || 'monthly') === 'monthly' ? 'selected' : ''}>Set monthly rate</option>
+                    <option value="usage" ${(customer.billing_type || customer.billingType) === 'usage' ? 'selected' : ''}>Dynamic usage rate</option>
+                </select></label>
+                <label><span>Monthly rate USD</span><input class="hb-input" type="number" min="0" step="0.01" name="monthly_rate_usd" value="${escapeAttr(customer.monthly_rate_usd ?? customer.monthlyRateUsd ?? '')}"></label>
+                <label><span>Usage rate USD</span><input class="hb-input" type="number" min="0" step="0.000001" name="usage_rate_usd" value="${escapeAttr(customer.usage_rate_usd ?? customer.usageRateUsd ?? '')}"></label>
+                ${adminLimitInputsMarkup(limits)}
+                <label><span>Notes</span><textarea class="hb-input" name="notes" rows="3">${escapeHtml(customer.notes || '')}</textarea></label>
+                <button class="hb-button-secondary" type="submit" ${state.adminUsageLoading ? 'disabled' : ''}>${id ? 'Save enterprise customer' : 'Add enterprise customer'}</button>
+            </form>`;
+    }
+
+    function adminLimitInputsMarkup(limits = {}) {
+        return `
+            <label><span>Workspace limit</span><input class="hb-input" type="number" min="0" name="workspace_limit" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.workspace_limit ?? limits.workspaceLimit))}"></label>
+            <label><span>Calendar limit</span><input class="hb-input" type="number" min="0" name="calendar_connection_limit" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.calendar_connection_limit ?? limits.calendarConnectionLimit))}"></label>
+            <label><span>Connected account limit</span><input class="hb-input" type="number" min="0" name="connected_account_limit" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.connected_account_limit ?? limits.connectedAccountLimit))}"></label>
+            <label><span>History days</span><input class="hb-input" type="number" min="0" name="history_days" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.history_days ?? limits.historyDays))}"></label>
+            <label><span>Daily Bean cost</span><input class="hb-input" type="number" min="0" step="0.01" name="daily_cost_limit" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.daily_cost_limit ?? limits.dailyCostLimit))}"></label>
+            <label><span>Daily external cost</span><input class="hb-input" type="number" min="0" step="0.01" name="daily_external_cost_limit" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.daily_external_cost_limit ?? limits.dailyExternalCostLimit))}"></label>
+            <div class="hb-admin-kill-grid">
+                ${adminSwitchMarkup('recurring_tasks_enabled', 'Recurring tasks', 'Allow recurring tasks for this tier/customer.', Boolean(limits.recurring_tasks_enabled ?? limits.recurringTasksEnabled))}
+                ${adminSwitchMarkup('recurring_reminders_enabled', 'Recurring reminders', 'Allow recurring reminders for this tier/customer.', Boolean(limits.recurring_reminders_enabled ?? limits.recurringRemindersEnabled))}
+                ${adminSwitchMarkup('recurring_calendar_enabled', 'Recurring calendar events', 'Allow recurring calendar event series.', Boolean(limits.recurring_calendar_enabled ?? limits.recurringCalendarEnabled))}
+                ${adminSwitchMarkup('email_reminders_enabled', 'Email reminders', 'Allow reminder delivery by email.', Boolean(limits.email_reminders_enabled ?? limits.emailRemindersEnabled))}
+                ${adminSwitchMarkup('priority_background_work', 'Priority background work', 'Prefer this tier/customer for priority background handling.', Boolean(limits.priority_background_work ?? limits.priorityBackgroundWork))}
+            </div>`;
+    }
+
+    function limitInputValue(value) {
+        return value === null || value === undefined ? '' : value;
     }
 
     function adminSwitchMarkup(name, label, help, enabled) {
@@ -1504,6 +1593,7 @@ if (mount) {
                     ${options.expandable ? `<button class="hb-button-secondary hb-chat-expand-action" type="button" data-toggle-chat-expand aria-label="${escapeAttr(expandLabel)}">${escapeHtml(expandLabel)}</button>` : ''}
                     <button class="hb-button-ghost hb-chat-new-session" type="button" data-new-session ${state.busy ? 'disabled' : ''}>${icons.add}<span>New</span></button>
                 </div>
+                ${errorMarkup(state.error)}
                 ${state.chatHistoryOpen ? chatHistoryMarkup() : ''}
                 <div class="hb-chat-messages" id="hb-chat-messages">
                     ${onboardingInterviewIntroMarkup()}
@@ -1628,7 +1718,7 @@ if (mount) {
         return `
             <section class="hb-card hb-card-pad hb-settings-grid">
                 ${sectionTitle(icons.settings, 'Settings', 'Focused Hermes Bean preferences')}
-                ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
+                ${errorMarkup(state.error)}
                 ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
                 <div class="hb-compact-item">
                     <span class="hb-compact-icon">${icons.user}</span>
@@ -2134,6 +2224,9 @@ if (mount) {
 
     function dayBoardColumnMarkup(day, items, kind, emptyText, overrideLabel = '', extraClass = '') {
         const label = overrideLabel || (day ? glanceDayLabel(parseLocalDate(day)) : 'No date');
+        const listMarkup = kind === 'task'
+            ? taskListWithFutureBucketsMarkup(items, emptyText)
+            : items.length ? items.map((item) => itemMarkup(item, kind)).join('') : `<div class="hb-empty hb-surface-soft">${escapeHtml(emptyText)}</div>`;
         return `
             <section class="hb-day-board-column ${day ? '' : 'hb-day-board-column-unscheduled'} ${extraClass}" aria-label="${escapeAttr(label)}">
                 <div class="hb-day-board-head">
@@ -2141,9 +2234,59 @@ if (mount) {
                     <span>${escapeHtml(itemCountLabel(items.length, kind))}</span>
                 </div>
                 <div class="hb-list hb-day-board-list">
-                    ${items.length ? items.map((item) => itemMarkup(item, kind)).join('') : `<div class="hb-empty hb-surface-soft">${escapeHtml(emptyText)}</div>`}
+                    ${listMarkup}
                 </div>
             </section>`;
+    }
+
+    function taskListWithFutureBucketsMarkup(items, emptyText) {
+        const buckets = taskFutureBuckets(items);
+        const visibleMarkup = buckets.now.map((item) => itemMarkup(item, 'task')).join('');
+        const sevenMarkup = taskFutureBucketMarkup('seven', 'More than 7 days away', buckets.seven);
+        const thirtyMarkup = taskFutureBucketMarkup('thirty', 'More than 30 days away', buckets.thirty);
+        const hasItems = buckets.now.length || buckets.seven.length || buckets.thirty.length;
+        return hasItems
+            ? `${visibleMarkup}${sevenMarkup}${thirtyMarkup}`
+            : `<div class="hb-empty hb-surface-soft">${escapeHtml(emptyText)}</div>`;
+    }
+
+    function taskFutureBucketMarkup(bucket, label, items) {
+        if (!items.length) return '';
+        const open = Boolean(state.futureTaskBucketsOpen?.[bucket]);
+        return `
+            <div class="hb-task-future-bucket" data-task-future-bucket="${escapeAttr(bucket)}">
+                <button class="hb-task-future-toggle" type="button" data-toggle-task-future="${escapeAttr(bucket)}" aria-expanded="${open ? 'true' : 'false'}">
+                    <span class="hb-task-future-chevron">${open ? '▲' : '▼'}</span>
+                    <span>${escapeHtml(label)}</span>
+                    <strong>${escapeHtml(itemCountLabel(items.length, 'task'))}</strong>
+                </button>
+                ${open ? `<div class="hb-list hb-task-future-list">${items.map((item) => itemMarkup(item, 'task')).join('')}</div>` : ''}
+            </div>`;
+    }
+
+    function taskFutureBuckets(items) {
+        const buckets = { now: [], seven: [], thirty: [] };
+        items.forEach((item) => {
+            const daysAway = taskDaysAway(item);
+            if (daysAway !== null && daysAway > 30) {
+                buckets.thirty.push(item);
+            } else if (daysAway !== null && daysAway > 7) {
+                buckets.seven.push(item);
+            } else {
+                buckets.now.push(item);
+            }
+        });
+        return buckets;
+    }
+
+    function taskDaysAway(task) {
+        const value = task?.due_at || task?.dueAt || '';
+        if (!value) return null;
+        const due = parseLocalDate(value);
+        if (Number.isNaN(due.getTime())) return null;
+        const today = parseLocalDate(dateOnly(new Date()));
+        const dueDay = parseLocalDate(dateOnly(due));
+        return Math.round((dueDay - today) / 86400000);
     }
 
     function itemMarkup(item, kind) {
@@ -2395,7 +2538,7 @@ if (mount) {
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Report an issue">
                 <form class="hb-card hb-modal hb-form hb-issue-report-modal" data-modal-form="issue-report">
                     ${sectionTitle(icons.activity, 'Report an issue', 'Tell us what happened so we can fix it quickly.')}
-                    ${state.error ? `<div class="hb-error">${escapeHtml(state.error)}</div>` : ''}
+                    ${errorMarkup(state.error)}
                     <label class="hb-label">What happened?
                         <textarea class="hb-textarea hb-issue-report-textarea" name="message" required maxlength="4000" placeholder="Describe what you were doing, what went wrong, and what you expected instead."></textarea>
                     </label>
@@ -2909,6 +3052,9 @@ if (mount) {
         mount.querySelectorAll('[data-refresh-app]').forEach((button) => button.addEventListener('click', refreshCurrentView));
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelector('[data-admin-settings-form]')?.addEventListener('submit', saveAdminSettings);
+        mount.querySelector('[data-admin-plan-limits-form]')?.addEventListener('submit', saveAdminPlanLimits);
+        mount.querySelectorAll('[data-enterprise-limit-form]').forEach((form) => form.addEventListener('submit', saveEnterpriseLimits));
+        mount.querySelectorAll('[data-enterprise-limit-delete]').forEach((button) => button.addEventListener('click', () => deleteEnterpriseLimits(button.dataset.enterpriseLimitDelete)));
         mount.querySelector('[data-update-hermes]')?.addEventListener('click', updateHermesRuntime);
         mount.querySelectorAll('[data-user-growth-range]').forEach((button) => button.addEventListener('click', () => setAdminUserGrowthRange(button.dataset.userGrowthRange)));
         mount.querySelector('[data-toggle-archived-issues]')?.addEventListener('click', () => { state.adminArchivedIssuesOpen = !state.adminArchivedIssuesOpen; render(); });
@@ -2932,6 +3078,11 @@ if (mount) {
             event.preventDefault();
             event.stopPropagation();
             toggleTaskDetails(button.dataset.toggleTaskDetails);
+        }));
+        mount.querySelectorAll('[data-toggle-task-future]').forEach((button) => button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleFutureTaskBucket(button.dataset.toggleTaskFuture);
         }));
         mount.querySelectorAll('[data-create-subtask]').forEach((button) => button.addEventListener('click', (event) => {
             event.preventDefault();
@@ -3003,6 +3154,12 @@ if (mount) {
         } else {
             state.expandedTaskIds.add(key);
         }
+        render();
+    }
+
+    function toggleFutureTaskBucket(bucket) {
+        if (!bucket || !Object.prototype.hasOwnProperty.call(state.futureTaskBucketsOpen, bucket)) return;
+        state.futureTaskBucketsOpen[bucket] = !state.futureTaskBucketsOpen[bucket];
         render();
     }
 
@@ -3463,14 +3620,6 @@ if (mount) {
                             bean_chat_enabled: Boolean(form.querySelector('input[name="bean_chat_enabled"]')?.checked),
                             bean_voice_enabled: Boolean(form.querySelector('input[name="bean_voice_enabled"]')?.checked),
                         },
-                        usage_limits: {
-                            base_cost_limit: floatValue('base_cost_limit'),
-                            base_external_cost_limit: floatValue('base_external_cost_limit'),
-                            premium_cost_limit: floatValue('premium_cost_limit'),
-                            premium_external_cost_limit: floatValue('premium_external_cost_limit'),
-                            pro_cost_limit: floatValue('pro_cost_limit'),
-                            pro_external_cost_limit: floatValue('pro_external_cost_limit'),
-                        },
                         apply_main_model_to_profiles: Boolean(form.querySelector('input[name="apply_main_model_to_profiles"]')?.checked),
                     },
                 }),
@@ -3483,6 +3632,101 @@ if (mount) {
             state.adminUsageLoading = false;
             render();
         }
+    }
+
+    async function saveAdminPlanLimits(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const plans = {};
+        form.querySelectorAll('[data-plan-limit-card]').forEach((card) => {
+            plans[card.dataset.planLimitCard] = readAdminLimits(card);
+        });
+        state.adminUsageLoading = true;
+        state.error = '';
+        render();
+        try {
+            state.adminPlanLimits = await api('/admin/plan-limits/plans', {
+                method: 'PATCH',
+                body: { plans },
+            });
+            state.notice = 'Plan limits saved.';
+        } catch (error) {
+            state.error = friendlyError(error, 'save plan limits');
+        } finally {
+            state.adminUsageLoading = false;
+            render();
+        }
+    }
+
+    async function saveEnterpriseLimits(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const id = form.dataset.enterpriseLimitForm || '';
+        const formData = new FormData(form);
+        const body = {
+            user_id: nullableNumber(formData.get('user_id')),
+            billing_type: String(formData.get('billing_type') || 'monthly'),
+            monthly_rate_usd: nullableNumber(formData.get('monthly_rate_usd')),
+            usage_rate_usd: nullableNumber(formData.get('usage_rate_usd')),
+            limits: readAdminLimits(form),
+            notes: String(formData.get('notes') || '').trim() || null,
+        };
+        state.adminUsageLoading = true;
+        state.error = '';
+        render();
+        try {
+            state.adminPlanLimits = await api(id ? `/admin/plan-limits/enterprise-customers/${encodeURIComponent(id)}` : '/admin/plan-limits/enterprise-customers', {
+                method: id ? 'PATCH' : 'POST',
+                body,
+            });
+            state.notice = id ? 'Enterprise limits saved.' : 'Enterprise customer added.';
+        } catch (error) {
+            state.error = friendlyError(error, 'save enterprise limits');
+        } finally {
+            state.adminUsageLoading = false;
+            render();
+        }
+    }
+
+    async function deleteEnterpriseLimits(id) {
+        if (!id || !window.confirm('Remove this enterprise customer override?')) return;
+        state.adminUsageLoading = true;
+        state.error = '';
+        render();
+        try {
+            await api(`/admin/plan-limits/enterprise-customers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            state.adminPlanLimits = await api('/admin/plan-limits');
+            state.notice = 'Enterprise override removed.';
+        } catch (error) {
+            state.error = friendlyError(error, 'remove enterprise limits');
+        } finally {
+            state.adminUsageLoading = false;
+            render();
+        }
+    }
+
+    function readAdminLimits(container) {
+        const checked = (name) => Boolean(container.querySelector(`input[name="${name}"]`)?.checked);
+        return {
+            workspace_limit: nullableNumber(container.querySelector('input[name="workspace_limit"]')?.value),
+            calendar_connection_limit: nullableNumber(container.querySelector('input[name="calendar_connection_limit"]')?.value),
+            connected_account_limit: nullableNumber(container.querySelector('input[name="connected_account_limit"]')?.value),
+            history_days: nullableNumber(container.querySelector('input[name="history_days"]')?.value),
+            daily_cost_limit: nullableNumber(container.querySelector('input[name="daily_cost_limit"]')?.value),
+            daily_external_cost_limit: nullableNumber(container.querySelector('input[name="daily_external_cost_limit"]')?.value),
+            recurring_tasks_enabled: checked('recurring_tasks_enabled'),
+            recurring_reminders_enabled: checked('recurring_reminders_enabled'),
+            recurring_calendar_enabled: checked('recurring_calendar_enabled'),
+            email_reminders_enabled: checked('email_reminders_enabled'),
+            priority_background_work: checked('priority_background_work'),
+        };
+    }
+
+    function nullableNumber(value) {
+        const normalized = String(value ?? '').trim();
+        if (!normalized) return null;
+        const parsed = Number.parseFloat(normalized);
+        return Number.isFinite(parsed) ? parsed : null;
     }
 
     async function updateHermesRuntime() {
@@ -4164,6 +4408,7 @@ if (mount) {
         state.voiceStatus = '';
         state.voiceStatusTone = '';
         state.chatRunState = 'Working…';
+        state.error = '';
         render();
         try {
             if (!state.session?.id) {
@@ -4207,6 +4452,9 @@ if (mount) {
                 state.messages.push(result.assistant_message);
                 assistantContent = result.assistant_message.content || '';
             }
+            if (result.status === 'blocked' && isPlanLimitMessage(assistantContent)) {
+                state.error = assistantContent;
+            }
             state.chatRunState = result.status === 'blocked' ? 'Blocked' : 'Ready';
             await refreshOnly(false);
             if (wasOnboarding && !needsBeanOnboarding()) {
@@ -4216,6 +4464,7 @@ if (mount) {
         } catch (error) {
             if (!cancelledChatRequestIds.has(requestId)) {
                 assistantContent = friendlyError(error, 'send that message');
+                state.error = assistantContent;
                 state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: assistantContent });
                 state.chatRunState = 'Failed';
             }
@@ -7542,7 +7791,7 @@ if (mount) {
         render();
         try {
             const growthRange = encodeURIComponent(state.adminUserGrowthRange || 'last_30_days');
-            const [usage, modelRegistry, hermesStatus] = await Promise.all([
+            const [usage, modelRegistry, hermesStatus, planLimits] = await Promise.all([
                 api(`/admin/usage/summary?user_growth_range=${growthRange}`),
                 api('/admin/settings/models'),
                 api('/admin/hermes/status').catch((error) => ({
@@ -7550,10 +7799,12 @@ if (mount) {
                     version: 'Unavailable',
                     error: friendlyError(error, 'check Hermes status'),
                 })),
+                api('/admin/plan-limits'),
             ]);
             state.adminUsage = usage;
             state.adminModelRegistry = modelRegistry;
             state.adminHermesStatus = hermesStatus;
+            state.adminPlanLimits = planLimits;
         } catch (error) {
             state.error = friendlyError(error, 'load admin metrics');
         } finally {
@@ -8861,6 +9112,27 @@ if (mount) {
         const message = error?.message || 'Something went wrong.';
         if (/failed to fetch/i.test(message)) return `Could not ${action}. Check your connection and try again.`;
         return message;
+    }
+
+    function errorMarkup(message) {
+        if (!message) return '';
+        const paywall = isPlanLimitMessage(message);
+        return `
+            <div class="${paywall ? 'hb-error hb-paywall-error' : 'hb-error'}">
+                <div>
+                    <strong>${paywall ? 'Upgrade to keep going' : 'Something needs attention'}</strong>
+                    <span>${escapeHtml(message)}</span>
+                </div>
+                ${paywall ? '<a class="hb-button-secondary hb-paywall-cta" href="/pricing">View plans</a>' : ''}
+            </div>`;
+    }
+
+    function isPlanLimitMessage(message) {
+        const normalized = String(message || '').toLowerCase();
+        return normalized.includes('current plan includes')
+            || normalized.includes('available on premium')
+            || normalized.includes('ai usage limit')
+            || normalized.includes('external lookup usage limit');
     }
 
     function escapeHtml(value) {

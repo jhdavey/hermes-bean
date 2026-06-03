@@ -1090,6 +1090,34 @@
     border: 1px solid rgba(220, 38, 38, .18);
 }
 
+.hb-error strong {
+    display: block;
+    margin-bottom: 2px;
+    color: inherit;
+}
+
+.hb-error span {
+    display: block;
+}
+
+.hb-paywall-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: rgba(var(--hb-accent-rgb), .10);
+    color: var(--hb-accent-strong);
+    border-color: rgba(var(--hb-accent-rgb), .24);
+}
+
+.hb-paywall-error .hb-paywall-cta {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 8px 12px;
+    border-color: rgba(var(--hb-accent-rgb), .24);
+    background: var(--hb-surface);
+}
+
 .hb-success {
     background: rgba(var(--hb-accent-rgb), .10);
     color: var(--hb-accent-strong);
@@ -1206,6 +1234,54 @@
 
 .hb-day-board-list {
     min-height: 0;
+}
+
+.hb-task-future-bucket {
+    display: grid;
+    gap: 10px;
+}
+
+.hb-task-future-toggle {
+    width: 100%;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .62);
+    color: var(--hb-text);
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.hb-task-future-toggle span:nth-child(2) {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-task-future-toggle strong {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.hb-task-future-chevron {
+    width: 18px;
+    color: var(--hb-muted);
+    font-size: 10px;
+    line-height: 1;
+    text-align: center;
+}
+
+.hb-task-future-list {
+    padding-left: 8px;
+    border-left: 2px solid var(--hb-border);
 }
 
 .hb-item {
@@ -4386,6 +4462,15 @@
 
     .hb-link-row {
         justify-content: center;
+    }
+
+    .hb-paywall-error {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .hb-paywall-error .hb-paywall-cta {
+        width: 100%;
     }
 
     .hb-member-row {

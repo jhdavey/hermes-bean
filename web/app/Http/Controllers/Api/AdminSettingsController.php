@@ -32,13 +32,13 @@ class AdminSettingsController extends Controller
             'kill_switches' => ['required', 'array'],
             'kill_switches.bean_chat_enabled' => ['required', 'boolean'],
             'kill_switches.bean_voice_enabled' => ['required', 'boolean'],
-            'usage_limits' => ['required', 'array'],
-            'usage_limits.base_cost_limit' => ['required', 'numeric', 'min:0', 'max:100000'],
-            'usage_limits.base_external_cost_limit' => ['required', 'numeric', 'min:0', 'max:100000'],
-            'usage_limits.premium_cost_limit' => ['required', 'numeric', 'min:0', 'max:100000'],
-            'usage_limits.premium_external_cost_limit' => ['required', 'numeric', 'min:0', 'max:100000'],
-            'usage_limits.pro_cost_limit' => ['required', 'numeric', 'min:0', 'max:100000'],
-            'usage_limits.pro_external_cost_limit' => ['required', 'numeric', 'min:0', 'max:100000'],
+            'usage_limits' => ['sometimes', 'array'],
+            'usage_limits.base_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
+            'usage_limits.base_external_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
+            'usage_limits.premium_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
+            'usage_limits.premium_external_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
+            'usage_limits.pro_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
+            'usage_limits.pro_external_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
             'apply_main_model_to_profiles' => ['sometimes', 'boolean'],
         ]);
 
@@ -49,7 +49,7 @@ class AdminSettingsController extends Controller
 
         $payload = $settings->update(
             $data['model_settings'],
-            $data['usage_limits'],
+            $data['usage_limits'] ?? [],
             $request->user(),
             (bool) ($data['apply_main_model_to_profiles'] ?? false),
             $data['kill_switches'],

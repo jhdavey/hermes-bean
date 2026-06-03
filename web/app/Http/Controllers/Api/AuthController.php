@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
 use App\Services\AgentProfileService;
+use App\Services\PlanLimitService;
 use App\Services\WelcomeConversationService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
@@ -166,6 +167,11 @@ class AuthController extends Controller
         $ttsData = collect($data)->only($ttsKeys)->all();
         $userData = collect($data)->only(['name', 'email', 'theme'])->all();
         if (array_key_exists('notification_preferences', $data)) {
+            $planLimits = app(PlanLimitService::class);
+            if (($data['notification_preferences']['reminder_email'] ?? false) && ! $planLimits->canUseEmailReminders($user)) {
+                return $planLimits->limitResponse('Email reminders are available on Premium, Pro, and Enterprise plans.');
+            }
+
             $userData['notification_preferences'] = array_merge(
                 User::defaultNotificationPreferences(),
                 $user->notification_preferences ?? [],

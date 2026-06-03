@@ -7,6 +7,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
 use App\Services\AgentProfileService;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\PlanLimitService;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +20,7 @@ class WorkspaceController extends Controller
         private readonly WorkspaceService $workspaces,
         private readonly AgentProfileService $profiles,
         private readonly GoogleCalendarSyncService $googleCalendar,
+        private readonly PlanLimitService $planLimits,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -29,6 +31,11 @@ class WorkspaceController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate(['name' => ['required', 'string', 'max:255']]);
+        $currentWorkspaceCount = $this->workspaces->accessibleWorkspaces($request->user())->count();
+        if ($response = $this->planLimits->enforceWorkspaceLimit($request->user(), $currentWorkspaceCount)) {
+            return $response;
+        }
+
         $workspace = $this->workspaces->createHousehold($request->user(), $data['name']);
         $workspace->setRelation('agentProfile', $this->profiles->ensureForWorkspace($workspace, $request->user()));
 
@@ -146,6 +153,10 @@ class WorkspaceController extends Controller
             'google_calendar_ids.*' => ['string'],
             'default_export_calendar_id' => ['nullable', 'string'],
         ]);
+        if ($response = $this->planLimits->enforceCalendarSelectionLimit($request->user(), count(array_unique($data['google_calendar_ids'])))) {
+            return $response;
+        }
+
         $workspace->googleCalendarMappings()->delete();
         $this->googleCalendar->clearWorkspaceSyncTokens($connection, $workspace);
         $settings = $workspace->settings ?? [];
