@@ -46,10 +46,10 @@
         </section>
         <section class="hero-visual" aria-label="HeyBean mobile planning screenshot mockup">
             <div class="halo"></div>
-            <div class="hero-callout events">3 events planned<small>calendar updated</small></div>
+            <div class="hero-callout events">3 updates made<small>event, reminder, weather</small></div>
             <div class="hero-callout voice">Voice-first control<small>Hold the button and say “Hey, Bean…!” <span class="pointer">👇</span></small></div>
             <div class="hero-phone image-mockup">
-                <img class="hero-phone-image" src="{{ asset('images/bean-chat-example-ss.png') }}?v={{ filemtime(public_path('images/bean-chat-example-ss.png')) }}" width="500" height="1125" alt="HeyBean mobile planning chat mockup showing Bean organizing a week">
+                <img class="hero-phone-image" src="{{ asset('images/bean-hero-conversation.png') }}?v={{ filemtime(public_path('images/bean-hero-conversation.png')) }}" width="500" height="1125" alt="HeyBean mobile chat mockup showing Bean adding an event, setting a reminder, and checking weather">
             </div>
         </section>
     </main>
