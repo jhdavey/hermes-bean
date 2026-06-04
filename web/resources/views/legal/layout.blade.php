@@ -16,11 +16,20 @@
         body { margin:0; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--ink); background:linear-gradient(180deg,#fffaf0,#f1faef); line-height:1.65; }
         a { color:#087a35; font-weight:700; }
         .wrap { width:min(920px, calc(100% - 32px)); margin:0 auto; }
-        header { padding:28px 0; }
-        nav { display:flex; align-items:center; justify-content:space-between; gap:16px; }
-        .brand { display:flex; align-items:center; gap:10px; color:var(--ink); text-decoration:none; font-size:18px; }
-        .brand img { width:36px; height:36px; border-radius:10px; }
-        .links { display:flex; flex-wrap:wrap; gap:14px; font-size:14px; }
+        .nav.wrap { width:min(1160px, calc(100% - 32px)); }
+        .nav { display:flex; align-items:center; justify-content:space-between; padding:22px 0; gap:18px; position:relative; }
+        .brand { display:flex; align-items:center; gap:10px; color:var(--ink); text-decoration:none; font-size:16px; font-weight:950; }
+        .brand img { width:38px; height:38px; border-radius:12px; }
+        .navlinks { display:flex; align-items:center; flex-wrap:wrap; gap:18px; color:var(--muted); font-size:14px; }
+        .navlinks a { color:inherit; font-weight:800; text-decoration:none; }
+        .mobile-menu { display:none; }
+        .mobile-menu summary { list-style:none; cursor:pointer; width:42px; height:42px; display:grid; place-items:center; border:1px solid var(--line); background:rgba(255,255,255,.86); border-radius:14px; padding:0; color:#102016; box-shadow:0 12px 30px rgba(24,80,40,.1); }
+        .mobile-menu summary::-webkit-details-marker { display:none; }
+        .mobile-menu-icon { width:18px; height:14px; display:grid; gap:4px; }
+        .mobile-menu-icon span { display:block; height:2px; border-radius:999px; background:#102016; }
+        .mobile-menu-panel { position:absolute; right:0; top:70px; z-index:20; display:grid; gap:6px; min-width:210px; padding:10px; background:rgba(255,255,255,.96); border:1px solid var(--line); border-radius:22px; box-shadow:0 24px 60px rgba(24,80,40,.18); backdrop-filter:blur(14px); }
+        .mobile-menu-panel a { color:#102016; text-decoration:none; font-weight:850; padding:12px 14px; border-radius:14px; }
+        .mobile-menu-panel a:hover { background:#effaf0; }
         main { background:rgba(255,255,255,.84); border:1px solid var(--line); border-radius:28px; box-shadow:0 22px 70px rgba(30,80,45,.12); padding:clamp(24px,5vw,56px); margin:20px 0 48px; }
         h1 { font-size:clamp(34px,6vw,58px); line-height:1; letter-spacing:-.05em; margin:0 0 12px; }
         h2 { margin:34px 0 10px; font-size:24px; letter-spacing:-.02em; }
@@ -29,23 +38,11 @@
         .effective { margin:0 0 24px; color:#708078; }
         .card { border:1px solid var(--line); border-radius:18px; background:#fff; padding:18px; margin:18px 0; }
         footer { color:#778278; font-size:14px; padding:0 0 32px; }
+        @media(max-width:620px) { .nav { padding:16px 0; } .navlinks { display:none; } .mobile-menu { display:block; } }
     </style>
 </head>
 <body>
-    <header class="wrap">
-        <nav>
-            <a class="brand" href="/">
-                <img src="{{ asset('images/bean-logo.png') }}" alt="HeyBean logo">
-                <strong>HeyBean</strong>
-            </a>
-            <div class="links">
-                <a href="/privacy">Privacy</a>
-                <a href="/terms">Terms</a>
-                <a href="/support">Support</a>
-                <a href="/account-deletion">Account deletion</a>
-            </div>
-        </nav>
-    </header>
+    @include('partials.public-nav')
     <main class="wrap">
         @yield('content')
     </main>
