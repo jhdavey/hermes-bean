@@ -16,6 +16,7 @@ if (mount) {
     const initialSelectedPlan = ['base', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
+    const activeWorkspaceKey = 'heybean.web.activeWorkspace';
     const dashboardChangeKey = 'heybean.dashboard.changeId';
     const dashboardDataCacheKey = 'heybean.dashboard.data';
     const kioskVoiceKey = 'heybean.kioskVoice';
@@ -454,8 +455,9 @@ if (mount) {
                 }
             };
             state.user = user;
+            restoreRememberedActiveWorkspace(user);
             state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || 0);
-            const cachedWorkspaceId = currentWorkspaceIdFromUser(user);
+            const cachedWorkspaceId = currentWorkspaceIdFromUser(state.user);
             if (cachedWorkspaceId && applyDashboardCache(cachedWorkspaceId)) {
                 state.phase = 'signedIn';
                 state.error = '';
@@ -463,16 +465,17 @@ if (mount) {
             }
 
             const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
-                recover(api('/today'), state.summary || {}),
-                recover(api('/tasks'), state.tasks),
-                recover(api('/tasks/past'), []),
-                recover(api('/reminders'), state.reminders),
-                recover(api('/calendar-events?skip_google_sync=1'), state.calendar),
-                recover(api('/event-categories'), state.categories),
+                recover(api(workspaceScopedPath('/today')), state.summary || {}),
+                recover(api(workspaceScopedPath('/tasks')), state.tasks),
+                recover(api(workspaceScopedPath('/tasks/past')), []),
+                recover(api(workspaceScopedPath('/reminders')), state.reminders),
+                recover(api(workspaceScopedPath('/calendar-events?skip_google_sync=1')), state.calendar),
+                recover(api(workspaceScopedPath('/event-categories')), state.categories),
                 api('/google-calendar/status?cached=1').catch(() => null),
             ]);
             state.user = mergeUser(user, summary?.user, summary);
             state.summary = summary;
+            setActiveWorkspaceLocally(currentWorkspaceId(), { persist: false });
             state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
             state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
             state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
@@ -518,6 +521,48 @@ if (mount) {
             || user?.default_workspace_id
             || user?.defaultWorkspaceId
             || null;
+    }
+
+    function activeWorkspaceStorageKey(user = state.user) {
+        return `${activeWorkspaceKey}.${user?.id || 'anon'}`;
+    }
+
+    function rememberedActiveWorkspaceId(user = state.user) {
+        try {
+            return localStorage.getItem(activeWorkspaceStorageKey(user)) || '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function persistActiveWorkspaceId(workspaceId, user = state.user) {
+        if (!workspaceId || !user?.id) return;
+        try {
+            localStorage.setItem(activeWorkspaceStorageKey(user), String(workspaceId));
+        } catch (_) {
+            // Active workspace persistence is best-effort; the server default remains the fallback.
+        }
+    }
+
+    function workspaceIsAccessible(workspaceId, user = state.user) {
+        return normalizeList(user?.workspaces || state.summary?.workspaces)
+            .some((workspace) => String(workspace.id) === String(workspaceId));
+    }
+
+    function restoreRememberedActiveWorkspace(user = state.user) {
+        const workspaceId = rememberedActiveWorkspaceId(user);
+        if (!workspaceId || !workspaceIsAccessible(workspaceId, user)) return false;
+        setActiveWorkspaceLocally(workspaceId, { persist: false });
+        return true;
+    }
+
+    function workspaceScopedPath(path, workspaceId = currentWorkspaceId()) {
+        if (!workspaceId) return path;
+        const [base, query = ''] = String(path).split('?');
+        const params = new URLSearchParams(query);
+        params.set('workspace_id', workspaceId);
+        const serialized = params.toString();
+        return serialized ? `${base}?${serialized}` : base;
     }
 
     function dashboardCacheStorageKey(workspaceId = currentWorkspaceId()) {
@@ -623,7 +668,7 @@ if (mount) {
         state.pendingCalendarDeletes = snapshot.pendingCalendarDeletes;
     }
 
-    function setActiveWorkspaceLocally(workspaceId) {
+    function setActiveWorkspaceLocally(workspaceId, options = {}) {
         const id = String(workspaceId);
         const workspace = findWorkspace(id);
         const nextWorkspaces = workspaces().map((candidate) => ({
@@ -645,6 +690,9 @@ if (mount) {
             workspace: workspace || state.summary?.workspace,
             workspaces: nextWorkspaces.length ? nextWorkspaces : state.summary?.workspaces,
         };
+        if (options.persist !== false) {
+            persistActiveWorkspaceId(id);
+        }
     }
 
     function syncSummaryAgentProfileFromUser(user = state.user) {
@@ -7651,13 +7699,14 @@ if (mount) {
         const generation = ++dashboardRefreshGeneration;
         try {
             const calendarPath = options.skipCalendarSync === false ? '/calendar-events' : '/calendar-events?skip_google_sync=1';
+            const workspaceId = currentWorkspaceId();
             const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
-                api('/today'),
-                api('/tasks'),
-                api('/tasks/past'),
-                api('/reminders'),
-                api(calendarPath),
-                api('/event-categories'),
+                api(workspaceScopedPath('/today', workspaceId)),
+                api(workspaceScopedPath('/tasks', workspaceId)),
+                api(workspaceScopedPath('/tasks/past', workspaceId)),
+                api(workspaceScopedPath('/reminders', workspaceId)),
+                api(workspaceScopedPath(calendarPath, workspaceId)),
+                api(workspaceScopedPath('/event-categories', workspaceId)),
                 api('/google-calendar/status?cached=1').catch(() => state.googleStatus),
             ]);
             if (generation !== dashboardRefreshGeneration) return;
@@ -7671,6 +7720,7 @@ if (mount) {
             state.activity = normalizeList(summary?.activity_events);
             state.googleStatus = googleStatus;
             state.user = mergeUser(state.user, summary?.user, summary);
+            setActiveWorkspaceLocally(workspaceId, { persist: false });
             saveDashboardCache();
             if (shouldRender) renderDashboardDataUpdate({ deferIfEditing: options.deferRender === true });
         } catch (error) {
@@ -7758,7 +7808,7 @@ if (mount) {
 
     function refreshCalendarInBackground() {
         const generation = ++dashboardRefreshGeneration;
-        api('/calendar-events')
+        api(workspaceScopedPath('/calendar-events'))
             .then((calendar) => {
                 if (generation !== dashboardRefreshGeneration) return;
                 state.calendar = reconcileCalendarRefresh(calendar);
@@ -7772,7 +7822,7 @@ if (mount) {
 
     function refreshCalendarAfterEventSave() {
         const generation = ++dashboardRefreshGeneration;
-        api('/calendar-events?skip_google_sync=1')
+        api(workspaceScopedPath('/calendar-events?skip_google_sync=1'))
             .then((calendar) => {
                 if (generation !== dashboardRefreshGeneration) return;
                 state.calendar = reconcileCalendarRefresh(calendar);
@@ -7820,7 +7870,7 @@ if (mount) {
         render();
         try {
             const [calendar, googleStatus] = await Promise.all([
-                api('/calendar-events'),
+                api(workspaceScopedPath('/calendar-events')),
                 api('/google-calendar/status').catch(() => state.googleStatus),
             ]);
             state.calendar = reconcileCalendarRefresh(calendar);
@@ -7959,11 +8009,12 @@ if (mount) {
         state.error = '';
         render();
         try {
-            await api('/workspaces/default', { method: 'PATCH', body: { workspace_id: Number(id) } });
-            refreshOnly(false, { skipCalendarSync: true }).then(() => {
-                state.notice = `Switched to ${workspaceDisplayName(workspace)}.`;
-                renderDashboardDataUpdate({ deferIfEditing: true });
-            });
+            await refreshOnly(false, { skipCalendarSync: true });
+            if (state.error) {
+                throw new Error(state.error);
+            }
+            state.notice = `Switched to ${workspaceDisplayName(workspace)}.`;
+            renderDashboardDataUpdate({ deferIfEditing: true });
         } catch (error) {
             restoreDashboardState(previous);
             state.error = friendlyError(error, 'switch workspaces');
@@ -8363,7 +8414,7 @@ if (mount) {
     }
 
     function currentWorkspaceId() {
-        return state.summary?.workspace?.id || state.summary?.workspaceId || state.user?.active_workspace?.id || state.user?.activeWorkspace?.id || workspaces().find((workspace) => workspace.active || workspace.is_default || workspace.isDefault)?.id || workspaces()[0]?.id || '';
+        return state.user?.active_workspace?.id || state.user?.activeWorkspace?.id || state.summary?.workspace?.id || state.summary?.workspaceId || workspaces().find((workspace) => workspace.active || workspace.is_default || workspace.isDefault)?.id || workspaces()[0]?.id || '';
     }
 
     function workspaceDisplayName(workspace = {}) {

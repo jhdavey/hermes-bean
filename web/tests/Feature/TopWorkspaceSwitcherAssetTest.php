@@ -28,4 +28,14 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
         $this->assertStringContainsString("name=\"syncWorkspaceIds\"", $appJs);
         $this->assertStringContainsString('Also assign to', $appJs);
     }
+
+    public function test_workspace_switcher_uses_sticky_active_workspace_without_changing_default_workspace(): void
+    {
+        $appJs = file_get_contents(resource_path('js/app.js'));
+
+        $this->assertStringContainsString("const activeWorkspaceKey = 'heybean.web.activeWorkspace';", $appJs);
+        $this->assertStringContainsString('restoreRememberedActiveWorkspace(user)', $appJs);
+        $this->assertStringContainsString('api(workspaceScopedPath(\'/today\', workspaceId))', $appJs);
+        $this->assertStringNotContainsString("api('/workspaces/default'", $appJs);
+    }
 }

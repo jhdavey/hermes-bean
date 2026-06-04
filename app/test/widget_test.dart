@@ -67,6 +67,46 @@ void main() {
   );
 
   testWidgets(
+    'create account submits an early access signup and stays signed out',
+    (WidgetTester tester) async {
+      final api = _FakeHermesApiClient();
+      final tokenStore = _MemoryAuthTokenStore();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: tokenStore),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('show-register-mode')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('auth-name')), 'testing');
+      await tester.enterText(
+        find.byKey(const Key('auth-email')),
+        'test@email.com',
+      );
+      await tester.enterText(
+        find.byKey(const Key('auth-password')),
+        'password1234',
+      );
+      await tester.tap(find.byKey(const Key('auth-submit')));
+      await tester.pumpAndSettle();
+
+      expect(api.earlyAccessSignupRequests, [
+        {'name': 'testing', 'email': 'test@email.com', 'plan': null},
+      ]);
+      expect(
+        find.text(
+          "You're on the early access list. We'll email you as soon as we can give you access.",
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('auth-notice')), findsOneWidget);
+      expect(find.byKey(const Key('calendar-view')), findsNothing);
+      expect(tokenStore.token, isNull);
+      expect(find.textContaining('Bean could not create'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'starts signed out, logs in, loads live data, sends chat, and exposes delete account',
     (WidgetTester tester) async {
       final api = _FakeHermesApiClient(onboardingCompleted: false);
@@ -117,12 +157,17 @@ void main() {
 
       await tester.tap(find.byKey(const Key('show-register-mode')));
       await tester.pumpAndSettle();
-      expect(find.text('Create your Hermes Bean account'), findsOneWidget);
+      expect(find.text('Create your account'), findsOneWidget);
+      expect(
+        find.textContaining('Create your account with your email'),
+        findsNothing,
+      );
       expect(find.byKey(const Key('auth-name')), findsOneWidget);
       expect(find.text('Choose Bean’s personality'), findsNothing);
       expect(find.text('What should Bean prioritize?'), findsNothing);
 
-      await tester.enterText(find.byKey(const Key('auth-name')), 'Bean User');
+      await tester.tap(find.byKey(const Key('show-login-mode')));
+      await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('auth-email')),
         'bean@example.com',
@@ -133,7 +178,6 @@ void main() {
       );
       tester.testTextInput.hide();
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const Key('auth-submit')));
       await tester.tap(find.byKey(const Key('auth-submit')));
       await tester.pumpAndSettle();
 
@@ -1146,9 +1190,6 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('show-register-mode')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('auth-name')), 'Bean User');
       await tester.enterText(
         find.byKey(const Key('auth-email')),
         'bean@example.com',
@@ -1188,9 +1229,6 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('show-register-mode')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('auth-name')), 'Bean User');
       await tester.enterText(
         find.byKey(const Key('auth-email')),
         'bean@example.com',
@@ -3126,6 +3164,46 @@ void main() {
 
     expect(api.updatedEmail, 'new-bean@example.com');
     expect(find.text('new-bean@example.com'), findsWidgets);
+  });
+
+  testWidgets('sign out ignores late signed-in refresh failures', (
+    WidgetTester tester,
+  ) async {
+    final api = _RefreshFailsAfterLogoutFakeHermesApiClient();
+    final tokenStore = _MemoryAuthTokenStore()..token = 'existing-token';
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: tokenStore),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('settings-view')), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const Key('signed-in-refresh-scroll')),
+      const Offset(0, 500),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(api.refreshStarted.isCompleted, isTrue);
+
+    await tester.ensureVisible(find.byKey(const Key('sign-out-action')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('sign-out-action')));
+    await tester.pump();
+
+    expect(find.text('Login'), findsOneWidget);
+    expect(find.byKey(const Key('settings-view')), findsNothing);
+
+    api.failRefresh();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Login'), findsOneWidget);
+    expect(find.byKey(const Key('settings-view')), findsNothing);
+    expect(find.textContaining('Session expired'), findsNothing);
+    expect(tokenStore.token, isNull);
   });
 
   testWidgets(
@@ -5269,6 +5347,32 @@ class _SlowDashboardFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   }
 }
 
+class _RefreshFailsAfterLogoutFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  final Completer<void> refreshStarted = Completer<void>();
+  final Completer<void> _refreshRelease = Completer<void>();
+
+  void failRefresh() {
+    if (!_refreshRelease.isCompleted) _refreshRelease.complete();
+  }
+
+  @override
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
+    todaySummaryCalls++;
+    if (todaySummaryCalls == 1) {
+      return super.todaySummary(workspaceId: workspaceId);
+    }
+    if (!refreshStarted.isCompleted) refreshStarted.complete();
+    await _refreshRelease.future;
+    throw const HermesApiException(401, '{"message":"Unauthenticated."}');
+  }
+
+  @override
+  Future<void> logout({bool clearBearerToken = true}) async {
+    if (clearBearerToken) bearerToken = null;
+  }
+}
+
 class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   final createdWorkspaceNames = <String>[];
   Completer<List<Map<String, Object?>>>? workspaceCalendarSaveCompleter;
@@ -5568,6 +5672,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       const HermesNotificationPreferences();
   String updatedTheme = 'green';
   final passwordResetRequests = <String>[];
+  final earlyAccessSignupRequests = <Map<String, String?>>[];
   final issueReports = <String>[];
   HermesReminder? bannerUpdatedReminder;
   List<HermesApproval> approvals = const [];
@@ -5641,6 +5746,19 @@ class _FakeHermesApiClient extends HermesApiClient {
     return HermesAuthResult(
       token: 'fake-token',
       user: _user(name: name, email: email),
+    );
+  }
+
+  @override
+  Future<HermesEarlyAccessSignupResult> requestEarlyAccess({
+    required String name,
+    required String email,
+    String? plan,
+  }) async {
+    earlyAccessSignupRequests.add({'name': name, 'email': email, 'plan': plan});
+    return const HermesEarlyAccessSignupResult(
+      message:
+          "You're on the early access list. We'll email you as soon as we can give you access.",
     );
   }
 

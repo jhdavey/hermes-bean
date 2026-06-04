@@ -1132,6 +1132,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     ),
   ].toList();
   String? _error;
+  String? _authNotice;
   String? _loadingStatusText;
   bool _busy = false;
   bool _dashboardLoading = false;
@@ -1165,6 +1166,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _dashboardRefreshGeneration = 0;
   int _dashboardDataVersion = 0;
   int _workspaceRefreshGeneration = 0;
+  int _authGeneration = 0;
   int? _lastScheduledAppIconBadgeCount;
   final Map<int, _DashboardSnapshot> _workspaceSnapshots = {};
   final Map<int, _PendingCalendarEventWrite> _pendingCalendarEventWrites = {};
@@ -1176,6 +1178,32 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void _markDashboardDataMutated() {
     _dashboardDataVersion++;
     _dashboardRefreshGeneration++;
+  }
+
+  bool _isCurrentAuthGeneration(int generation) =>
+      mounted && generation == _authGeneration;
+
+  void _clearSignedInState() {
+    _user = null;
+    _session = null;
+    _tasks = const [];
+    _pastTasks = const [];
+    _reminders = const [];
+    _calendar = const [];
+    _eventCategories = const [];
+    _googleCalendarStatus = null;
+    _approvals = const [];
+    _events = const [];
+    _messages.clear();
+    _pendingTaskIds.clear();
+    _dismissedReminderBannerIds.clear();
+    _notifiedReminderIds.clear();
+    _shownApprovalSheetId = null;
+    _approvalSheetOpen = false;
+    _beanVoiceListening = false;
+    _beanVoiceDraft = null;
+    _dashboardLoading = false;
+    _loadingStatusText = null;
   }
 
   void _rememberPendingCalendarEventWrite(HermesCalendarEvent event) {
@@ -1479,6 +1507,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String? loadingStatusText,
   }) async {
     _stopDashboardChangePolling();
+    final authGeneration = ++_authGeneration;
     _workspaceRefreshGeneration++;
     setState(() {
       _phase = _AuthPhase.loading;
@@ -1498,7 +1527,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
     try {
       final user = knownUser ?? await widget.apiClient.me();
-      if (!mounted) return;
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _applyUserTheme(user);
       setState(() {
         _user = user;
@@ -1575,7 +1604,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final listedCalendarEvents = _calendarEventsWithPendingWrites(
         results[3] as List<HermesCalendarEvent>,
       );
-      if (!mounted) return;
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _applyUserTheme(user);
       setState(() {
         _user = user;
@@ -1604,7 +1633,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _startDashboardChangePolling(resetCursor: true);
     } catch (error) {
       _stopDashboardChangePolling();
-      if (!mounted) return;
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       final invalidToken = _isInvalidTokenError(error);
       if (invalidToken) {
         await widget.tokenStore.clearToken();
@@ -1642,6 +1671,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _busy = true;
       _error = null;
+      _authNotice = null;
     });
     try {
       final auth = await widget.apiClient.login(
@@ -1669,16 +1699,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _busy = true;
       _error = null;
+      _authNotice = null;
     });
     try {
-      final auth = await widget.apiClient.register(
+      final result = await widget.apiClient.requestEarlyAccess(
         name: name,
         email: email,
-        password: password,
       );
-      await widget.tokenStore.saveRememberMe(true);
-      await widget.tokenStore.saveToken(auth.token);
-      await _loadSignedIn(knownUser: auth.user);
+      await widget.tokenStore.saveRememberMe(false);
+      await widget.tokenStore.clearToken();
+      widget.apiClient.bearerToken = null;
+      if (!mounted) return;
+      setState(() {
+        _phase = _AuthPhase.signedOut;
+        _authNotice = result.message;
+        _error = null;
+      });
     } catch (error) {
       setState(
         () => _error = beanFriendlyErrorMessage(
@@ -2435,6 +2471,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (_phase != _AuthPhase.signedIn || _dashboardChangePollInFlight) return;
     _dashboardChangePollInFlight = true;
     final generation = _dashboardChangePollGeneration;
+    final authGeneration = _authGeneration;
     final previousLatestId = _dashboardChangeLastId;
     try {
       final feed = await widget.apiClient.dashboardChanges(
@@ -2442,6 +2479,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
+          authGeneration != _authGeneration ||
           generation != _dashboardChangePollGeneration) {
         return;
       }
@@ -2466,6 +2504,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _refreshSignedInViews() async {
     final session = _session;
     if (_phase != _AuthPhase.signedIn || session == null) return;
+    final authGeneration = _authGeneration;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
     setState(() => _dashboardLoading = true);
@@ -2495,6 +2534,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         results[3] as List<HermesCalendarEvent>,
       );
       if (!mounted ||
+          _phase != _AuthPhase.signedIn ||
+          authGeneration != _authGeneration ||
           refreshGeneration != _dashboardRefreshGeneration ||
           dataVersion != _dashboardDataVersion) {
         return;
@@ -2516,7 +2557,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _syncReminderNotifications();
       _cacheCurrentDashboardSnapshot();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          _phase != _AuthPhase.signedIn ||
+          authGeneration != _authGeneration ||
+          refreshGeneration != _dashboardRefreshGeneration) {
+        return;
+      }
       setState(() {
         _dashboardLoading = false;
         _error = beanFriendlyErrorMessage(
@@ -2525,7 +2571,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         );
       });
     } finally {
-      if (mounted && refreshGeneration == _dashboardRefreshGeneration) {
+      if (mounted &&
+          _phase == _AuthPhase.signedIn &&
+          authGeneration == _authGeneration &&
+          refreshGeneration == _dashboardRefreshGeneration) {
         setState(() => _dashboardLoading = false);
       }
     }
@@ -2536,6 +2585,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String errorAction = 'refresh your latest data',
   }) async {
     if (_phase != _AuthPhase.signedIn) return;
+    final authGeneration = _authGeneration;
     final generation = ++_workspaceRefreshGeneration;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
@@ -2585,6 +2635,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
+          authGeneration != _authGeneration ||
           generation != _workspaceRefreshGeneration ||
           refreshGeneration != _dashboardRefreshGeneration ||
           dataVersion != _dashboardDataVersion) {
@@ -2613,6 +2664,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     } catch (error) {
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
+          authGeneration != _authGeneration ||
           generation != _workspaceRefreshGeneration) {
         return;
       }
@@ -2621,7 +2673,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _error = beanFriendlyErrorMessage(error, action: errorAction);
       });
     } finally {
-      if (mounted && generation == _workspaceRefreshGeneration) {
+      if (mounted &&
+          _phase == _AuthPhase.signedIn &&
+          authGeneration == _authGeneration &&
+          generation == _workspaceRefreshGeneration) {
         setState(() => _dashboardLoading = false);
       }
     }
@@ -3627,27 +3682,35 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _logout() async {
     if (_busy) return;
+    final authGeneration = ++_authGeneration;
     _stopDashboardChangePolling();
-    setState(() => _busy = true);
+    _workspaceRefreshGeneration++;
+    _dashboardRefreshGeneration++;
+    _dashboardDataVersion++;
+    _applyUserTheme(null);
+    setState(() {
+      _busy = true;
+      _phase = _AuthPhase.signedOut;
+      _error = null;
+      _authNotice = null;
+      _clearSignedInState();
+    });
     try {
-      await _pushNotifications.unregister(widget.apiClient);
-      await widget.apiClient.logout();
-    } catch (_) {
-      widget.apiClient.bearerToken = null;
-    } finally {
       await widget.tokenStore.clearToken();
-      if (mounted) {
-        _applyUserTheme(null);
+      await _pushNotifications.unregister(widget.apiClient);
+      await widget.apiClient.logout(clearBearerToken: false);
+    } catch (_) {
+      // Local sign-out already completed; server/device cleanup can be retried
+      // next time the user signs in.
+    } finally {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        widget.apiClient.bearerToken = null;
         setState(() {
           _busy = false;
           _phase = _AuthPhase.signedOut;
-          _loadingStatusText = null;
-          _dashboardLoading = false;
-          _user = null;
-          _session = null;
-          _messages.clear();
-          _events = const [];
           _error = null;
+          _authNotice = null;
+          _clearSignedInState();
         });
       }
     }
@@ -3989,6 +4052,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         launchExternalUrl: widget.launchExternalUrl,
         busy: _busy,
         error: _error,
+        notice: _authNotice,
       );
     }
     final user = _user!;
@@ -4646,6 +4710,7 @@ class _SignedOutScreen extends StatefulWidget {
     required this.launchExternalUrl,
     required this.busy,
     this.error,
+    this.notice,
   });
 
   final Future<void> Function(
@@ -4660,6 +4725,7 @@ class _SignedOutScreen extends StatefulWidget {
   final ExternalUrlLauncher launchExternalUrl;
   final bool busy;
   final String? error;
+  final String? notice;
 
   @override
   State<_SignedOutScreen> createState() => _SignedOutScreenState();
@@ -4711,10 +4777,8 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = _registerMode ? 'Create your Hermes Bean account' : 'Login';
-    final subtitle = _registerMode
-        ? 'Create your account with your email and a secure 12+ character password'
-        : '';
+    final title = _registerMode ? 'Create your account' : 'Login';
+    const subtitle = '';
 
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
@@ -4832,6 +4896,17 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                         Text(
                           widget.error!,
                           style: const TextStyle(color: Colors.redAccent),
+                        ),
+                      ],
+                      if (widget.notice != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          widget.notice!,
+                          key: const Key('auth-notice'),
+                          style: TextStyle(
+                            color: HeyBeanTheme.accentStrong,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ],
                       const SizedBox(height: 16),

@@ -193,6 +193,45 @@ void main() {
     },
   );
 
+  test('requests early access through the register endpoint', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'POST');
+        expect(request.path, '/auth/register');
+        expect(request.headers.containsKey('Authorization'), isFalse);
+        expect(request.body, {'name': 'testing', 'email': 'test@email.com'});
+        return HermesApiResponse(
+          201,
+          jsonEncode({
+            'data': {
+              'message':
+                  "You're on the early access list. We'll email you as soon as we can give you access.",
+              'early_access_signup': {
+                'email': 'test@email.com',
+                'name': 'testing',
+              },
+            },
+          }),
+        );
+      },
+    );
+
+    final result = await client.requestEarlyAccess(
+      name: 'testing',
+      email: 'test@email.com',
+    );
+
+    expect(
+      result.message,
+      "You're on the early access list. We'll email you as soon as we can give you access.",
+    );
+    expect(client.bearerToken, isNull);
+    expect(requests, hasLength(1));
+  });
+
   test(
     'updates Bean onboarding preferences through auth profile update',
     () async {

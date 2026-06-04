@@ -69,6 +69,20 @@ class HermesApiClient {
     return _rememberAuth(HermesAuthResult.fromJson(_expectMap(data['data'])));
   }
 
+  Future<HermesEarlyAccessSignupResult> requestEarlyAccess({
+    required String name,
+    required String email,
+    String? plan,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/auth/register',
+      body: {'name': name, 'email': email, if (plan != null) 'plan': plan},
+      authenticated: false,
+    );
+    return HermesEarlyAccessSignupResult.fromJson(_expectMap(data['data']));
+  }
+
   Future<HermesAuthResult> login({
     required String email,
     required String password,
@@ -91,9 +105,9 @@ class HermesApiClient {
     );
   }
 
-  Future<void> logout() async {
+  Future<void> logout({bool clearBearerToken = true}) async {
     await _sendJson('POST', '/auth/logout');
-    bearerToken = null;
+    if (clearBearerToken) bearerToken = null;
   }
 
   Future<void> registerPushNotificationToken({
@@ -1106,6 +1120,20 @@ class HermesAuthResult {
         token: _expectString(json['token']),
         user: HermesUser.fromJson(_expectMap(json['user'])),
       );
+}
+
+class HermesEarlyAccessSignupResult {
+  const HermesEarlyAccessSignupResult({required this.message});
+
+  final String message;
+
+  factory HermesEarlyAccessSignupResult.fromJson(
+    Map<String, Object?> json,
+  ) => HermesEarlyAccessSignupResult(
+    message:
+        json['message']?.toString() ??
+        "You're on the early access list. We'll email you as soon as we can give you access.",
+  );
 }
 
 class HermesDashboardChangeFeed {
