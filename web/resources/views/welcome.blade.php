@@ -61,7 +61,7 @@
             <div class="chat-mockup" aria-label="Bean planning chat mockup">
                 <div class="chat-phone" aria-label="Bean chat mockup matching real app screen">
                     <div class="chat-art">
-                        <img class="chat-example-screen" src="{{ asset('images/bean-chat-example-ss.png') }}?v={{ filemtime(public_path('images/bean-chat-example-ss.png')) }}" width="500" height="1125" alt="HeyBean mobile planning chat screen showing Bean organizing a week into calendar blocks, tasks, and reminders">
+                        <img class="chat-example-screen" src="{{ asset('images/bean-logistics-conversation.png') }}?v={{ filemtime(public_path('images/bean-logistics-conversation.png')) }}" width="500" height="1080" alt="HeyBean mobile planning chat screen showing Bean organizing a week into calendar blocks, tasks, and reminders">
                     </div>
                 </div>
             </div>
