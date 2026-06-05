@@ -69,20 +69,6 @@ class HermesApiClient {
     return _rememberAuth(HermesAuthResult.fromJson(_expectMap(data['data'])));
   }
 
-  Future<HermesEarlyAccessSignupResult> requestEarlyAccess({
-    required String name,
-    required String email,
-    String? plan,
-  }) async {
-    final data = await _sendJson(
-      'POST',
-      '/auth/register',
-      body: {'name': name, 'email': email, if (plan != null) 'plan': plan},
-      authenticated: false,
-    );
-    return HermesEarlyAccessSignupResult.fromJson(_expectMap(data['data']));
-  }
-
   Future<HermesAuthResult> login({
     required String email,
     required String password,
@@ -103,6 +89,18 @@ class HermesApiClient {
       body: {'email': email},
       authenticated: false,
     );
+  }
+
+  Future<HermesCheckoutSession> createCheckoutSession({
+    required String plan,
+    String source = 'flutter',
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/billing/checkout-sessions',
+      body: {'plan': plan, 'source': source},
+    );
+    return HermesCheckoutSession.fromJson(_expectMap(data['data']));
   }
 
   Future<void> logout({bool clearBearerToken = true}) async {
@@ -1122,18 +1120,26 @@ class HermesAuthResult {
       );
 }
 
-class HermesEarlyAccessSignupResult {
-  const HermesEarlyAccessSignupResult({required this.message});
+class HermesCheckoutSession {
+  const HermesCheckoutSession({
+    required this.id,
+    required this.url,
+    required this.plan,
+    this.status,
+  });
 
-  final String message;
+  final String id;
+  final String url;
+  final String plan;
+  final String? status;
 
-  factory HermesEarlyAccessSignupResult.fromJson(
-    Map<String, Object?> json,
-  ) => HermesEarlyAccessSignupResult(
-    message:
-        json['message']?.toString() ??
-        "You're on the early access list. We'll email you as soon as we can give you access.",
-  );
+  factory HermesCheckoutSession.fromJson(Map<String, Object?> json) =>
+      HermesCheckoutSession(
+        id: _expectString(json['id']),
+        url: _expectString(json['url']),
+        plan: _expectString(json['plan']),
+        status: json['status']?.toString(),
+      );
 }
 
 class HermesDashboardChangeFeed {
@@ -1225,6 +1231,8 @@ class HermesUser {
     required this.name,
     required this.email,
     this.subscriptionTier = 'base',
+    this.subscriptionStatus,
+    this.subscriptionTrialEndsAt,
     this.theme = 'green',
     this.onboardComplete = false,
     this.agentProfile,
@@ -1236,6 +1244,7 @@ class HermesUser {
     this.needsBeanOnboarding,
     this.beanPreferencesReady,
     this.isBeta = false,
+    this.isAdmin = false,
     this.notificationPreferences = const HermesNotificationPreferences(),
   });
 
@@ -1243,6 +1252,8 @@ class HermesUser {
   final String name;
   final String email;
   final String subscriptionTier;
+  final String? subscriptionStatus;
+  final String? subscriptionTrialEndsAt;
   final String theme;
   final bool onboardComplete;
   final HermesAgentProfile? agentProfile;
@@ -1254,6 +1265,7 @@ class HermesUser {
   final bool? needsBeanOnboarding;
   final bool? beanPreferencesReady;
   final bool isBeta;
+  final bool isAdmin;
   final HermesNotificationPreferences notificationPreferences;
 
   HermesAgentProfile? get currentAgentProfile =>
@@ -1263,6 +1275,8 @@ class HermesUser {
     String? name,
     String? email,
     String? subscriptionTier,
+    String? subscriptionStatus,
+    String? subscriptionTrialEndsAt,
     String? theme,
     bool? onboardComplete,
     HermesAgentProfile? agentProfile,
@@ -1274,12 +1288,16 @@ class HermesUser {
     bool? needsBeanOnboarding,
     bool? beanPreferencesReady,
     bool? isBeta,
+    bool? isAdmin,
     HermesNotificationPreferences? notificationPreferences,
   }) => HermesUser(
     id: id,
     name: name ?? this.name,
     email: email ?? this.email,
     subscriptionTier: subscriptionTier ?? this.subscriptionTier,
+    subscriptionStatus: subscriptionStatus ?? this.subscriptionStatus,
+    subscriptionTrialEndsAt:
+        subscriptionTrialEndsAt ?? this.subscriptionTrialEndsAt,
     theme: theme ?? this.theme,
     onboardComplete: onboardComplete ?? this.onboardComplete,
     agentProfile: agentProfile ?? this.agentProfile,
@@ -1292,6 +1310,7 @@ class HermesUser {
     needsBeanOnboarding: needsBeanOnboarding ?? this.needsBeanOnboarding,
     beanPreferencesReady: beanPreferencesReady ?? this.beanPreferencesReady,
     isBeta: isBeta ?? this.isBeta,
+    isAdmin: isAdmin ?? this.isAdmin,
     notificationPreferences:
         notificationPreferences ?? this.notificationPreferences,
   );
@@ -1304,6 +1323,11 @@ class HermesUser {
       json['subscription_tier'] ?? json['subscriptionTier'],
       'base',
     ),
+    subscriptionStatus:
+        (json['subscription_status'] ?? json['subscriptionStatus'])?.toString(),
+    subscriptionTrialEndsAt:
+        (json['subscription_trial_ends_at'] ?? json['subscriptionTrialEndsAt'])
+            ?.toString(),
     theme: _readStringOrDefault(json['theme'], 'green'),
     onboardComplete: json['onboard_complete'] == true,
     agentProfile: json['agent_profile'] is Map<String, Object?>
@@ -1340,6 +1364,7 @@ class HermesUser {
         json['isBeta'] == true ||
         json['beta_user'] != null ||
         json['betaUser'] != null,
+    isAdmin: json['is_admin'] == true || json['isAdmin'] == true,
     notificationPreferences: HermesNotificationPreferences.fromJson(
       _expectMapOrNull(json['notification_preferences']),
     ),

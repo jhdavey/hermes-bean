@@ -52,25 +52,31 @@ class AuthController extends Controller
         ]);
 
         $data = $request->validate([
-            'name' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email:rfc', 'max:255'],
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email:rfc', 'max:255', Rule::unique('users', 'email')],
+            'password' => ['required', 'string', 'min:12', 'confirmed'],
             'plan' => ['sometimes', 'nullable', Rule::in(['base', 'premium', 'pro'])],
         ]);
-        $requestedPlan = $data['plan'] ?? null;
 
-        $signup = EarlyAccessSignup::updateOrCreate(
-            ['email' => $data['email']],
-            [
-                'name' => $data['name'] ?: null,
-                'use_case' => null,
-                'requested_plan' => $requestedPlan,
-                'source' => $requestedPlan ? 'pricing_register' : 'app_register',
-            ],
-        );
+        $user = DB::transaction(function () use ($data): User {
+            $user = User::create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => Hash::make($data['password']),
+                'subscription_tier' => 'base',
+            ]);
+
+            app(AgentProfileService::class)->ensureForUser($user);
+            app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+            app(WelcomeConversationService::class)->ensureForUser($user);
+
+            return $user;
+        });
 
         return response()->json(['data' => [
-            'message' => "You're on the early access list. We'll email you as soon as we can give you access.",
-            'early_access_signup' => $signup,
+            'user' => $this->hydratedUser($user),
+            'token' => $this->issueToken($user),
+            'selected_plan' => $data['plan'] ?? null,
         ]], 201);
     }
 

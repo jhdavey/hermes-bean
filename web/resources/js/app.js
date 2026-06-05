@@ -976,8 +976,8 @@ if (mount) {
                         <div class="hb-auth-title">
                             ${register ? `<span class="hb-section-icon">${icons.user}</span>` : `<img src="${escapeAttr(logoUrl)}" alt="">`}
                             <div>
-                                <h1>${forgot ? 'Reset password' : register ? 'We are currently accepting early access beta users' : 'Login'}</h1>
-                                ${register ? selectedPlanMarkup() || "<p>Sign up for early access and we'll email you as soon as we can give you access.</p>" : ''}
+                                <h1>${forgot ? 'Reset password' : register ? 'Create your account' : 'Login'}</h1>
+                                ${register ? selectedPlanMarkup() || '<p>Create your account, choose a plan, and start your 7-day free trial.</p>' : ''}
                             </div>
                         </div>
                         ${errorMarkup(state.error)}
@@ -999,13 +999,16 @@ if (mount) {
                 ${register ? labelInput('Name', 'name', 'text', '', 'autocomplete="name"') : ''}
                 ${labelInput('Email', 'email', 'email', '', 'required autocomplete="email"')}
                 ${register && state.selectedPlan ? `<input type="hidden" name="plan" value="${escapeAttr(state.selectedPlan)}">` : ''}
-                ${register ? '' : `
+                ${register ? `
+                    ${labelInput('Password', 'password', 'password', '', 'required autocomplete="new-password" minlength="12"')}
+                    ${labelInput('Confirm password', 'password_confirmation', 'password', '', 'required autocomplete="new-password" minlength="12"')}
+                ` : `
                     ${labelInput('Password', 'password', 'password', '', 'required autocomplete="current-password" minlength="1"')}
                     <label class="hb-checkbox-row"><input type="checkbox" name="remember" ${state.remember ? 'checked' : ''}> Remember me</label>
                 `}
-                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? (register ? 'Requesting access…' : 'Signing in…') : (register ? 'Sign up for early access' : 'Sign in')}</button>
+                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? (register ? 'Creating account…' : 'Signing in…') : (register ? 'Create account' : 'Sign in')}</button>
                 <div class="hb-link-row">
-                    <button class="hb-button-ghost" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? 'Already have an account? Sign in' : 'Request early access'}</button>
+                    <button class="hb-button-ghost" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? 'Already have an account? Sign in' : 'Create an account'}</button>
                     <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
                 </div>
             </form>`;
@@ -1016,7 +1019,7 @@ if (mount) {
         if (!plan) return '';
         return `
             <p>${escapeHtml(plan.trial)}.</p>
-            <p class="hb-item-meta">${escapeHtml(plan.summary)} Trial billing starts on day 8 until canceled once checkout is enabled.</p>
+            <p class="hb-item-meta">${escapeHtml(plan.summary)} Trial billing starts on day 8 until canceled.</p>
         `;
     }
 
@@ -1028,7 +1031,7 @@ if (mount) {
                 <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Sending…' : 'Send reset link'}</button>
                 <div class="hb-link-row">
                     <button class="hb-button-ghost" type="button" data-auth-mode="login">Back to login</button>
-                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Request early access</button>
+                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Create an account</button>
                 </div>
             </form>`;
     }
@@ -3003,13 +3006,24 @@ if (mount) {
                 return;
             }
             const payload = action === 'register'
-                ? { name: data.name, email: data.email, ...(data.plan ? { plan: data.plan } : {}) }
+                ? { name: data.name, email: data.email, password: data.password, password_confirmation: data.password_confirmation, ...(data.plan ? { plan: data.plan } : {}) }
                 : { email: data.email, password: data.password };
             const result = await api(`/auth/${action}`, { method: 'POST', body: payload });
             if (action === 'register') {
+                persistToken(result.token, true);
                 state.busy = false;
-                state.notice = result.message || "You're on the early access list. We'll email you as soon as we can give you access.";
-                render();
+                if (data.plan) {
+                    state.busy = true;
+                    render();
+                    const checkout = await api('/billing/checkout-sessions', {
+                        method: 'POST',
+                        body: { plan: data.plan, source: 'pricing' },
+                    });
+                    window.location.href = checkout.url;
+                    return;
+                }
+                history.pushState({}, '', '/pricing?source=register');
+                window.location.href = '/pricing?source=register';
                 return;
             }
             persistToken(result.token, action === 'login' && data.remember === 'on');

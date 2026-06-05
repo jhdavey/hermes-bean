@@ -66,45 +66,63 @@ void main() {
     },
   );
 
-  testWidgets(
-    'create account submits an early access signup and stays signed out',
-    (WidgetTester tester) async {
-      final api = _FakeHermesApiClient();
-      final tokenStore = _MemoryAuthTokenStore();
-      await tester.pumpWidget(
-        HermesBeanApp(apiClient: api, tokenStore: tokenStore),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('create account signs in and shows the trial plan paywall', (
+    WidgetTester tester,
+  ) async {
+    final api = _FakeHermesApiClient();
+    final tokenStore = _MemoryAuthTokenStore();
+    final launchedUrls = <Uri>[];
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: tokenStore,
+        launchExternalUrl: (url) async {
+          launchedUrls.add(url);
+          return true;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('show-register-mode')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('auth-name')), 'testing');
-      await tester.enterText(
-        find.byKey(const Key('auth-email')),
-        'test@email.com',
-      );
-      await tester.enterText(
-        find.byKey(const Key('auth-password')),
-        'password1234',
-      );
-      await tester.tap(find.byKey(const Key('auth-submit')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('show-register-mode')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('auth-name')), 'testing');
+    await tester.enterText(
+      find.byKey(const Key('auth-email')),
+      'test@email.com',
+    );
+    await tester.enterText(
+      find.byKey(const Key('auth-password')),
+      'password1234',
+    );
+    await tester.tap(find.byKey(const Key('auth-submit')));
+    await tester.pumpAndSettle();
 
-      expect(api.earlyAccessSignupRequests, [
-        {'name': 'testing', 'email': 'test@email.com', 'plan': null},
-      ]);
-      expect(
-        find.text(
-          "You're on the early access list. We'll email you as soon as we can give you access.",
-        ),
-        findsOneWidget,
-      );
-      expect(find.byKey(const Key('auth-notice')), findsOneWidget);
-      expect(find.byKey(const Key('calendar-view')), findsNothing);
-      expect(tokenStore.token, isNull);
-      expect(find.textContaining('Bean could not create'), findsNothing);
-    },
-  );
+    expect(api.registeredUsers, [
+      {
+        'name': 'testing',
+        'email': 'test@email.com',
+        'password': 'password1234',
+      },
+    ]);
+    expect(find.byKey(const Key('signup-paywall-screen')), findsOneWidget);
+    expect(find.text('Choose your Bean plan'), findsOneWidget);
+    expect(find.text('Start with a 7-day free trial.'), findsNothing);
+    expect(find.byKey(const Key('calendar-view')), findsNothing);
+    expect(tokenStore.token, 'fake-token');
+    expect(tokenStore.rememberMe, isTrue);
+    expect(find.textContaining('Bean could not create'), findsNothing);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('signup-plan-premium-action')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('signup-plan-premium-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.checkoutPlans, ['premium']);
+    expect(launchedUrls.single.host, 'checkout.stripe.com');
+  });
 
   testWidgets(
     'starts signed out, logs in, loads live data, sends chat, and exposes delete account',
@@ -5403,6 +5421,7 @@ class _WorkspaceFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     id: 1,
     name: 'Bean User',
     email: updatedEmail ?? 'bean@example.com',
+    subscriptionStatus: 'active',
     onboardComplete: true,
     defaultWorkspaceId: defaultWorkspaceSetTo ?? 1,
     personalWorkspace: workspaces.first,
@@ -5672,7 +5691,8 @@ class _FakeHermesApiClient extends HermesApiClient {
       const HermesNotificationPreferences();
   String updatedTheme = 'green';
   final passwordResetRequests = <String>[];
-  final earlyAccessSignupRequests = <Map<String, String?>>[];
+  final registeredUsers = <Map<String, String>>[];
+  final checkoutPlans = <String>[];
   final issueReports = <String>[];
   HermesReminder? bannerUpdatedReminder;
   List<HermesApproval> approvals = const [];
@@ -5680,7 +5700,12 @@ class _FakeHermesApiClient extends HermesApiClient {
   bool alwaysApprovedApproval = false;
   int? deniedApprovalId;
 
-  HermesUser _user({required String name, required String email}) {
+  HermesUser _user({
+    required String name,
+    required String email,
+    String subscriptionStatus = 'active',
+    bool isAdmin = false,
+  }) {
     final persistedPersonality = staleSettingsAfterUpdate
         ? null
         : updatedAgentPersonality;
@@ -5712,6 +5737,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       id: 1,
       name: name,
       email: email,
+      subscriptionStatus: subscriptionStatus,
       theme: updatedTheme,
       onboardComplete: !needsBeanOnboarding,
       agentProfile: profile,
@@ -5719,6 +5745,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       needsBeanOnboarding: needsBeanOnboarding,
       beanPreferencesReady: !needsBeanOnboarding,
       isBeta: betaUser,
+      isAdmin: isAdmin,
       notificationPreferences: updatedNotificationPreferences,
     );
   }
@@ -5742,29 +5769,31 @@ class _FakeHermesApiClient extends HermesApiClient {
     required String password,
     String? passwordConfirmation,
   }) async {
+    registeredUsers.add({'name': name, 'email': email, 'password': password});
     bearerToken = 'fake-token';
     return HermesAuthResult(
       token: 'fake-token',
-      user: _user(name: name, email: email),
-    );
-  }
-
-  @override
-  Future<HermesEarlyAccessSignupResult> requestEarlyAccess({
-    required String name,
-    required String email,
-    String? plan,
-  }) async {
-    earlyAccessSignupRequests.add({'name': name, 'email': email, 'plan': plan});
-    return const HermesEarlyAccessSignupResult(
-      message:
-          "You're on the early access list. We'll email you as soon as we can give you access.",
+      user: _user(name: name, email: email, subscriptionStatus: 'incomplete'),
     );
   }
 
   @override
   Future<void> requestPasswordReset({required String email}) async {
     passwordResetRequests.add(email.trim().toLowerCase());
+  }
+
+  @override
+  Future<HermesCheckoutSession> createCheckoutSession({
+    required String plan,
+    String source = 'flutter',
+  }) async {
+    checkoutPlans.add(plan);
+    return HermesCheckoutSession(
+      id: 'cs_test_$plan',
+      url: 'https://checkout.stripe.com/c/pay/cs_test_$plan',
+      plan: plan,
+      status: 'open',
+    );
   }
 
   @override
@@ -7110,6 +7139,7 @@ class _LinkedWorkspaceEditableCalendarFakeHermesApiClient
     id: 1,
     name: 'Bean User',
     email: 'bean@example.com',
+    subscriptionStatus: 'active',
     onboardComplete: true,
     defaultWorkspaceId: 1,
     personalWorkspace: _personal,
@@ -7170,6 +7200,7 @@ class _SharedWorkspaceCategoryFakeHermesApiClient
     id: 1,
     name: 'Bean User',
     email: 'bean@example.com',
+    subscriptionStatus: 'active',
     onboardComplete: true,
     defaultWorkspaceId: 2,
     personalWorkspace: _personal,

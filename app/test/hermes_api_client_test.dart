@@ -193,42 +193,36 @@ void main() {
     },
   );
 
-  test('requests early access through the register endpoint', () async {
+  test('creates checkout sessions for trial plans', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'register-token',
       transport: (request) async {
         requests.add(request);
         expect(request.method, 'POST');
-        expect(request.path, '/auth/register');
-        expect(request.headers.containsKey('Authorization'), isFalse);
-        expect(request.body, {'name': 'testing', 'email': 'test@email.com'});
+        expect(request.path, '/billing/checkout-sessions');
+        expect(request.headers['Authorization'], 'Bearer register-token');
+        expect(request.body, {'plan': 'premium', 'source': 'flutter'});
         return HermesApiResponse(
-          201,
+          200,
           jsonEncode({
             'data': {
-              'message':
-                  "You're on the early access list. We'll email you as soon as we can give you access.",
-              'early_access_signup': {
-                'email': 'test@email.com',
-                'name': 'testing',
-              },
+              'id': 'cs_test_123',
+              'url': 'https://checkout.stripe.com/c/pay/cs_test_123',
+              'plan': 'premium',
+              'status': 'open',
             },
           }),
         );
       },
     );
 
-    final result = await client.requestEarlyAccess(
-      name: 'testing',
-      email: 'test@email.com',
-    );
+    final result = await client.createCheckoutSession(plan: 'premium');
 
-    expect(
-      result.message,
-      "You're on the early access list. We'll email you as soon as we can give you access.",
-    );
-    expect(client.bearerToken, isNull);
+    expect(result.id, 'cs_test_123');
+    expect(result.url, 'https://checkout.stripe.com/c/pay/cs_test_123');
+    expect(result.plan, 'premium');
     expect(requests, hasLength(1));
   });
 

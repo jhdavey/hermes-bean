@@ -18,26 +18,33 @@ class AuthAndAccountLifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_register_records_early_access_signup(): void
+    public function test_register_creates_user_and_auth_token_without_early_access_signup(): void
     {
-        $this->postJson('/api/auth/register', [
+        $response = $this->postJson('/api/auth/register', [
             'name' => 'Bean User',
             'email' => 'bean@example.com',
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
             'plan' => 'pro',
         ])->assertCreated()
-            ->assertJsonPath('data.message', "You're on the early access list. We'll email you as soon as we can give you access.")
-            ->assertJsonPath('data.early_access_signup.email', 'bean@example.com')
-            ->assertJsonPath('data.early_access_signup.name', 'Bean User')
-            ->assertJsonPath('data.early_access_signup.source', 'pricing_register')
-            ->assertJsonPath('data.early_access_signup.requested_plan', 'pro');
+            ->assertJsonPath('data.user.email', 'bean@example.com')
+            ->assertJsonPath('data.user.subscription_tier', 'base')
+            ->assertJsonPath('data.user.is_early_access', false)
+            ->assertJsonPath('data.selected_plan', 'pro');
 
-        $this->assertDatabaseHas('early_access_signups', [
+        $this->assertIsString($response->json('data.token'));
+        $this->assertDatabaseHas('users', [
             'email' => 'bean@example.com',
             'name' => 'Bean User',
-            'requested_plan' => 'pro',
-            'source' => 'pricing_register',
+            'subscription_tier' => 'base',
         ]);
-        $this->assertDatabaseMissing('users', ['email' => 'bean@example.com']);
+        $this->assertDatabaseHas('workspaces', [
+            'name' => 'Bean User Personal Workspace',
+            'type' => 'personal',
+        ]);
+        $this->assertDatabaseMissing('early_access_signups', [
+            'email' => 'bean@example.com',
+        ]);
     }
 
     public function test_converted_early_access_user_keeps_early_access_flag_while_signup_record_exists(): void

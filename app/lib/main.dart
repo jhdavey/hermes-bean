@@ -1048,7 +1048,7 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
   );
 }
 
-enum _AuthPhase { loading, signedOut, signedIn }
+enum _AuthPhase { loading, signedOut, planSelection, signedIn }
 
 enum _HomeDestination { today, tasks, bean, reminders, settings }
 
@@ -1134,6 +1134,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _error;
   String? _authNotice;
   String? _loadingStatusText;
+  String? _checkoutBusyPlan;
+  String? _checkoutError;
   bool _busy = false;
   bool _dashboardLoading = false;
   String _chatRunState = 'Ready';
@@ -1482,6 +1484,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       error is HermesApiException &&
       (error.statusCode == 401 || error.statusCode == 403);
 
+  bool _userNeedsSignupPaywall(HermesUser user) {
+    if (user.isAdmin) return false;
+    if (user.subscriptionTier.trim().toLowerCase() == 'enterprise') {
+      return false;
+    }
+    final status = user.subscriptionStatus?.trim().toLowerCase();
+    return status != 'active' && status != 'trialing';
+  }
+
   Future<GoogleCalendarSyncStatus> _syncGoogleCalendarIfConnected({
     GoogleCalendarSyncStatus? fallback,
     bool syncConnected = true,
@@ -1529,6 +1540,25 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final user = knownUser ?? await widget.apiClient.me();
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _applyUserTheme(user);
+      if (_userNeedsSignupPaywall(user)) {
+        setState(() {
+          _user = user;
+          _session = null;
+          _tasks = const [];
+          _pastTasks = const [];
+          _reminders = const [];
+          _calendar = const [];
+          _eventCategories = const [];
+          _approvals = const [];
+          _events = const [];
+          _phase = _AuthPhase.planSelection;
+          _dashboardLoading = false;
+          _loadingStatusText = null;
+          _error = null;
+          _checkoutError = null;
+        });
+        return;
+      }
       setState(() {
         _user = user;
         _session = null;
@@ -1702,18 +1732,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _authNotice = null;
     });
     try {
-      final result = await widget.apiClient.requestEarlyAccess(
+      final auth = await widget.apiClient.register(
         name: name,
         email: email,
+        password: password,
       );
-      await widget.tokenStore.saveRememberMe(false);
-      await widget.tokenStore.clearToken();
-      widget.apiClient.bearerToken = null;
+      await widget.tokenStore.saveRememberMe(true);
+      await widget.tokenStore.saveToken(auth.token);
       if (!mounted) return;
+      _applyUserTheme(auth.user);
       setState(() {
-        _phase = _AuthPhase.signedOut;
-        _authNotice = result.message;
+        _user = auth.user;
+        _phase = _AuthPhase.planSelection;
+        _authNotice = null;
         _error = null;
+        _checkoutError = null;
       });
     } catch (error) {
       setState(
@@ -1725,6 +1758,42 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _startTrialCheckout(String plan) async {
+    if (_checkoutBusyPlan != null) return;
+    setState(() {
+      _checkoutBusyPlan = plan;
+      _checkoutError = null;
+    });
+    try {
+      final checkout = await widget.apiClient.createCheckoutSession(
+        plan: plan,
+        source: 'flutter',
+      );
+      final launched = await widget.launchExternalUrl(Uri.parse(checkout.url));
+      if (!mounted) return;
+      setState(() {
+        _checkoutBusyPlan = null;
+        _checkoutError = launched
+            ? null
+            : 'Bean could not open checkout. Please try again.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _checkoutBusyPlan = null;
+        _checkoutError = beanFriendlyErrorMessage(
+          error,
+          action: 'start your trial',
+        );
+      });
+    }
+  }
+
+  Future<void> _continueAfterCheckout() async {
+    setState(() => _checkoutError = null);
+    await _loadSignedIn(loadingStatusText: 'Refreshing your subscription...');
   }
 
   Future<void> _requestPasswordReset(String email) async {
@@ -4055,6 +4124,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         notice: _authNotice,
       );
     }
+    if (_phase == _AuthPhase.planSelection) {
+      return _SignupPaywallScreen(
+        user: _user!,
+        busyPlan: _checkoutBusyPlan,
+        error: _checkoutError,
+        onSelectPlan: _startTrialCheckout,
+        onContinue: _continueAfterCheckout,
+        onSignOut: _logout,
+      );
+    }
     final user = _user!;
     _scheduleApprovalSheet();
     final showAgentOnboarding =
@@ -4222,6 +4301,376 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 typedef _RegisterHandler =
     Future<void> Function(String name, String email, String password);
 typedef _ForgotPasswordHandler = Future<void> Function(String email);
+
+const List<_SignupPlanOption> _signupPlanOptions = [
+  _SignupPlanOption(
+    key: 'base',
+    label: 'Base',
+    price: r'$4.99',
+    description: 'Start with one calm place for your day.',
+    features: [
+      'Tasks, reminders, calendar, chat, and voice',
+      '2 workspaces and 1 connected calendar',
+      'Push reminders and recent Bean context',
+    ],
+  ),
+  _SignupPlanOption(
+    key: 'premium',
+    label: 'Premium',
+    price: r'$19.99',
+    description: 'Best for busy households and daily routines.',
+    features: [
+      '5 workspaces for home, work, school, and projects',
+      'Push and email reminders with recurring routines',
+      'Multiple calendars and 1 year of history',
+    ],
+    popular: true,
+  ),
+  _SignupPlanOption(
+    key: 'pro',
+    label: 'Pro',
+    price: r'$49.99',
+    description: 'For running Bean across every part of life.',
+    features: [
+      'Unlimited workspaces and connected accounts',
+      'Highest Bean usage and external tool budget',
+      'Full memory, priority background work, priority support',
+    ],
+  ),
+];
+
+class _SignupPlanOption {
+  const _SignupPlanOption({
+    required this.key,
+    required this.label,
+    required this.price,
+    required this.description,
+    required this.features,
+    this.popular = false,
+  });
+
+  final String key;
+  final String label;
+  final String price;
+  final String description;
+  final List<String> features;
+  final bool popular;
+}
+
+class _SignupPaywallScreen extends StatelessWidget {
+  const _SignupPaywallScreen({
+    required this.user,
+    required this.busyPlan,
+    required this.error,
+    required this.onSelectPlan,
+    required this.onContinue,
+    required this.onSignOut,
+  });
+
+  final HermesUser user;
+  final String? busyPlan;
+  final String? error;
+  final Future<void> Function(String plan) onSelectPlan;
+  final Future<void> Function() onContinue;
+  final Future<void> Function() onSignOut;
+
+  bool get _busy => busyPlan != null;
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    key: const Key('signup-paywall-screen'),
+    padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _ShellCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: HeyBeanTheme.accent.withValues(alpha: .14),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(
+                          Icons.workspace_premium_rounded,
+                          color: HeyBeanTheme.accentStrong,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Choose your Bean plan',
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              'Welcome, ${user.name}. Start with a 7-day free trial.',
+                              style: const TextStyle(
+                                color: HeyBeanTheme.muted,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Billing begins on day 8 and continues monthly until canceled. Premium is the best fit for most households and busy personal lives.',
+                    style: TextStyle(
+                      color: HeyBeanTheme.muted,
+                      height: 1.45,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (error != null) ...[
+              _InlinePlanLimitError(message: error!),
+              const SizedBox(height: 12),
+            ],
+            for (final plan in _signupPlanOptions) ...[
+              _SignupPlanCard(
+                plan: plan,
+                busy: busyPlan == plan.key,
+                disabled: _busy && busyPlan != plan.key,
+                onPressed: () => onSelectPlan(plan.key),
+              ),
+              const SizedBox(height: 12),
+            ],
+            _ShellCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Already finished checkout?',
+                    style: TextStyle(
+                      color: HeyBeanTheme.text,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'After checkout completes, return here and Bean will refresh your account.',
+                    style: TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    key: const Key('signup-paywall-refresh-action'),
+                    onPressed: _busy ? null : onContinue,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Refresh account'),
+                  ),
+                  TextButton(
+                    key: const Key('signup-paywall-sign-out-action'),
+                    onPressed: _busy ? null : onSignOut,
+                    child: const Text('Use a different account'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _SignupPlanCard extends StatelessWidget {
+  const _SignupPlanCard({
+    required this.plan,
+    required this.busy,
+    required this.disabled,
+    required this.onPressed,
+  });
+
+  final _SignupPlanOption plan;
+  final bool busy;
+  final bool disabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final prominent = plan.popular;
+    final foreground = prominent ? Colors.white : HeyBeanTheme.text;
+    final muted = prominent
+        ? Colors.white.withValues(alpha: .76)
+        : HeyBeanTheme.muted;
+    return Container(
+      key: Key('signup-plan-${plan.key}'),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: prominent
+            ? HeyBeanTheme.text
+            : Colors.white.withValues(alpha: .84),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: prominent
+              ? HeyBeanTheme.accent.withValues(alpha: .4)
+              : HeyBeanTheme.border,
+        ),
+        boxShadow: prominent
+            ? [
+                BoxShadow(
+                  color: HeyBeanTheme.text.withValues(alpha: .18),
+                  blurRadius: 28,
+                  offset: const Offset(0, 14),
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            plan.label,
+                            style: TextStyle(
+                              color: foreground,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        if (prominent) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFDE68A),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: const Text(
+                              'Most popular',
+                              style: TextStyle(
+                                color: Color(0xFF7C4A03),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      plan.description,
+                      style: TextStyle(
+                        color: muted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    plan.price,
+                    style: TextStyle(
+                      color: foreground,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  Text(
+                    '/mo',
+                    style: TextStyle(color: muted, fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          for (final feature in plan.features)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.check_circle_rounded,
+                    size: 18,
+                    color: prominent
+                        ? const Color(0xFFBBF7D0)
+                        : HeyBeanTheme.accentStrong,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      feature,
+                      style: TextStyle(
+                        color: prominent
+                            ? Colors.white.withValues(alpha: .9)
+                            : HeyBeanTheme.text,
+                        height: 1.3,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: Key('signup-plan-${plan.key}-action'),
+              style: prominent
+                  ? FilledButton.styleFrom(
+                      backgroundColor: HeyBeanTheme.accent,
+                      foregroundColor: Colors.white,
+                    )
+                  : null,
+              onPressed: disabled || busy ? null : onPressed,
+              icon: busy
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.arrow_upward_rounded),
+              label: Text(
+                busy ? 'Opening checkout...' : 'Start 7-day free trial',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _AgentPersonalityOption {
   const _AgentPersonalityOption({
