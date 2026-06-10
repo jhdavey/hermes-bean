@@ -15,7 +15,7 @@
     <div
         id="heybean-web-app"
         data-logo="{{ asset('images/bean-logo.png') }}"
-        data-auth-mode="{{ request()->is('register') ? 'register' : (request()->is('forgot-password') ? 'forgot' : 'login') }}"
+        data-auth-mode="{{ request()->is('subscribe') ? 'subscribe' : (request()->is('register') ? 'register' : (request()->is('forgot-password') ? 'forgot' : 'login')) }}"
         data-selected-plan="{{ in_array(request()->query('plan'), ['base', 'premium', 'pro'], true) ? request()->query('plan') : '' }}"
     >
         <div class="hb-loading-screen">

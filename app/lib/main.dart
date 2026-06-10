@@ -25,6 +25,9 @@ final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
 final Uri _termsOfServiceUrl = Uri.parse('https://heybean.org/terms');
 final Uri _supportUrl = Uri.parse('https://heybean.org/support');
 final Uri _pricingUrl = Uri.parse('https://heybean.org/pricing?source=flutter');
+final Uri _subscriptionCancellationUrl = Uri.parse(
+  'https://heybean.org/support?topic=cancel-subscription&source=flutter',
+);
 const String _beanGreenCategoryColor = '#34C759';
 
 @pragma('vm:entry-point')
@@ -1769,7 +1772,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     try {
       final checkout = await widget.apiClient.createCheckoutSession(
         plan: plan,
-        source: 'flutter',
+        source: 'subscribe',
       );
       final launched = await widget.launchExternalUrl(Uri.parse(checkout.url));
       if (!mounted) return;
@@ -1785,7 +1788,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _checkoutBusyPlan = null;
         _checkoutError = beanFriendlyErrorMessage(
           error,
-          action: 'start your trial',
+          action: 'start your subscription',
         );
       });
     }
@@ -4339,6 +4342,8 @@ const List<_SignupPlanOption> _signupPlanOptions = [
   ),
 ];
 
+const List<String> _visibleSignupPlanKeys = ['base'];
+
 class _SignupPlanOption {
   const _SignupPlanOption({
     required this.key,
@@ -4410,17 +4415,17 @@ class _SignupPaywallScreen extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Choose your Bean plan',
-                              style: Theme.of(context).textTheme.titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.w900),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              'Welcome, ${user.name}. Start with a 7-day free trial.',
+                              'Account created for ${user.name}.',
                               style: const TextStyle(
                                 color: HeyBeanTheme.muted,
                                 fontWeight: FontWeight.w700,
                               ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              'Choose your HeyBean subscription',
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w900),
                             ),
                           ],
                         ),
@@ -4429,13 +4434,15 @@ class _SignupPaywallScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
                   const Text(
-                    'Billing begins on day 8 and continues monthly until canceled. Premium is the best fit for most households and busy personal lives.',
+                    'Pick the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.',
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
                       height: 1.45,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  const _SignupProgressSteps(activeStep: 2),
                 ],
               ),
             ),
@@ -4444,7 +4451,7 @@ class _SignupPaywallScreen extends StatelessWidget {
               _InlinePlanLimitError(message: error!),
               const SizedBox(height: 12),
             ],
-            for (final plan in _signupPlanOptions) ...[
+            for (final plan in _visibleSignupPlanOptions) ...[
               _SignupPlanCard(
                 plan: plan,
                 busy: busyPlan == plan.key,
@@ -4458,7 +4465,7 @@ class _SignupPaywallScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Already finished checkout?',
+                    'Already finished payment?',
                     style: TextStyle(
                       color: HeyBeanTheme.text,
                       fontWeight: FontWeight.w900,
@@ -4466,7 +4473,7 @@ class _SignupPaywallScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'After checkout completes, return here and Bean will refresh your account.',
+                    'After Stripe confirms the subscription, return here and Bean will refresh your account.',
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
                       fontWeight: FontWeight.w600,
@@ -4477,7 +4484,7 @@ class _SignupPaywallScreen extends StatelessWidget {
                     key: const Key('signup-paywall-refresh-action'),
                     onPressed: _busy ? null : onContinue,
                     icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Refresh account'),
+                    label: const Text('Refresh subscription status'),
                   ),
                   TextButton(
                     key: const Key('signup-paywall-sign-out-action'),
@@ -4490,6 +4497,109 @@ class _SignupPaywallScreen extends StatelessWidget {
           ],
         ),
       ),
+    ),
+  );
+}
+
+List<_SignupPlanOption> get _visibleSignupPlanOptions => _signupPlanOptions
+    .where((plan) => _visibleSignupPlanKeys.contains(plan.key))
+    .toList(growable: false);
+
+class _SignupProgressSteps extends StatelessWidget {
+  const _SignupProgressSteps({required this.activeStep});
+
+  final int activeStep;
+
+  static const _steps = [
+    (number: '1', label: 'Account'),
+    (number: '2', label: 'Plan'),
+    (number: '3', label: 'Payment'),
+    (number: '4', label: 'Dashboard'),
+  ];
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 430;
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (var index = 0; index < _steps.length; index++)
+            SizedBox(
+              width: compact
+                  ? (constraints.maxWidth - 8) / 2
+                  : (constraints.maxWidth - 24) / 4,
+              child: _SignupProgressStep(
+                number: _steps[index].number,
+                label: _steps[index].label,
+                active: index + 1 <= activeStep,
+              ),
+            ),
+        ],
+      );
+    },
+  );
+}
+
+class _SignupProgressStep extends StatelessWidget {
+  const _SignupProgressStep({
+    required this.number,
+    required this.label,
+    required this.active,
+  });
+
+  final String number;
+  final String label;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
+    decoration: BoxDecoration(
+      color: active
+          ? HeyBeanTheme.accent.withValues(alpha: .09)
+          : Colors.white.withValues(alpha: .72),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(
+        color: active
+            ? HeyBeanTheme.accent.withValues(alpha: .25)
+            : HeyBeanTheme.border,
+      ),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 25,
+          height: 25,
+          decoration: BoxDecoration(
+            color: active ? HeyBeanTheme.accent : HeyBeanTheme.surface2,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            number,
+            style: TextStyle(
+              color: active ? Colors.white : HeyBeanTheme.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        const SizedBox(width: 7),
+        Flexible(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: active ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ],
     ),
   );
 }
@@ -4662,8 +4772,19 @@ class _SignupPlanCard extends StatelessWidget {
                     )
                   : const Icon(Icons.arrow_upward_rounded),
               label: Text(
-                busy ? 'Opening checkout...' : 'Start 7-day free trial',
+                busy ? 'Opening payment...' : 'Start 7-day free trial',
               ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Cancel anytime before day 8 to avoid being billed.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: muted,
+              fontSize: 12,
+              height: 1.3,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -14483,10 +14604,25 @@ class _BillingSettingsCard extends StatelessWidget {
     icon: Icons.workspace_premium_outlined,
     title: 'Plan',
     subtitle: 'Current plan: $_planLabel',
-    trailing: FilledButton(
-      key: const Key('settings-upgrade-plan-action'),
-      onPressed: () => launchExternalUrl(_pricingUrl),
-      child: const Text('View plans'),
+    trailing: SizedBox(
+      width: 148,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FilledButton(
+            key: const Key('settings-upgrade-plan-action'),
+            onPressed: () => launchExternalUrl(_pricingUrl),
+            child: const Text('View plans'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            key: const Key('settings-cancel-subscription-action'),
+            onPressed: () => launchExternalUrl(_subscriptionCancellationUrl),
+            child: const Text('Cancel subscription'),
+          ),
+        ],
+      ),
     ),
   );
 }

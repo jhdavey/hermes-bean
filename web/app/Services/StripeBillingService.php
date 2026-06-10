@@ -37,8 +37,9 @@ class StripeBillingService
         $priceId = $this->priceId($plan);
         $customerId = $this->ensureCustomer($user);
         $source = $this->cleanSource($source);
-        $successUrl = url('/pricing?checkout=success&plan='.$plan.($source ? '&source='.$source : ''));
-        $cancelUrl = url('/pricing?checkout=cancel'.($source ? '&source='.$source : ''));
+        $returnPath = in_array($source, ['register', 'signup', 'subscribe'], true) ? '/subscribe' : '/pricing';
+        $successUrl = url($returnPath.'?checkout=success&plan='.$plan.($source ? '&source='.$source : ''));
+        $cancelUrl = url($returnPath.'?checkout=cancel&plan='.$plan.($source ? '&source='.$source : ''));
 
         $payload = [
             'mode' => 'subscription',

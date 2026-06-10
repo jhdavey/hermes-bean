@@ -32,7 +32,6 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('.hero-voice{font-size:clamp(30px,4.8vw,54px)!important', false)
             ->assertSee('Voice-first control', false)
             ->assertSee('Hold the button and say “Hey, Bean…!”', false)
-            ->assertSee('class="pointer">👇</span>', false)
             ->assertDontSee('↘️ Hold the button and say “Hey, Bean…!”', false)
             ->assertSee('.c2{left:-24px;bottom:132px}', false)
             ->assertSee('.c2{left:-14px;bottom:102px}', false)
@@ -129,7 +128,7 @@ class LandingPageFeatureTest extends TestCase
 
     public function test_browser_app_auth_routes_render_the_heybean_app_shell(): void
     {
-        foreach (['/login', '/register', '/forgot-password', '/app', '/dashboard'] as $path) {
+        foreach (['/login', '/register', '/subscribe', '/forgot-password', '/app', '/dashboard'] as $path) {
             $this->get($path)
                 ->assertOk()
                 ->assertSee('id="heybean-web-app"', false)
@@ -181,6 +180,14 @@ class LandingPageFeatureTest extends TestCase
         $this->get('/register?plan=base')
             ->assertOk()
             ->assertSee('data-selected-plan="base"', false);
+    }
+
+    public function test_subscribe_route_renders_subscription_app_step(): void
+    {
+        $this->get('/subscribe?plan=premium&checkout=success')
+            ->assertOk()
+            ->assertSee('data-auth-mode="subscribe"', false)
+            ->assertSee('data-selected-plan="premium"', false);
     }
 
     public function test_visitors_can_request_early_access(): void

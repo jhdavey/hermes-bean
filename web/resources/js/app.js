@@ -38,18 +38,40 @@ if (mount) {
     const subscriptionPlans = {
         base: {
             label: 'Base',
+            price: '$4.99',
             summary: '2 workspaces, Bean chat and voice, connected calendar planning, push reminders, and recent context.',
             trial: 'Base 7-day free trial selected',
+            bestFor: 'For getting your personal day into one organized place.',
+            features: [
+                'Tasks, reminders, calendar, chat, and voice',
+                '2 workspaces and 1 connected calendar',
+                'Push reminders and recent Bean context',
+            ],
         },
         premium: {
             label: 'Premium',
+            price: '$19.99',
             summary: '5 workspaces, expanded Bean capacity, email reminders, recurring routines, multiple calendars, and 1 year of history.',
             trial: 'Premium 7-day free trial selected',
+            bestFor: 'Best for busy households and daily routines.',
+            popular: true,
+            features: [
+                '5 workspaces for home, work, school, and projects',
+                'Push and email reminders with recurring routines',
+                'Multiple calendars and 1 year of history',
+            ],
         },
         pro: {
             label: 'Pro',
+            price: '$49.99',
             summary: 'Unlimited workspaces, maximum Bean capacity, unlimited connected accounts, full history, and priority background work.',
             trial: 'Pro 7-day free trial selected',
+            bestFor: 'For running Bean across every part of life.',
+            features: [
+                'Unlimited workspaces and connected accounts',
+                'Highest Bean usage and external tool budget',
+                'Full memory, priority background work, priority support',
+            ],
         },
     };
 
@@ -80,6 +102,8 @@ if (mount) {
     const state = {
         authMode: initialMode,
         selectedPlan: initialSelectedPlan,
+        subscriptionSummary: null,
+        subscriptionCheckoutStatus: new URLSearchParams(window.location.search).get('checkout') || '',
         token: readToken(),
         remember: localStorage.getItem(rememberKey) === 'true',
         phase: 'loading',
@@ -234,12 +258,46 @@ if (mount) {
     bindDeferredDashboardRenderFlush();
 
     async function boot() {
+        if (initialMode === 'subscribe') {
+            await loadSubscriptionPage();
+            return;
+        }
         if (state.token) {
             await loadSignedIn();
         } else {
             state.phase = 'signedOut';
             render();
         }
+    }
+
+    async function loadSubscriptionPage() {
+        state.phase = 'subscription';
+        state.error = '';
+        render();
+        if (!state.token) {
+            state.phase = 'signedOut';
+            state.authMode = 'register';
+            state.notice = '';
+            state.error = '';
+            render();
+            return;
+        }
+        try {
+            const [user, subscription] = await Promise.all([
+                api('/auth/me'),
+                api('/billing/subscription').catch(() => null),
+            ]);
+            state.user = user;
+            state.subscriptionSummary = subscription;
+            state.phase = 'subscription';
+            state.error = '';
+        } catch (error) {
+            clearToken();
+            state.phase = 'signedOut';
+            state.authMode = 'login';
+            state.error = friendlyError(error, 'load your subscription setup');
+        }
+        render();
     }
 
     function bindResponsiveCalendar() {
@@ -847,8 +905,13 @@ if (mount) {
         const preservedModalState = preservedModal ? captureModalDomState(preservedModal) : null;
         if (preservedModal) preservedModal.remove();
 
-        mount.innerHTML = state.phase === 'signedIn' ? signedInMarkup() : signedOutMarkup();
+        mount.innerHTML = state.phase === 'signedIn'
+            ? signedInMarkup()
+            : state.phase === 'subscription'
+                ? subscriptionSignupMarkup()
+                : signedOutMarkup();
         bindCommonActions();
+        if (state.phase === 'subscription') bindSubscriptionActions();
         if (state.phase === 'signedIn') bindSignedInActions();
         if (state.modal) {
             if (preservedModal) {
@@ -1034,6 +1097,129 @@ if (mount) {
                     <button class="hb-button-ghost" type="button" data-auth-mode="register">Create an account</button>
                 </div>
             </form>`;
+    }
+
+    function subscriptionSignupMarkup() {
+        if (state.phase === 'loading') {
+            return `<div class="hb-loading-screen"><div class="hb-spinner"></div><p>Loading subscription setup…</p></div>`;
+        }
+        const checkoutStatus = String(state.subscriptionCheckoutStatus || '').toLowerCase();
+        const confirmed = checkoutStatus === 'success';
+        const canceled = checkoutStatus === 'cancel';
+        const selectedPlan = subscriptionPlans[state.selectedPlan] ? state.selectedPlan : 'premium';
+        const subscription = state.subscriptionSummary || {};
+        const status = String(subscription.status || state.user?.subscription_status || state.user?.subscriptionStatus || '').toLowerCase();
+        const liveConfirmed = ['active', 'trialing'].includes(status);
+        return `
+            <div class="hb-app">
+                <main class="hb-subscribe-wrap">
+                    <section class="hb-subscribe-shell">
+                        <div class="hb-subscribe-hero hb-card">
+                            <div class="hb-subscribe-brand">
+                                <img src="${escapeAttr(logoUrl)}" alt="">
+                                <span>HeyBean</span>
+                            </div>
+                            <div class="hb-subscribe-kicker">7-day free trial</div>
+                            <h1>${confirmed ? 'Your subscription is ready' : 'Choose your Bean subscription'}</h1>
+                            <p>${confirmed ? subscriptionConfirmationCopy(liveConfirmed, selectedPlan) : 'Your account is created. Pick the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.'}</p>
+                            ${subscriptionProgressMarkup(confirmed ? 4 : 2)}
+                            ${errorMarkup(state.error)}
+                            ${canceled ? '<div class="hb-error"><strong>Checkout was canceled</strong><span>No charge was made. Choose a plan when you are ready to continue.</span></div>' : ''}
+                            ${confirmed ? subscriptionConfirmationMarkup(selectedPlan, subscription, liveConfirmed) : subscriptionPlanSelectionMarkup(selectedPlan)}
+                        </div>
+                    </section>
+                </main>
+            </div>`;
+    }
+
+    function subscriptionProgressMarkup(activeStep) {
+        const steps = [
+            ['1', 'Account'],
+            ['2', 'Plan'],
+            ['3', 'Payment'],
+            ['4', 'Dashboard'],
+        ];
+        return `
+            <div class="hb-subscribe-steps" aria-label="Signup progress">
+                ${steps.map(([number, label], index) => {
+                    const step = index + 1;
+                    return `
+                        <div class="hb-subscribe-step ${step <= activeStep ? 'hb-subscribe-step-active' : ''}">
+                            <span>${number}</span>
+                            <strong>${label}</strong>
+                        </div>`;
+                }).join('')}
+            </div>`;
+    }
+
+    function subscriptionPlanSelectionMarkup(selectedPlan) {
+        return `
+            <div class="hb-subscribe-grid">
+                ${Object.entries(subscriptionPlans).map(([key, plan]) => subscriptionPlanCardMarkup(key, plan, key === selectedPlan)).join('')}
+            </div>
+            <div class="hb-subscribe-footer">
+                <p>Payment is handled securely through Stripe. Billing starts on day 8 and renews monthly until canceled.</p>
+                <button class="hb-button-ghost" type="button" data-subscribe-logout>Use a different account</button>
+            </div>`;
+    }
+
+    function subscriptionPlanCardMarkup(key, plan, selected) {
+        const busy = state.busy && state.selectedPlan === key;
+        return `
+            <article class="hb-subscribe-plan ${plan.popular ? 'hb-subscribe-plan-popular' : ''} ${selected ? 'hb-subscribe-plan-selected' : ''}">
+                ${plan.popular ? '<span class="hb-subscribe-badge">Most popular</span>' : ''}
+                <div class="hb-subscribe-plan-head">
+                    <div>
+                        <h2>${escapeHtml(plan.label)}</h2>
+                        <p>${escapeHtml(plan.bestFor)}</p>
+                    </div>
+                    <div class="hb-subscribe-price"><strong>${escapeHtml(plan.price)}</strong><span>/mo</span></div>
+                </div>
+                <div class="hb-subscribe-trial">7-day free trial, then billed monthly</div>
+                <ul>
+                    ${normalizeList(plan.features).map((feature) => `<li>${icons.checkCircle}<span>${escapeHtml(feature)}</span></li>`).join('')}
+                </ul>
+                <button class="${plan.popular ? 'hb-button' : 'hb-button-secondary'}" type="button" data-subscribe-plan="${escapeAttr(key)}" ${state.busy ? 'disabled' : ''}>
+                    ${busy ? '<span class="hb-spinner"></span> Opening payment…' : `Start ${escapeHtml(plan.label)} trial`}
+                </button>
+            </article>`;
+    }
+
+    function subscriptionConfirmationCopy(liveConfirmed, selectedPlan) {
+        const plan = subscriptionPlans[selectedPlan] || subscriptionPlans.premium;
+        if (liveConfirmed) {
+            return `${plan.label} is active. Bean is ready to open your dashboard.`;
+        }
+        return `Stripe sent you back to HeyBean. ${plan.label} setup is recorded, and Bean will update the live subscription status as soon as Stripe confirms it.`;
+    }
+
+    function subscriptionConfirmationMarkup(selectedPlan, subscription, liveConfirmed) {
+        const plan = subscriptionPlans[selectedPlan] || subscriptionPlans.premium;
+        const trialEndsAt = subscription.trial_ends_at || subscription.trialEndsAt || state.user?.subscription_trial_ends_at || state.user?.subscriptionTrialEndsAt || '';
+        const currentPeriodEnd = subscription.current_period_end || subscription.currentPeriodEnd || '';
+        return `
+            <div class="hb-subscribe-confirmation">
+                <div class="hb-success">
+                    <strong>${liveConfirmed ? `${escapeHtml(plan.label)} confirmed` : `${escapeHtml(plan.label)} setup submitted`}</strong>
+                    <span>${escapeHtml(subscriptionBillingSummary(plan, trialEndsAt, currentPeriodEnd))}</span>
+                </div>
+                <div class="hb-subscribe-summary-grid">
+                    <div><span>Plan</span><strong>${escapeHtml(plan.label)}</strong></div>
+                    <div><span>Monthly price</span><strong>${escapeHtml(plan.price)}/mo</strong></div>
+                    <div><span>Trial</span><strong>7 days</strong></div>
+                    <div><span>Billing cycle</span><strong>Monthly</strong></div>
+                </div>
+                <div class="hb-subscribe-actions">
+                    <button class="hb-button" type="button" data-subscribe-dashboard>Go to dashboard</button>
+                    <button class="hb-button-secondary" type="button" data-subscribe-refresh ${state.busy ? 'disabled' : ''}>${state.busy ? 'Refreshing…' : 'Refresh subscription status'}</button>
+                </div>
+            </div>`;
+    }
+
+    function subscriptionBillingSummary(plan, trialEndsAt, currentPeriodEnd) {
+        if (trialEndsAt) return `${plan.label} starts with a free trial through ${formatDateTime(trialEndsAt)}. After that, billing continues monthly until canceled.`;
+        if (currentPeriodEnd) return `${plan.label} is billed monthly. Your current billing cycle renews around ${formatDateTime(currentPeriodEnd)}.`;
+        return `${plan.label} starts with a 7-day free trial. Billing begins on day 8 and continues monthly until canceled.`;
     }
 
     function signedInMarkup() {
@@ -2986,6 +3172,17 @@ if (mount) {
         mount.querySelectorAll('form[data-action="login"], form[data-action="register"], form[data-action="forgot"]').forEach((form) => form.addEventListener('submit', submitAuth));
     }
 
+    function bindSubscriptionActions() {
+        mount.querySelectorAll('[data-subscribe-plan]').forEach((button) => button.addEventListener('click', () => startSubscriptionCheckout(button.dataset.subscribePlan)));
+        mount.querySelectorAll('[data-subscribe-dashboard]').forEach((button) => button.addEventListener('click', () => {
+            history.pushState({}, '', '/app');
+            state.selected = 'today';
+            loadSignedIn();
+        }));
+        mount.querySelectorAll('[data-subscribe-refresh]').forEach((button) => button.addEventListener('click', refreshSubscriptionStatus));
+        mount.querySelectorAll('[data-subscribe-logout]').forEach((button) => button.addEventListener('click', logout));
+    }
+
     async function submitAuth(event) {
         event.preventDefault();
         const form = event.currentTarget;
@@ -3012,18 +3209,12 @@ if (mount) {
             if (action === 'register') {
                 persistToken(result.token, true);
                 state.busy = false;
-                if (data.plan) {
-                    state.busy = true;
-                    render();
-                    const checkout = await api('/billing/checkout-sessions', {
-                        method: 'POST',
-                        body: { plan: data.plan, source: 'pricing' },
-                    });
-                    window.location.href = checkout.url;
-                    return;
-                }
-                history.pushState({}, '', '/pricing?source=register');
-                window.location.href = '/pricing?source=register';
+                state.selectedPlan = data.plan && subscriptionPlans[data.plan] ? data.plan : 'premium';
+                state.subscriptionCheckoutStatus = '';
+                state.user = result.user || null;
+                state.subscriptionSummary = null;
+                history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan)}`);
+                await loadSubscriptionPage();
                 return;
             }
             persistToken(result.token, action === 'login' && data.remember === 'on');
@@ -3035,6 +3226,47 @@ if (mount) {
             state.error = friendlyError(error, action === 'register' ? 'create your account' : action === 'forgot' ? 'send a password reset link' : 'sign in');
             render();
         }
+    }
+
+    async function startSubscriptionCheckout(plan) {
+        if (!subscriptionPlans[plan] || state.busy) return;
+        state.busy = true;
+        state.error = '';
+        state.selectedPlan = plan;
+        render();
+        try {
+            const checkout = await api('/billing/checkout-sessions', {
+                method: 'POST',
+                body: { plan, source: 'subscribe' },
+            });
+            if (!checkout?.url) throw new Error('Stripe did not return a payment page.');
+            window.location.href = checkout.url;
+        } catch (error) {
+            state.busy = false;
+            state.error = friendlyError(error, 'start your subscription');
+            render();
+        }
+    }
+
+    async function refreshSubscriptionStatus() {
+        if (state.busy) return;
+        state.busy = true;
+        state.error = '';
+        render();
+        try {
+            const [user, subscription] = await Promise.all([
+                api('/auth/me'),
+                api('/billing/subscription'),
+            ]);
+            state.user = user;
+            state.subscriptionSummary = subscription;
+            state.busy = false;
+            state.error = '';
+        } catch (error) {
+            state.busy = false;
+            state.error = friendlyError(error, 'refresh your subscription status');
+        }
+        render();
     }
 
     function bindSignedInActions() {

@@ -55,6 +55,41 @@ class BillingInfrastructureTest extends TestCase
         $this->assertSame('cus_test_123', User::where('email', 'checkout@example.com')->firstOrFail()->stripe_customer_id);
     }
 
+    public function test_signup_checkout_sessions_return_to_subscription_flow(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('subscribe@example.com');
+
+        Http::fake(function (HttpRequest $request) {
+            if ($request->url() === 'https://api.stripe.com/v1/customers') {
+                return Http::response(['id' => 'cus_subscribe_123'], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/checkout/sessions') {
+                $data = $request->data();
+                $this->assertStringContainsString('/subscribe?checkout=success&plan=base&source=subscribe', $data['success_url']);
+                $this->assertStringContainsString('/subscribe?checkout=cancel&plan=base&source=subscribe', $data['cancel_url']);
+                $this->assertSame('subscribe', $data['metadata']['source']);
+
+                return Http::response([
+                    'id' => 'cs_subscribe_123',
+                    'url' => 'https://checkout.stripe.com/c/pay/cs_subscribe_123',
+                    'status' => 'open',
+                ], 200);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->withToken($token)->postJson('/api/billing/checkout-sessions', [
+            'plan' => 'base',
+            'source' => 'subscribe',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.id', 'cs_subscribe_123')
+            ->assertJsonPath('data.plan', 'base');
+    }
+
     public function test_existing_subscription_upgrade_charges_proration_for_current_cycle(): void
     {
         $this->configureStripe();

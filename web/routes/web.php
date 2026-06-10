@@ -20,6 +20,7 @@ Route::get('/', function () {
 Route::view('/pricing', 'pricing')->name('pricing');
 Route::view('/login', 'app')->name('login');
 Route::view('/register', 'app')->name('register');
+Route::view('/subscribe', 'app')->name('subscribe');
 Route::view('/forgot-password', 'app')->name('password.request');
 Route::view('/app', 'app')->name('app');
 Route::view('/dashboard', 'app')->name('dashboard');

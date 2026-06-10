@@ -3,7 +3,7 @@
 @section('content')
     <p class="eyebrow">HeyBean Terms</p>
     <h1>Terms of Use</h1>
-    <p class="effective">Effective date: May 16, 2026</p>
+    <p class="effective">Effective date: June 8, 2026</p>
 
     <p>These Terms of Use govern your access to and use of HeyBean, including the mobile app, API-backed assistant features, connected calendar features, and website. By using HeyBean, you agree to these terms.</p>
 
@@ -23,8 +23,10 @@
     <h2>Your content</h2>
     <p>You retain ownership of your content. You grant HeyBean permission to host, process, transmit, and display your content as necessary to provide and improve the service, maintain security, and comply with law.</p>
 
-    <h2>Subscriptions and launch status</h2>
-    <p>HeyBean may be offered as a beta, early-access, free, or paid service. If paid features are introduced, pricing and payment terms will be disclosed before purchase.</p>
+    <h2>Subscriptions, trials, and billing</h2>
+    <p>HeyBean offers paid subscriptions that may include a free trial period. Plan prices, renewal frequency, trial length, and included features are disclosed before purchase. Unless canceled before the end of the free trial, your subscription will automatically renew and billing will begin at the price shown at purchase.</p>
+    <p>Subscriptions renew monthly until canceled. If you subscribe through Apple, payment is charged to your Apple ID and renewals, cancellations, refunds, and billing management are handled through your Apple account settings and Apple’s subscription policies. If you subscribe through the HeyBean website, billing is handled by our payment provider and may be managed through HeyBean support until self-service billing controls are available.</p>
+    <p>You may cancel a subscription at any time. Cancellation stops future renewals but does not automatically refund amounts already billed unless required by law or the applicable app store/payment provider policy. If you cancel during a free trial, access to paid features may end when the trial period expires.</p>
 
     <h2>Account deletion</h2>
     <p>You may delete your account in the app or request help through <a href="/account-deletion">Account deletion</a>. Deletion is permanent except for limited records we may retain for security, legal, backup, or fraud-prevention purposes.</p>

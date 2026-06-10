@@ -13,6 +13,7 @@
     <h2>Common requests</h2>
     <ul>
         <li><strong>Account deletion:</strong> use Settings in the app or follow <a href="/account-deletion">account deletion instructions</a>.</li>
+        <li><strong>Subscription cancellation:</strong> if you subscribed through Apple, manage or cancel the subscription in your Apple ID subscription settings. If you subscribed through the HeyBean website, email <a href="mailto:support@heybean.org">support@heybean.org</a> and include the email address on your account.</li>
         <li><strong>Privacy questions:</strong> review the <a href="/privacy">Privacy Policy</a> or contact support.</li>
         <li><strong>Terms:</strong> review the <a href="/terms">Terms of Use</a>.</li>
         <li><strong>Calendar sync:</strong> disconnect calendar integrations from the app settings if you no longer want calendar sync.</li>

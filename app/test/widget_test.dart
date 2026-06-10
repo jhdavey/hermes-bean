@@ -106,21 +106,34 @@ void main() {
       },
     ]);
     expect(find.byKey(const Key('signup-paywall-screen')), findsOneWidget);
-    expect(find.text('Choose your Bean plan'), findsOneWidget);
+    expect(find.text('Choose your HeyBean subscription'), findsOneWidget);
+    expect(find.text('Account created for testing.'), findsOneWidget);
+    expect(
+      find.text('Cancel anytime before day 8 to avoid being billed.'),
+      findsOneWidget,
+    );
+    expect(find.text('Account'), findsOneWidget);
+    expect(find.text('Plan'), findsOneWidget);
+    expect(find.text('Payment'), findsOneWidget);
+    expect(find.text('Dashboard'), findsOneWidget);
     expect(find.text('Start with a 7-day free trial.'), findsNothing);
     expect(find.byKey(const Key('calendar-view')), findsNothing);
     expect(tokenStore.token, 'fake-token');
     expect(tokenStore.rememberMe, isTrue);
     expect(find.textContaining('Bean could not create'), findsNothing);
 
-    await tester.ensureVisible(
-      find.byKey(const Key('signup-plan-premium-action')),
-    );
+    expect(find.byKey(const Key('signup-plan-base')), findsOneWidget);
+    expect(find.byKey(const Key('signup-plan-premium')), findsNothing);
+    expect(find.byKey(const Key('signup-plan-pro')), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const Key('signup-plan-base-action')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('signup-plan-premium-action')));
+    await tester.tap(find.byKey(const Key('signup-plan-base-action')));
     await tester.pumpAndSettle();
 
-    expect(api.checkoutPlans, ['premium']);
+    expect(api.checkoutRequests, [
+      {'plan': 'base', 'source': 'subscribe'},
+    ]);
     expect(launchedUrls.single.host, 'checkout.stripe.com');
   });
 
@@ -2912,7 +2925,7 @@ void main() {
     );
   });
 
-  testWidgets('settings upgrade action opens pricing page from app', (
+  testWidgets('settings subscription actions open billing links from app', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -2937,6 +2950,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Current plan: Base'), findsOneWidget);
+    expect(find.byKey(const Key('settings-cancel-subscription-action')), findsOneWidget);
     await tester.tap(find.byKey(const Key('settings-upgrade-plan-action')));
     await tester.pumpAndSettle();
 
@@ -2944,6 +2958,15 @@ void main() {
     expect(launchedUrls.single.host, 'heybean.org');
     expect(launchedUrls.single.path, '/pricing');
     expect(launchedUrls.single.queryParameters['source'], 'flutter');
+
+    await tester.tap(find.byKey(const Key('settings-cancel-subscription-action')));
+    await tester.pumpAndSettle();
+
+    expect(launchedUrls, hasLength(2));
+    expect(launchedUrls.last.host, 'heybean.org');
+    expect(launchedUrls.last.path, '/support');
+    expect(launchedUrls.last.queryParameters['topic'], 'cancel-subscription');
+    expect(launchedUrls.last.queryParameters['source'], 'flutter');
   });
 
   testWidgets(
@@ -5692,7 +5715,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   String updatedTheme = 'green';
   final passwordResetRequests = <String>[];
   final registeredUsers = <Map<String, String>>[];
-  final checkoutPlans = <String>[];
+  final checkoutRequests = <Map<String, String>>[];
   final issueReports = <String>[];
   HermesReminder? bannerUpdatedReminder;
   List<HermesApproval> approvals = const [];
@@ -5787,7 +5810,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     required String plan,
     String source = 'flutter',
   }) async {
-    checkoutPlans.add(plan);
+    checkoutRequests.add({'plan': plan, 'source': source});
     return HermesCheckoutSession(
       id: 'cs_test_$plan',
       url: 'https://checkout.stripe.com/c/pay/cs_test_$plan',
