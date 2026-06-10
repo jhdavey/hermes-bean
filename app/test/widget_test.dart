@@ -23,6 +23,14 @@ void main() {
     expect(realtimeVoiceCancelForTesting('Hey Bean what time is it'), isFalse);
   });
 
+  test('realtime dashboard refresh keeps the required session type', () {
+    final payload = realtimeSessionUpdatePayloadForTesting('Fresh context');
+    expect(payload['type'], 'session.update');
+    expect(payload['session'], isA<Map<String, Object?>>());
+    expect(payload['session'], containsPair('type', 'realtime'));
+    expect(payload['session'], containsPair('instructions', 'Fresh context'));
+  });
+
   testWidgets(
     'forgot password asks for account email and sends a reset link request',
     (WidgetTester tester) async {
@@ -126,7 +134,9 @@ void main() {
     expect(find.byKey(const Key('signup-plan-premium')), findsNothing);
     expect(find.byKey(const Key('signup-plan-pro')), findsNothing);
 
-    await tester.ensureVisible(find.byKey(const Key('signup-plan-base-action')));
+    await tester.ensureVisible(
+      find.byKey(const Key('signup-plan-base-action')),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('signup-plan-base-action')));
     await tester.pumpAndSettle();
@@ -1458,6 +1468,39 @@ void main() {
     expect(realtime.microphoneEnabled, isFalse);
   });
 
+  testWidgets('holding the selected Bean button records until release', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FakeBeanRealtimeConversation(api);
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('nav-bean'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+
+    expect(realtime.captureStarted, isTrue);
+    expect(realtime.captureEnded, isFalse);
+    expect(realtime.microphoneEnabled, isTrue);
+
+    await gesture.up();
+    await tester.pump();
+
+    expect(realtime.captureEnded, isTrue);
+    expect(realtime.microphoneEnabled, isFalse);
+  });
+
   testWidgets('typed Bean chat uses realtime text when available', (
     WidgetTester tester,
   ) async {
@@ -1591,6 +1634,42 @@ void main() {
     expect(find.text('Future task'), findsNothing);
     expect(find.text('Future reminder'), findsNothing);
     expect(find.text('Future event'), findsNothing);
+  });
+
+  testWidgets('critical count excludes non-critical overdue items', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _NonCriticalOverdueFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
+    expect(find.text('3'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('critical-task-count')));
+    await tester.pumpAndSettle();
+
+    final dropdown = find.byKey(const Key('critical-task-dropdown'));
+    expect(find.byKey(const Key('critical-task-item-104')), findsNothing);
+    expect(find.byKey(const Key('critical-reminder-item-105')), findsNothing);
+    expect(
+      find.descendant(
+        of: dropdown,
+        matching: find.text('Overdue regular task'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: dropdown,
+        matching: find.text('Overdue regular reminder'),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets('signed-in screens show a loading indicator while data loads', (
@@ -2950,7 +3029,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Current plan: Base'), findsOneWidget);
-    expect(find.byKey(const Key('settings-cancel-subscription-action')), findsOneWidget);
+    expect(
+      find.byKey(const Key('settings-cancel-subscription-action')),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const Key('settings-upgrade-plan-action')));
     await tester.pumpAndSettle();
 
@@ -2959,7 +3041,9 @@ void main() {
     expect(launchedUrls.single.path, '/pricing');
     expect(launchedUrls.single.queryParameters['source'], 'flutter');
 
-    await tester.tap(find.byKey(const Key('settings-cancel-subscription-action')));
+    await tester.tap(
+      find.byKey(const Key('settings-cancel-subscription-action')),
+    );
     await tester.pumpAndSettle();
 
     expect(launchedUrls, hasLength(2));
@@ -5359,6 +5443,33 @@ class _FutureCriticalFakeHermesApiClient extends _SignedInFakeHermesApiClient {
       title: 'Future event',
       startsAt: DateTime.now().add(const Duration(days: 3)).toIso8601String(),
       isCritical: true,
+    ),
+  ];
+}
+
+class _NonCriticalOverdueFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesTask>> listTasks() async => [
+    ...await super.listTasks(),
+    HermesTask(
+      id: 104,
+      title: 'Overdue regular task',
+      status: 'open',
+      dueAt: DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
+      isCritical: false,
+    ),
+  ];
+
+  @override
+  Future<List<HermesReminder>> listReminders() async => [
+    ...await super.listReminders(),
+    HermesReminder(
+      id: 105,
+      title: 'Overdue regular reminder',
+      status: 'pending',
+      dueAt: DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
+      isCritical: false,
     ),
   ];
 }

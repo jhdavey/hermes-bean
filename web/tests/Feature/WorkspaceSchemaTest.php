@@ -105,6 +105,25 @@ class WorkspaceSchemaTest extends TestCase
         ]);
     }
 
+    public function test_personal_workspace_provisioning_does_not_reset_persisted_active_workspace_from_stale_user_model(): void
+    {
+        $user = User::factory()->create(['name' => 'Stale Workspace User']);
+        $staleUser = User::findOrFail($user->id);
+        $workspaceService = app(WorkspaceService::class);
+
+        $personalWorkspaceId = $workspaceService->ensurePersonalWorkspaceForUser($user);
+        $household = $workspaceService->createHousehold($user->fresh(), 'Family');
+
+        $user->fresh()->forceFill(['default_workspace_id' => $household->id])->save();
+
+        $this->assertNull($staleUser->default_workspace_id);
+
+        $workspaceService->ensurePersonalWorkspaceForUser($staleUser);
+
+        $this->assertSame($household->id, $user->fresh()->default_workspace_id);
+        $this->assertNotSame($personalWorkspaceId, $user->fresh()->default_workspace_id);
+    }
+
     public function test_workspace_list_includes_current_users_workspace_role(): void
     {
         $token = $this->apiToken('workspace-role-owner@example.com');
@@ -137,7 +156,10 @@ class WorkspaceSchemaTest extends TestCase
         $this->withToken($token)->patchJson('/api/workspaces/default', [
             'workspace_id' => $householdWorkspaceId,
         ])->assertOk()
-            ->assertJsonPath('data.id', $householdWorkspaceId);
+            ->assertJsonPath('data.id', $householdWorkspaceId)
+            ->assertJsonPath('data.active', true)
+            ->assertJsonPath('data.is_default', true)
+            ->assertJsonPath('data.role', 'owner');
 
         $response = $this->withToken($token)->getJson('/api/auth/me')
             ->assertOk()

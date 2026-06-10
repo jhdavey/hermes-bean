@@ -320,10 +320,7 @@ class BeanRealtimeConversation {
       if (instructions.isEmpty) return false;
       channel!.send(
         RTCDataChannelMessage(
-          jsonEncode({
-            'type': 'session.update',
-            'session': {'instructions': instructions},
-          }),
+          jsonEncode(_realtimeSessionUpdatePayload(instructions)),
         ),
       );
       return true;
@@ -1349,6 +1346,15 @@ class BeanRealtimeConversation {
     }
   }
 }
+
+Map<String, Object?> realtimeSessionUpdatePayloadForTesting(
+  String instructions,
+) => _realtimeSessionUpdatePayload(instructions);
+
+Map<String, Object?> _realtimeSessionUpdatePayload(String instructions) => {
+  'type': 'session.update',
+  'session': {'type': 'realtime', 'instructions': instructions},
+};
 
 List<Map<String, Object?>> _responseOutput(Map<String, Object?> payload) {
   final response = payload['response'];

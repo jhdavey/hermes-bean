@@ -35,9 +35,21 @@ class WorkspaceService
                 ['role' => 'owner', 'status' => 'active', 'invited_by_user_id' => null, 'invited_email' => null, 'accepted_at' => now()]
             );
 
-            if (! $user->default_workspace_id) {
-                $user->forceFill(['default_workspace_id' => $workspace->id])->save();
+            $persistedDefaultWorkspaceId = User::query()
+                ->whereKey($user->id)
+                ->value('default_workspace_id');
+
+            if (! $persistedDefaultWorkspaceId) {
+                User::query()
+                    ->whereKey($user->id)
+                    ->whereNull('default_workspace_id')
+                    ->update(['default_workspace_id' => $workspace->id]);
+                $persistedDefaultWorkspaceId = User::query()
+                    ->whereKey($user->id)
+                    ->value('default_workspace_id');
             }
+
+            $user->forceFill(['default_workspace_id' => $persistedDefaultWorkspaceId]);
 
             $this->backfillUserRows((int) $user->id, (int) $workspace->id);
 
@@ -92,9 +104,16 @@ class WorkspaceService
 
     public function resolveWorkspace(User $user, mixed $workspaceId = null): Workspace
     {
-        $this->ensurePersonalWorkspaceForUser($user);
-        $workspaceId = $workspaceId ?: $user->fresh()->default_workspace_id;
+        $personalWorkspaceId = $this->ensurePersonalWorkspaceForUser($user);
+        $explicitWorkspaceId = $workspaceId !== null && $workspaceId !== '';
+        $workspaceId = $explicitWorkspaceId ? $workspaceId : $user->fresh()->default_workspace_id;
         $workspace = $workspaceId ? Workspace::find($workspaceId) : null;
+
+        if (! $explicitWorkspaceId && (! $workspace || ! $this->isActiveMember($user, $workspace))) {
+            $workspace = Workspace::findOrFail($personalWorkspaceId);
+            $user->forceFill(['default_workspace_id' => $workspace->id])->save();
+        }
+
         $workspace ??= Workspace::where('personal_owner_user_id', $user->id)->firstOrFail();
         $this->authorizeMember($user, $workspace);
 
@@ -103,10 +122,14 @@ class WorkspaceService
 
     public function setDefaultWorkspace(User $user, Workspace $workspace): Workspace
     {
-        $this->authorizeMember($user, $workspace);
+        $membership = $this->authorizeMember($user, $workspace);
         $user->forceFill(['default_workspace_id' => $workspace->id])->save();
 
-        return $workspace;
+        return $workspace
+            ->setAttribute('role', $membership->role)
+            ->setAttribute('membership_role', $membership->role)
+            ->setAttribute('active', true)
+            ->setAttribute('is_default', true);
     }
 
     public function authorizeMember(User $user, Workspace $workspace): WorkspaceMembership
@@ -117,6 +140,14 @@ class WorkspaceService
         }
 
         return $membership;
+    }
+
+    private function isActiveMember(User $user, Workspace $workspace): bool
+    {
+        return WorkspaceMembership::where('workspace_id', $workspace->id)
+            ->where('user_id', $user->id)
+            ->where('status', 'active')
+            ->exists();
     }
 
     public function authorizeOwner(User $user, Workspace $workspace): WorkspaceMembership

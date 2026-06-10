@@ -16596,20 +16596,6 @@ List<HermesTask> _visibleSortedTasks(List<HermesTask> tasks) {
   return visible;
 }
 
-List<HermesTask> _tasksForDay(List<HermesTask> tasks, DateTime day) {
-  final selectedDay = _dateOnly(day);
-  final today = _dateOnly(DateTime.now());
-  final visible = tasks.where((task) {
-    if (_taskIsRecurring(task)) return true;
-    if (_taskIsOverdue(task)) return _sameCalendarDay(selectedDay, today);
-    final dueAt = _parseTaskDueDate(task);
-    if (dueAt == null) return _sameCalendarDay(selectedDay, today);
-    return _sameCalendarDay(_dateOnly(dueAt), selectedDay);
-  }).toList();
-  visible.sort(_compareTasksByCompletionAndDueDate);
-  return visible;
-}
-
 List<HermesTask> _tasksForTodayAgenda(List<HermesTask> tasks, DateTime day) {
   final today = _dateOnly(day);
   final visible = tasks.where((task) {
@@ -16693,14 +16679,16 @@ int _compareRemindersByCompletionAndDueDate(
 }
 
 List<HermesTask> _criticalTasksForToday(List<HermesTask> tasks) {
-  return _tasksForDay(tasks, DateTime.now())
-      .where(
-        (task) =>
-            _taskIsCritical(task) &&
-            !_taskIsCompleted(task) &&
-            !_taskIsSubtask(task),
-      )
-      .toList();
+  final today = _dateOnly(DateTime.now());
+  final visible = tasks.where((task) {
+    if (!task.isCritical || _taskIsCompleted(task) || _taskIsSubtask(task)) {
+      return false;
+    }
+    final dueAt = _parseTaskDueDate(task);
+    return dueAt != null && !_dateOnly(dueAt).isAfter(today);
+  }).toList();
+  visible.sort(_compareTasksByCompletionAndDueDate);
+  return visible;
 }
 
 List<HermesCalendarEvent> _criticalEventsForToday(
@@ -16726,7 +16714,7 @@ List<HermesReminder> _criticalRemindersForToday(
 ) {
   final today = _dateOnly(DateTime.now());
   final visible = reminders.where((reminder) {
-    if (!_reminderIsCritical(reminder) || _reminderIsCompleted(reminder)) {
+    if (!reminder.isCritical || _reminderIsCompleted(reminder)) {
       return false;
     }
     final dueAt = _parseReminderDueDate(reminder);
@@ -17951,7 +17939,6 @@ class _BeanFabState extends State<_BeanFab>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseController;
   bool _pressRecording = false;
-  bool _suppressNextTap = false;
 
   @override
   void initState() {
@@ -17986,36 +17973,25 @@ class _BeanFabState extends State<_BeanFab>
     super.dispose();
   }
 
+  void _beginPressRecording() {
+    if (_pressRecording) return;
+    _pressRecording = true;
+    widget.onLongPressStart();
+  }
+
+  void _endPressRecording() {
+    if (!_pressRecording) return;
+    _pressRecording = false;
+    widget.onLongPressEnd();
+  }
+
   @override
   Widget build(BuildContext context) => GestureDetector(
     key: const Key('nav-bean'),
-    onTapDown: (_) {
-      if (!widget.selected) return;
-      _pressRecording = true;
-      _suppressNextTap = true;
-      widget.onLongPressStart();
-    },
-    onTapUp: (_) {
-      if (!_pressRecording) return;
-      _pressRecording = false;
-      widget.onLongPressEnd();
-    },
-    onTapCancel: () {
-      if (!_pressRecording) return;
-      _pressRecording = false;
-      widget.onLongPressEnd();
-    },
-    onLongPressStart: (_) {
-      if (widget.selected || _pressRecording) return;
-      _pressRecording = true;
-      _suppressNextTap = true;
-      widget.onLongPressStart();
-    },
-    onLongPressEnd: (_) {
-      if (!_pressRecording) return;
-      _pressRecording = false;
-      widget.onLongPressEnd();
-    },
+    onTap: widget.onPressed,
+    onLongPressStart: (_) => _beginPressRecording(),
+    onLongPressEnd: (_) => _endPressRecording(),
+    onLongPressCancel: _endPressRecording,
     child: SizedBox(
       width: 98,
       height: 98,
@@ -18054,15 +18030,7 @@ class _BeanFabState extends State<_BeanFab>
             ),
           Material(
             color: Colors.transparent,
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: () {
-                if (_suppressNextTap) {
-                  _suppressNextTap = false;
-                  return;
-                }
-                widget.onPressed();
-              },
+            child: Ink(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 key: const Key('heybean-center-bean-button'),
