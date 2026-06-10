@@ -69,6 +69,15 @@ class AuthController extends Controller
             app(AgentProfileService::class)->ensureForUser($user);
             app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
             app(WelcomeConversationService::class)->ensureForUser($user);
+            EarlyAccessSignup::updateOrCreate(
+                ['email' => $user->email],
+                [
+                    'name' => $user->name,
+                    'use_case' => null,
+                    'requested_plan' => $data['plan'] ?? null,
+                    'source' => 'app_register',
+                ],
+            );
 
             return $user;
         });

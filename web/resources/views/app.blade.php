@@ -12,6 +12,9 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="heybean-app-body">
+    @if (request()->is('register'))
+        @include('partials.public-beta-banner')
+    @endif
     <div
         id="heybean-web-app"
         data-logo="{{ asset('images/bean-logo.png') }}"

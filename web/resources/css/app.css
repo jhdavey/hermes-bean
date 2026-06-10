@@ -270,6 +270,48 @@
     box-shadow: 0 8px 20px rgba(var(--hb-accent-rgb), .16);
 }
 
+.public-beta-banner {
+    position: sticky;
+    top: 0;
+    z-index: 25;
+    width: 100%;
+    min-height: 34px;
+    border-bottom: 1px solid rgba(var(--hb-accent-rgb), .20);
+    background: linear-gradient(135deg, rgba(var(--hb-accent-rgb), .96), rgba(var(--hb-success-rgb), .94));
+    color: #fff;
+    font-size: 13px;
+    font-weight: 850;
+    letter-spacing: 0;
+    text-align: center;
+    box-shadow: 0 8px 20px rgba(var(--hb-accent-rgb), .16);
+}
+
+.public-beta-banner-inner {
+    width: min(1160px, calc(100% - 32px));
+    min-height: 34px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 0;
+}
+
+.public-beta-banner strong,
+.public-beta-banner a {
+    font-weight: 950;
+}
+
+.public-beta-banner a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+}
+
+.heybean-app-body:has(.public-beta-banner) .hb-auth-wrap {
+    min-height: calc(100vh - 34px);
+}
+
 .hb-beta-banner:hover,
 .hb-beta-banner:focus-visible {
     background: linear-gradient(135deg, rgba(var(--hb-accent-strong-rgb), .98), rgba(var(--hb-accent-rgb), .96));
@@ -932,6 +974,13 @@
     margin: 4px 0 0;
     color: var(--hb-muted);
     font-size: 12px;
+}
+
+.hb-auth-title p.hb-register-intro {
+    max-width: 360px;
+    margin: 8px auto 0;
+    font-size: 13px;
+    line-height: 1.45;
 }
 
 .hb-form {
@@ -2591,6 +2640,21 @@
     max-height: min(760px, calc(100vh - 40px));
     overflow: auto;
     padding: 18px;
+}
+
+.hb-register-success-modal {
+    text-align: center;
+}
+
+.hb-register-success-icon {
+    width: 54px;
+    height: 54px;
+    margin: 0 auto 14px;
+    display: grid;
+    place-items: center;
+    border-radius: 18px;
+    background: rgba(var(--hb-accent-rgb), .12);
+    color: var(--hb-accent);
 }
 
 .hb-modal-actions {

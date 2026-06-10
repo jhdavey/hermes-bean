@@ -17,8 +17,8 @@ class LandingPageFeatureTest extends TestCase
 
         $response->assertOk()
             ->assertSee('Meet Bean, your new assistant for real-life', false)
-            ->assertSee('HeyBean is currently in beta.', false)
-            ->assertSee('please report them here', false)
+            ->assertSee('HeyBean is currently in Beta.', false)
+            ->assertSee('href="/register">Sign up here</a> to join the waitlist.', false)
             ->assertSee('class="public-beta-banner"', false)
             ->assertDontSee('First 100 early-access invites now opening', false)
             ->assertDontSee('● First 100 early-access invites now opening', false)
@@ -140,13 +140,32 @@ class LandingPageFeatureTest extends TestCase
         }
     }
 
+    public function test_register_route_shows_beta_waitlist_banner_and_copy(): void
+    {
+        $this->get('/register')
+            ->assertOk()
+            ->assertSee('HeyBean is currently in Beta.', false)
+            ->assertSee('href="/register">Sign up here</a> to join the waitlist.', false)
+            ->assertSee('data-auth-mode="register"', false);
+
+        $appJs = file_get_contents(resource_path('js/app.js'));
+
+        $this->assertStringContainsString('We are currently onboarding beta users.', $appJs);
+        $this->assertStringContainsString("Sign up for early access and we'll let you know as soon as we are ready to onboard you!", $appJs);
+        $this->assertStringContainsString('Sign up for early access', $appJs);
+        $this->assertStringContainsString('Thank you for signing up for early access!', $appJs);
+        $this->assertStringContainsString('We look forward to onboarding you soon!', $appJs);
+        $this->assertStringContainsString('data-register-early-access-home', $appJs);
+        $this->assertStringNotContainsString('/subscribe?plan=', $appJs);
+    }
+
     public function test_pricing_page_shows_plans_and_trial_ctas(): void
     {
         $this->get('/pricing')
             ->assertOk()
             ->assertSee('<h1>Pricing</h1>', false)
-            ->assertSee('HeyBean is currently in beta.', false)
-            ->assertSee('please report them here', false)
+            ->assertSee('HeyBean is currently in Beta.', false)
+            ->assertSee('href="/register">Sign up here</a> to join the waitlist.', false)
             ->assertSee('class="public-beta-banner"', false)
             ->assertSee('More context, more coordination, more Bean.', false)
             ->assertSee('Why upgrade', false)

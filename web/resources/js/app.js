@@ -1039,8 +1039,8 @@ if (mount) {
                         <div class="hb-auth-title">
                             ${register ? `<span class="hb-section-icon">${icons.user}</span>` : `<img src="${escapeAttr(logoUrl)}" alt="">`}
                             <div>
-                                <h1>${forgot ? 'Reset password' : register ? 'Create your account' : 'Login'}</h1>
-                                ${register ? selectedPlanMarkup() || '<p>Create your account, choose a plan, and start your 7-day free trial.</p>' : ''}
+                                <h1>${forgot ? 'Reset password' : register ? 'We are currently onboarding beta users.' : 'Login'}</h1>
+                                ${register ? "<p class=\"hb-register-intro\">Sign up for early access and we'll let you know as soon as we are ready to onboard you!</p>" : ''}
                             </div>
                         </div>
                         ${errorMarkup(state.error)}
@@ -1069,21 +1069,12 @@ if (mount) {
                     ${labelInput('Password', 'password', 'password', '', 'required autocomplete="current-password" minlength="1"')}
                     <label class="hb-checkbox-row"><input type="checkbox" name="remember" ${state.remember ? 'checked' : ''}> Remember me</label>
                 `}
-                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? (register ? 'Creating account…' : 'Signing in…') : (register ? 'Create account' : 'Sign in')}</button>
+                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? (register ? 'Signing up…' : 'Signing in…') : (register ? 'Sign up for early access' : 'Sign in')}</button>
                 <div class="hb-link-row">
-                    <button class="hb-button-ghost" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? 'Already have an account? Sign in' : 'Create an account'}</button>
+                    <button class="hb-button-ghost" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? 'Already have an account? Sign in' : 'Join the waitlist'}</button>
                     <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
                 </div>
             </form>`;
-    }
-
-    function selectedPlanMarkup() {
-        const plan = subscriptionPlans[state.selectedPlan];
-        if (!plan) return '';
-        return `
-            <p>${escapeHtml(plan.trial)}.</p>
-            <p class="hb-item-meta">${escapeHtml(plan.summary)} Trial billing starts on day 8 until canceled.</p>
-        `;
     }
 
     function forgotFormMarkup() {
@@ -2682,6 +2673,7 @@ if (mount) {
     }
 
     function modalMarkup(modal) {
+        if (modal.type === 'register-early-access-success') return registerEarlyAccessSuccessModalMarkup();
         if (modal.type === 'issue-report') return issueReportModalMarkup();
         if (modal.type === 'issue-report-success') return issueReportSuccessModalMarkup();
         if (modal.type === 'admin-usage-log') return adminUsageLogModalMarkup(modal.log);
@@ -2692,6 +2684,20 @@ if (mount) {
         if (modal.type === 'categories') return categoriesModalMarkup();
         if (modal.type === 'recurring-delete') return recurringDeleteModalMarkup(modal.item);
         return itemModalMarkup(modal.type, modal.item, modal.parentTask);
+    }
+
+    function registerEarlyAccessSuccessModalMarkup() {
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="register-success-title">
+                <section class="hb-card hb-modal hb-register-success-modal">
+                    <div class="hb-register-success-icon" aria-hidden="true">${icons.checkCircle}</div>
+                    <h2 id="register-success-title">Thank you for signing up for early access!</h2>
+                    <p>We look forward to onboarding you soon!</p>
+                    <div class="hb-modal-actions hb-issue-report-success-actions">
+                        <button class="hb-button" type="button" data-register-early-access-home>Done</button>
+                    </div>
+                </section>
+            </div>`;
     }
 
     function adminUsageLogModalMarkup(log = {}) {
@@ -3207,14 +3213,12 @@ if (mount) {
                 : { email: data.email, password: data.password };
             const result = await api(`/auth/${action}`, { method: 'POST', body: payload });
             if (action === 'register') {
-                persistToken(result.token, true);
                 state.busy = false;
-                state.selectedPlan = data.plan && subscriptionPlans[data.plan] ? data.plan : 'premium';
                 state.subscriptionCheckoutStatus = '';
                 state.user = result.user || null;
                 state.subscriptionSummary = null;
-                history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan)}`);
-                await loadSubscriptionPage();
+                state.modal = { type: 'register-early-access-success' };
+                render();
                 return;
             }
             persistToken(result.token, action === 'login' && data.remember === 'on');
@@ -3223,7 +3227,7 @@ if (mount) {
             await loadSignedIn();
         } catch (error) {
             state.busy = false;
-            state.error = friendlyError(error, action === 'register' ? 'create your account' : action === 'forgot' ? 'send a password reset link' : 'sign in');
+            state.error = friendlyError(error, action === 'register' ? 'sign up for early access' : action === 'forgot' ? 'send a password reset link' : 'sign in');
             render();
         }
     }
@@ -3458,6 +3462,9 @@ if (mount) {
     }
 
     function bindModalActions() {
+        mount.querySelector('[data-register-early-access-home]')?.addEventListener('click', () => {
+            window.location.href = '/';
+        });
         mount.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', () => {
             state.modal = null;
             render();
@@ -3485,6 +3492,10 @@ if (mount) {
         });
         mount.querySelector('.hb-modal-backdrop')?.addEventListener('click', (event) => {
             if (event.target.classList.contains('hb-modal-backdrop')) {
+                if (state.modal?.type === 'register-early-access-success') {
+                    window.location.href = '/';
+                    return;
+                }
                 if (state.modal?.type === 'admin-command-run' && adminCommandRunActive(state.modal?.status)) return;
                 state.modal = null;
                 render();

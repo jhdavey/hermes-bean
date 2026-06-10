@@ -18,7 +18,7 @@ class AuthAndAccountLifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_register_creates_user_and_auth_token_without_early_access_signup(): void
+    public function test_register_creates_user_auth_token_and_early_access_signup(): void
     {
         $response = $this->postJson('/api/auth/register', [
             'name' => 'Bean User',
@@ -29,7 +29,7 @@ class AuthAndAccountLifecycleTest extends TestCase
         ])->assertCreated()
             ->assertJsonPath('data.user.email', 'bean@example.com')
             ->assertJsonPath('data.user.subscription_tier', 'base')
-            ->assertJsonPath('data.user.is_early_access', false)
+            ->assertJsonPath('data.user.is_early_access', true)
             ->assertJsonPath('data.selected_plan', 'pro');
 
         $this->assertIsString($response->json('data.token'));
@@ -42,8 +42,11 @@ class AuthAndAccountLifecycleTest extends TestCase
             'name' => 'Bean User Personal Workspace',
             'type' => 'personal',
         ]);
-        $this->assertDatabaseMissing('early_access_signups', [
+        $this->assertDatabaseHas('early_access_signups', [
             'email' => 'bean@example.com',
+            'name' => 'Bean User',
+            'requested_plan' => 'pro',
+            'source' => 'app_register',
         ]);
     }
 
