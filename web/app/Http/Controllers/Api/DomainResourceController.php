@@ -1316,7 +1316,7 @@ class DomainResourceController extends Controller
             } catch (Throwable $error) {
                 report($error);
             }
-        }, "google-calendar-export-{$eventId}", true);
+        });
     }
 
     /**
