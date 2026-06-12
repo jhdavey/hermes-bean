@@ -2815,6 +2815,7 @@ if (mount) {
         const editing = Boolean(item);
         const isReminder = kind === 'reminder';
         const isEvent = kind === 'event';
+        const isTask = kind === 'task';
         const eventStart = isEvent ? (item?.starts_at || item?.startsAt || defaultEventStart()) : null;
         const eventEnd = isEvent ? (item?.ends_at || item?.endsAt || defaultEventEnd(eventStart)) : null;
         const when = isEvent
@@ -2822,24 +2823,39 @@ if (mount) {
             : item ? toDatetimeLocal(item.due_at || item.dueAt || item.remind_at) : '';
         const end = isEvent ? toDatetimeLocal(eventEnd) : '';
         const workspaceId = item?.workspace_id || item?.workspaceId || currentWorkspaceId();
+        const title = parentTask ? 'New sub-task' : `${editing ? 'Edit' : 'New'} ${kind}`;
+        const subtitle = parentTask
+            ? `Assigned to ${parentTask.title || parentTask.name || 'task'}`
+            : isEvent
+                ? 'Schedule, details, and calendar sync'
+                : isReminder
+                    ? 'Time-sensitive nudge with optional repeat'
+                    : 'Keep the task lightweight, dated, and organized';
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
-                <form class="hb-card hb-modal hb-form" data-modal-form="${kind}">
+                <form class="hb-card hb-modal hb-form hb-item-form hb-item-form-${kind}" data-modal-form="${kind}">
                     ${parentTask ? `<input type="hidden" name="parentTaskId" value="${escapeAttr(parentTask.id)}">` : ''}
-                    ${sectionTitle(isEvent ? icons.calendar : isReminder ? icons.reminders : icons.tasks, parentTask ? 'New sub-task' : `${editing ? 'Edit' : 'New'} ${kind}`, parentTask ? `Assigned to ${parentTask.title || parentTask.name || 'task'}` : '')}
-                    ${labelInput(`${capitalize(kind)} title`, 'title', 'text', item?.title || item?.name || '', 'required')}
-                    ${kind === 'task' ? `<label class="hb-label">Notes<textarea class="hb-textarea" name="notes" placeholder="Add task details">${escapeHtml(item?.notes || '')}</textarea></label>` : ''}
-                    ${isEvent ? eventDetailFieldsMarkup(item) : ''}
-                    ${isEvent ? eventTimeFieldsMarkup(item, when, end) : labelInput(isReminder ? 'Remind me at' : 'Due date', 'time', 'datetime-local', when, isReminder ? 'required' : '')}
-                    <div class="hb-field-row">
-                        ${categorySelectMarkup(item)}
-                        ${labelInput('Color', 'color', 'color', itemColor(item))}
+                    ${sectionTitle(isEvent ? icons.calendar : isReminder ? icons.reminders : icons.tasks, title, subtitle)}
+                    <div class="hb-form-section hb-form-section-primary">
+                        ${labelInput(`${capitalize(kind)} title`, 'title', 'text', item?.title || item?.name || '', 'required')}
+                        ${isEvent ? eventTimeFieldsMarkup(item, when, end) : labelInput(isReminder ? 'Remind me at' : 'Due date', 'time', 'datetime-local', when, isReminder ? 'required' : '')}
                     </div>
-                    ${categoryManagerToggleMarkup()}
-                    ${!isReminder ? `<label class="hb-checkbox-row"><input type="checkbox" name="critical" ${item?.is_critical || item?.isCritical ? 'checked' : ''}> Critical</label>` : ''}
+                    ${isTask ? formSectionMarkup('Details', 'Notes and importance', `
+                        <label class="hb-label">Notes<textarea class="hb-textarea" name="notes" placeholder="Add task details">${escapeHtml(item?.notes || '')}</textarea></label>
+                        ${criticalToggleMarkup(item)}
+                        ${editing && !taskParentId(item) ? `<button class="hb-button-ghost hb-inline-action" type="button" data-create-subtask="${item.id}">Add sub-task</button>` : ''}
+                    `) : ''}
+                    ${isEvent ? formSectionMarkup('Event details', 'Location, description, and status', eventDetailFieldsMarkup(item)) : ''}
+                    ${formSectionMarkup('Organize', 'Category, color, and workspace', `
+                        <div class="hb-field-row hb-compact-field-row">
+                            ${categorySelectMarkup(item)}
+                            ${labelInput('Color', 'color', 'color', itemColor(item))}
+                        </div>
+                        ${categoryManagerToggleMarkup()}
+                        ${!isReminder && !isTask ? criticalToggleMarkup(item) : ''}
+                    `)}
                     ${workspaceConnectionsMarkup(kind, item, workspaceId, editing)}
-                    ${recurrenceFieldsMarkup(kind, item)}
-                    ${kind === 'task' && editing && !taskParentId(item) ? `<button class="hb-button-ghost" type="button" data-create-subtask="${item.id}">Add sub-task</button>` : ''}
+                    ${formSectionMarkup('Repeat', 'Make this repeat when it should come back', recurrenceFieldsMarkup(kind, item))}
                     <div class="hb-modal-actions">
                         ${editing ? `<button class="hb-button-danger" type="button" data-modal-delete="${kind}" data-id="${item.id}">Delete</button>` : ''}
                         <button class="hb-button-secondary" type="button" data-close-modal>Cancel</button>
@@ -2847,6 +2863,25 @@ if (mount) {
                     </div>
                 </form>
             </div>`;
+    }
+
+    function formSectionMarkup(title, subtitle, content) {
+        return `
+            <section class="hb-form-section">
+                <div class="hb-form-section-head">
+                    <strong>${escapeHtml(title)}</strong>
+                    ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ''}
+                </div>
+                <div class="hb-form-section-body">${content}</div>
+            </section>`;
+    }
+
+    function criticalToggleMarkup(item = null) {
+        return `
+            <label class="hb-switch-row hb-form-switch">
+                <input type="checkbox" name="critical" ${item?.is_critical || item?.isCritical ? 'checked' : ''}>
+                <span><strong>Critical</strong><small>Keep this visible in today’s priority view.</small></span>
+            </label>`;
     }
 
     function recurringDeleteModalMarkup(item = null) {
@@ -2870,13 +2905,13 @@ if (mount) {
 
     function eventDetailFieldsMarkup(item = null) {
         return `
-            <label class="hb-label">Description<textarea class="hb-textarea" name="description" placeholder="Description">${escapeHtml(item?.description || '')}</textarea></label>
             <div class="hb-field-row">
                 ${labelInput('Location', 'location', 'text', item?.location || '')}
                 <label class="hb-label">Status<select class="hb-select" name="status">
                     ${['confirmed', 'tentative', 'cancelled'].map((status) => `<option value="${status}" ${String(item?.status || 'confirmed') === status ? 'selected' : ''}>${capitalize(status)}</option>`).join('')}
                 </select></label>
-            </div>`;
+            </div>
+            <label class="hb-label">Description<textarea class="hb-textarea" name="description" placeholder="Add notes, agenda, links, or anything useful for this event">${escapeHtml(item?.description || '')}</textarea></label>`;
     }
 
     function eventTimeFieldsMarkup(item = null, when = '', end = '') {
@@ -2885,7 +2920,7 @@ if (mount) {
         const startDate = allDay ? storedDateOnly(startSource) : dateOnly(startSource);
         const endDate = allDayEndDateInputValue(item, startDate);
         return `
-            <label class="hb-checkbox-row hb-all-day-toggle"><input type="checkbox" name="allDay" data-all-day-toggle ${allDay ? 'checked' : ''}> All day</label>
+            <label class="hb-switch-row hb-form-switch hb-all-day-toggle"><input type="checkbox" name="allDay" data-all-day-toggle ${allDay ? 'checked' : ''}> <span><strong>All day</strong><small>Use dates instead of specific start and end times.</small></span></label>
             <div class="hb-field-row" data-timed-fields ${allDay ? 'hidden' : ''}>
                 ${labelInput('Starts at', 'time', 'datetime-local', when, allDay ? 'disabled' : 'required')}
                 ${labelInput('Ends at', 'endsAt', 'datetime-local', end, allDay ? 'disabled' : '')}
@@ -2909,7 +2944,7 @@ if (mount) {
     function categoryManagerToggleMarkup() {
         return `
             <div class="hb-inline-category-shell">
-                <button class="hb-button-ghost" type="button" data-open-categories aria-expanded="false">Manage categories</button>
+                <button class="hb-button-ghost hb-inline-action" type="button" data-open-categories aria-expanded="false">Manage categories</button>
                 <div class="hb-inline-category-manager" data-category-manager hidden>
                     <div class="hb-inline-category-head">
                         <strong>Categories</strong>
@@ -2945,8 +2980,12 @@ if (mount) {
         const sourceWorkspace = allWorkspaces.find((workspace) => String(workspace.id) === sourceWorkspaceId);
         const title = kind === 'event' ? 'Connections' : 'Workspaces';
         return `
-            <div class="hb-surface-soft hb-card-pad hb-event-connections hb-workspace-picker" data-workspace-picker>
-                <strong>${title}</strong>
+            <section class="hb-form-section hb-event-connections hb-workspace-picker" data-workspace-picker>
+                <div class="hb-form-section-head">
+                    <strong>${title}</strong>
+                    <span>${kind === 'event' ? 'Workspace sync and Google Calendar export' : 'Choose where this item belongs'}</span>
+                </div>
+                <div class="hb-form-section-body">
                 <label class="hb-label">Primary workspace
                     <select class="hb-select" name="workspaceId" data-primary-workspace-select ${editing ? 'disabled' : ''}>
                         ${allWorkspaces.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === sourceWorkspaceId ? 'selected' : ''}>${escapeHtml(workspace.name || 'Workspace')}</option>`).join('')}
@@ -2955,7 +2994,8 @@ if (mount) {
                 ${editing ? `<input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}"><p class="hb-item-meta">Saved in ${escapeHtml(sourceWorkspace?.name || 'this workspace')}.</p>` : ''}
                 <div data-sync-workspace-options>${workspaceSyncOptionsMarkup(sourceWorkspaceId, linked)}</div>
                 ${kind === 'event' ? `<div data-google-export-options>${googleEventConnectionMarkup(item, sourceWorkspace)}</div>` : ''}
-            </div>`;
+                </div>
+            </section>`;
     }
 
     function workspaceSyncOptionsMarkup(sourceWorkspaceId, linked = new Set()) {
@@ -3073,12 +3113,12 @@ if (mount) {
         const days = recurrenceDays(item?.metadata);
         const unit = recurrenceMeta.unit || recurrenceMeta.interval_unit || recurrenceMeta.intervalUnit || 'days';
         return `
-            <label class="hb-label">${capitalize(kind)} recurrence
+            <label class="hb-label">Recurrence
                 <select class="hb-select" name="recurrence" data-recurrence-select>
                     ${recurrenceOptions().map((value) => `<option value="${value}" ${value === recurrence ? 'selected' : ''}>${recurrenceLabel(value)}</option>`).join('')}
                 </select>
             </label>
-            <div class="hb-tabs" data-recurrence-days ${recurrence === 'specific_days' ? '' : 'hidden'}>
+            <div class="hb-tabs hb-recurrence-days" data-recurrence-days ${recurrence === 'specific_days' ? '' : 'hidden'}>
                 ${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => `<label class="hb-chip"><input type="checkbox" name="specificDays" value="${day}" ${days.has(day) ? 'checked' : ''}> ${day.toUpperCase()}</label>`).join('')}
             </div>
             <div class="hb-field-row" data-recurrence-interval ${recurrence === 'interval' ? '' : 'hidden'}>
@@ -5555,7 +5595,7 @@ if (mount) {
         return Date.now() < kioskRealtimeSuppressInputUntil;
     }
 
-    function realtimeAssistantRecentlyOutput(bufferMs = 2800) {
+    function realtimeAssistantRecentlyOutput(bufferMs = 4200) {
         return realtimeAssistantOutputActive()
             || Boolean(kioskRealtimeLastAssistantOutputEndedAt && Date.now() - kioskRealtimeLastAssistantOutputEndedAt < bufferMs)
             || state.kioskVoicePhase === 'responding';
@@ -5564,9 +5604,9 @@ if (mount) {
     function realtimeAssistantOutputRemainingMs() {
         const text = String(kioskRealtimeAssistantDraft?.content || '').trim();
         const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
-        const estimatedTotalMs = Math.min(26000, Math.max(1800, Math.round(words * 360) + 1100));
+        const estimatedTotalMs = Math.min(34000, Math.max(3200, Math.round(words * 430) + 2200));
         const elapsedMs = kioskRealtimeAssistantOutputStartedAt ? Date.now() - kioskRealtimeAssistantOutputStartedAt : 0;
-        return Math.min(20000, Math.max(1800, estimatedTotalMs - elapsedMs + 1600));
+        return Math.min(28000, Math.max(4200, estimatedTotalMs - elapsedMs + 2600));
     }
 
     function scheduleRealtimeTurnStatusAfterOutput() {
@@ -5631,9 +5671,9 @@ if (mount) {
     function scheduleRealtimeBackgroundProgressUpdates() {
         clearRealtimeBackgroundProgressUpdates();
         [
-            { elapsedMs: 8000, instruction: 'Give one brief, natural progress update. Reassure the user that Bean is still working. Do not repeat prior wording.' },
-            { elapsedMs: 18000, instruction: 'Give one brief progress update that acknowledges this is taking a little longer. Do not repeat prior wording.' },
-            { elapsedMs: 30000, instruction: 'Briefly say this is taking longer than expected and that the result will be placed in chat if needed. Do not repeat prior wording.' },
+            { elapsedMs: 12000, instruction: 'Give one brief, natural progress update specific to the request. Do not say "still working". Do not repeat prior wording.' },
+            { elapsedMs: 24000, instruction: 'Give one brief progress update that acknowledges this is taking a little longer. Do not repeat prior wording.' },
+            { elapsedMs: 42000, instruction: 'Briefly say this is taking longer than expected and that the result will be placed in chat if needed. Do not repeat prior wording.' },
         ].forEach((checkpoint) => {
             const timer = window.setTimeout(() => {
                 kioskRealtimeBackgroundProgressTimers.delete(timer);
@@ -5743,6 +5783,38 @@ if (mount) {
         return normalized.length >= 12 && transcriptSimilarity(normalized, assistant) > 0.72;
     }
 
+    function realtimeTranscriptMentionsBean(transcript) {
+        return /\b(?:bean|beans|ben|beam|beem|bein|bing|heybean)\b/i.test(String(transcript || ''));
+    }
+
+    function realtimeTranscriptLooksLikeStatusCheck(transcript) {
+        const normalized = normalizedRealtimeTranscript(transcript);
+        return /\b(?:are you done|is it done|did it finish|did that finish|did it work|did that work|finished|complete|completed|created|scheduled|added|status|still working|what happened|how'?s it going|hows it going)\b/.test(normalized);
+    }
+
+    function realtimeTranscriptCanContinueWithoutWake(transcript) {
+        const normalized = normalizedRealtimeTranscript(transcript);
+        if (!normalized) return false;
+        if (realtimeTranscriptMentionsBean(transcript)) return true;
+        if (kioskRealtimeAwaitingFollowup) return true;
+        if (realtimeBackgroundWorkPending() && realtimeTranscriptLooksLikeStatusCheck(normalized)) return true;
+        return false;
+    }
+
+    function realtimeTranscriptRequestsPoliteClose(transcript) {
+        const normalized = normalizedRealtimeTranscript(transcript);
+        return /^(?:thanks|thank you|thx|that'?s all|we'?re done|we are done)$/.test(normalized)
+            || (realtimeTranscriptMentionsBean(transcript) && /^(?:thanks|thank you|thx)\b/.test(normalized))
+            || /\b(?:thanks|thank you),?\s*(?:that'?s all|we'?re done|we are done)\b/i.test(String(transcript || ''));
+    }
+
+    function realtimeTranscriptRequestsCancel(raw, command, isWakeTurn) {
+        if (isWakeTurn && voiceCancelRequested(command)) return true;
+        if (realtimeTranscriptMentionsBean(raw) && voiceCancelRequested(raw)) return true;
+        if (realtimeBackgroundWorkPending() || realtimeAssistantRecentlyOutput()) return false;
+        return voiceCancelRequested(raw);
+    }
+
     function normalizedRealtimeTranscript(transcript) {
         return String(transcript || '')
             .toLowerCase()
@@ -5774,18 +5846,31 @@ if (mount) {
         }
         const command = commandAfterWakePhrase(raw);
         const isWakeTurn = command !== null;
-        if (conversationEndRequested(raw) || (isWakeTurn && voiceCancelRequested(command))) {
-            cancelKioskVoiceCapture();
+        if (realtimeAssistantOutputActive()) {
+            if (realtimeTranscriptRequestsCancel(raw, command, isWakeTurn)) {
+                cancelKioskVoiceCapture();
+            }
             return;
         }
         if (realtimeUserTranscriptLooksLikeEcho(raw)) {
             return;
         }
-        if (realtimeAssistantOutputActive()) {
+        if (realtimeTranscriptRequestsCancel(raw, command, isWakeTurn)) {
+            cancelKioskVoiceCapture();
+            return;
+        }
+        if (realtimeTranscriptRequestsPoliteClose(raw)) {
+            if (!realtimeBackgroundWorkPending() || isWakeTurn || realtimeTranscriptMentionsBean(raw)) {
+                endKioskConversation();
+            }
             return;
         }
         if (!isWakeTurn && !kioskConversationActive) {
             setKioskVoiceStatus('armed', 'Say hey bean');
+            return;
+        }
+        if (!isWakeTurn && kioskConversationActive && !realtimeTranscriptCanContinueWithoutWake(raw)) {
+            armKioskConversationTimeout(kioskRealtimeAwaitingFollowup ? 30000 : undefined);
             return;
         }
         window.clearTimeout(kioskConversationTimer);
@@ -5830,7 +5915,9 @@ if (mount) {
         if (!delta) return;
         if (realtimeUserTranscriptLooksLikeEcho(delta)) return;
         if (realtimeAssistantOutputActive()) return;
-        if (kioskConversationActive || commandAfterWakePhrase(delta) !== null) {
+        const hasWakePhrase = commandAfterWakePhrase(delta) !== null;
+        if (kioskConversationActive && !hasWakePhrase && !realtimeTranscriptCanContinueWithoutWake(delta)) return;
+        if (kioskConversationActive || hasWakePhrase) {
             window.clearTimeout(kioskConversationTimer);
             kioskConversationTimer = 0;
         }
@@ -5846,7 +5933,9 @@ if (mount) {
         if (!text) return;
         if (realtimeUserTranscriptLooksLikeEcho(text)) return;
         if (realtimeAssistantOutputActive()) return;
-        if (kioskConversationActive || commandAfterWakePhrase(text) !== null) {
+        const hasWakePhrase = commandAfterWakePhrase(text) !== null;
+        if (kioskConversationActive && !hasWakePhrase && !realtimeTranscriptCanContinueWithoutWake(text)) return;
+        if (kioskConversationActive || hasWakePhrase) {
             window.clearTimeout(kioskConversationTimer);
             kioskConversationTimer = 0;
         }
@@ -5880,6 +5969,7 @@ if (mount) {
         if (realtimeUserTranscriptLooksLikeEcho(raw)) return;
         const command = commandAfterWakePhrase(raw);
         if (!kioskConversationActive && command === null) return;
+        if (kioskConversationActive && command === null && !realtimeTranscriptCanContinueWithoutWake(raw)) return;
         showKioskHeardTranscript(raw, {
             allowArmed: command !== null,
             phase: command !== null || kioskConversationActive ? 'heard' : 'armed',
@@ -7032,13 +7122,6 @@ if (mount) {
         }, 1500);
     }
 
-    function conversationEndRequested(transcript) {
-        return voiceCancelRequested(transcript)
-            || /^\s*(?:thanks|thank you|thx|thanks bean|thank you bean)\s*[.!?]*$/i.test(transcript)
-            || /\b(?:thanks|thank you|that'?s all|stop listening|cancel)\s+(?:bean|been|beam|being)\b/i.test(transcript)
-            || /\b(?:thanks|thank you),?\s*(?:that'?s all|we'?re done)\b/i.test(transcript);
-    }
-
     function showKioskHeardTranscript(transcript, options = {}) {
         if (!transcript || state.kioskVoicePhase === 'responding' || (state.kioskVoicePhase === 'working' && !options.force)) return;
         if (!kioskConversationActive && !options.allowArmed) return;
@@ -7195,13 +7278,32 @@ if (mount) {
         restartKioskVoiceListeningSoon(1200);
     }
 
+    function pauseBargeInDuringSpeech() {
+        const shouldResume = Boolean(kioskBargeRecognition || kioskBargeRecognitionActive || kioskBargeRestartTimer);
+        stopKioskBargeInListening();
+        return () => {
+            if (!shouldResume || !kioskConversationActive || !state.kioskVoiceEnabled) return;
+            if (!state.busy && !['working', 'responding'].includes(state.kioskVoicePhase)) return;
+            restartKioskBargeInListeningSoon(900);
+        };
+    }
+
+    async function speakWithBargeInPaused(playSpeech) {
+        const resumeBargeIn = pauseBargeInDuringSpeech();
+        try {
+            return await playSpeech();
+        } finally {
+            resumeBargeIn();
+        }
+    }
+
     function speakKioskVoiceSegment(text, generation, spokenSegments) {
         const cleanText = String(text || '').trim();
         if (!cleanText) return Promise.resolve(false);
         spokenSegments.push(cleanText);
-        return speakKioskAcknowledgement(text, {
+        return speakWithBargeInPaused(() => speakKioskAcknowledgement(text, {
             shouldPlay: () => kioskConversationActive && generation === kioskQuickReplyGeneration,
-        });
+        }));
     }
 
     function appendKioskLocalVoiceExchange(userContent, assistantContent) {
@@ -7473,18 +7575,20 @@ if (mount) {
     }
 
     function speakKioskResponseText(text, options = {}) {
-        if (profileTtsProvider() === 'openai') {
-            return playOpenAiTts(text, { ...options, quietFailure: true }).then((spoken) => {
-                if (spoken) return true;
-                reportKioskRealtimeIssue('openai_tts_emergency_fallback_failure', {
-                    message: kioskLastTtsError || 'Bean needs a moment',
+        return speakWithBargeInPaused(() => {
+            if (profileTtsProvider() === 'openai') {
+                return playOpenAiTts(text, { ...options, quietFailure: true }).then((spoken) => {
+                    if (spoken) return true;
+                    reportKioskRealtimeIssue('openai_tts_emergency_fallback_failure', {
+                        message: kioskLastTtsError || 'Bean needs a moment',
+                    });
+                    if (allowDebugBrowserVoiceFallback()) return speakBrowserTts(text);
+                    setKioskVoiceStatus('error', 'Bean needs a moment');
+                    return false;
                 });
-                if (allowDebugBrowserVoiceFallback()) return speakBrowserTts(text);
-                setKioskVoiceStatus('error', 'Bean needs a moment');
-                return false;
-            });
-        }
-        return allowDebugBrowserVoiceFallback() ? speakBrowserTts(text) : Promise.resolve(false);
+            }
+            return allowDebugBrowserVoiceFallback() ? speakBrowserTts(text) : Promise.resolve(false);
+        });
     }
 
     function finalVoiceForTurn(userContent, quickReplyText, assistantContent, options = {}) {

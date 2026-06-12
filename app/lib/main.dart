@@ -1170,6 +1170,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _dashboardChangeLastId = 0;
   int _dashboardRefreshGeneration = 0;
   int _dashboardDataVersion = 0;
+  int _localResourceSequence = -1;
   int _workspaceRefreshGeneration = 0;
   int _authGeneration = 0;
   int? _lastScheduledAppIconBadgeCount;
@@ -1184,6 +1185,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _dashboardDataVersion++;
     _dashboardRefreshGeneration++;
   }
+
+  bool _canApplyBackgroundSave(int mutationVersion) =>
+      mounted &&
+      _phase == _AuthPhase.signedIn &&
+      mutationVersion == _dashboardDataVersion;
 
   bool _isCurrentAuthGeneration(int generation) =>
       mounted && generation == _authGeneration;
@@ -1294,6 +1300,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   int _nextLocalMessageId() => _localMessageSequence--;
+  int _nextLocalResourceId() => _localResourceSequence--;
 
   bool _assistantResponseIsDetailed(String content) {
     final raw = content.trim();
@@ -2573,13 +2580,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  Future<void> _refreshSignedInViews() async {
+  Future<void> _refreshSignedInViews({bool showLoading = true}) async {
     final session = _session;
     if (_phase != _AuthPhase.signedIn || session == null) return;
     final authGeneration = _authGeneration;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
-    setState(() => _dashboardLoading = true);
+    if (showLoading) setState(() => _dashboardLoading = true);
     try {
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected();
       final results = await Future.wait<Object>([
@@ -2623,7 +2630,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
         _events = results[6] as List<HermesActivityEvent>;
-        _dashboardLoading = false;
+        if (showLoading) _dashboardLoading = false;
         _error = null;
       });
       _syncReminderNotifications();
@@ -2636,7 +2643,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         return;
       }
       setState(() {
-        _dashboardLoading = false;
+        if (showLoading) _dashboardLoading = false;
         _error = beanFriendlyErrorMessage(
           error,
           action: 'refresh your latest data',
@@ -2647,7 +2654,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _phase == _AuthPhase.signedIn &&
           authGeneration == _authGeneration &&
           refreshGeneration == _dashboardRefreshGeneration) {
-        setState(() => _dashboardLoading = false);
+        if (showLoading) setState(() => _dashboardLoading = false);
       }
     }
   }
@@ -2904,7 +2911,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds = const [],
     List<String> googleCalendarIds = const [],
-  }) async {
+  }) {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
     final normalizedColor = category == null ? _themeCategoryColorHex() : color;
     final metadata = <String, Object?>{
@@ -2915,6 +2922,87 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (parentTaskId != null || task?.parentTaskId != null)
         'parent_task_id': parentTaskId ?? task!.parentTaskId,
     };
+    final previousTasks = _tasks;
+    final previousPastTasks = _pastTasks;
+    final optimisticTask = task == null
+        ? HermesTask(
+            id: _nextLocalResourceId(),
+            title: title,
+            status: 'open',
+            dueAt: normalizedDueAt,
+            notes: notes,
+            category: category,
+            color: normalizedColor,
+            isCritical: isCritical ?? false,
+            metadata: metadata.isEmpty ? null : metadata,
+            workspaceId: workspaceId,
+          )
+        : task.copyWith(
+            title: title,
+            status: task.status ?? 'open',
+            dueAt: normalizedDueAt,
+            notes: notes,
+            category: category,
+            color: normalizedColor,
+            isCritical: isCritical,
+            metadata: metadata,
+            clearCategory: category == null,
+            clearColor: false,
+            clearNotes: notes == null,
+          );
+    _markDashboardDataMutated();
+    final mutationVersion = _dashboardDataVersion;
+    setState(() {
+      if (task == null) {
+        _tasks = [..._tasks, optimisticTask];
+      } else {
+        if (_tasks.any((item) => item.id == task.id)) {
+          _tasks = _replaceTask(_tasks, optimisticTask);
+        }
+        if (_pastTasks.any((item) => item.id == task.id)) {
+          _pastTasks = _replaceTask(_pastTasks, optimisticTask);
+        }
+      }
+      _error = null;
+    });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _saveTaskInBackground(
+        task,
+        title: title,
+        normalizedDueAt: normalizedDueAt,
+        notes: notes,
+        category: category,
+        normalizedColor: normalizedColor,
+        isCritical: isCritical,
+        metadata: metadata,
+        workspaceId: workspaceId,
+        syncToWorkspaceIds: syncToWorkspaceIds,
+        optimisticTask: optimisticTask,
+        previousTasks: previousTasks,
+        previousPastTasks: previousPastTasks,
+        mutationVersion: mutationVersion,
+      ),
+    );
+    return Future<void>.value();
+  }
+
+  Future<void> _saveTaskInBackground(
+    HermesTask? task, {
+    required String title,
+    required String? normalizedDueAt,
+    required String? notes,
+    required String? category,
+    required String? normalizedColor,
+    required bool? isCritical,
+    required Map<String, Object?> metadata,
+    required int? workspaceId,
+    required List<Object> syncToWorkspaceIds,
+    required HermesTask optimisticTask,
+    required List<HermesTask> previousTasks,
+    required List<HermesTask> previousPastTasks,
+    required int mutationVersion,
+  }) async {
     try {
       final saved = task == null
           ? await widget.apiClient.createTask(
@@ -2943,26 +3031,35 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               clearNotes: notes == null,
               syncToWorkspaceIds: syncToWorkspaceIds,
             );
-      if (!mounted) return;
-      _markDashboardDataMutated();
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
       setState(() {
-        final exists = _tasks.any((item) => item.id == saved.id);
-        _tasks = exists
-            ? _tasks.map((item) => item.id == saved.id ? saved : item).toList()
-            : [..._tasks, saved];
+        final replaceId = optimisticTask.id;
+        if (_tasks.any((item) => item.id == replaceId)) {
+          _tasks = _tasks
+              .map((item) => item.id == replaceId ? saved : item)
+              .toList(growable: false);
+        } else if (_tasks.any((item) => item.id == saved.id)) {
+          _tasks = _replaceTask(_tasks, saved);
+        }
+        if (_pastTasks.any((item) => item.id == replaceId)) {
+          _pastTasks = _pastTasks
+              .map((item) => item.id == replaceId ? saved : item)
+              .toList(growable: false);
+        } else if (_pastTasks.any((item) => item.id == saved.id)) {
+          _pastTasks = _replaceTask(_pastTasks, saved);
+        }
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (mounted) {
-        setState(
-          () => _error = beanFriendlyErrorMessage(
-            error,
-            action: 'save that task',
-          ),
-        );
-      }
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      _markDashboardDataMutated();
+      setState(() {
+        _tasks = previousTasks;
+        _pastTasks = previousPastTasks;
+        _error = beanFriendlyErrorMessage(error, action: 'save that task');
+      });
     }
   }
 
@@ -3109,11 +3206,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds = const [],
     List<String> googleCalendarIds = const [],
-  }) async {
+  }) {
     final normalizedRemindAt = _taskReminderInputToWireValue(remindAt);
     if (normalizedRemindAt == null) {
       if (mounted) setState(() => _error = 'Reminder time is required.');
-      return;
+      return Future<void>.value();
     }
     final normalizedColor = category == null ? _themeCategoryColorHex() : color;
     final metadata = <String, Object?>{
@@ -3122,6 +3219,75 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (googleCalendarIds.isNotEmpty || reminder != null)
         'google_calendar_ids': googleCalendarIds,
     };
+    final previousReminders = _reminders;
+    final optimisticReminder = reminder == null
+        ? HermesReminder(
+            id: _nextLocalResourceId(),
+            title: title,
+            dueAt: normalizedRemindAt,
+            category: category,
+            color: normalizedColor,
+            status: status,
+            metadata: metadata.isEmpty ? null : metadata,
+            workspaceId: workspaceId,
+          )
+        : reminder.copyWith(
+            title: title,
+            dueAt: normalizedRemindAt,
+            status: status,
+            category: category,
+            color: normalizedColor,
+            metadata: metadata,
+            clearCategory: category == null,
+            clearColor: false,
+          );
+    _markDashboardDataMutated();
+    final mutationVersion = _dashboardDataVersion;
+    setState(() {
+      final existingId = reminder?.id;
+      if (existingId == null) {
+        _reminders = [..._reminders, optimisticReminder];
+      } else {
+        _reminders = _reminders
+            .map((item) => item.id == existingId ? optimisticReminder : item)
+            .toList(growable: false);
+      }
+      _error = null;
+    });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _saveReminderInBackground(
+        reminder,
+        title: title,
+        normalizedRemindAt: normalizedRemindAt,
+        status: status,
+        category: category,
+        normalizedColor: normalizedColor,
+        metadata: metadata,
+        workspaceId: workspaceId,
+        syncToWorkspaceIds: syncToWorkspaceIds,
+        optimisticReminder: optimisticReminder,
+        previousReminders: previousReminders,
+        mutationVersion: mutationVersion,
+      ),
+    );
+    return Future<void>.value();
+  }
+
+  Future<void> _saveReminderInBackground(
+    HermesReminder? reminder, {
+    required String title,
+    required String normalizedRemindAt,
+    required String status,
+    required String? category,
+    required String? normalizedColor,
+    required Map<String, Object?> metadata,
+    required int? workspaceId,
+    required List<Object> syncToWorkspaceIds,
+    required HermesReminder optimisticReminder,
+    required List<HermesReminder> previousReminders,
+    required int mutationVersion,
+  }) async {
     try {
       final saved = reminder == null
           ? await widget.apiClient.createReminder(
@@ -3146,28 +3312,29 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               clearColor: false,
               syncToWorkspaceIds: syncToWorkspaceIds,
             );
-      if (!mounted) return;
-      _markDashboardDataMutated();
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
       setState(() {
-        final exists = _reminders.any((item) => item.id == saved.id);
-        _reminders = exists
-            ? _reminders
-                  .map((item) => item.id == saved.id ? saved : item)
-                  .toList()
-            : [..._reminders, saved];
+        final replaceId = optimisticReminder.id;
+        if (_reminders.any((item) => item.id == replaceId)) {
+          _reminders = _reminders
+              .map((item) => item.id == replaceId ? saved : item)
+              .toList(growable: false);
+        } else if (_reminders.any((item) => item.id == saved.id)) {
+          _reminders = _reminders
+              .map((item) => item.id == saved.id ? saved : item)
+              .toList(growable: false);
+        }
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (mounted) {
-        setState(
-          () => _error = beanFriendlyErrorMessage(
-            error,
-            action: 'save that reminder',
-          ),
-        );
-      }
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      _markDashboardDataMutated();
+      setState(() {
+        _reminders = previousReminders;
+        _error = beanFriendlyErrorMessage(error, action: 'save that reminder');
+      });
     }
   }
 
@@ -3333,10 +3500,83 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     int? reminderInterval,
     String? reminderIntervalUnit,
     List<Object> syncToWorkspaceIds = const [],
-  }) async {
+  }) {
     final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
     final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
     final normalizedColor = category == null ? _themeCategoryColorHex() : color;
+    final previousCalendar = _calendar;
+    final optimisticEvent = HermesCalendarEvent(
+      id: _nextLocalResourceId(),
+      title: title,
+      startsAt: wireStartsAt,
+      endsAt: wireEndsAt,
+      notes: notes,
+      location: location,
+      status: status,
+      category: category,
+      color: normalizedColor,
+      recurrence: recurrence,
+      metadata: metadata,
+      isCritical: isCritical ?? false,
+      workspaceId: _user?.activeWorkspace?.numericId,
+    );
+    _markDashboardDataMutated();
+    final mutationVersion = _dashboardDataVersion;
+    _rememberPendingCalendarEventWrite(optimisticEvent);
+    setState(() {
+      _calendar = [..._calendar, optimisticEvent];
+      _error = null;
+    });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _createCalendarEventInBackground(
+        title: title,
+        wireStartsAt: wireStartsAt,
+        wireEndsAt: wireEndsAt,
+        notes: notes,
+        location: location,
+        status: status,
+        category: category,
+        normalizedColor: normalizedColor,
+        recurrence: recurrence,
+        metadata: metadata,
+        isCritical: isCritical,
+        reminderMinutesBefore: reminderMinutesBefore,
+        reminderRecurrence: reminderRecurrence,
+        reminderSpecificDays: reminderSpecificDays,
+        reminderInterval: reminderInterval,
+        reminderIntervalUnit: reminderIntervalUnit,
+        syncToWorkspaceIds: syncToWorkspaceIds,
+        optimisticEvent: optimisticEvent,
+        previousCalendar: previousCalendar,
+        mutationVersion: mutationVersion,
+      ),
+    );
+    return Future<void>.value();
+  }
+
+  Future<void> _createCalendarEventInBackground({
+    required String title,
+    required String wireStartsAt,
+    required String? wireEndsAt,
+    required String? notes,
+    required String? location,
+    required String? status,
+    required String? category,
+    required String? normalizedColor,
+    required String? recurrence,
+    required Map<String, Object?>? metadata,
+    required bool? isCritical,
+    required int? reminderMinutesBefore,
+    required String? reminderRecurrence,
+    required List<String>? reminderSpecificDays,
+    required int? reminderInterval,
+    required String? reminderIntervalUnit,
+    required List<Object> syncToWorkspaceIds,
+    required HermesCalendarEvent optimisticEvent,
+    required List<HermesCalendarEvent> previousCalendar,
+    required int mutationVersion,
+  }) async {
     try {
       final createdEvent = await widget.apiClient.createCalendarEvent(
         title: title,
@@ -3375,24 +3615,31 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           );
         }
       }
-      if (!mounted) return;
-      _markDashboardDataMutated();
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      _forgetPendingCalendarEventWrite(optimisticEvent.id);
       _rememberPendingCalendarEventWrite(createdEvent);
       setState(() {
-        _calendar = [..._calendar, createdEvent];
+        _calendar = _calendar
+            .map(
+              (candidate) =>
+                  candidate.id == optimisticEvent.id ? createdEvent : candidate,
+            )
+            .toList(growable: false);
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (mounted) {
-        setState(
-          () => _error = beanFriendlyErrorMessage(
-            error,
-            action: 'create that calendar event',
-          ),
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      _markDashboardDataMutated();
+      _forgetPendingCalendarEventWrite(optimisticEvent.id);
+      setState(() {
+        _calendar = previousCalendar;
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'create that calendar event',
         );
-      }
+      });
     }
   }
 
@@ -3415,7 +3662,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     int? reminderInterval,
     String? reminderIntervalUnit,
     List<Object> syncToWorkspaceIds = const [],
-  }) async {
+  }) {
     final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
     final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
     final normalizedColor = category == null ? _themeCategoryColorHex() : color;
@@ -3440,6 +3687,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       clearRecurrence: recurrence == null,
     );
     _markDashboardDataMutated();
+    final mutationVersion = _dashboardDataVersion;
+    _rememberPendingCalendarEventWrite(optimisticEvent);
     setState(() {
       _calendar = _calendar
           .map(
@@ -3449,7 +3698,56 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           .toList();
       _error = null;
     });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _editCalendarEventInBackground(
+        event,
+        title: title,
+        wireStartsAt: wireStartsAt,
+        wireEndsAt: wireEndsAt,
+        notes: notes,
+        location: location,
+        status: status,
+        category: category,
+        normalizedColor: normalizedColor,
+        recurrence: recurrence,
+        metadata: metadata,
+        isCritical: isCritical,
+        reminderMinutesBefore: reminderMinutesBefore,
+        reminderRecurrence: reminderRecurrence,
+        reminderSpecificDays: reminderSpecificDays,
+        reminderInterval: reminderInterval,
+        reminderIntervalUnit: reminderIntervalUnit,
+        syncToWorkspaceIds: syncToWorkspaceIds,
+        previousCalendar: previousCalendar,
+        mutationVersion: mutationVersion,
+      ),
+    );
+    return Future<void>.value();
+  }
 
+  Future<void> _editCalendarEventInBackground(
+    HermesCalendarEvent event, {
+    required String title,
+    required String wireStartsAt,
+    required String? wireEndsAt,
+    required String? notes,
+    required String? location,
+    required String? status,
+    required String? category,
+    required String? normalizedColor,
+    required String? recurrence,
+    required Map<String, Object?>? metadata,
+    required bool? isCritical,
+    required int? reminderMinutesBefore,
+    required String? reminderRecurrence,
+    required List<String>? reminderSpecificDays,
+    required int? reminderInterval,
+    required String? reminderIntervalUnit,
+    required List<Object> syncToWorkspaceIds,
+    required List<HermesCalendarEvent> previousCalendar,
+    required int mutationVersion,
+  }) async {
     try {
       final updatedEvent = await widget.apiClient.updateCalendarEvent(
         event.id,
@@ -3490,8 +3788,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           );
         }
       }
-      if (!mounted) return;
-      _markDashboardDataMutated();
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
       _rememberPendingCalendarEventWrite(updatedEvent);
       setState(() {
         _calendar = _calendar
@@ -3502,9 +3799,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             .toList();
       });
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (!mounted) return;
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      _markDashboardDataMutated();
+      _forgetPendingCalendarEventWrite(event.id);
       setState(() {
         _calendar = previousCalendar;
         _error = beanFriendlyErrorMessage(
@@ -4042,33 +4341,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                       reminders: _criticalRemindersForToday(_reminders),
                       events: _criticalEventsForToday(_calendar),
                     ),
-                    if (_selectedDestination == _HomeDestination.today) ...[
-                      const SizedBox(width: 8),
-                      IconButton.filledTonal(
-                        key: const Key('calendar-add-event-action'),
-                        tooltip: 'Create event',
-                        onPressed: _showNewCalendarEventEditor,
-                        icon: const Icon(Icons.add_rounded),
-                      ),
-                    ],
-                    if (_selectedDestination == _HomeDestination.tasks) ...[
-                      const SizedBox(width: 8),
-                      IconButton.filledTonal(
-                        key: const Key('task-add-action'),
-                        tooltip: 'Add task',
-                        onPressed: _showNewTaskEditor,
-                        icon: const Icon(Icons.add_rounded),
-                      ),
-                    ],
-                    if (_selectedDestination == _HomeDestination.reminders) ...[
-                      const SizedBox(width: 8),
-                      IconButton.filledTonal(
-                        key: const Key('reminder-add-action'),
-                        tooltip: 'Add reminder',
-                        onPressed: _showNewReminderEditor,
-                        icon: const Icon(Icons.add_rounded),
-                      ),
-                    ],
+                    const SizedBox(width: 8),
+                    _CreateItemMenu(
+                      onCreateEvent: _showNewCalendarEventEditor,
+                      onCreateTask: _showNewTaskEditor,
+                      onCreateReminder: _showNewReminderEditor,
+                    ),
                   ],
                   const SizedBox(width: 16),
                 ],
@@ -4167,6 +4445,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return Stack(
       children: [
         signedInSurface,
+        if (_dashboardLoading)
+          const Positioned.fill(
+            child: IgnorePointer(child: _SignedInLoadingIndicator()),
+          ),
         if (dueReminder != null)
           Positioned(
             key: const Key('due-reminder-banner'),
@@ -4253,7 +4535,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     events: _events,
     messages: _messages,
     busy: _busy,
-    dashboardLoading: _dashboardLoading,
     chatRunState: _chatRunState,
     error: _error,
     selectedDestination: _selectedDestination,
@@ -4298,6 +4579,90 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
     },
     onWorkspacesChanged: _reloadSignedInViewsFromSettings,
+  );
+}
+
+enum _CreateItemAction { event, task, reminder }
+
+class _CreateItemMenu extends StatelessWidget {
+  const _CreateItemMenu({
+    required this.onCreateEvent,
+    required this.onCreateTask,
+    required this.onCreateReminder,
+  });
+
+  final Future<void> Function() onCreateEvent;
+  final Future<void> Function() onCreateTask;
+  final Future<void> Function() onCreateReminder;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<_CreateItemAction>(
+    key: const Key('create-item-menu'),
+    tooltip: 'Create',
+    position: PopupMenuPosition.under,
+    offset: const Offset(0, 8),
+    onSelected: (action) {
+      switch (action) {
+        case _CreateItemAction.event:
+          unawaited(onCreateEvent());
+          return;
+        case _CreateItemAction.task:
+          unawaited(onCreateTask());
+          return;
+        case _CreateItemAction.reminder:
+          unawaited(onCreateReminder());
+          return;
+      }
+    },
+    itemBuilder: (context) => const [
+      PopupMenuItem<_CreateItemAction>(
+        key: Key('create-event-action'),
+        value: _CreateItemAction.event,
+        child: _CreateItemMenuRow(icon: Icons.event_rounded, label: 'Event'),
+      ),
+      PopupMenuItem<_CreateItemAction>(
+        key: Key('create-task-action'),
+        value: _CreateItemAction.task,
+        child: _CreateItemMenuRow(icon: Icons.task_alt_rounded, label: 'Task'),
+      ),
+      PopupMenuItem<_CreateItemAction>(
+        key: Key('create-reminder-action'),
+        value: _CreateItemAction.reminder,
+        child: _CreateItemMenuRow(
+          icon: Icons.notifications_active_rounded,
+          label: 'Reminder',
+        ),
+      ),
+    ],
+    child: Container(
+      key: const Key('create-item-menu-button'),
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.accent.withValues(alpha: .12),
+        shape: BoxShape.circle,
+        border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .22)),
+      ),
+      child: Icon(Icons.add_rounded, color: HeyBeanTheme.accentStrong),
+    ),
+  );
+}
+
+class _CreateItemMenuRow extends StatelessWidget {
+  const _CreateItemMenuRow({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
+      const SizedBox(width: 10),
+      Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+    ],
   );
 }
 
@@ -5690,7 +6055,6 @@ class _CommandCenterContent extends StatelessWidget {
     required this.events,
     required this.messages,
     required this.busy,
-    required this.dashboardLoading,
     required this.chatRunState,
     required this.selectedDestination,
     required this.selectedCalendarDay,
@@ -5743,7 +6107,6 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
   final bool busy;
-  final bool dashboardLoading;
   final String chatRunState;
   final _HomeDestination selectedDestination;
   final DateTime selectedCalendarDay;
@@ -5963,10 +6326,6 @@ class _CommandCenterContent extends StatelessWidget {
               )
             : null;
         final panelChildren = <Widget>[
-          if (dashboardLoading) ...[
-            const _SignedInLoadingStrip(),
-            const SizedBox(height: 12),
-          ],
           if (limitBanner != null &&
               selectedDestination != _HomeDestination.settings) ...[
             limitBanner,
@@ -6974,34 +7333,32 @@ class _ProgressCard extends StatelessWidget {
   );
 }
 
-class _SignedInLoadingStrip extends StatelessWidget {
-  const _SignedInLoadingStrip();
+class _SignedInLoadingIndicator extends StatelessWidget {
+  const _SignedInLoadingIndicator();
 
   @override
-  Widget build(BuildContext context) => Container(
-    key: const Key('signed-in-loading-strip'),
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    decoration: BoxDecoration(
-      color: HeyBeanTheme.surface2,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: HeyBeanTheme.border),
-    ),
-    child: const Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox.square(
-          dimension: 16,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-        SizedBox(width: 10),
-        Text(
-          'Loading...',
-          style: TextStyle(
-            color: HeyBeanTheme.muted,
-            fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) => Center(
+    child: DecoratedBox(
+      key: const Key('signed-in-loading-indicator'),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface.withValues(alpha: .86),
+        shape: BoxShape.circle,
+        border: Border.all(color: HeyBeanTheme.border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x18000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
           ),
+        ],
+      ),
+      child: const Padding(
+        padding: EdgeInsets.all(16),
+        child: SizedBox.square(
+          dimension: 28,
+          child: CircularProgressIndicator(strokeWidth: 3),
         ),
-      ],
+      ),
     ),
   );
 }
@@ -14643,6 +15000,7 @@ class _ThemePreferencesCard extends StatefulWidget {
 class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
   late String _selectedThemeKey;
   bool _saving = false;
+  bool _expanded = false;
 
   @override
   void initState() {
@@ -14673,61 +15031,126 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
   }
 
   @override
-  Widget build(BuildContext context) => Container(
-    key: const Key('theme-preferences-card'),
-    margin: const EdgeInsets.only(top: 10),
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: HeyBeanTheme.surface2,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: HeyBeanTheme.border),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.palette_outlined, color: HeyBeanTheme.accentStrong),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'Appearance',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            if (_saving)
-              SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: HeyBeanTheme.accent,
+  Widget build(BuildContext context) {
+    final selectedTheme = heyBeanColorThemeForKey(_selectedThemeKey);
+    return Container(
+      key: const Key('theme-preferences-card'),
+      margin: const EdgeInsets.only(top: 10),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              key: const Key('theme-preferences-toggle'),
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.palette_outlined,
+                      color: HeyBeanTheme.accentStrong,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Appearance',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${selectedTheme.label} accent',
+                            style: const TextStyle(
+                              color: HeyBeanTheme.muted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: selectedTheme.accent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: .14),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    if (_saving)
+                      SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: HeyBeanTheme.accent,
+                        ),
+                      )
+                    else
+                      Icon(
+                        _expanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        color: HeyBeanTheme.muted,
+                      ),
+                  ],
                 ),
               ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Choose the accent color used across HeyBean.',
-          style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final theme in heyBeanColorThemes)
-              _ThemeSwatchButton(
-                theme: theme,
-                selected: theme.key == _selectedThemeKey,
-                disabled: _saving,
-                onTap: () => _save(theme.key),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              key: const Key('theme-preferences-options'),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(height: 1, color: HeyBeanTheme.border),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Choose the accent color used across HeyBean.',
+                    style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final theme in heyBeanColorThemes)
+                        _ThemeSwatchButton(
+                          theme: theme,
+                          selected: theme.key == _selectedThemeKey,
+                          disabled: _saving,
+                          onTap: () => _save(theme.key),
+                        ),
+                    ],
+                  ),
+                ],
               ),
-          ],
-        ),
-      ],
-    ),
-  );
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ThemeSwatchButton extends StatelessWidget {
