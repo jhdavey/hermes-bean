@@ -2669,7 +2669,10 @@ if (mount) {
     }
 
     function labelInput(label, name, type, value = '', attrs = '') {
-        return `<label class="hb-label">${escapeHtml(label)}<input class="hb-input" type="${type}" name="${escapeAttr(name)}" value="${escapeAttr(value)}" placeholder="${escapeAttr(label)}" ${attrs}></label>`;
+        const stepAttr = (type === 'datetime-local' || type === 'time') && !/\bstep\s*=/.test(attrs)
+            ? 'step="300" '
+            : '';
+        return `<label class="hb-label">${escapeHtml(label)}<input class="hb-input" type="${type}" name="${escapeAttr(name)}" value="${escapeAttr(value)}" placeholder="${escapeAttr(label)}" ${stepAttr}${attrs}></label>`;
     }
 
     function modalMarkup(modal) {

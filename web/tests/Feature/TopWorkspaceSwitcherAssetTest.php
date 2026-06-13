@@ -29,6 +29,17 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
         $this->assertStringContainsString('Also assign to', $appJs);
     }
 
+    public function test_web_resource_time_inputs_use_five_minute_steps(): void
+    {
+        $appJs = file_get_contents(resource_path('js/app.js'));
+
+        $this->assertStringContainsString("type === 'datetime-local' || type === 'time'", $appJs);
+        $this->assertStringContainsString('step="300"', $appJs);
+        $this->assertStringContainsString("labelInput(isReminder ? 'Remind me at' : 'Due date', 'time', 'datetime-local'", $appJs);
+        $this->assertStringContainsString("labelInput('Starts at', 'time', 'datetime-local'", $appJs);
+        $this->assertStringContainsString("labelInput('Ends at', 'endsAt', 'datetime-local'", $appJs);
+    }
+
     public function test_workspace_switcher_uses_sticky_active_workspace_without_changing_default_workspace(): void
     {
         $appJs = file_get_contents(resource_path('js/app.js'));

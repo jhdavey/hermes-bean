@@ -7862,6 +7862,12 @@ class _TodayHomeView extends StatelessWidget {
       timeLabel: 'Due date',
       initialTitle: task?.title ?? '',
       initialTime: _formatCalendarEventDateTime(task?.dueAt),
+      editorIcon: Icons.task_alt_rounded,
+      editorSubtitle: parentTask != null
+          ? 'Assigned to ${parentTask.title}'
+          : 'Keep the task lightweight, dated, and organized',
+      primarySectionTitle: 'Task basics',
+      primarySectionSubtitle: 'Title and optional due date',
       initialNotes: task?.notes ?? '',
       allowEmptyTime: true,
       showNotes: true,
@@ -9939,6 +9945,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   final Set<String> _reminderSpecificDays = <String>{};
   bool _saving = false;
   bool _savingCategory = false;
+  bool _showCategoryManager = false;
 
   static const _colors = <({String value, String label})>[
     (value: _beanGreenCategoryColor, label: 'Green'),
@@ -10774,44 +10781,35 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     IconButton.filledTonal(
                       key: const Key('event-detail-back-action'),
                       onPressed: () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.arrow_back_rounded),
                     ),
-                    const SizedBox(width: 8),
-                    IconButton.filledTonal(
-                      key: const Key('event-detail-critical-toggle'),
-                      tooltip: _isCritical
-                          ? 'Remove critical star'
-                          : 'Mark critical',
-                      onPressed: _toggleCritical,
-                      icon: Icon(
-                        _isCritical
-                            ? Icons.star_rounded
-                            : Icons.star_border_rounded,
-                        color: _isCritical
-                            ? HeyBeanTheme.warning
-                            : HeyBeanTheme.muted,
-                      ),
-                    ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Event Details',
-                            key: const Key('event-detail-header-title'),
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w900,
-                                  color: HeyBeanTheme.text,
-                                  letterSpacing: -.4,
-                                ),
+                      child: _FormEditorHeader(
+                        icon: Icons.calendar_month_rounded,
+                        title: 'Event Details',
+                        titleKey: const Key('event-detail-header-title'),
+                        subtitle: 'Schedule, details, and calendar sync',
+                        trailing: IconButton.filledTonal(
+                          key: const Key('event-detail-critical-toggle'),
+                          tooltip: _isCritical
+                              ? 'Remove critical star'
+                              : 'Mark critical',
+                          onPressed: _toggleCritical,
+                          icon: Icon(
+                            _isCritical
+                                ? Icons.star_rounded
+                                : Icons.star_border_rounded,
+                            color: _isCritical
+                                ? HeyBeanTheme.warning
+                                : HeyBeanTheme.muted,
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ],
@@ -10823,19 +10821,6 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _ShellCard(
-                        glow: true,
-                        child: TextField(
-                          key: const Key('event-title-field'),
-                          controller: _title,
-                          textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(
-                            labelText: 'Title',
-                            prefixIcon: Icon(Icons.title_rounded),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
                       _MobileFormSection(
                         title: 'Schedule',
                         subtitle:
@@ -10851,6 +10836,15 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         ],
                         primary: true,
                         children: [
+                          TextField(
+                            key: const Key('event-title-field'),
+                            controller: _title,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: 'Event title',
+                              prefixIcon: Icon(Icons.title_rounded),
+                            ),
+                          ),
                           if (_validationError != null)
                             _InlinePlanLimitError(
                               key: const Key('event-validation-error'),
@@ -10900,27 +10894,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       const SizedBox(height: 14),
                       _MobileFormSection(
                         title: 'Event details',
-                        subtitle: 'Description, location, and status',
+                        subtitle: 'Location, description, and status',
                         icon: Icons.notes_rounded,
-                        children: [
-                          TextField(
-                            key: const Key('event-notes-field'),
-                            controller: _notes,
-                            minLines: 3,
-                            maxLines: 6,
-                            decoration: const InputDecoration(
-                              labelText: 'Description',
-                              hintText: 'Add event description',
-                              prefixIcon: Icon(Icons.notes_rounded),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      _MobileFormSection(
-                        title: 'Where and visibility',
-                        subtitle: 'Location and event status',
-                        icon: Icons.place_rounded,
                         children: [
                           TextField(
                             key: const Key('event-location-field'),
@@ -10950,13 +10925,172 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               setState(() => _status = value);
                             },
                           ),
+                          TextField(
+                            key: const Key('event-notes-field'),
+                            controller: _notes,
+                            minLines: 3,
+                            maxLines: 6,
+                            decoration: const InputDecoration(
+                              labelText: 'Description',
+                              hintText: 'Add event description',
+                              prefixIcon: Icon(Icons.notes_rounded),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      _MobileFormSection(
+                        title: 'Organize',
+                        subtitle: 'Category, color, and workspace',
+                        icon: Icons.category_outlined,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: KeyedSubtree(
+                                  key: ValueKey(
+                                    'event-category-dropdown-${_category.text.trim().toLowerCase()}',
+                                  ),
+                                  child: DropdownButtonFormField<String>(
+                                    key: const Key('event-category-dropdown'),
+                                    initialValue: _category.text.trim().isEmpty
+                                        ? ''
+                                        : _category.text.trim(),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Category',
+                                      prefixIcon: Icon(Icons.category_outlined),
+                                    ),
+                                    isExpanded: true,
+                                    items: [
+                                      const DropdownMenuItem<String>(
+                                        key: Key('event-category-none'),
+                                        value: '',
+                                        child: Text('No category'),
+                                      ),
+                                      for (final category
+                                          in _categoryChipValues)
+                                        DropdownMenuItem<String>(
+                                          key: Key(
+                                            'event-category-option-${_categoryKey(category.name)}',
+                                          ),
+                                          value: category.name,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              CircleAvatar(
+                                                radius: 6,
+                                                backgroundColor: _categoryColor(
+                                                  category.color,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                category.name,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: _savingCategory
+                                        ? null
+                                        : (value) {
+                                            final nextValue = value ?? '';
+                                            if (nextValue.isEmpty) {
+                                              setState(() {
+                                                _category.text = '';
+                                                _color =
+                                                    _themeCategoryColorHex();
+                                              });
+                                              return;
+                                            }
+                                            final selected = _categoryChipValues
+                                                .where(
+                                                  (category) =>
+                                                      category.name ==
+                                                      nextValue,
+                                                )
+                                                .firstOrNull;
+                                            setState(() {
+                                              _category.text = nextValue;
+                                              _color =
+                                                  selected?.color ?? _color;
+                                            });
+                                          },
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              IconButton.filledTonal(
+                                key: const Key('event-category-add-action'),
+                                onPressed: _savingCategory
+                                    ? null
+                                    : _openCategoryCreationModal,
+                                tooltip: 'Create category',
+                                icon: const Icon(Icons.add_rounded),
+                              ),
+                            ],
+                          ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              key: const Key('event-category-manager-toggle'),
+                              onPressed: _savingCategory
+                                  ? null
+                                  : () => setState(
+                                      () => _showCategoryManager =
+                                          !_showCategoryManager,
+                                    ),
+                              icon: Icon(
+                                _showCategoryManager
+                                    ? Icons.expand_less_rounded
+                                    : Icons.tune_rounded,
+                              ),
+                              label: Text(
+                                _showCategoryManager
+                                    ? 'Hide category manager'
+                                    : 'Manage categories',
+                              ),
+                            ),
+                          ),
+                          if (_showCategoryManager)
+                            Wrap(
+                              key: const Key('event-category-manager'),
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final category in _categoryChipValues)
+                                  _EventCategoryChip(
+                                    chipKey: Key(
+                                      'event-category-chip-${_categoryKey(category.name)}',
+                                    ),
+                                    deleteKey: Key(
+                                      'event-category-delete-${_categoryKey(category.name)}',
+                                    ),
+                                    editKey: Key(
+                                      'event-category-edit-${_categoryKey(category.name)}',
+                                    ),
+                                    category: category,
+                                    color: _categoryColor(category.color),
+                                    selected:
+                                        _category.text.trim() == category.name,
+                                    saving: _savingCategory,
+                                    onSelected: () => _selectCategory(category),
+                                    onEdited: () =>
+                                        _openCategoryEditModal(category),
+                                    onDeleted: () =>
+                                        _deleteCategoryValues(category),
+                                  ),
+                              ],
+                            ),
                         ],
                       ),
                       const SizedBox(height: 14),
                       _MobileFormSection(
                         key: const Key('event-recurrence-field'),
-                        title: 'Recurrence',
-                        subtitle: 'Repeat this event when needed.',
+                        title: 'Repeat',
+                        subtitle: 'Make this repeat when it should come back',
                         icon: Icons.repeat_rounded,
                         infoKey: const Key('event-recurrence-info'),
                         infoTitle: 'Event recurrence',
@@ -10966,6 +11100,19 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           'Every X lets you build patterns like every 2 weeks or every 3 months.',
                         ],
                         children: [
+                          const _EventFieldLabel(
+                            icon: Icons.repeat_on_rounded,
+                            label: 'Recurrence',
+                          ),
+                          const Text(
+                            'Repeat this event when needed.',
+                            style: TextStyle(
+                              color: HeyBeanTheme.muted,
+                              fontSize: 12,
+                              height: 1.35,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
@@ -11046,57 +11193,47 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               .isNotEmpty ??
                           false)) ...[
                         const SizedBox(height: 14),
-                        _ShellCard(
-                          child: Column(
-                            key: const Key('event-google-calendar-field'),
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const _SectionTitle(
-                                icon: Icons.calendar_month_rounded,
-                                title: 'External Calendar Sync',
-                                subtitle:
-                                    'Add or update this event on selected writable external calendars.',
-                                infoKey: Key('event-google-calendars-info'),
-                                infoTitle: 'External Calendar Sync',
-                                infoBullets: [
-                                  'Checked external calendars receive a copy of this local Bean event.',
-                                  'Only writable connected external calendars are shown here.',
-                                  'Changing this list affects this event, not your whole account.',
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              for (final calendar
-                                  in widget
-                                      .googleCalendarStatus!
-                                      .writableCalendars)
-                                CheckboxListTile(
-                                  key: Key(
-                                    'event-google-calendar-${calendar.id}',
-                                  ),
-                                  contentPadding: EdgeInsets.zero,
-                                  value: _googleCalendarIds.contains(
-                                    calendar.id,
-                                  ),
-                                  onChanged: (value) => setState(() {
-                                    if (value ?? false) {
-                                      _googleCalendarIds.add(calendar.id);
-                                    } else {
-                                      _googleCalendarIds.remove(calendar.id);
-                                    }
-                                  }),
-                                  title: Text(calendar.summary),
-                                  subtitle:
-                                      calendar.id ==
-                                          widget
-                                              .googleCalendarStatus!
-                                              .defaultCalendarId
-                                      ? const Text(
-                                          'Default for new local events',
-                                        )
-                                      : null,
+                        _MobileFormSection(
+                          key: const Key('event-google-calendar-field'),
+                          title: 'External Calendar Sync',
+                          subtitle:
+                              'Add or update this event on selected writable external calendars.',
+                          icon: Icons.calendar_month_rounded,
+                          infoKey: const Key('event-google-calendars-info'),
+                          infoTitle: 'External Calendar Sync',
+                          infoBullets: const [
+                            'Checked external calendars receive a copy of this local Bean event.',
+                            'Only writable connected external calendars are shown here.',
+                            'Changing this list affects this event, not your whole account.',
+                          ],
+                          children: [
+                            for (final calendar
+                                in widget
+                                    .googleCalendarStatus!
+                                    .writableCalendars)
+                              CheckboxListTile(
+                                key: Key(
+                                  'event-google-calendar-${calendar.id}',
                                 ),
-                            ],
-                          ),
+                                contentPadding: EdgeInsets.zero,
+                                value: _googleCalendarIds.contains(calendar.id),
+                                onChanged: (value) => setState(() {
+                                  if (value ?? false) {
+                                    _googleCalendarIds.add(calendar.id);
+                                  } else {
+                                    _googleCalendarIds.remove(calendar.id);
+                                  }
+                                }),
+                                title: Text(calendar.summary),
+                                subtitle:
+                                    calendar.id ==
+                                        widget
+                                            .googleCalendarStatus!
+                                            .defaultCalendarId
+                                    ? const Text('Default for new local events')
+                                    : null,
+                              ),
+                          ],
                         ),
                       ],
                       if (widget.workspaces
@@ -11106,240 +11243,148 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           )
                           .isNotEmpty) ...[
                         const SizedBox(height: 14),
-                        _ShellCard(
-                          child: Column(
-                            key: const Key('event-workspace-sync-field'),
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const _SectionTitle(
-                                icon: Icons.home_work_outlined,
-                                title: 'Local Workspace Sync',
-                                subtitle:
-                                    'Copy this event only to selected HeyBean workspaces.',
-                                infoKey: Key('event-workspace-sync-info'),
-                                infoTitle: 'Local Workspace Sync',
-                                infoBullets: [
-                                  'Use this when a Personal event should also appear in a household workspace.',
-                                  'Sync creates a copy for the selected workspace; future edits remain controlled by Bean.',
-                                  'Leave everything unchecked to keep the event only in the current workspace.',
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  for (final workspace
-                                      in widget.workspaces.where(
-                                        (workspace) =>
-                                            workspace.id !=
-                                            widget.activeWorkspaceId,
-                                      ))
-                                    FilterChip(
-                                      key: Key(
-                                        'event-sync-workspace-${workspace.id}',
-                                      ),
-                                      label: Text(workspace.name),
-                                      selected: _syncWorkspaceIds.contains(
-                                        workspace.numericId ?? workspace.id,
-                                      ),
-                                      onSelected: (selected) => setState(() {
-                                        final value =
-                                            workspace.numericId ?? workspace.id;
-                                        if (selected) {
-                                          _syncWorkspaceIds.add(value);
-                                        } else {
-                                          _syncWorkspaceIds.remove(value);
-                                        }
-                                      }),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 14),
-                      _ShellCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        _MobileFormSection(
+                          key: const Key('event-workspace-sync-field'),
+                          title: 'Local Workspace Sync',
+                          subtitle:
+                              'Copy this event only to selected HeyBean workspaces.',
+                          icon: Icons.home_work_outlined,
+                          infoKey: const Key('event-workspace-sync-info'),
+                          infoTitle: 'Local Workspace Sync',
+                          infoBullets: const [
+                            'Use this when a Personal event should also appear in a household workspace.',
+                            'Sync creates a copy for the selected workspace; future edits remain controlled by Bean.',
+                            'Leave everything unchecked to keep the event only in the current workspace.',
+                          ],
                           children: [
-                            const _SectionTitle(
-                              icon: Icons.notifications_active_outlined,
-                              title: 'Reminder',
-                              subtitle:
-                                  'Add a reminder relative to this event.',
-                              infoKey: Key('event-reminder-info'),
-                              infoTitle: 'Event reminders',
-                              infoBullets: [
-                                'Minutes before controls when Bean reminds you before the event starts.',
-                                'Reminder repeats are separate from event recurrence, so reminders can follow their own pattern.',
-                                'Leave minutes blank if you do not need a reminder for this event.',
-                              ],
-                            ),
-                            const SizedBox(height: 18),
-                            TextField(
-                              key: const Key('event-reminder-minutes-field'),
-                              controller: _reminder,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Minutes before',
-                                hintText: '15',
-                                prefixIcon: Icon(Icons.alarm_rounded),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            _EventFieldLabel(
-                              icon: Icons.repeat_on_rounded,
-                              label: 'Reminder repeats',
-                            ),
-                            const SizedBox(height: 8),
                             Wrap(
-                              key: const Key('event-reminder-recurrence-field'),
                               spacing: 8,
                               runSpacing: 8,
                               children: [
-                                for (final recurrence in _reminderRecurrences)
-                                  ChoiceChip(
-                                    label: Text(recurrence.label),
-                                    selected:
-                                        _reminderRecurrence == recurrence.value,
-                                    onSelected: (_) => setState(() {
-                                      _reminderRecurrence = recurrence.value;
+                                for (final workspace in widget.workspaces.where(
+                                  (workspace) =>
+                                      workspace.id != widget.activeWorkspaceId,
+                                ))
+                                  FilterChip(
+                                    key: Key(
+                                      'event-sync-workspace-${workspace.id}',
+                                    ),
+                                    label: Text(workspace.name),
+                                    selected: _syncWorkspaceIds.contains(
+                                      workspace.numericId ?? workspace.id,
+                                    ),
+                                    onSelected: (selected) => setState(() {
+                                      final value =
+                                          workspace.numericId ?? workspace.id;
+                                      if (selected) {
+                                        _syncWorkspaceIds.add(value);
+                                      } else {
+                                        _syncWorkspaceIds.remove(value);
+                                      }
                                     }),
                                   ),
                               ],
                             ),
-                            if (_reminderRecurrence == 'specific_days') ...[
-                              const SizedBox(height: 10),
-                              Wrap(
-                                key: const Key('event-reminder-specific-days'),
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  for (final day in _weekdays)
-                                    FilterChip(
-                                      label: Text(day.label),
-                                      selected: _reminderSpecificDays.contains(
-                                        day.value,
-                                      ),
-                                      onSelected: (selected) => setState(() {
-                                        if (selected) {
-                                          _reminderSpecificDays.add(day.value);
-                                        } else {
-                                          _reminderSpecificDays.remove(
-                                            day.value,
-                                          );
-                                        }
-                                      }),
-                                    ),
-                                ],
-                              ),
-                            ],
-                            if (_reminderRecurrence == 'interval') ...[
-                              const SizedBox(height: 10),
-                              Row(
-                                key: const Key('event-reminder-interval-field'),
-                                children: [
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _reminderInterval,
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Every',
-                                        prefixIcon: Icon(Icons.numbers_rounded),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  DropdownButton<String>(
-                                    value: _reminderIntervalUnit,
-                                    items: [
-                                      for (final unit in _intervalUnits)
-                                        DropdownMenuItem(
-                                          value: unit.value,
-                                          child: Text(unit.label),
-                                        ),
-                                    ],
-                                    onChanged: (value) => setState(() {
-                                      if (value != null) {
-                                        _reminderIntervalUnit = value;
-                                      }
-                                    }),
-                                  ),
-                                ],
-                              ),
-                            ],
                           ],
                         ),
-                      ),
+                      ],
                       const SizedBox(height: 14),
-                      Column(
-                        key: const Key('event-category-chip-list'),
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      _MobileFormSection(
+                        title: 'Reminder',
+                        subtitle: 'Add a reminder relative to this event.',
+                        icon: Icons.notifications_active_outlined,
+                        infoKey: const Key('event-reminder-info'),
+                        infoTitle: 'Event reminders',
+                        infoBullets: const [
+                          'Minutes before controls when Bean reminds you before the event starts.',
+                          'Reminder repeats are separate from event recurrence, so reminders can follow their own pattern.',
+                          'Leave minutes blank if you do not need a reminder for this event.',
+                        ],
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  'Category',
-                                  style: Theme.of(context).textTheme.labelLarge
-                                      ?.copyWith(
-                                        color: HeyBeanTheme.text,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                ),
-                              ),
-                              IconButton.filledTonal(
-                                key: const Key('event-category-add-action'),
-                                onPressed: _savingCategory
-                                    ? null
-                                    : _openCategoryCreationModal,
-                                tooltip: 'Create category',
-                                icon: const Icon(Icons.add_rounded),
-                              ),
-                            ],
+                          TextField(
+                            key: const Key('event-reminder-minutes-field'),
+                            controller: _reminder,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Minutes before',
+                              hintText: '15',
+                              prefixIcon: Icon(Icons.alarm_rounded),
+                            ),
                           ),
-                          const SizedBox(height: 8),
+                          const _EventFieldLabel(
+                            icon: Icons.repeat_on_rounded,
+                            label: 'Reminder repeats',
+                          ),
                           Wrap(
+                            key: const Key('event-reminder-recurrence-field'),
                             spacing: 8,
                             runSpacing: 8,
                             children: [
-                              _CategoryOptionPill(
-                                key: const Key('event-category-none'),
-                                label: 'No category',
-                                selected: _category.text.trim().isEmpty,
-                                onTap: () {
-                                  setState(() {
-                                    _category.text = '';
-                                    _color = _themeCategoryColorHex();
-                                  });
-                                },
-                              ),
-                              for (final category in _categoryChipValues)
-                                _EventCategoryChip(
-                                  chipKey: Key(
-                                    'event-category-chip-${_categoryKey(category.name)}',
-                                  ),
-                                  deleteKey: Key(
-                                    'event-category-delete-${_categoryKey(category.name)}',
-                                  ),
-                                  editKey: Key(
-                                    'event-category-edit-${_categoryKey(category.name)}',
-                                  ),
-                                  category: category,
-                                  color: _categoryColor(category.color),
+                              for (final recurrence in _reminderRecurrences)
+                                ChoiceChip(
+                                  label: Text(recurrence.label),
                                   selected:
-                                      _category.text.trim() == category.name,
-                                  saving: _savingCategory,
-                                  onSelected: () => _selectCategory(category),
-                                  onEdited: () =>
-                                      _openCategoryEditModal(category),
-                                  onDeleted: () =>
-                                      _deleteCategoryValues(category),
+                                      _reminderRecurrence == recurrence.value,
+                                  onSelected: (_) => setState(() {
+                                    _reminderRecurrence = recurrence.value;
+                                  }),
                                 ),
                             ],
                           ),
+                          if (_reminderRecurrence == 'specific_days')
+                            Wrap(
+                              key: const Key('event-reminder-specific-days'),
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final day in _weekdays)
+                                  FilterChip(
+                                    label: Text(day.label),
+                                    selected: _reminderSpecificDays.contains(
+                                      day.value,
+                                    ),
+                                    onSelected: (selected) => setState(() {
+                                      if (selected) {
+                                        _reminderSpecificDays.add(day.value);
+                                      } else {
+                                        _reminderSpecificDays.remove(day.value);
+                                      }
+                                    }),
+                                  ),
+                              ],
+                            ),
+                          if (_reminderRecurrence == 'interval')
+                            Row(
+                              key: const Key('event-reminder-interval-field'),
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _reminderInterval,
+                                    keyboardType: TextInputType.number,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Every',
+                                      prefixIcon: Icon(Icons.numbers_rounded),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                DropdownButton<String>(
+                                  value: _reminderIntervalUnit,
+                                  items: [
+                                    for (final unit in _intervalUnits)
+                                      DropdownMenuItem(
+                                        value: unit.value,
+                                        child: Text(unit.label),
+                                      ),
+                                  ],
+                                  onChanged: (value) => setState(() {
+                                    if (value != null) {
+                                      _reminderIntervalUnit = value;
+                                    }
+                                  }),
+                                ),
+                              ],
+                            ),
                         ],
                       ),
                     ],
@@ -11518,66 +11563,61 @@ class _EventCategoryChip extends StatelessWidget {
   );
 }
 
-class _CategoryOptionPill extends StatelessWidget {
-  const _CategoryOptionPill({
-    super.key,
+class _ColorSwatchButton extends StatelessWidget {
+  const _ColorSwatchButton({
     required this.label,
+    required this.color,
     required this.selected,
     required this.onTap,
-    this.color,
-    this.dotKey,
   });
 
   final String label;
+  final Color color;
   final bool selected;
   final VoidCallback onTap;
-  final Color? color;
-  final Key? dotKey;
 
   @override
-  Widget build(BuildContext context) {
-    final dotColor = color ?? HeyBeanTheme.muted;
-    return Material(
-      color: Colors.white,
-      shape: StadiumBorder(
-        side: BorderSide(
-          color: selected ? HeyBeanTheme.accent : HeyBeanTheme.border,
-          width: selected ? 1.8 : 1.2,
-        ),
-      ),
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: selected,
+    label: '$label color',
+    child: Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        customBorder: const CircleBorder(),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (color != null) ...[
-                CircleAvatar(key: dotKey, radius: 6, backgroundColor: dotColor),
-                const SizedBox(width: 7),
-              ],
-              Text(
-                label,
-                style: TextStyle(
-                  color: HeyBeanTheme.text,
-                  fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
-                ),
-              ),
-              if (selected) ...[
-                const SizedBox(width: 6),
-                Icon(
-                  Icons.check_circle_rounded,
-                  size: 15,
-                  color: HeyBeanTheme.accent,
+        child: Container(
+          width: 36,
+          height: 36,
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected ? HeyBeanTheme.accent : HeyBeanTheme.border,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: .24),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
                 ),
               ],
-            ],
+            ),
+            child: selected
+                ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
+                : null,
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _EventCategoryCreateDialog extends StatefulWidget {
@@ -13361,6 +13401,14 @@ const _titleTimeEditorIntervalUnits = <({String value, String label})>[
   (value: 'months', label: 'months'),
 ];
 
+const _titleTimeEditorCategoryColors = <({String value, String label})>[
+  (value: _beanGreenCategoryColor, label: 'Green'),
+  (value: '#007AFF', label: 'Blue'),
+  (value: '#FF9500', label: 'Orange'),
+  (value: '#AF52DE', label: 'Purple'),
+  (value: '#FF3B30', label: 'Red'),
+];
+
 String _recurrenceFromMetadata(Map<String, Object?>? metadata) {
   final value = metadata?['recurrence']?.toString() ?? 'none';
   return _titleTimeEditorRecurrences.any(
@@ -13427,6 +13475,10 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   required String timeLabel,
   required String initialTitle,
   required String initialTime,
+  IconData? editorIcon,
+  String? editorSubtitle,
+  String? primarySectionTitle,
+  String? primarySectionSubtitle,
   String initialNotes = '',
   required bool allowEmptyTime,
   List<HermesEventCategory> categories = const [],
@@ -13483,6 +13535,28 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   final writableGoogleCalendars =
       googleCalendarStatus?.writableCalendars ?? const <GoogleCalendarInfo>[];
   String? validationError;
+  final isReminderEditor = titleLabel.toLowerCase().contains('reminder');
+  final resolvedEditorIcon =
+      editorIcon ??
+      (isReminderEditor
+          ? Icons.notifications_active_outlined
+          : Icons.task_alt_rounded);
+  final resolvedEditorSubtitle = (editorSubtitle?.trim().isNotEmpty ?? false)
+      ? editorSubtitle!.trim()
+      : isReminderEditor
+      ? 'Time-sensitive nudge with optional repeat'
+      : title.toLowerCase().contains('sub-task')
+      ? 'Assigned to its parent task'
+      : 'Keep the task lightweight, dated, and organized';
+  final resolvedPrimarySectionTitle =
+      primarySectionTitle ??
+      (isReminderEditor ? 'Reminder basics' : 'Task basics');
+  final resolvedPrimarySectionSubtitle =
+      primarySectionSubtitle ??
+      (isReminderEditor
+          ? 'Title and required reminder time'
+          : 'Title and optional due date');
+  final actionLabel = deleteLabel == null ? 'Create' : 'Save';
 
   Map<String, Object?>? buildPayload(
     StateSetter setModalState, {
@@ -13589,6 +13663,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   return showModalBottomSheet<Map<String, Object?>>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: Colors.transparent,
     builder: (context) => StatefulBuilder(
       builder: (context, setModalState) {
@@ -13603,12 +13678,31 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
               ),
             )
             .toList();
+        final categoryDropdownValues = <HermesEventCategory>[
+          ...modalCategories,
+        ];
+        if (selectedCategory.isNotEmpty &&
+            !categoryDropdownValues.any(
+              (category) =>
+                  category.name.toLowerCase() == selectedCategory.toLowerCase(),
+            )) {
+          categoryDropdownValues.add(
+            HermesEventCategory(
+              id: -1,
+              name: selectedCategory,
+              color: selectedColor,
+            ),
+          );
+        }
+        categoryDropdownValues.sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+        final mediaQuery = MediaQuery.of(context);
+        final topInset = mediaQuery.padding.top;
         return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
+          padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
           child: Container(
-            height: MediaQuery.of(context).size.height,
+            height: mediaQuery.size.height - topInset,
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
             decoration: const BoxDecoration(
               color: HeyBeanTheme.surface,
@@ -13621,48 +13715,21 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                 children: [
                   Positioned.fill(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.only(bottom: 82),
+                      padding: const EdgeInsets.only(bottom: 120),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: _SectionTitle(
-                                  icon: Icons.edit_note_rounded,
-                                  title: title,
-                                  subtitle: '',
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              FilledButton.icon(
-                                key: const Key('title-time-editor-save'),
-                                onPressed: saving
-                                    ? null
-                                    : () =>
-                                          submitPayload(context, setModalState),
-                                icon: saving
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.check_rounded),
-                                label: Text(saving ? 'Saving...' : 'Save'),
-                              ),
-                            ],
+                          _FormEditorHeader(
+                            icon: resolvedEditorIcon,
+                            title: title,
+                            subtitle: resolvedEditorSubtitle,
                           ),
                           const SizedBox(height: 14),
                           _MobileFormSection(
-                            title: 'Primary',
-                            subtitle: allowEmptyTime
-                                ? 'Title, optional timing, and priority'
-                                : 'Title, required timing, and priority',
-                            icon: Icons.edit_note_rounded,
+                            title: resolvedPrimarySectionTitle,
+                            subtitle: resolvedPrimarySectionSubtitle,
+                            icon: resolvedEditorIcon,
                             primary: true,
                             children: [
                               TextFormField(
@@ -13701,30 +13768,61 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                   ),
                                 )
                               else
-                                Container(
+                                Material(
                                   key: const Key(
                                     'title-time-editor-selected-time-label',
                                   ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: .72),
+                                  borderRadius: BorderRadius.circular(14),
+                                  color: Colors.transparent,
+                                  child: InkWell(
                                     borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: const Color(0x1A1C314E),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    timeController.text.trim().isEmpty
-                                        ? 'No date and time selected'
-                                        : timeController.text.trim(),
-                                    style: TextStyle(
-                                      color: timeController.text.trim().isEmpty
-                                          ? HeyBeanTheme.muted
-                                          : HeyBeanTheme.text,
-                                      fontWeight: FontWeight.w700,
+                                    onTap: () =>
+                                        chooseDateTime(context, setModalState),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(
+                                          alpha: .72,
+                                        ),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: const Color(0x1A1C314E),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.schedule_rounded,
+                                            size: 18,
+                                            color: HeyBeanTheme.accentStrong,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              timeController.text.trim().isEmpty
+                                                  ? 'No date and time selected'
+                                                  : timeController.text.trim(),
+                                              style: TextStyle(
+                                                color:
+                                                    timeController.text
+                                                        .trim()
+                                                        .isEmpty
+                                                    ? HeyBeanTheme.muted
+                                                    : HeyBeanTheme.text,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                          const Icon(
+                                            Icons.calendar_month_rounded,
+                                            size: 18,
+                                            color: HeyBeanTheme.muted,
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -13746,12 +13844,33 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                 ),
                             ],
                           ),
+                          if (showNotes) ...[
+                            const SizedBox(height: 12),
+                            _MobileFormSection(
+                              title: 'Details',
+                              subtitle: 'Notes and importance',
+                              icon: Icons.notes_rounded,
+                              children: [
+                                TextFormField(
+                                  key: const Key('title-time-editor-notes'),
+                                  controller: notesController,
+                                  minLines: 3,
+                                  maxLines: 6,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Notes',
+                                    hintText: 'Add task details',
+                                    prefixIcon: Icon(Icons.notes_rounded),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                           if (modalCategories.isNotEmpty ||
                               onEventCategorySaved != null) ...[
                             const SizedBox(height: 12),
                             _MobileFormSection(
                               title: 'Organize',
-                              subtitle: 'Category and color',
+                              subtitle: 'Category, color, and workspace',
                               icon: Icons.category_outlined,
                               children: [
                                 Row(
@@ -13783,33 +13902,8 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                                           const _EventCategoryCreateDialog(
                                                             initialColor:
                                                                 _beanGreenCategoryColor,
-                                                            colors: [
-                                                              (
-                                                                value:
-                                                                    _beanGreenCategoryColor,
-                                                                label: 'Green',
-                                                              ),
-                                                              (
-                                                                value:
-                                                                    '#007AFF',
-                                                                label: 'Blue',
-                                                              ),
-                                                              (
-                                                                value:
-                                                                    '#FF9500',
-                                                                label: 'Orange',
-                                                              ),
-                                                              (
-                                                                value:
-                                                                    '#AF52DE',
-                                                                label: 'Purple',
-                                                              ),
-                                                              (
-                                                                value:
-                                                                    '#FF3B30',
-                                                                label: 'Red',
-                                                              ),
-                                                            ],
+                                                            colors:
+                                                                _titleTimeEditorCategoryColors,
                                                           ),
                                                     );
                                                 if (categoryValues == null) {
@@ -13858,39 +13952,102 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                       ),
                                   ],
                                 ),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    _CategoryOptionPill(
-                                      key: const Key(
-                                        'title-time-editor-category-none',
-                                      ),
-                                      label: 'No category',
-                                      selected: selectedCategory.isEmpty,
-                                      onTap: () => setModalState(() {
-                                        selectedCategory = '';
-                                        selectedColor =
-                                            _themeCategoryColorHex();
-                                      }),
+                                KeyedSubtree(
+                                  key: ValueKey(
+                                    'title-time-editor-category-${selectedCategory.toLowerCase()}',
+                                  ),
+                                  child: DropdownButtonFormField<String>(
+                                    key: const Key(
+                                      'title-time-editor-category-select',
                                     ),
-                                    for (final category in modalCategories)
-                                      _CategoryOptionPill(
+                                    initialValue: selectedCategory.isEmpty
+                                        ? ''
+                                        : selectedCategory,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Category',
+                                      prefixIcon: Icon(Icons.category_outlined),
+                                    ),
+                                    isExpanded: true,
+                                    items: [
+                                      const DropdownMenuItem<String>(
                                         key: Key(
-                                          'title-time-editor-category-${category.name.toLowerCase().replaceAll(' ', '-')}',
+                                          'title-time-editor-category-none',
                                         ),
-                                        dotKey: Key(
-                                          'title-time-editor-category-dot-${category.name.toLowerCase().replaceAll(' ', '-')}',
+                                        value: '',
+                                        child: Text('No category'),
+                                      ),
+                                      for (final category
+                                          in categoryDropdownValues)
+                                        DropdownMenuItem<String>(
+                                          key: Key(
+                                            'title-time-editor-category-${category.name.toLowerCase().replaceAll(' ', '-')}',
+                                          ),
+                                          value: category.name,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              CircleAvatar(
+                                                key: Key(
+                                                  'title-time-editor-category-dot-${category.name.toLowerCase().replaceAll(' ', '-')}',
+                                                ),
+                                                radius: 6,
+                                                backgroundColor:
+                                                    _safeCategoryColor(
+                                                      category.color,
+                                                    ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                category.name,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ],
+                                          ),
                                         ),
-                                        label: category.name,
-                                        color: _safeCategoryColor(
-                                          category.color,
-                                        ),
+                                    ],
+                                    onChanged: saving
+                                        ? null
+                                        : (value) => setModalState(() {
+                                            final nextValue = value ?? '';
+                                            if (nextValue.isEmpty) {
+                                              selectedCategory = '';
+                                              selectedColor =
+                                                  _themeCategoryColorHex();
+                                              return;
+                                            }
+                                            final category =
+                                                categoryDropdownValues
+                                                    .where(
+                                                      (item) =>
+                                                          item.name ==
+                                                          nextValue,
+                                                    )
+                                                    .firstOrNull;
+                                            selectedCategory = nextValue;
+                                            selectedColor =
+                                                category?.color ??
+                                                selectedColor;
+                                          }),
+                                  ),
+                                ),
+                                _EventFieldLabel(
+                                  icon: Icons.palette_outlined,
+                                  label: 'Color',
+                                ),
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  children: [
+                                    for (final color
+                                        in _titleTimeEditorCategoryColors)
+                                      _ColorSwatchButton(
+                                        label: color.label,
+                                        color: _colorFromHex(color.value),
                                         selected:
-                                            selectedCategory == category.name,
+                                            selectedColor.toUpperCase() ==
+                                            color.value.toUpperCase(),
                                         onTap: () => setModalState(() {
-                                          selectedCategory = category.name;
-                                          selectedColor = category.color;
+                                          selectedColor = color.value;
                                         }),
                                       ),
                                   ],
@@ -13898,155 +14055,128 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                               ],
                             ),
                           ],
-                          if (showNotes) ...[
-                            const SizedBox(height: 12),
-                            _MobileFormSection(
-                              title: 'Details',
-                              subtitle: 'Notes and extra context',
-                              icon: Icons.notes_rounded,
-                              children: [
-                                TextFormField(
-                                  key: const Key('title-time-editor-notes'),
-                                  controller: notesController,
-                                  minLines: 3,
-                                  maxLines: 6,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Notes',
-                                    hintText: 'Add task details',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
                           if (showRecurrence) ...[
                             const SizedBox(height: 12),
-                            Container(
+                            _MobileFormSection(
                               key: const Key(
                                 'title-time-editor-recurrence-field',
                               ),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: HeyBeanTheme.surface2.withValues(
-                                  alpha: .66,
-                                ),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: const Color(0x1A1C314E),
-                                ),
+                              title: 'Repeat',
+                              subtitle:
+                                  'Make this repeat when it should come back',
+                              icon: Icons.repeat_rounded,
+                              infoKey: const Key(
+                                'title-time-editor-recurrence-info',
                               ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _SectionTitle(
-                                    icon: Icons.repeat_rounded,
-                                    title: recurrenceTitle,
-                                    subtitle: recurrenceSubtitle,
-                                    infoKey: const Key(
-                                      'title-time-editor-recurrence-info',
-                                    ),
-                                    infoTitle: recurrenceInfoTitle,
-                                    infoBullets: const [
-                                      'Choose None for a one-time item.',
-                                      'Specific days repeats on the weekdays you select.',
-                                      'Every X lets you build patterns like every 2 weeks or every 3 months.',
-                                    ],
+                              infoTitle: recurrenceInfoTitle,
+                              infoBullets: const [
+                                'Choose None for a one-time item.',
+                                'Specific days repeats on the weekdays you select.',
+                                'Every X lets you build patterns like every 2 weeks or every 3 months.',
+                              ],
+                              children: [
+                                _EventFieldLabel(
+                                  icon: Icons.repeat_on_rounded,
+                                  label: recurrenceTitle,
+                                ),
+                                Text(
+                                  recurrenceSubtitle,
+                                  style: const TextStyle(
+                                    color: HeyBeanTheme.muted,
+                                    fontSize: 12,
+                                    height: 1.35,
+                                    fontWeight: FontWeight.w700,
                                   ),
-                                  const SizedBox(height: 12),
+                                ),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final option
+                                        in _titleTimeEditorRecurrences)
+                                      ChoiceChip(
+                                        label: Text(option.label),
+                                        selected: recurrence == option.value,
+                                        onSelected: (_) => setModalState(() {
+                                          recurrence = option.value;
+                                        }),
+                                      ),
+                                  ],
+                                ),
+                                if (recurrence == 'specific_days')
                                   Wrap(
+                                    key: const Key(
+                                      'title-time-editor-specific-days',
+                                    ),
                                     spacing: 8,
                                     runSpacing: 8,
                                     children: [
-                                      for (final option
-                                          in _titleTimeEditorRecurrences)
-                                        ChoiceChip(
-                                          label: Text(option.label),
-                                          selected: recurrence == option.value,
-                                          onSelected: (_) => setModalState(() {
-                                            recurrence = option.value;
-                                          }),
+                                      for (final day
+                                          in _titleTimeEditorWeekdays)
+                                        FilterChip(
+                                          label: Text(day.label),
+                                          selected: recurrenceSpecificDays
+                                              .contains(day.value),
+                                          onSelected: (selected) =>
+                                              setModalState(() {
+                                                if (selected) {
+                                                  recurrenceSpecificDays.add(
+                                                    day.value,
+                                                  );
+                                                } else {
+                                                  recurrenceSpecificDays.remove(
+                                                    day.value,
+                                                  );
+                                                }
+                                              }),
                                         ),
                                     ],
                                   ),
-                                  if (recurrence == 'specific_days') ...[
-                                    const SizedBox(height: 10),
-                                    Wrap(
-                                      key: const Key(
-                                        'title-time-editor-specific-days',
-                                      ),
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        for (final day
-                                            in _titleTimeEditorWeekdays)
-                                          FilterChip(
-                                            label: Text(day.label),
-                                            selected: recurrenceSpecificDays
-                                                .contains(day.value),
-                                            onSelected: (selected) =>
-                                                setModalState(() {
-                                                  if (selected) {
-                                                    recurrenceSpecificDays.add(
-                                                      day.value,
-                                                    );
-                                                  } else {
-                                                    recurrenceSpecificDays
-                                                        .remove(day.value);
-                                                  }
-                                                }),
-                                          ),
-                                      ],
+                                if (recurrence == 'interval')
+                                  Row(
+                                    key: const Key(
+                                      'title-time-editor-interval-field',
                                     ),
-                                  ],
-                                  if (recurrence == 'interval') ...[
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      key: const Key(
-                                        'title-time-editor-interval-field',
-                                      ),
-                                      children: [
-                                        Expanded(
-                                          child: TextField(
-                                            key: const Key(
-                                              'title-time-editor-interval-count',
-                                            ),
-                                            controller:
-                                                recurrenceIntervalController,
-                                            keyboardType: TextInputType.number,
-                                            decoration: const InputDecoration(
-                                              labelText: 'Every',
-                                              prefixIcon: Icon(
-                                                Icons.numbers_rounded,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        DropdownButton<String>(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
                                           key: const Key(
-                                            'title-time-editor-interval-unit',
+                                            'title-time-editor-interval-count',
                                           ),
-                                          value: recurrenceIntervalUnit,
-                                          items: [
-                                            for (final unit
-                                                in _titleTimeEditorIntervalUnits)
-                                              DropdownMenuItem(
-                                                value: unit.value,
-                                                child: Text(unit.label),
-                                              ),
-                                          ],
-                                          onChanged: (value) => setModalState(
-                                            () {
-                                              if (value != null) {
-                                                recurrenceIntervalUnit = value;
-                                              }
-                                            },
+                                          controller:
+                                              recurrenceIntervalController,
+                                          keyboardType: TextInputType.number,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Every',
+                                            prefixIcon: Icon(
+                                              Icons.numbers_rounded,
+                                            ),
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                  ],
-                                ],
-                              ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      DropdownButton<String>(
+                                        key: const Key(
+                                          'title-time-editor-interval-unit',
+                                        ),
+                                        value: recurrenceIntervalUnit,
+                                        items: [
+                                          for (final unit
+                                              in _titleTimeEditorIntervalUnits)
+                                            DropdownMenuItem(
+                                              value: unit.value,
+                                              child: Text(unit.label),
+                                            ),
+                                        ],
+                                        onChanged: (value) => setModalState(() {
+                                          if (value != null) {
+                                            recurrenceIntervalUnit = value;
+                                          }
+                                        }),
+                                      ),
+                                    ],
+                                  ),
+                              ],
                             ),
                           ],
                           Align(
@@ -14061,218 +14191,154 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                           ),
                           if (writableGoogleCalendars.isNotEmpty) ...[
                             const SizedBox(height: 8),
-                            Container(
+                            _MobileFormSection(
                               key: const Key(
                                 'title-time-editor-google-calendar-sync',
                               ),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: HeyBeanTheme.surface2.withValues(
-                                  alpha: .66,
-                                ),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: const Color(0x1A1C314E),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Add to connected calendars',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Create or update this item on selected writable connected calendars.',
-                                    style: TextStyle(color: HeyBeanTheme.muted),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      for (final calendar
-                                          in writableGoogleCalendars)
-                                        FilterChip(
-                                          key: Key(
-                                            'title-time-editor-google-calendar-${calendar.id}',
-                                          ),
-                                          label: Text(calendar.summary),
-                                          selected: googleCalendarIds.contains(
-                                            calendar.id,
-                                          ),
-                                          onSelected: (selected) =>
-                                              setModalState(() {
-                                                if (selected) {
-                                                  googleCalendarIds.add(
-                                                    calendar.id,
-                                                  );
-                                                } else {
-                                                  googleCalendarIds.remove(
-                                                    calendar.id,
-                                                  );
-                                                }
-                                              }),
+                              title: 'Connected calendars',
+                              subtitle:
+                                  'Create or update this item on selected writable connected calendars.',
+                              icon: Icons.calendar_month_rounded,
+                              children: [
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final calendar
+                                        in writableGoogleCalendars)
+                                      FilterChip(
+                                        key: Key(
+                                          'title-time-editor-google-calendar-${calendar.id}',
                                         ),
-                                    ],
-                                  ),
-                                ],
-                              ),
+                                        label: Text(calendar.summary),
+                                        selected: googleCalendarIds.contains(
+                                          calendar.id,
+                                        ),
+                                        onSelected: (selected) =>
+                                            setModalState(() {
+                                              if (selected) {
+                                                googleCalendarIds.add(
+                                                  calendar.id,
+                                                );
+                                              } else {
+                                                googleCalendarIds.remove(
+                                                  calendar.id,
+                                                );
+                                              }
+                                            }),
+                                      ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ],
                           if (showPrimaryWorkspaceSelector &&
                               workspaces.isNotEmpty) ...[
                             const SizedBox(height: 8),
-                            Container(
+                            _MobileFormSection(
                               key: const Key(
                                 'title-time-editor-primary-workspace',
                               ),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: HeyBeanTheme.surface2.withValues(
-                                  alpha: .66,
-                                ),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: const Color(0x1A1C314E),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Workspace',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                    ),
+                              title: 'Workspaces',
+                              subtitle: 'Choose where this item belongs',
+                              icon: Icons.home_work_outlined,
+                              children: [
+                                DropdownButtonFormField<String>(
+                                  key: const Key(
+                                    'title-time-editor-primary-workspace-select',
                                   ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Choose the primary workspace, or leave it unassigned.',
-                                    style: TextStyle(color: HeyBeanTheme.muted),
+                                  initialValue:
+                                      selectedPrimaryWorkspaceId?.toString() ??
+                                      '',
+                                  decoration: const InputDecoration(
+                                    labelText: 'Primary workspace',
+                                    prefixIcon: Icon(Icons.home_work_outlined),
                                   ),
-                                  const SizedBox(height: 10),
-                                  DropdownButtonFormField<String>(
-                                    key: const Key(
-                                      'title-time-editor-primary-workspace-select',
+                                  items: [
+                                    const DropdownMenuItem<String>(
+                                      value: '',
+                                      child: Text('No primary workspace'),
                                     ),
-                                    initialValue:
-                                        selectedPrimaryWorkspaceId
-                                            ?.toString() ??
-                                        '',
-                                    decoration: const InputDecoration(
-                                      labelText: 'Primary workspace',
-                                    ),
-                                    items: [
-                                      const DropdownMenuItem<String>(
-                                        value: '',
-                                        child: Text('No primary workspace'),
-                                      ),
-                                      for (final workspace in workspaces)
-                                        DropdownMenuItem<String>(
-                                          value: _workspaceValue(
-                                            workspace,
-                                          ).toString(),
-                                          child: Text(
-                                            workspace.isPersonal
-                                                ? 'Personal'
-                                                : workspace.name,
-                                          ),
+                                    for (final workspace in workspaces)
+                                      DropdownMenuItem<String>(
+                                        value: _workspaceValue(
+                                          workspace,
+                                        ).toString(),
+                                        child: Text(
+                                          workspace.isPersonal
+                                              ? 'Personal'
+                                              : workspace.name,
                                         ),
-                                    ],
-                                    onChanged: saving
-                                        ? null
-                                        : (value) => setModalState(() {
-                                            selectedPrimaryWorkspaceId =
-                                                value == null || value.isEmpty
-                                                ? null
-                                                : value;
-                                            syncWorkspaceIds.removeWhere(
-                                              (workspaceId) =>
-                                                  _workspaceValuesMatch(
-                                                    workspaceId,
-                                                    selectedPrimaryWorkspaceId,
-                                                  ),
-                                            );
-                                          }),
-                                  ),
-                                ],
-                              ),
+                                      ),
+                                  ],
+                                  onChanged: saving
+                                      ? null
+                                      : (value) => setModalState(() {
+                                          selectedPrimaryWorkspaceId =
+                                              value == null || value.isEmpty
+                                              ? null
+                                              : value;
+                                          syncWorkspaceIds.removeWhere(
+                                            (workspaceId) =>
+                                                _workspaceValuesMatch(
+                                                  workspaceId,
+                                                  selectedPrimaryWorkspaceId,
+                                                ),
+                                          );
+                                        }),
+                                ),
+                              ],
                             ),
                           ],
                           if (syncTargets.isNotEmpty) ...[
                             const SizedBox(height: 8),
-                            Container(
+                            _MobileFormSection(
                               key: const Key(
                                 'title-time-editor-workspace-sync',
                               ),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: HeyBeanTheme.surface2.withValues(
-                                  alpha: .66,
-                                ),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: const Color(0x1A1C314E),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Sync to workspaces',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Copy this item only to selected workspaces.',
-                                    style: TextStyle(color: HeyBeanTheme.muted),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      for (final workspace in syncTargets)
-                                        FilterChip(
-                                          key: Key(
-                                            'title-time-editor-sync-workspace-${workspace.id}',
-                                          ),
-                                          label: Text(workspace.name),
-                                          selected: syncWorkspaceIds.any(
-                                            (workspaceId) =>
-                                                _workspaceValuesMatch(
-                                                  workspaceId,
-                                                  _workspaceValue(workspace),
-                                                ),
-                                          ),
-                                          onSelected: (selected) =>
-                                              setModalState(() {
-                                                final value = _workspaceValue(
-                                                  workspace,
-                                                );
-                                                if (selected) {
-                                                  syncWorkspaceIds.add(value);
-                                                } else {
-                                                  syncWorkspaceIds.removeWhere(
-                                                    (workspaceId) =>
-                                                        _workspaceValuesMatch(
-                                                          workspaceId,
-                                                          value,
-                                                        ),
-                                                  );
-                                                }
-                                              }),
+                              title: 'Also assign to',
+                              subtitle:
+                                  'Copy this item only to selected workspaces.',
+                              icon: Icons.account_tree_outlined,
+                              children: [
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final workspace in syncTargets)
+                                      FilterChip(
+                                        key: Key(
+                                          'title-time-editor-sync-workspace-${workspace.id}',
                                         ),
-                                    ],
-                                  ),
-                                ],
-                              ),
+                                        label: Text(workspace.name),
+                                        selected: syncWorkspaceIds.any(
+                                          (workspaceId) =>
+                                              _workspaceValuesMatch(
+                                                workspaceId,
+                                                _workspaceValue(workspace),
+                                              ),
+                                        ),
+                                        onSelected: (selected) =>
+                                            setModalState(() {
+                                              final value = _workspaceValue(
+                                                workspace,
+                                              );
+                                              if (selected) {
+                                                syncWorkspaceIds.add(value);
+                                              } else {
+                                                syncWorkspaceIds.removeWhere(
+                                                  (workspaceId) =>
+                                                      _workspaceValuesMatch(
+                                                        workspaceId,
+                                                        value,
+                                                      ),
+                                                );
+                                              }
+                                            }),
+                                      ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ],
                           if (validationError != null) ...[
@@ -14285,38 +14351,49 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                     ),
                   ),
                   Positioned(
+                    left: 0,
                     right: 0,
                     bottom: 0,
                     child: Container(
-                      padding: const EdgeInsets.only(top: 10),
+                      padding: const EdgeInsets.fromLTRB(0, 10, 0, 0),
+                      decoration: BoxDecoration(
+                        color: HeyBeanTheme.surface.withValues(alpha: .94),
+                        border: const Border(
+                          top: BorderSide(color: HeyBeanTheme.border),
+                        ),
+                      ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              if (deleteLabel != null)
-                                SizedBox(
-                                  width: 154,
-                                  child: FilledButton.icon(
-                                    key: const Key('title-time-editor-delete'),
-                                    style: _destructiveFilledButtonStyle(),
-                                    onPressed: saving
-                                        ? null
-                                        : () => Navigator.of(
-                                            context,
-                                          ).pop({'delete': true}),
-                                    icon: const Icon(
-                                      Icons.delete_outline_rounded,
-                                    ),
-                                    label: Text(deleteLabel),
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: saving
+                                      ? null
+                                      : () => Navigator.of(context).pop(),
+                                  child: const Text('Cancel'),
+                                ),
+                              ),
+                              if (deleteLabel != null) ...[
+                                const SizedBox(width: 10),
+                                IconButton.filled(
+                                  key: const Key('title-time-editor-delete'),
+                                  tooltip: deleteLabel,
+                                  style: _destructiveIconButtonStyle(),
+                                  onPressed: saving
+                                      ? null
+                                      : () => Navigator.of(
+                                          context,
+                                        ).pop({'delete': true}),
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
                                   ),
                                 ),
-                              if (deleteLabel != null)
-                                const SizedBox(width: 10),
-                              SizedBox(
-                                width: 132,
+                              ],
+                              const SizedBox(width: 10),
+                              Expanded(
                                 child: FilledButton.icon(
                                   key: const Key(
                                     'title-time-editor-save-bottom',
@@ -14336,24 +14413,29 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                           ),
                                         )
                                       : const Icon(Icons.check_rounded),
-                                  label: Text(saving ? 'Saving...' : 'Save'),
+                                  label: Text(
+                                    saving ? 'Saving...' : actionLabel,
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                           if (completeLabel != null) ...[
                             const SizedBox(height: 8),
-                            TextButton.icon(
-                              key: const Key('title-time-editor-complete'),
-                              onPressed: saving
-                                  ? null
-                                  : () => submitPayload(
-                                      context,
-                                      setModalState,
-                                      complete: true,
-                                    ),
-                              icon: const Icon(Icons.done_all_rounded),
-                              label: Text(completeLabel),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                key: const Key('title-time-editor-complete'),
+                                onPressed: saving
+                                    ? null
+                                    : () => submitPayload(
+                                        context,
+                                        setModalState,
+                                        complete: true,
+                                      ),
+                                icon: const Icon(Icons.done_all_rounded),
+                                label: Text(completeLabel),
+                              ),
                             ),
                           ],
                         ],
@@ -14903,6 +14985,10 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       timeLabel: 'Remind me at',
       initialTitle: reminder?.title ?? '',
       initialTime: _formatCalendarEventDateTime(reminder?.dueAt),
+      editorIcon: Icons.notifications_active_outlined,
+      editorSubtitle: 'Time-sensitive nudge with optional repeat',
+      primarySectionTitle: 'Reminder basics',
+      primarySectionSubtitle: 'Title and required reminder time',
       allowEmptyTime: false,
       categories: widget.eventCategories,
       initialCategory: reminder?.category,
@@ -17870,6 +17956,76 @@ class _SectionTitle extends StatelessWidget {
         _InfoIconButton(key: infoKey, title: infoTitle!, bullets: infoBullets),
       ],
     ],
+  );
+}
+
+class _FormEditorHeader extends StatelessWidget {
+  const _FormEditorHeader({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.titleKey,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Key? titleKey;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.only(bottom: 14),
+    decoration: const BoxDecoration(
+      border: Border(bottom: BorderSide(color: Color(0x1A1C314E))),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: HeyBeanTheme.accent.withValues(alpha: .10),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: HeyBeanTheme.accent.withValues(alpha: .16),
+            ),
+          ),
+          child: Icon(icon, color: HeyBeanTheme.accentStrong, size: 21),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                key: titleKey,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: HeyBeanTheme.text,
+                  fontWeight: FontWeight.w900,
+                  height: 1.1,
+                ),
+              ),
+              if (subtitle.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: HeyBeanTheme.muted,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (trailing != null) ...[const SizedBox(width: 12), trailing!],
+      ],
+    ),
   );
 }
 

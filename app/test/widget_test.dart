@@ -1012,6 +1012,8 @@ void main() {
     expect(find.textContaining('Coach'), findsOneWidget);
     expect(find.textContaining('Family, Focus'), findsOneWidget);
 
+    await tester.ensureVisible(find.byKey(const Key('open-bean-preferences')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-bean-preferences')));
     await tester.pumpAndSettle();
 
@@ -1201,6 +1203,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('open-bean-preferences')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-bean-preferences')));
     await tester.pumpAndSettle();
@@ -1796,7 +1800,9 @@ void main() {
       find.byKey(const Key('title-time-editor-critical-toggle')),
       findsNothing,
     );
-    await tester.dragFrom(const Offset(400, 500), const Offset(0, -220));
+    await tester.ensureVisible(
+      find.byKey(const Key('title-time-editor-picker-button')),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('title-time-editor-picker-button')));
     await tester.pumpAndSettle();
@@ -1808,6 +1814,27 @@ void main() {
     expect(
       find.byKey(const Key('title-time-time-minute-dial')),
       findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('title-time-time-minute-dial')),
+        matching: find.text('05'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('title-time-time-minute-dial')),
+        matching: find.text('10'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('title-time-time-minute-dial')),
+        matching: find.text('07'),
+      ),
+      findsNothing,
     );
     expect(
       find.byKey(const Key('title-time-time-meridiem-dial')),
@@ -1967,6 +1994,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Task recurrence'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const Key('title-time-editor-category-add-action')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const Key('title-time-editor-category-add-action')),
     );
@@ -1983,17 +2014,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(api.savedCategory?.name, 'Errands');
     expect(
-      find.byKey(const Key('title-time-editor-category-errands')),
+      find.byKey(const Key('title-time-editor-category-select')),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
+    expect(find.text('Errands'), findsWidgets);
+    await _selectDropdownText(
+      tester,
+      dropdownKey: const Key('title-time-editor-category-select'),
+      text: 'Work',
+    );
+    await tester.ensureVisible(
+      find.byKey(const Key('title-time-editor-open-picker')),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('title-time-editor-open-picker')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('title-time-time-dock')), findsOneWidget);
     await tester.tap(find.byKey(const Key('title-time-time-dock-done')));
     await tester.pumpAndSettle();
-    await tester.dragFrom(const Offset(400, 500), const Offset(0, -320));
+    await tester.dragFrom(const Offset(400, 500), const Offset(0, -520));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Weekly'));
     await tester.pumpAndSettle();
@@ -2035,9 +2074,12 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Reminder repeats'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('title-time-editor-category-work')));
-    await tester.pumpAndSettle();
-    await tester.dragFrom(const Offset(400, 500), const Offset(0, -320));
+    await _selectDropdownText(
+      tester,
+      dropdownKey: const Key('title-time-editor-category-select'),
+      text: 'Work',
+    );
+    await tester.dragFrom(const Offset(400, 300), const Offset(0, -760));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Specific days'));
     await tester.pumpAndSettle();
@@ -2074,7 +2116,7 @@ void main() {
     await tester.tap(find.byKey(const Key('task-edit-action-501')));
     await tester.pumpAndSettle();
     expect(
-      find.byKey(const Key('title-time-editor-category-none')),
+      find.byKey(const Key('title-time-editor-category-select')),
       findsOneWidget,
     );
     await tester.dragFrom(const Offset(400, 500), const Offset(0, -320));
@@ -2089,7 +2131,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('reminder-edit-action-601')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('title-time-editor-category-none')));
+    await _selectDropdownText(
+      tester,
+      dropdownKey: const Key('title-time-editor-category-select'),
+      text: 'No category',
+    );
     await tester.dragFrom(const Offset(400, 500), const Offset(0, -320));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('title-time-editor-save-bottom')));
@@ -2113,6 +2159,7 @@ void main() {
     await tester.tap(find.byKey(const Key('nav-tasks')));
     await tester.pumpAndSettle();
     await _openCreateMenuAndChoose(tester, const Key('create-task-action'));
+    expect(find.byKey(const Key('title-time-editor-save')), findsNothing);
     expect(
       find.byKey(const Key('title-time-editor-primary-workspace-select')),
       findsOneWidget,
@@ -2155,6 +2202,7 @@ void main() {
     expect(find.text('Order coffee beans'), findsNothing);
 
     await _openCreateMenuAndChoose(tester, const Key('create-reminder-action'));
+    expect(find.byKey(const Key('title-time-editor-save')), findsNothing);
     expect(find.text('Reminder repeats'), findsOneWidget);
   });
 
@@ -2172,10 +2220,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('task-edit-action-501')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    expect(find.byKey(const Key('title-time-editor-save')), findsNothing);
+    await tester.tap(find.byKey(const Key('title-time-editor-save-bottom')));
     await tester.pump();
 
-    expect(find.text('Saving...'), findsNWidgets(2));
+    expect(find.text('Saving...'), findsOneWidget);
     expect(api.updatedTask, isNull);
 
     api.updateTaskCompleter!.complete();
@@ -2203,7 +2252,7 @@ void main() {
       find.byKey(const Key('title-time-editor-title')),
       'Updated proposal',
     );
-    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.tap(find.byKey(const Key('title-time-editor-save-bottom')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('title-time-editor-title')), findsNothing);
@@ -2234,7 +2283,7 @@ void main() {
       find.byKey(const Key('title-time-editor-title')),
       'Updated reminder',
     );
-    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.tap(find.byKey(const Key('title-time-editor-save-bottom')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('title-time-editor-title')), findsNothing);
@@ -3331,7 +3380,7 @@ void main() {
       find.byKey(const Key('title-time-editor-title')),
       'Buy printer paper',
     );
-    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.tap(find.byKey(const Key('title-time-editor-save-bottom')));
     await tester.pumpAndSettle();
 
     expect(api.createdTaskTitles, ['Buy printer paper']);
@@ -3879,15 +3928,21 @@ void main() {
 
       await _openCreateMenuAndChoose(tester, const Key('create-event-action'));
 
-      expect(
-        find.byKey(const Key('event-category-chip-Family')),
-        findsOneWidget,
+      expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
+      await tester.ensureVisible(
+        find.byKey(const Key('event-category-dropdown')),
       );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('event-category-dropdown')));
+      await tester.pumpAndSettle();
+      expect(find.text('Family'), findsOneWidget);
       expect(
-        find.byKey(const Key('event-category-chip-Personal')),
+        find.byKey(const Key('event-category-option-Personal')),
         findsNothing,
       );
-      expect(find.byKey(const Key('event-category-none')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-none')), findsWidgets);
+      await tester.tap(find.text('No category').last);
+      await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('event-title-field')),
         'Family dinner',
@@ -4132,11 +4187,12 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.ensureVisible(
-      find.byKey(const Key('event-category-chip-Studio')),
+      find.byKey(const Key('event-category-dropdown')),
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('event-category-chip-Studio')), findsOneWidget);
+    expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
+    expect(find.text('Studio'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('event-save-action')));
     await tester.pumpAndSettle();
@@ -4284,20 +4340,24 @@ void main() {
       expect(find.text('Notes'), findsNothing);
       expect(find.byKey(const Key('event-location-field')), findsOneWidget);
       expect(find.byKey(const Key('event-status-field')), findsOneWidget);
-      expect(find.byKey(const Key('event-category-dropdown')), findsNothing);
+      expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
       expect(find.text('Categories'), findsNothing);
       expect(find.text('Category'), findsOneWidget);
-      expect(find.byKey(const Key('event-category-chip-list')), findsOneWidget);
+      await tester.ensureVisible(
+        find.byKey(const Key('event-category-dropdown')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('event-category-dropdown')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('event-category-none')), findsOneWidget);
-      expect(find.byKey(const Key('event-category-chip-Work')), findsOneWidget);
+      await tester.tap(find.text('Personal').last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('event-category-manager')), findsNothing);
       expect(
-        find.byKey(const Key('event-category-chip-Personal')),
+        find.byKey(const Key('event-category-manager-toggle')),
         findsOneWidget,
       );
-      expect(
-        find.byKey(const Key('event-category-delete-Work')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('event-category-delete-Work')), findsNothing);
       expect(
         find.byKey(const Key('event-category-add-action')),
         findsOneWidget,
@@ -4322,11 +4382,11 @@ void main() {
           .getTopLeft(find.byKey(const Key('event-recurrence-field')))
           .dy;
       final categoryTop = tester
-          .getTopLeft(find.byKey(const Key('event-category-chip-list')))
+          .getTopLeft(find.byKey(const Key('event-category-dropdown')))
           .dy;
       expect(titleTop, lessThan(scheduleTop));
-      expect(scheduleTop, lessThan(recurrenceTop));
-      expect(recurrenceTop, lessThan(categoryTop));
+      expect(scheduleTop, lessThan(categoryTop));
+      expect(categoryTop, lessThan(recurrenceTop));
       final startEditor = tester.widget<EditableText>(
         find.descendant(
           of: find.byKey(const Key('event-start-field')),
@@ -4465,13 +4525,16 @@ void main() {
           ?.call(true);
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.byKey(const Key('event-category-chip-Work')),
+        find.byKey(const Key('event-category-dropdown')),
         200,
         scrollable: find.byType(Scrollable).last,
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('event-category-chip-Work')));
-      await tester.pumpAndSettle();
+      await _selectDropdownText(
+        tester,
+        dropdownKey: const Key('event-category-dropdown'),
+        text: 'Work',
+      );
       await tester.tap(find.byKey(const Key('event-save-action')));
       await tester.pumpAndSettle();
 
@@ -4978,19 +5041,22 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.ensureVisible(
-        find.byKey(const Key('event-category-chip-list')),
+        find.byKey(const Key('event-category-dropdown')),
       );
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('event-category-dropdown')), findsNothing);
+      expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
       expect(find.text('Categories'), findsNothing);
       expect(find.text('Category'), findsOneWidget);
-      expect(find.byKey(const Key('event-category-chip-list')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('event-category-dropdown')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('event-category-none')), findsOneWidget);
-      expect(find.byKey(const Key('event-category-chip-Work')), findsOneWidget);
+      await tester.tap(find.text('Personal').last);
+      await tester.pumpAndSettle();
       expect(
-        find.byKey(const Key('event-category-delete-Work')),
+        find.byKey(const Key('event-category-manager-toggle')),
         findsOneWidget,
       );
+      expect(find.byKey(const Key('event-category-delete-Work')), findsNothing);
       expect(
         find.byKey(const Key('event-category-add-action')),
         findsOneWidget,
@@ -4998,6 +5064,15 @@ void main() {
       expect(find.byKey(const Key('event-category-field')), findsNothing);
       expect(find.byKey(const Key('event-category-manager')), findsNothing);
       expect(find.byKey(const Key('event-category-save-action')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('event-category-manager-toggle')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('event-category-manager')), findsOneWidget);
+      expect(find.byKey(const Key('event-category-chip-Work')), findsOneWidget);
+      expect(
+        find.byKey(const Key('event-category-delete-Work')),
+        findsOneWidget,
+      );
 
       final categoryDeleteButton = tester.widget<IconButton>(
         find.byKey(const Key('event-category-delete-Work')),
@@ -5318,7 +5393,7 @@ void main() {
       find.byKey(const Key('title-time-editor-title')),
       'Refill Bean food',
     );
-    await tester.tap(find.byKey(const Key('title-time-editor-save')));
+    await tester.tap(find.byKey(const Key('title-time-editor-save-bottom')));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -7878,6 +7953,19 @@ Future<void> _openCreateMenuAndChoose(
   await tester.tap(find.byKey(const Key('create-item-menu')));
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(actionKey));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _selectDropdownText(
+  WidgetTester tester, {
+  required Key dropdownKey,
+  required String text,
+}) async {
+  await tester.ensureVisible(find.byKey(dropdownKey));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(dropdownKey));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(text).last);
   await tester.pumpAndSettle();
 }
 
