@@ -116,10 +116,7 @@ void main() {
     expect(find.byKey(const Key('signup-paywall-screen')), findsOneWidget);
     expect(find.text('Choose your HeyBean subscription'), findsOneWidget);
     expect(find.text('Account created for testing.'), findsOneWidget);
-    expect(
-      find.text('Cancel anytime before day 8 to avoid being billed.'),
-      findsOneWidget,
-    );
+    expect(find.text('7-day free trial, then billed monthly'), findsOneWidget);
     expect(find.text('Account'), findsOneWidget);
     expect(find.text('Plan'), findsOneWidget);
     expect(find.text('Payment'), findsOneWidget);
@@ -131,8 +128,22 @@ void main() {
     expect(find.textContaining('Bean could not create'), findsNothing);
 
     expect(find.byKey(const Key('signup-plan-base')), findsOneWidget);
-    expect(find.byKey(const Key('signup-plan-premium')), findsNothing);
-    expect(find.byKey(const Key('signup-plan-pro')), findsNothing);
+    expect(find.byKey(const Key('signup-plan-premium')), findsOneWidget);
+    expect(find.byKey(const Key('signup-plan-pro')), findsOneWidget);
+    expect(find.byKey(const Key('signup-plan-enterprise')), findsOneWidget);
+    expect(find.text('Custom'), findsOneWidget);
+    expect(find.text('Contact us'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('signup-plan-enterprise-action')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('signup-plan-enterprise-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.checkoutRequests, isEmpty);
+    expect(launchedUrls.single.scheme, 'mailto');
+    expect(launchedUrls.single.path, 'support@heybean.org');
 
     await tester.ensureVisible(
       find.byKey(const Key('signup-plan-base-action')),
@@ -144,7 +155,7 @@ void main() {
     expect(api.checkoutRequests, [
       {'plan': 'base', 'source': 'subscribe'},
     ]);
-    expect(launchedUrls.single.host, 'checkout.stripe.com');
+    expect(launchedUrls.last.host, 'checkout.stripe.com');
   });
 
   testWidgets(
