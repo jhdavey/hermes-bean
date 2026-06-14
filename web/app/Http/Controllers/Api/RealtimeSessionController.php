@@ -531,7 +531,7 @@ PROMPT;
                         'type' => 'server_vad',
                         'threshold' => 0.45,
                         'prefix_padding_ms' => 250,
-                        'silence_duration_ms' => 350,
+                        'silence_duration_ms' => 800,
                         'create_response' => false,
                         'interrupt_response' => false,
                     ],

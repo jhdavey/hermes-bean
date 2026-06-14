@@ -31,7 +31,7 @@
     <main class="wrap hero">
         <section class="hero-copy">
             <h1>Meet Bean, your new assistant for real-life</h1>
-            <p class="hero-subhead">Bean helps you manage your calendar, keeps track of tasks, set reminders, and keeps you moving instead of getting stuck in the weeds.</p>
+            <p class="hero-subhead">Bean turns quick requests into organized follow-through, so home, work, and family logistics keep moving without constant app-switching.</p>
             <form class="form" id="early-access" method="POST" action="{{ route('early-access.store') }}">
                 @csrf
                 <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address">
@@ -53,7 +53,7 @@
         <section class="hero-visual" aria-label="HeyBean mobile planning screenshot mockup">
             <div class="halo"></div>
             <div class="hero-callout events">3 updates made<small>event, reminder, weather</small></div>
-            <div class="hero-callout voice">Voice-first control<small>Hold the button and say “Hey, Bean…!”</small></div>
+            <div class="hero-callout voice">Voice-first control<small>Speak or type from the mobile app</small></div>
             <div class="hero-phone image-mockup">
                 <img class="hero-phone-image" src="{{ asset('images/bean-hero-conversation.png') }}?v={{ filemtime(public_path('images/bean-hero-conversation.png')) }}" width="500" height="1125" alt="HeyBean mobile chat mockup showing Bean adding an event, setting a reminder, and checking weather">
             </div>
@@ -77,72 +77,73 @@
 
     <section class="wrap section" id="features">
         <h2>Everything Bean needs to help run your day.</h2>
-        <p class="lead">Bean is not nine separate tools. It is one assistant that plans the day, captures the loose ends, and keeps the right context attached.</p>
+        <p class="lead">The app gives Bean a clear place for every commitment, note, routine, and approval instead of scattering them across separate tools.</p>
         <div class="capability-map">
             <article class="capability-hero">
                 <div>
-                    <span class="capability-kicker">Core assistant</span>
-                    <h3>Bean assistant</h3>
-                    <p>Ask naturally by chat or voice, then let Bean plan, capture, move, summarize, and follow up across your day.</p>
+                    <span class="capability-kicker">Command center</span>
+                    <h3>One place for the moving pieces.</h3>
+                    <p>See what Bean has handled, what still needs attention, and where each item belongs.</p>
                 </div>
                 <div>
                     <div class="capability-command">
-                        <b>Try saying</b>
-                        <p>“Hey Bean, move my focus block to 3, remind Sam about cleats, and add groceries to Household.”</p>
+                        <b>What stays organized</b>
+                        <p>Accounts, critical items, recurring routines, shared spaces, and anything waiting on your approval.</p>
                     </div>
                     <div class="capability-outcomes" aria-label="Example Bean outcomes">
-                        <span>Calendar updated</span>
-                        <span>Task synced</span>
-                        <span>Reminder sent</span>
-                        <span>Approval required</span>
+                        <span>Accounts connected</span>
+                        <span>Critical items flagged</span>
+                        <span>Routines tracked</span>
+                        <span>Approvals queued</span>
                     </div>
                 </div>
             </article>
             <div class="capability-lanes">
                 <article class="capability-lane">
                     <span class="lane-label">Plan your day</span>
-                    <h3>See the schedule, then let Bean make room.</h3>
-                    <p>Bean keeps your plans visible and can help reshape the day when new requests appear.</p>
+                    <h3>Calendars that show the whole load.</h3>
+                    <p>Connect accounts and scan the day, week, or month before saying yes to anything else.</p>
                     <ul class="capability-list">
-                        <li><strong>Connected calendars</strong> keep accounts in one command center.</li>
-                        <li><strong>Daily, weekly, and monthly views</strong> reveal today’s load and what is coming next.</li>
-                        <li><strong>Background follow-through</strong> lets Bean keep working while you move on.</li>
+                        <li><strong>Connected calendars</strong> for multiple accounts.</li>
+                        <li><strong>Daily, weekly, and monthly views</strong> for short and long-range planning.</li>
+                        <li><strong>Scheduling assist</strong> for finding room without hunting manually.</li>
                     </ul>
                     <div class="capability-tags">
-                        <span>Open space found</span>
-                        <span>Event moved</span>
+                        <span>Open space</span>
+                        <span>Calendar load</span>
                     </div>
                 </article>
                 <article class="capability-lane">
                     <span class="lane-label">Capture what matters</span>
-                    <h3>Turn loose thoughts into tasks and reminders.</h3>
-                    <p>Bean catches the small things before they disappear, then keeps them surfaced when they matter.</p>
+                    <h3>Tasks and reminders with enough context.</h3>
+                    <p>Fast capture for work, home, school, errands, and the recurring routines that are easy to miss.</p>
                     <ul class="capability-list">
-                        <li><strong>Task management</strong> handles categories, critical work, workspace sync, and overdue visibility.</li>
-                        <li><strong>Push and email reminders</strong> cover one-time nudges and recurring routines.</li>
+                        <li><strong>Task management</strong> for categories, priority, and overdue visibility.</li>
+                        <li><strong>Push and email reminders</strong> for one-time nudges.</li>
+                        <li><strong>Recurring routines</strong> for the things that repeat.</li>
                     </ul>
                     <div class="capability-tags">
-                        <span>Critical task saved</span>
-                        <span>Routine scheduled</span>
+                        <span>Critical task</span>
+                        <span>Routine</span>
                     </div>
                 </article>
                 <article class="capability-lane">
                     <span class="lane-label">Keep context together</span>
-                    <h3>Separate work, home, and shared plans without losing the thread.</h3>
-                    <p>Bean remembers what belongs where and keeps sensitive changes from happening silently.</p>
+                    <h3>Workspaces for each part of life.</h3>
+                    <p>Separate household, work, school, and project details without turning them into separate apps.</p>
                     <ul class="capability-list">
-                        <li><strong>Workspaces for every context</strong> separate personal, household, work, school, and project logistics.</li>
-                        <li><strong>Saved history and context</strong> keep conversations, memory, tasks, reminders, and decisions close.</li>
-                        <li><strong>Approval guardrails</strong> let Bean draft important changes while you stay in control.</li>
+                        <li><strong>Workspaces</strong> for personal, household, work, school, and projects.</li>
+                        <li><strong>Saved history and context</strong> for conversations, memory, and decisions.</li>
+                        <li><strong>Approval guardrails</strong> for changes that should wait for review.</li>
                     </ul>
                     <div class="capability-tags">
-                        <span>Household context</span>
-                        <span>Review before sending</span>
+                        <span>Shared context</span>
+                        <span>Review queue</span>
                     </div>
                 </article>
             </div>
         </div>
-        <div class="quote"><p>“Done — calendar updated, reminder created, household task synced.”</p><a class="button" href="#early-access">Get early access</a></div>
+        <div class="quote"><p>Start with one request. Bean turns it into the next right action.</p><a class="button" href="#early-access">Get early access</a></div>
     </section>
 
     @if (session('early_access_status'))

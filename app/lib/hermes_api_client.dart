@@ -103,6 +103,63 @@ class HermesApiClient {
     return HermesCheckoutSession.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesPaymentSheetSetup> createMobileSubscriptionSetup({
+    required String plan,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/billing/mobile-subscriptions/setup',
+      body: {'plan': plan},
+    );
+    return HermesPaymentSheetSetup.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesSubscriptionResult> confirmMobileSubscription({
+    required String plan,
+    required String setupIntentId,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/billing/mobile-subscriptions/confirm',
+      body: {'plan': plan, 'setup_intent_id': setupIntentId},
+    );
+    return HermesSubscriptionResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesBillingPaymentMethod?> getBillingPaymentMethod() async {
+    final data = await _sendJson('GET', '/billing/payment-method');
+    final method = _expectMap(data['data'])['payment_method'];
+    return method is Map<String, Object?>
+        ? HermesBillingPaymentMethod.fromJson(_expectMap(method))
+        : null;
+  }
+
+  Future<HermesPaymentSheetSetup> createPaymentMethodSetup() async {
+    final data = await _sendJson('POST', '/billing/payment-method/setup');
+    return HermesPaymentSheetSetup.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesBillingPaymentMethod?> confirmPaymentMethodSetup({
+    required String setupIntentId,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/billing/payment-method/confirm',
+      body: {'setup_intent_id': setupIntentId},
+    );
+    final method = _expectMap(data['data'])['payment_method'];
+    return method is Map<String, Object?>
+        ? HermesBillingPaymentMethod.fromJson(_expectMap(method))
+        : null;
+  }
+
+  Future<HermesSubscriptionSummary> cancelSubscription() async {
+    final data = await _sendJson('POST', '/billing/subscription/cancel');
+    return HermesSubscriptionSummary.fromJson(
+      _expectMap(_expectMap(data['data'])['subscription']),
+    );
+  }
+
   Future<void> logout({bool clearBearerToken = true}) async {
     await _sendJson('POST', '/auth/logout');
     if (clearBearerToken) bearerToken = null;
@@ -1139,6 +1196,140 @@ class HermesCheckoutSession {
         url: _expectString(json['url']),
         plan: _expectString(json['plan']),
         status: json['status']?.toString(),
+      );
+}
+
+class HermesPaymentSheetSetup {
+  const HermesPaymentSheetSetup({
+    required this.publishableKey,
+    required this.customerId,
+    required this.customerEphemeralKeySecret,
+    required this.setupIntentId,
+    required this.setupIntentClientSecret,
+    this.plan,
+  });
+
+  final String publishableKey;
+  final String customerId;
+  final String customerEphemeralKeySecret;
+  final String setupIntentId;
+  final String setupIntentClientSecret;
+  final String? plan;
+
+  factory HermesPaymentSheetSetup.fromJson(Map<String, Object?> json) =>
+      HermesPaymentSheetSetup(
+        publishableKey: _expectString(json['publishable_key']),
+        customerId: _expectString(json['customer_id']),
+        customerEphemeralKeySecret: _expectString(
+          json['customer_ephemeral_key_secret'],
+        ),
+        setupIntentId: _expectString(json['setup_intent_id']),
+        setupIntentClientSecret: _expectString(
+          json['setup_intent_client_secret'],
+        ),
+        plan: json['plan']?.toString(),
+      );
+}
+
+class HermesSubscriptionSummary {
+  const HermesSubscriptionSummary({
+    required this.tier,
+    this.status,
+    this.currentPeriodEnd,
+    this.trialEndsAt,
+    this.cancelAtPeriodEnd = false,
+    this.canUpgrade = false,
+  });
+
+  final String tier;
+  final String? status;
+  final String? currentPeriodEnd;
+  final String? trialEndsAt;
+  final bool cancelAtPeriodEnd;
+  final bool canUpgrade;
+
+  factory HermesSubscriptionSummary.fromJson(Map<String, Object?> json) =>
+      HermesSubscriptionSummary(
+        tier: _readStringOrDefault(json['tier'], 'base'),
+        status: json['status']?.toString(),
+        currentPeriodEnd: json['current_period_end']?.toString(),
+        trialEndsAt: json['trial_ends_at']?.toString(),
+        cancelAtPeriodEnd: _readBool(json['cancel_at_period_end'] ?? false),
+        canUpgrade: _readBool(json['can_upgrade'] ?? false),
+      );
+}
+
+class HermesBillingPaymentMethod {
+  const HermesBillingPaymentMethod({
+    this.id,
+    this.type = 'card',
+    this.brand,
+    this.last4,
+    this.expMonth,
+    this.expYear,
+  });
+
+  final String? id;
+  final String type;
+  final String? brand;
+  final String? last4;
+  final int? expMonth;
+  final int? expYear;
+
+  String get displayBrand {
+    final normalized = (brand ?? type).replaceAll('_', ' ').trim();
+    if (normalized.isEmpty) return 'Card';
+    return normalized
+        .split(RegExp(r'\s+'))
+        .map(
+          (word) => word.isEmpty
+              ? word
+              : '${word[0].toUpperCase()}${word.substring(1)}',
+        )
+        .join(' ');
+  }
+
+  String get displayLine {
+    final suffix = last4 == null || last4!.isEmpty ? '' : ' ending $last4';
+    final expiry = expMonth == null || expYear == null
+        ? ''
+        : ' • expires ${expMonth.toString().padLeft(2, '0')}/$expYear';
+    return '$displayBrand$suffix$expiry';
+  }
+
+  factory HermesBillingPaymentMethod.fromJson(Map<String, Object?> json) =>
+      HermesBillingPaymentMethod(
+        id: json['id']?.toString(),
+        type: _readStringOrDefault(json['type'], 'card'),
+        brand: json['brand']?.toString(),
+        last4: json['last4']?.toString(),
+        expMonth: _readIntOrNull(json['exp_month'] ?? json['expMonth']),
+        expYear: _readIntOrNull(json['exp_year'] ?? json['expYear']),
+      );
+}
+
+class HermesSubscriptionResult {
+  const HermesSubscriptionResult({
+    required this.subscription,
+    this.plan,
+    this.paymentMethod,
+  });
+
+  final HermesSubscriptionSummary subscription;
+  final String? plan;
+  final HermesBillingPaymentMethod? paymentMethod;
+
+  factory HermesSubscriptionResult.fromJson(Map<String, Object?> json) =>
+      HermesSubscriptionResult(
+        subscription: HermesSubscriptionSummary.fromJson(
+          _expectMap(json['subscription']),
+        ),
+        plan: json['plan']?.toString(),
+        paymentMethod: json['payment_method'] is Map<String, Object?>
+            ? HermesBillingPaymentMethod.fromJson(
+                _expectMap(json['payment_method']),
+              )
+            : null,
       );
 }
 

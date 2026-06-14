@@ -90,6 +90,225 @@ class BillingInfrastructureTest extends TestCase
             ->assertJsonPath('data.plan', 'base');
     }
 
+    public function test_mobile_subscription_setup_returns_stripe_client_secrets_without_card_data(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('mobile-setup@example.com');
+
+        Http::fake(function (HttpRequest $request) {
+            if ($request->url() === 'https://api.stripe.com/v1/customers') {
+                return Http::response(['id' => 'cus_mobile_123'], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/ephemeral_keys') {
+                $this->assertSame('cus_mobile_123', $request->data()['customer']);
+                $this->assertSame('2026-05-27.dahlia', $request->header('Stripe-Version')[0] ?? null);
+
+                return Http::response(['id' => 'ephkey_test_123', 'secret' => 'ek_test_secret_123'], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/setup_intents') {
+                $data = $request->data();
+                $this->assertSame('cus_mobile_123', $data['customer']);
+                $this->assertSame('off_session', $data['usage']);
+                $this->assertSame(['card'], $data['payment_method_types']);
+                $this->assertSame('subscription', $data['metadata']['purpose']);
+                $this->assertSame('premium', $data['metadata']['plan']);
+
+                return Http::response([
+                    'id' => 'seti_mobile_123',
+                    'client_secret' => 'seti_mobile_123_secret_abc',
+                ], 200);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->withToken($token)->postJson('/api/billing/mobile-subscriptions/setup', [
+            'plan' => 'premium',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.publishable_key', 'pk_test_123')
+            ->assertJsonPath('data.customer_id', 'cus_mobile_123')
+            ->assertJsonPath('data.customer_ephemeral_key_secret', 'ek_test_secret_123')
+            ->assertJsonPath('data.setup_intent_id', 'seti_mobile_123')
+            ->assertJsonPath('data.setup_intent_client_secret', 'seti_mobile_123_secret_abc')
+            ->assertJsonPath('data.plan', 'premium');
+    }
+
+    public function test_mobile_subscription_confirmation_creates_subscription_with_verified_payment_method(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('mobile-confirm@example.com');
+        $user = User::where('email', 'mobile-confirm@example.com')->firstOrFail();
+        $user->forceFill(['stripe_customer_id' => 'cus_mobile_confirm_123'])->save();
+
+        Http::fake(function (HttpRequest $request) use ($user) {
+            if (str_starts_with($request->url(), 'https://api.stripe.com/v1/setup_intents/seti_mobile_123')) {
+                $this->assertSame(['payment_method'], $request->data()['expand']);
+
+                return Http::response([
+                    'id' => 'seti_mobile_123',
+                    'customer' => 'cus_mobile_confirm_123',
+                    'status' => 'succeeded',
+                    'payment_method' => [
+                        'id' => 'pm_card_visa',
+                        'customer' => 'cus_mobile_confirm_123',
+                        'type' => 'card',
+                        'card' => [
+                            'brand' => 'visa',
+                            'last4' => '4242',
+                            'exp_month' => 12,
+                            'exp_year' => 2032,
+                        ],
+                    ],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/customers/cus_mobile_confirm_123') {
+                $this->assertSame('pm_card_visa', $request->data()['invoice_settings']['default_payment_method']);
+
+                return Http::response(['id' => 'cus_mobile_confirm_123'], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/subscriptions') {
+                $data = $request->data();
+                $this->assertSame('cus_mobile_confirm_123', $data['customer']);
+                $this->assertSame('pm_card_visa', $data['default_payment_method']);
+                $this->assertSame('price_premium_test', $data['items'][0]['price']);
+                $this->assertSame(1, $data['items'][0]['quantity']);
+                $this->assertSame(7, $data['trial_period_days']);
+                $this->assertSame('on_subscription', $data['payment_settings']['save_default_payment_method']);
+
+                return Http::response([
+                    'id' => 'sub_mobile_123',
+                    'customer' => 'cus_mobile_confirm_123',
+                    'status' => 'trialing',
+                    'current_period_end' => now()->addDays(7)->timestamp,
+                    'trial_end' => now()->addDays(7)->timestamp,
+                    'cancel_at_period_end' => false,
+                    'metadata' => [
+                        'heybean_user_id' => (string) $user->id,
+                        'plan' => 'premium',
+                    ],
+                    'items' => ['data' => [[
+                        'id' => 'si_mobile_123',
+                        'price' => ['id' => 'price_premium_test'],
+                    ]]],
+                ], 200);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->withToken($token)->postJson('/api/billing/mobile-subscriptions/confirm', [
+            'plan' => 'premium',
+            'setup_intent_id' => 'seti_mobile_123',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.plan', 'premium')
+            ->assertJsonPath('data.subscription.tier', 'premium')
+            ->assertJsonPath('data.subscription.status', 'trialing')
+            ->assertJsonPath('data.payment_method.brand', 'visa')
+            ->assertJsonPath('data.payment_method.last4', '4242');
+
+        $user->refresh();
+        $this->assertSame('premium', $user->subscription_tier);
+        $this->assertSame('sub_mobile_123', $user->stripe_subscription_id);
+        $this->assertSame('si_mobile_123', $user->stripe_subscription_item_id);
+    }
+
+    public function test_mobile_subscription_confirmation_rejects_setup_intent_for_another_customer(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('wrong-customer@example.com');
+        User::where('email', 'wrong-customer@example.com')->firstOrFail()
+            ->forceFill(['stripe_customer_id' => 'cus_right_123'])
+            ->save();
+
+        Http::fake([
+            'https://api.stripe.com/v1/setup_intents/seti_wrong_123*' => Http::response([
+                'id' => 'seti_wrong_123',
+                'customer' => 'cus_wrong_123',
+                'status' => 'succeeded',
+                'payment_method' => 'pm_wrong_123',
+            ], 200),
+        ]);
+
+        $this->withToken($token)->postJson('/api/billing/mobile-subscriptions/confirm', [
+            'plan' => 'premium',
+            'setup_intent_id' => 'seti_wrong_123',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That payment setup does not belong to this account.');
+    }
+
+    public function test_user_can_retrieve_and_update_safe_payment_method_summary(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('payment-method@example.com');
+        $user = User::where('email', 'payment-method@example.com')->firstOrFail();
+        $user->forceFill([
+            'stripe_customer_id' => 'cus_pm_123',
+            'stripe_subscription_id' => 'sub_pm_123',
+        ])->save();
+
+        Http::fake(function (HttpRequest $request) {
+            if ($request->url() === 'https://api.stripe.com/v1/subscriptions/sub_pm_123') {
+                if (($request->method() ?? 'GET') === 'GET') {
+                    return Http::response(['id' => 'sub_pm_123', 'default_payment_method' => 'pm_old_123'], 200);
+                }
+
+                $this->assertSame('pm_new_123', $request->data()['default_payment_method']);
+
+                return Http::response(['id' => 'sub_pm_123'], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/payment_methods/pm_old_123') {
+                return Http::response([
+                    'id' => 'pm_old_123',
+                    'customer' => 'cus_pm_123',
+                    'type' => 'card',
+                    'card' => ['brand' => 'mastercard', 'last4' => '4444', 'exp_month' => 10, 'exp_year' => 2031],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.stripe.com/v1/setup_intents/seti_pm_123')) {
+                return Http::response([
+                    'id' => 'seti_pm_123',
+                    'customer' => 'cus_pm_123',
+                    'status' => 'succeeded',
+                    'payment_method' => [
+                        'id' => 'pm_new_123',
+                        'customer' => 'cus_pm_123',
+                        'type' => 'card',
+                        'card' => ['brand' => 'visa', 'last4' => '4242', 'exp_month' => 11, 'exp_year' => 2032],
+                    ],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/customers/cus_pm_123') {
+                $this->assertSame('pm_new_123', $request->data()['invoice_settings']['default_payment_method']);
+
+                return Http::response(['id' => 'cus_pm_123'], 200);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->withToken($token)->getJson('/api/billing/payment-method')
+            ->assertOk()
+            ->assertJsonPath('data.payment_method.brand', 'mastercard')
+            ->assertJsonPath('data.payment_method.last4', '4444');
+
+        $this->withToken($token)->postJson('/api/billing/payment-method/confirm', [
+            'setup_intent_id' => 'seti_pm_123',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.payment_method.brand', 'visa')
+            ->assertJsonPath('data.payment_method.last4', '4242');
+    }
+
     public function test_existing_subscription_upgrade_charges_proration_for_current_cycle(): void
     {
         $this->configureStripe();
@@ -202,6 +421,8 @@ class BillingInfrastructureTest extends TestCase
     private function configureStripe(): void
     {
         config()->set('services.stripe.secret', 'sk_test_123');
+        config()->set('services.stripe.publishable_key', 'pk_test_123');
+        config()->set('services.stripe.api_version', '2026-05-27.dahlia');
         config()->set('services.stripe.webhook_secret', null);
         config()->set('services.stripe.trial_days', 7);
         config()->set('services.stripe.prices.base', 'price_base_test');

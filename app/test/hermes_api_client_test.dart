@@ -226,6 +226,173 @@ void main() {
     expect(requests, hasLength(1));
   });
 
+  test('creates and confirms mobile subscription setup', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'register-token',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.headers['Authorization'], 'Bearer register-token');
+        if (request.path == '/billing/mobile-subscriptions/setup') {
+          expect(request.method, 'POST');
+          expect(request.body, {'plan': 'premium'});
+          return HermesApiResponse(
+            201,
+            jsonEncode({
+              'data': {
+                'publishable_key': 'pk_test_123',
+                'customer_id': 'cus_test_123',
+                'customer_ephemeral_key_secret': 'ek_test_123',
+                'setup_intent_id': 'seti_test_123',
+                'setup_intent_client_secret': 'seti_test_123_secret',
+                'plan': 'premium',
+              },
+            }),
+          );
+        }
+        expect(request.path, '/billing/mobile-subscriptions/confirm');
+        expect(request.method, 'POST');
+        expect(request.body, {
+          'plan': 'premium',
+          'setup_intent_id': 'seti_test_123',
+        });
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'plan': 'premium',
+              'subscription': {
+                'tier': 'premium',
+                'status': 'trialing',
+                'cancel_at_period_end': false,
+                'can_upgrade': true,
+              },
+              'payment_method': {
+                'type': 'card',
+                'brand': 'visa',
+                'last4': '4242',
+                'exp_month': 12,
+                'exp_year': 2032,
+              },
+            },
+          }),
+        );
+      },
+    );
+
+    final setup = await client.createMobileSubscriptionSetup(plan: 'premium');
+    expect(setup.publishableKey, 'pk_test_123');
+    expect(setup.setupIntentId, 'seti_test_123');
+
+    final result = await client.confirmMobileSubscription(
+      plan: 'premium',
+      setupIntentId: setup.setupIntentId,
+    );
+    expect(result.subscription.tier, 'premium');
+    expect(result.subscription.status, 'trialing');
+    expect(
+      result.paymentMethod?.displayLine,
+      'Visa ending 4242 • expires 12/2032',
+    );
+    expect(requests.map((request) => request.path), [
+      '/billing/mobile-subscriptions/setup',
+      '/billing/mobile-subscriptions/confirm',
+    ]);
+  });
+
+  test('loads updates and cancels billing payment method state', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        switch (request.path) {
+          case '/billing/payment-method':
+            expect(request.method, 'GET');
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {
+                  'payment_method': {
+                    'brand': 'mastercard',
+                    'last4': '4444',
+                    'exp_month': 10,
+                    'exp_year': 2031,
+                  },
+                },
+              }),
+            );
+          case '/billing/payment-method/setup':
+            expect(request.method, 'POST');
+            return HermesApiResponse(
+              201,
+              jsonEncode({
+                'data': {
+                  'publishable_key': 'pk_test_123',
+                  'customer_id': 'cus_test_123',
+                  'customer_ephemeral_key_secret': 'ek_test_123',
+                  'setup_intent_id': 'seti_update_123',
+                  'setup_intent_client_secret': 'seti_update_123_secret',
+                },
+              }),
+            );
+          case '/billing/payment-method/confirm':
+            expect(request.method, 'POST');
+            expect(request.body, {'setup_intent_id': 'seti_update_123'});
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {
+                  'payment_method': {
+                    'brand': 'visa',
+                    'last4': '4242',
+                    'exp_month': 12,
+                    'exp_year': 2032,
+                  },
+                },
+              }),
+            );
+          case '/billing/subscription/cancel':
+            expect(request.method, 'POST');
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {
+                  'subscription': {
+                    'tier': 'premium',
+                    'status': 'active',
+                    'cancel_at_period_end': true,
+                    'can_upgrade': true,
+                  },
+                },
+              }),
+            );
+        }
+        fail('Unexpected request ${request.method} ${request.path}');
+      },
+    );
+
+    final existing = await client.getBillingPaymentMethod();
+    expect(existing?.displayLine, 'Mastercard ending 4444 • expires 10/2031');
+
+    final setup = await client.createPaymentMethodSetup();
+    final updated = await client.confirmPaymentMethodSetup(
+      setupIntentId: setup.setupIntentId,
+    );
+    expect(updated?.displayLine, 'Visa ending 4242 • expires 12/2032');
+
+    final subscription = await client.cancelSubscription();
+    expect(subscription.cancelAtPeriodEnd, isTrue);
+    expect(requests.map((request) => request.path), [
+      '/billing/payment-method',
+      '/billing/payment-method/setup',
+      '/billing/payment-method/confirm',
+      '/billing/subscription/cancel',
+    ]);
+  });
+
   test(
     'updates Bean onboarding preferences through auth profile update',
     () async {

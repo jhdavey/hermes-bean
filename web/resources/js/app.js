@@ -237,13 +237,15 @@ if (mount) {
     let kioskRealtimeLastAssistantText = '';
     let kioskRealtimeLastAssistantOutputEndedAt = 0;
     let kioskRealtimeBackgroundProgressContext = null;
+    let kioskRealtimeWakeContinuationUntil = 0;
     const kioskRealtimeBackgroundProgressTimers = new Set();
     const kioskRealtimeSpokenSegments = [];
     const kioskRealtimeMaxReconnectAttempts = 5;
     const kioskRealtimeConnectTimeoutMs = 15000;
     const kioskRealtimeTransientDisconnectMs = 12000;
     const kioskRealtimeTransientStatusMs = 2500;
-    const kioskRealtimeTurnDebounceMs = 1200;
+    const kioskRealtimeTurnDebounceMs = 2200;
+    const kioskRealtimeWakeContinuationMs = 5500;
     const kioskRealtimeProcessedCalls = new Set();
     const kioskRealtimeRunWatchTimers = new Map();
     const kioskRealtimeDeferredFunctionOutputTimers = new Set();
@@ -4699,6 +4701,7 @@ if (mount) {
         kioskRealtimeAwaitingFollowup = false;
         kioskRealtimeLastAssistantText = '';
         kioskRealtimeLastAssistantOutputEndedAt = 0;
+        kioskRealtimeWakeContinuationUntil = 0;
         kioskRealtimeSpokenSegments.length = 0;
         clearRealtimeAssistantOutputGuard();
         kioskRealtimePendingBackgroundResult = null;
@@ -5512,7 +5515,7 @@ if (mount) {
         if (type === 'input_audio_buffer.speech_stopped') {
             if (realtimeAssistantRecentlyOutput()) return;
             if (kioskConversationActive) {
-                setKioskVoiceStatus('working', 'thinking');
+                setKioskVoiceStatus('listening', 'listening');
             }
             return;
         }
@@ -5795,11 +5798,17 @@ if (mount) {
         return /\b(?:are you done|is it done|did it finish|did that finish|did it work|did that work|finished|complete|completed|created|scheduled|added|status|still working|what happened|how'?s it going|hows it going)\b/.test(normalized);
     }
 
+    function realtimeWakeContinuationActive() {
+        return Boolean(kioskRealtimeWakeContinuationUntil && Date.now() < kioskRealtimeWakeContinuationUntil);
+    }
+
     function realtimeTranscriptCanContinueWithoutWake(transcript) {
         const normalized = normalizedRealtimeTranscript(transcript);
         if (!normalized) return false;
         if (realtimeTranscriptMentionsBean(transcript)) return true;
         if (kioskRealtimeAwaitingFollowup) return true;
+        if (realtimeWakeContinuationActive()) return true;
+        if (kioskRealtimeResponseTimer && kioskRealtimePendingUser && !kioskRealtimePendingUser.persisted) return true;
         if (realtimeBackgroundWorkPending() && realtimeTranscriptLooksLikeStatusCheck(normalized)) return true;
         return false;
     }
@@ -5880,11 +5889,12 @@ if (mount) {
         kioskConversationTimer = 0;
         if (isWakeTurn) {
             beginKioskConversation();
+            kioskRealtimeWakeContinuationUntil = Date.now() + kioskRealtimeWakeContinuationMs;
         }
         const content = (isWakeTurn ? command : raw).trim();
         if (!content) {
             setKioskVoiceStatus('listening', 'listening');
-            armKioskConversationTimeout();
+            armKioskConversationTimeout(kioskRealtimeWakeContinuationMs);
             return;
         }
         kioskRealtimeAwaitingFollowup = false;
@@ -5903,6 +5913,7 @@ if (mount) {
                 persisted: false,
             };
         }
+        kioskRealtimeWakeContinuationUntil = Date.now() + kioskRealtimeTurnDebounceMs + 500;
         kioskRealtimeCurrentUserTurn = { ...kioskRealtimePendingUser };
         upsertRealtimeLocalMessage({
             id: `rt-user-${kioskRealtimePendingUser.itemId}`,
@@ -6004,6 +6015,7 @@ if (mount) {
             if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
             const content = String(kioskRealtimePendingUser?.content || '').trim();
             if (!content) return;
+            kioskRealtimeWakeContinuationUntil = 0;
             armRealtimeToolFallback(content);
             setKioskVoiceStatus('working', 'thinking');
             if (!sendRealtimeResponseCreate()) {
@@ -7101,6 +7113,7 @@ if (mount) {
         kioskRealtimeAwaitingFollowup = false;
         kioskRealtimeLastAssistantText = '';
         kioskRealtimeLastAssistantOutputEndedAt = 0;
+        kioskRealtimeWakeContinuationUntil = 0;
         kioskRealtimeSpokenSegments.length = 0;
         clearRealtimeAssistantOutputGuard();
         kioskRealtimeUserTranscriptDrafts.clear();

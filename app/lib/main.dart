@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_stripe/flutter_stripe.dart' as stripe;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -20,6 +21,47 @@ import 'hermes_api_client.dart';
 typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
 typedef AppIconBadgeUpdater = Future<void> Function(int count);
 
+abstract class StripePaymentHandler {
+  Future<void> preparePaymentSheet(
+    HermesPaymentSheetSetup setup, {
+    required HermesUser user,
+    required String primaryButtonLabel,
+  });
+  Future<void> presentPaymentSheet();
+}
+
+class DefaultStripePaymentHandler implements StripePaymentHandler {
+  @override
+  Future<void> preparePaymentSheet(
+    HermesPaymentSheetSetup setup, {
+    required HermesUser user,
+    required String primaryButtonLabel,
+  }) async {
+    stripe.Stripe.publishableKey = setup.publishableKey;
+    await stripe.Stripe.instance.applySettings();
+    await stripe.Stripe.instance.initPaymentSheet(
+      paymentSheetParameters: stripe.SetupPaymentSheetParameters(
+        setupIntentClientSecret: setup.setupIntentClientSecret,
+        customerId: setup.customerId,
+        customerEphemeralKeySecret: setup.customerEphemeralKeySecret,
+        merchantDisplayName: 'HeyBean',
+        primaryButtonLabel: primaryButtonLabel,
+        allowsDelayedPaymentMethods: false,
+        style: ThemeMode.light,
+        billingDetails: stripe.BillingDetails(
+          name: user.name,
+          email: user.email,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<void> presentPaymentSheet() async {
+    await stripe.Stripe.instance.presentPaymentSheet();
+  }
+}
+
 const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
 final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
 final Uri _termsOfServiceUrl = Uri.parse('https://heybean.org/terms');
@@ -27,9 +69,6 @@ final Uri _supportUrl = Uri.parse('https://heybean.org/support');
 final Uri _pricingUrl = Uri.parse('https://heybean.org/pricing?source=flutter');
 final Uri _enterpriseContactUrl = Uri.parse(
   'mailto:support@heybean.org?subject=HeyBean%20Enterprise',
-);
-final Uri _subscriptionCancellationUrl = Uri.parse(
-  'https://heybean.org/support?topic=cancel-subscription&source=flutter',
 );
 const String _beanGreenCategoryColor = '#34C759';
 
@@ -551,16 +590,20 @@ class HermesBeanApp extends StatefulWidget {
     AuthTokenStore? tokenStore,
     ExternalUrlLauncher? launchExternalUrl,
     AppIconBadgeUpdater? updateAppIconBadge,
+    StripePaymentHandler? stripePaymentHandler,
     this.realtimeConversation,
   }) : apiClient = apiClient ?? HermesApiClient(),
        tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore(),
        launchExternalUrl = launchExternalUrl ?? _defaultLaunchExternalUrl,
-       updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge;
+       updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge,
+       stripePaymentHandler =
+           stripePaymentHandler ?? DefaultStripePaymentHandler();
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
+  final StripePaymentHandler stripePaymentHandler;
   final BeanRealtimeConversation? realtimeConversation;
 
   @override
@@ -587,6 +630,7 @@ class _HermesBeanAppState extends State<HermesBeanApp> {
         tokenStore: widget.tokenStore,
         launchExternalUrl: widget.launchExternalUrl,
         updateAppIconBadge: widget.updateAppIconBadge,
+        stripePaymentHandler: widget.stripePaymentHandler,
         realtimeConversation: widget.realtimeConversation,
         onThemeChanged: _setThemeKey,
       ),
@@ -1133,6 +1177,7 @@ class CommandCenterShell extends StatefulWidget {
     required this.tokenStore,
     required this.launchExternalUrl,
     required this.updateAppIconBadge,
+    required this.stripePaymentHandler,
     required this.onThemeChanged,
     this.realtimeConversation,
   });
@@ -1141,6 +1186,7 @@ class CommandCenterShell extends StatefulWidget {
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
+  final StripePaymentHandler stripePaymentHandler;
   final ValueChanged<String> onThemeChanged;
   final BeanRealtimeConversation? realtimeConversation;
 
@@ -1811,26 +1857,35 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _checkoutError = null;
     });
     try {
-      final checkout = await widget.apiClient.createCheckoutSession(
+      final setup = await widget.apiClient.createMobileSubscriptionSetup(
         plan: plan,
-        source: 'subscribe',
       );
-      final launched = await widget.launchExternalUrl(Uri.parse(checkout.url));
+      await widget.stripePaymentHandler.preparePaymentSheet(
+        setup,
+        user: _user!,
+        primaryButtonLabel: 'Start ${_subscriptionPlanLabel(plan)} trial',
+      );
+      await widget.stripePaymentHandler.presentPaymentSheet();
+      await widget.apiClient.confirmMobileSubscription(
+        plan: plan,
+        setupIntentId: setup.setupIntentId,
+      );
       if (!mounted) return;
       setState(() {
         _checkoutBusyPlan = null;
-        _checkoutError = launched
-            ? null
-            : 'Bean could not open checkout. Please try again.';
+        _checkoutError = null;
       });
+      await _loadSignedIn(loadingStatusText: 'Preparing your dashboard...');
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _checkoutBusyPlan = null;
-        _checkoutError = beanFriendlyErrorMessage(
-          error,
-          action: 'start your subscription',
-        );
+        _checkoutError = _isStripePaymentCanceled(error)
+            ? null
+            : beanFriendlyErrorMessage(
+                error,
+                action: 'start your subscription',
+              );
       });
     }
   }
@@ -4609,6 +4664,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     onNotificationPreferencesChanged: _updateNotificationPreferences,
     onThemeChanged: _updateTheme,
     launchExternalUrl: widget.launchExternalUrl,
+    stripePaymentHandler: widget.stripePaymentHandler,
+    onBillingChanged: () =>
+        _loadSignedIn(loadingStatusText: 'Refreshing your subscription...'),
     onEditAgentOnboarding: () {
       setState(() {
         _editingAgentPreferences = true;
@@ -4791,6 +4849,17 @@ const List<_SignupPlanOption> _signupPlanOptions = [
   ),
 ];
 
+String _subscriptionPlanLabel(String plan) =>
+    switch (plan.trim().toLowerCase()) {
+      'premium' => 'Premium',
+      'pro' => 'Pro',
+      'enterprise' => 'Enterprise',
+      _ => 'Base',
+    };
+
+bool _isStripePaymentCanceled(Object error) =>
+    error.toString().toLowerCase().contains('cancel');
+
 class _SignupPlanOption {
   const _SignupPlanOption({
     required this.key,
@@ -4850,6 +4919,16 @@ class _SignupPaywallScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 8),
+              child: Text(
+                'Account created for ${user.name}.',
+                style: const TextStyle(
+                  color: HeyBeanTheme.muted,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
             _ShellCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -4874,14 +4953,6 @@ class _SignupPaywallScreen extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Account created for ${user.name}.',
-                              style: const TextStyle(
-                                color: HeyBeanTheme.muted,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
                               'Choose your HeyBean subscription',
                               style: Theme.of(context).textTheme.titleLarge
                                   ?.copyWith(fontWeight: FontWeight.w900),
@@ -4893,15 +4964,13 @@ class _SignupPaywallScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
                   const Text(
-                    'Pick the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.',
+                    'Start your free 7-day trial today! Pick the plan that best fits your needs.',
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
                       height: 1.45,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  const _SignupProgressSteps(activeStep: 2),
                 ],
               ),
             ),
@@ -4926,7 +4995,7 @@ class _SignupPaywallScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Already finished payment?',
+                    'Already subscribed?',
                     style: TextStyle(
                       color: HeyBeanTheme.text,
                       fontWeight: FontWeight.w900,
@@ -4934,7 +5003,7 @@ class _SignupPaywallScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'After Stripe confirms the subscription, return here and Bean will refresh your account.',
+                    'If your account was updated on another device, refresh here and Bean will check your latest subscription status.',
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
                       fontWeight: FontWeight.w600,
@@ -4958,105 +5027,6 @@ class _SignupPaywallScreen extends StatelessWidget {
           ],
         ),
       ),
-    ),
-  );
-}
-
-class _SignupProgressSteps extends StatelessWidget {
-  const _SignupProgressSteps({required this.activeStep});
-
-  final int activeStep;
-
-  static const _steps = [
-    (number: '1', label: 'Account'),
-    (number: '2', label: 'Plan'),
-    (number: '3', label: 'Payment'),
-    (number: '4', label: 'Dashboard'),
-  ];
-
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final compact = constraints.maxWidth < 430;
-      return Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (var index = 0; index < _steps.length; index++)
-            SizedBox(
-              width: compact
-                  ? (constraints.maxWidth - 8) / 2
-                  : (constraints.maxWidth - 24) / 4,
-              child: _SignupProgressStep(
-                number: _steps[index].number,
-                label: _steps[index].label,
-                active: index + 1 <= activeStep,
-              ),
-            ),
-        ],
-      );
-    },
-  );
-}
-
-class _SignupProgressStep extends StatelessWidget {
-  const _SignupProgressStep({
-    required this.number,
-    required this.label,
-    required this.active,
-  });
-
-  final String number;
-  final String label;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
-    decoration: BoxDecoration(
-      color: active
-          ? HeyBeanTheme.accent.withValues(alpha: .09)
-          : Colors.white.withValues(alpha: .72),
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(
-        color: active
-            ? HeyBeanTheme.accent.withValues(alpha: .25)
-            : HeyBeanTheme.border,
-      ),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 25,
-          height: 25,
-          decoration: BoxDecoration(
-            color: active ? HeyBeanTheme.accent : HeyBeanTheme.surface2,
-            borderRadius: BorderRadius.circular(999),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            number,
-            style: TextStyle(
-              color: active ? Colors.white : HeyBeanTheme.muted,
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-        const SizedBox(width: 7),
-        Flexible(
-          child: Text(
-            label,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: active ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-      ],
     ),
   );
 }
@@ -5244,10 +5214,12 @@ class _SignupPlanCard extends StatelessWidget {
                     )
                   : Icon(
                       plan.startsCheckout
-                          ? Icons.arrow_upward_rounded
+                          ? Icons.lock_rounded
                           : Icons.mail_outline_rounded,
                     ),
-              label: Text(busy ? 'Opening payment...' : plan.actionLabel),
+              label: Text(
+                busy ? 'Opening secure payment...' : plan.actionLabel,
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -6200,6 +6172,8 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
     required this.launchExternalUrl,
+    required this.stripePaymentHandler,
+    required this.onBillingChanged,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
     this.error,
@@ -6339,6 +6313,8 @@ class _CommandCenterContent extends StatelessWidget {
   onNotificationPreferencesChanged;
   final Future<void> Function(String themeKey) onThemeChanged;
   final ExternalUrlLauncher launchExternalUrl;
+  final StripePaymentHandler stripePaymentHandler;
+  final Future<void> Function() onBillingChanged;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
@@ -6412,7 +6388,9 @@ class _CommandCenterContent extends StatelessWidget {
           _HomeDestination.settings => _SettingsView(
             apiClient: apiClient,
             launchExternalUrl: launchExternalUrl,
+            stripePaymentHandler: stripePaymentHandler,
             user: user,
+            onBillingChanged: onBillingChanged,
             googleCalendarStatus: googleCalendarStatus,
             calendarStartHour: calendarStartHour,
             calendarEndHour: calendarEndHour,
@@ -15119,7 +15097,9 @@ class _SettingsView extends StatelessWidget {
   const _SettingsView({
     required this.apiClient,
     required this.launchExternalUrl,
+    required this.stripePaymentHandler,
     required this.user,
+    required this.onBillingChanged,
     this.googleCalendarStatus,
     required this.calendarStartHour,
     required this.calendarEndHour,
@@ -15137,7 +15117,9 @@ class _SettingsView extends StatelessWidget {
 
   final HermesApiClient apiClient;
   final ExternalUrlLauncher launchExternalUrl;
+  final StripePaymentHandler stripePaymentHandler;
   final HermesUser user;
+  final Future<void> Function() onBillingChanged;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
   final int calendarStartHour;
   final int calendarEndHour;
@@ -15187,8 +15169,10 @@ class _SettingsView extends StatelessWidget {
               subtitle: user.email,
             ),
             _BillingSettingsCard(
+              apiClient: apiClient,
               user: user,
-              launchExternalUrl: launchExternalUrl,
+              stripePaymentHandler: stripePaymentHandler,
+              onBillingChanged: onBillingChanged,
             ),
             _CompactItemTile(
               icon: Icons.tune_rounded,
@@ -15241,45 +15225,418 @@ class _SettingsView extends StatelessWidget {
   );
 }
 
-class _BillingSettingsCard extends StatelessWidget {
+class _BillingSettingsCard extends StatefulWidget {
   const _BillingSettingsCard({
+    required this.apiClient,
     required this.user,
-    required this.launchExternalUrl,
+    required this.stripePaymentHandler,
+    required this.onBillingChanged,
   });
 
+  final HermesApiClient apiClient;
   final HermesUser user;
-  final ExternalUrlLauncher launchExternalUrl;
+  final StripePaymentHandler stripePaymentHandler;
+  final Future<void> Function() onBillingChanged;
 
-  String get _planLabel {
-    final tier = user.subscriptionTier.trim().toLowerCase();
-    return switch (tier) {
-      'premium' => 'Premium',
-      'pro' => 'Pro',
-      _ => 'Base',
-    };
+  @override
+  State<_BillingSettingsCard> createState() => _BillingSettingsCardState();
+}
+
+class _BillingSettingsCardState extends State<_BillingSettingsCard> {
+  HermesBillingPaymentMethod? _paymentMethod;
+  bool _loadingPaymentMethod = true;
+  bool _busy = false;
+  String? _error;
+
+  String get _planLabel => _planLabelForUser(widget.user);
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadPaymentMethod());
   }
 
   @override
-  Widget build(BuildContext context) => _CompactItemTile(
-    icon: Icons.workspace_premium_outlined,
-    title: 'Plan',
-    subtitle: 'Current plan: $_planLabel',
-    trailing: SizedBox(
-      width: 148,
+  void didUpdateWidget(covariant _BillingSettingsCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.user.subscriptionTier != widget.user.subscriptionTier ||
+        oldWidget.user.subscriptionStatus != widget.user.subscriptionStatus) {
+      unawaited(_loadPaymentMethod());
+    }
+  }
+
+  Future<void> _loadPaymentMethod() async {
+    setState(() {
+      _loadingPaymentMethod = true;
+      _error = null;
+    });
+    try {
+      final paymentMethod = await widget.apiClient.getBillingPaymentMethod();
+      if (!mounted) return;
+      setState(() => _paymentMethod = paymentMethod);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'load your payment method',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _loadingPaymentMethod = false);
+    }
+  }
+
+  Future<void> _updatePaymentMethod() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final setup = await widget.apiClient.createPaymentMethodSetup();
+      await widget.stripePaymentHandler.preparePaymentSheet(
+        setup,
+        user: widget.user,
+        primaryButtonLabel: 'Save payment method',
+      );
+      await widget.stripePaymentHandler.presentPaymentSheet();
+      final paymentMethod = await widget.apiClient.confirmPaymentMethodSetup(
+        setupIntentId: setup.setupIntentId,
+      );
+      if (!mounted) return;
+      setState(() => _paymentMethod = paymentMethod);
+      await widget.onBillingChanged();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = _isStripePaymentCanceled(error)
+            ? null
+            : beanFriendlyErrorMessage(
+                error,
+                action: 'update your payment method',
+              );
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _subscribeToPlan(String plan) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final setup = await widget.apiClient.createMobileSubscriptionSetup(
+        plan: plan,
+      );
+      await widget.stripePaymentHandler.preparePaymentSheet(
+        setup,
+        user: widget.user,
+        primaryButtonLabel: 'Start ${_subscriptionPlanLabel(plan)} trial',
+      );
+      await widget.stripePaymentHandler.presentPaymentSheet();
+      final result = await widget.apiClient.confirmMobileSubscription(
+        plan: plan,
+        setupIntentId: setup.setupIntentId,
+      );
+      if (!mounted) return;
+      setState(() => _paymentMethod = result.paymentMethod ?? _paymentMethod);
+      await widget.onBillingChanged();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = _isStripePaymentCanceled(error)
+            ? null
+            : beanFriendlyErrorMessage(
+                error,
+                action: 'change your subscription',
+              );
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _choosePlan() async {
+    final plan = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) =>
+          _PlanManagementSheet(currentPlan: widget.user.subscriptionTier),
+    );
+    if (plan != null) await _subscribeToPlan(plan);
+  }
+
+  Future<void> _cancelSubscription() async {
+    if (_busy) return;
+    final confirmed = await _confirmDestructiveAction(
+      context,
+      title: 'Cancel subscription?',
+      message:
+          'Your current access stays active until the end of the paid period or trial. Bean will stop renewal with Stripe.',
+      confirmLabel: 'Cancel renewal',
+    );
+    if (!confirmed) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.apiClient.cancelSubscription();
+      await widget.onBillingChanged();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'cancel your subscription',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = widget.user.subscriptionStatus;
+    final statusLine = status == null || status.isEmpty
+        ? 'Current plan: $_planLabel'
+        : 'Current plan: $_planLabel • ${status.replaceAll('_', ' ')}';
+    final paymentLine = _loadingPaymentMethod
+        ? 'Loading payment method...'
+        : _paymentMethod?.displayLine ?? 'No saved payment method yet';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
+        key: const Key('billing-settings-card'),
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          FilledButton(
-            key: const Key('settings-upgrade-plan-action'),
-            onPressed: () => launchExternalUrl(_pricingUrl),
-            child: const Text('View plans'),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: HeyBeanTheme.accent.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.credit_card_rounded,
+                  color: HeyBeanTheme.accentStrong,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Billing',
+                      style: TextStyle(
+                        color: HeyBeanTheme.text,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      statusLine,
+                      style: const TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      paymentLine,
+                      key: const Key('settings-payment-method-summary'),
+                      style: const TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (widget.user.subscriptionStatus == 'trialing') ...[
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Trial renewal uses the saved Stripe payment method.',
+                        style: TextStyle(
+                          color: HeyBeanTheme.muted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          OutlinedButton(
-            key: const Key('settings-cancel-subscription-action'),
-            onPressed: () => launchExternalUrl(_subscriptionCancellationUrl),
-            child: const Text('Cancel subscription'),
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            _InlinePlanLimitError(message: _error!),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                key: const Key('settings-upgrade-plan-action'),
+                onPressed: _busy ? null : _choosePlan,
+                icon: _busy
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.swap_vert_rounded),
+                label: const Text('Change plan'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('settings-update-payment-method-action'),
+                onPressed: _busy ? null : _updatePaymentMethod,
+                icon: const Icon(Icons.credit_card_rounded),
+                label: const Text('Update payment'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('settings-cancel-subscription-action'),
+                onPressed: _busy || widget.user.subscriptionStatus == null
+                    ? null
+                    : _cancelSubscription,
+                icon: const Icon(Icons.event_busy_rounded),
+                label: const Text('Cancel renewal'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _planLabelForUser(HermesUser user) =>
+    _subscriptionPlanLabel(user.subscriptionTier);
+
+class _PlanManagementSheet extends StatelessWidget {
+  const _PlanManagementSheet({required this.currentPlan});
+
+  final String currentPlan;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = currentPlan.trim().toLowerCase();
+    final plans = _signupPlanOptions.where((plan) => plan.startsCheckout);
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Change plan',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Payment stays inside HeyBean with Stripe handling secure card entry and storage.',
+              style: TextStyle(
+                color: HeyBeanTheme.muted,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 14),
+            for (final plan in plans) ...[
+              _PlanManagementTile(
+                plan: plan,
+                selected: plan.key == current,
+                onTap: plan.key == current
+                    ? null
+                    : () => Navigator.of(context).pop(plan.key),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanManagementTile extends StatelessWidget {
+  const _PlanManagementTile({
+    required this.plan,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _SignupPlanOption plan;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    key: Key('settings-plan-${plan.key}'),
+    borderRadius: BorderRadius.circular(18),
+    onTap: onTap,
+    child: Ink(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: selected
+            ? HeyBeanTheme.accent.withValues(alpha: .10)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: selected
+              ? HeyBeanTheme.accent.withValues(alpha: .32)
+              : HeyBeanTheme.border,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            selected
+                ? Icons.check_circle_rounded
+                : Icons.radio_button_unchecked_rounded,
+            color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  plan.label,
+                  style: const TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${plan.price}${plan.priceSuffix ?? ''} • ${plan.trialText}',
+                  style: const TextStyle(
+                    color: HeyBeanTheme.muted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

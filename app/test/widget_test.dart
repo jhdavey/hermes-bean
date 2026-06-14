@@ -79,11 +79,13 @@ void main() {
   ) async {
     final api = _FakeHermesApiClient();
     final tokenStore = _MemoryAuthTokenStore();
+    final stripeHandler = _FakeStripePaymentHandler();
     final launchedUrls = <Uri>[];
     await tester.pumpWidget(
       HermesBeanApp(
         apiClient: api,
         tokenStore: tokenStore,
+        stripePaymentHandler: stripeHandler,
         launchExternalUrl: (url) async {
           launchedUrls.add(url);
           return true;
@@ -117,10 +119,6 @@ void main() {
     expect(find.text('Choose your HeyBean subscription'), findsOneWidget);
     expect(find.text('Account created for testing.'), findsOneWidget);
     expect(find.text('7-day free trial, then billed monthly'), findsOneWidget);
-    expect(find.text('Account'), findsOneWidget);
-    expect(find.text('Plan'), findsOneWidget);
-    expect(find.text('Payment'), findsOneWidget);
-    expect(find.text('Dashboard'), findsOneWidget);
     expect(find.text('Start with a 7-day free trial.'), findsNothing);
     expect(find.byKey(const Key('calendar-view')), findsNothing);
     expect(tokenStore.token, 'fake-token');
@@ -152,10 +150,14 @@ void main() {
     await tester.tap(find.byKey(const Key('signup-plan-base-action')));
     await tester.pumpAndSettle();
 
-    expect(api.checkoutRequests, [
-      {'plan': 'base', 'source': 'subscribe'},
+    expect(api.checkoutRequests, isEmpty);
+    expect(api.mobileSubscriptionSetupRequests, ['base']);
+    expect(api.mobileSubscriptionConfirmRequests, [
+      {'plan': 'base', 'setupIntentId': 'seti_test_base'},
     ]);
-    expect(launchedUrls.last.host, 'checkout.stripe.com');
+    expect(stripeHandler.preparedSetupIntentIds, ['seti_test_base']);
+    expect(stripeHandler.presentedSheets, 1);
+    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
   });
 
   testWidgets(
@@ -3167,19 +3169,16 @@ void main() {
     );
   });
 
-  testWidgets('settings subscription actions open billing links from app', (
+  testWidgets('settings manages subscription and payment method in app', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
-    final launchedUrls = <Uri>[];
+    final stripeHandler = _FakeStripePaymentHandler();
     await tester.pumpWidget(
       HermesBeanApp(
         apiClient: api,
         tokenStore: _MemoryAuthTokenStore(),
-        launchExternalUrl: (url) async {
-          launchedUrls.add(url);
-          return true;
-        },
+        stripePaymentHandler: stripeHandler,
       ),
     );
     await tester.pumpAndSettle();
@@ -3191,29 +3190,53 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Current plan: Base'), findsOneWidget);
+    expect(find.textContaining('Current plan: Base'), findsOneWidget);
+    expect(find.textContaining('Visa ending 4242'), findsOneWidget);
     expect(
       find.byKey(const Key('settings-cancel-subscription-action')),
       findsOneWidget,
     );
+
     await tester.tap(find.byKey(const Key('settings-upgrade-plan-action')));
     await tester.pumpAndSettle();
 
-    expect(launchedUrls, hasLength(1));
-    expect(launchedUrls.single.host, 'heybean.org');
-    expect(launchedUrls.single.path, '/pricing');
-    expect(launchedUrls.single.queryParameters['source'], 'flutter');
+    expect(find.byKey(const Key('settings-plan-premium')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('settings-plan-premium')));
+    await tester.pumpAndSettle();
+
+    expect(api.mobileSubscriptionSetupRequests, ['premium']);
+    expect(api.mobileSubscriptionConfirmRequests, [
+      {'plan': 'premium', 'setupIntentId': 'seti_test_premium'},
+    ]);
+    expect(stripeHandler.preparedSetupIntentIds, ['seti_test_premium']);
+    expect(stripeHandler.presentedSheets, 1);
+    expect(find.textContaining('Current plan: Premium'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('settings-update-payment-method-action')),
+    );
+    await tester.tap(
+      find.byKey(const Key('settings-update-payment-method-action')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.paymentMethodSetupRequests, 1);
+    expect(api.paymentMethodConfirmRequests, ['seti_payment_update']);
+    expect(stripeHandler.preparedSetupIntentIds, [
+      'seti_test_premium',
+      'seti_payment_update',
+    ]);
+    expect(find.textContaining('Mastercard ending 4444'), findsOneWidget);
 
     await tester.tap(
       find.byKey(const Key('settings-cancel-subscription-action')),
     );
     await tester.pumpAndSettle();
 
-    expect(launchedUrls, hasLength(2));
-    expect(launchedUrls.last.host, 'heybean.org');
-    expect(launchedUrls.last.path, '/support');
-    expect(launchedUrls.last.queryParameters['topic'], 'cancel-subscription');
-    expect(launchedUrls.last.queryParameters['source'], 'flutter');
+    await tester.tap(find.byKey(const Key('destructive-confirm-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.cancelSubscriptionRequests, 1);
   });
 
   testWidgets(
@@ -5490,6 +5513,25 @@ class _MemoryAuthTokenStore implements AuthTokenStore {
   }
 }
 
+class _FakeStripePaymentHandler implements StripePaymentHandler {
+  final preparedSetupIntentIds = <String>[];
+  int presentedSheets = 0;
+
+  @override
+  Future<void> preparePaymentSheet(
+    HermesPaymentSheetSetup setup, {
+    required HermesUser user,
+    required String primaryButtonLabel,
+  }) async {
+    preparedSetupIntentIds.add(setup.setupIntentId);
+  }
+
+  @override
+  Future<void> presentPaymentSheet() async {
+    presentedSheets++;
+  }
+}
+
 class _StaleTodayPersistedResourcesFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
@@ -6049,9 +6091,23 @@ class _FakeHermesApiClient extends HermesApiClient {
   HermesNotificationPreferences updatedNotificationPreferences =
       const HermesNotificationPreferences();
   String updatedTheme = 'green';
+  String subscriptionTier = 'base';
+  String? currentSubscriptionStatus = 'active';
+  HermesBillingPaymentMethod? billingPaymentMethod =
+      const HermesBillingPaymentMethod(
+        brand: 'visa',
+        last4: '4242',
+        expMonth: 12,
+        expYear: 2032,
+      );
   final passwordResetRequests = <String>[];
   final registeredUsers = <Map<String, String>>[];
   final checkoutRequests = <Map<String, String>>[];
+  final mobileSubscriptionSetupRequests = <String>[];
+  final mobileSubscriptionConfirmRequests = <Map<String, String>>[];
+  int paymentMethodSetupRequests = 0;
+  final paymentMethodConfirmRequests = <String>[];
+  int cancelSubscriptionRequests = 0;
   final issueReports = <String>[];
   HermesReminder? bannerUpdatedReminder;
   List<HermesApproval> approvals = const [];
@@ -6062,7 +6118,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   HermesUser _user({
     required String name,
     required String email,
-    String subscriptionStatus = 'active',
+    String? subscriptionStatus,
     bool isAdmin = false,
   }) {
     final persistedPersonality = staleSettingsAfterUpdate
@@ -6096,7 +6152,8 @@ class _FakeHermesApiClient extends HermesApiClient {
       id: 1,
       name: name,
       email: email,
-      subscriptionStatus: subscriptionStatus,
+      subscriptionTier: subscriptionTier,
+      subscriptionStatus: subscriptionStatus ?? currentSubscriptionStatus,
       theme: updatedTheme,
       onboardComplete: !needsBeanOnboarding,
       agentProfile: profile,
@@ -6152,6 +6209,85 @@ class _FakeHermesApiClient extends HermesApiClient {
       url: 'https://checkout.stripe.com/c/pay/cs_test_$plan',
       plan: plan,
       status: 'open',
+    );
+  }
+
+  @override
+  Future<HermesPaymentSheetSetup> createMobileSubscriptionSetup({
+    required String plan,
+  }) async {
+    mobileSubscriptionSetupRequests.add(plan);
+    return HermesPaymentSheetSetup(
+      publishableKey: 'pk_test_fake',
+      customerId: 'cus_test_fake',
+      customerEphemeralKeySecret: 'ek_test_fake',
+      setupIntentId: 'seti_test_$plan',
+      setupIntentClientSecret: 'seti_test_${plan}_secret_fake',
+      plan: plan,
+    );
+  }
+
+  @override
+  Future<HermesSubscriptionResult> confirmMobileSubscription({
+    required String plan,
+    required String setupIntentId,
+  }) async {
+    mobileSubscriptionConfirmRequests.add({
+      'plan': plan,
+      'setupIntentId': setupIntentId,
+    });
+    subscriptionTier = plan;
+    currentSubscriptionStatus = 'trialing';
+    return HermesSubscriptionResult(
+      plan: plan,
+      subscription: HermesSubscriptionSummary(
+        tier: plan,
+        status: currentSubscriptionStatus,
+        canUpgrade: plan != 'pro',
+      ),
+      paymentMethod: billingPaymentMethod,
+    );
+  }
+
+  @override
+  Future<HermesBillingPaymentMethod?> getBillingPaymentMethod() async =>
+      billingPaymentMethod;
+
+  @override
+  Future<HermesPaymentSheetSetup> createPaymentMethodSetup() async {
+    paymentMethodSetupRequests++;
+    return const HermesPaymentSheetSetup(
+      publishableKey: 'pk_test_fake',
+      customerId: 'cus_test_fake',
+      customerEphemeralKeySecret: 'ek_test_payment_update',
+      setupIntentId: 'seti_payment_update',
+      setupIntentClientSecret: 'seti_payment_update_secret_fake',
+    );
+  }
+
+  @override
+  Future<HermesBillingPaymentMethod?> confirmPaymentMethodSetup({
+    required String setupIntentId,
+  }) async {
+    paymentMethodConfirmRequests.add(setupIntentId);
+    billingPaymentMethod = const HermesBillingPaymentMethod(
+      brand: 'mastercard',
+      last4: '4444',
+      expMonth: 10,
+      expYear: 2031,
+    );
+    return billingPaymentMethod;
+  }
+
+  @override
+  Future<HermesSubscriptionSummary> cancelSubscription() async {
+    cancelSubscriptionRequests++;
+    currentSubscriptionStatus = 'active';
+    return HermesSubscriptionSummary(
+      tier: subscriptionTier,
+      status: currentSubscriptionStatus,
+      cancelAtPeriodEnd: true,
+      canUpgrade: subscriptionTier != 'pro',
     );
   }
 

@@ -31,6 +31,22 @@ class StripeBillingService
         ];
     }
 
+    public function paymentMethodSummary(User $user): array
+    {
+        if (! $user->stripe_customer_id) {
+            return ['payment_method' => null];
+        }
+
+        $paymentMethodId = $this->defaultPaymentMethodId($user);
+        if (! $paymentMethodId) {
+            return ['payment_method' => null];
+        }
+
+        $paymentMethod = $this->stripeGet('/payment_methods/'.$paymentMethodId)->json();
+
+        return ['payment_method' => $this->paymentMethodDisplay($paymentMethod, $user)];
+    }
+
     public function createCheckoutSession(User $user, string $plan, ?string $source = null): array
     {
         $this->assertCheckoutPlan($plan);
@@ -75,6 +91,95 @@ class StripeBillingService
         ];
     }
 
+    public function createMobileSubscriptionSetup(User $user, string $plan): array
+    {
+        $this->assertCheckoutPlan($plan);
+
+        return $this->createSetupIntentResponse($user, [
+            'purpose' => 'subscription',
+            'plan' => $plan,
+        ], ['plan' => $plan]);
+    }
+
+    public function confirmMobileSubscription(User $user, string $plan, string $setupIntentId): array
+    {
+        $this->assertCheckoutPlan($plan);
+        $setupIntent = $this->verifiedSetupIntent($user, $setupIntentId);
+        $paymentMethodId = $this->paymentMethodIdFromSetupIntent($setupIntent);
+
+        $this->setCustomerDefaultPaymentMethod($user, $paymentMethodId);
+
+        if ($user->stripe_subscription_id && $user->stripe_subscription_item_id) {
+            $subscription = $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
+                'cancel_at_period_end' => false,
+                'default_payment_method' => $paymentMethodId,
+                'items' => [[
+                    'id' => $user->stripe_subscription_item_id,
+                    'price' => $this->priceId($plan),
+                ]],
+                'proration_behavior' => 'always_invoice',
+                'payment_behavior' => 'allow_incomplete',
+                'metadata' => [
+                    'heybean_user_id' => (string) $user->id,
+                    'plan' => $plan,
+                    'source' => 'flutter',
+                ],
+            ])->json();
+        } else {
+            $subscription = $this->stripePost('/subscriptions', [
+                'customer' => $user->stripe_customer_id,
+                'default_payment_method' => $paymentMethodId,
+                'items' => [[
+                    'price' => $this->priceId($plan),
+                    'quantity' => 1,
+                ]],
+                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 7)),
+                'payment_behavior' => 'allow_incomplete',
+                'payment_settings' => [
+                    'save_default_payment_method' => 'on_subscription',
+                ],
+                'metadata' => [
+                    'heybean_user_id' => (string) $user->id,
+                    'plan' => $plan,
+                    'source' => 'flutter',
+                ],
+            ])->json();
+        }
+
+        $this->syncSubscription($subscription, $user);
+        $freshUser = $user->fresh();
+
+        return [
+            'plan' => $plan,
+            'subscription' => $this->subscriptionSummary($freshUser),
+            'payment_method' => $this->paymentMethodDisplayFromSetupIntent($setupIntent, $freshUser),
+        ];
+    }
+
+    public function createPaymentMethodSetup(User $user): array
+    {
+        return $this->createSetupIntentResponse($user, [
+            'purpose' => 'payment_method_update',
+        ]);
+    }
+
+    public function confirmPaymentMethodSetup(User $user, string $setupIntentId): array
+    {
+        $setupIntent = $this->verifiedSetupIntent($user, $setupIntentId);
+        $paymentMethodId = $this->paymentMethodIdFromSetupIntent($setupIntent);
+
+        $this->setCustomerDefaultPaymentMethod($user, $paymentMethodId);
+        if ($user->stripe_subscription_id) {
+            $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
+                'default_payment_method' => $paymentMethodId,
+            ]);
+        }
+
+        return [
+            'payment_method' => $this->paymentMethodDisplayFromSetupIntent($setupIntent, $user),
+        ];
+    }
+
     public function upgradeSubscription(User $user, string $plan): array
     {
         $this->assertPaidPlan($plan);
@@ -106,6 +211,28 @@ class StripeBillingService
         return [
             'plan' => $plan,
             'status' => $subscription['status'] ?? $user->subscription_status,
+            'subscription' => $this->subscriptionSummary($user->fresh()),
+        ];
+    }
+
+    public function cancelSubscription(User $user): array
+    {
+        if (! $user->stripe_subscription_id) {
+            throw new InvalidArgumentException('No active Stripe subscription was found for this account.');
+        }
+
+        $subscription = $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
+            'cancel_at_period_end' => true,
+            'metadata' => [
+                'heybean_user_id' => (string) $user->id,
+                'plan' => $user->subscriptionTier(),
+                'source' => 'flutter',
+            ],
+        ])->json();
+
+        $this->syncSubscription($subscription, $user);
+
+        return [
             'subscription' => $this->subscriptionSummary($user->fresh()),
         ];
     }
@@ -231,17 +358,141 @@ class StripeBillingService
         return $customerId;
     }
 
-    private function stripeGet(string $path): Response
+    private function createSetupIntentResponse(User $user, array $metadata, array $extra = []): array
     {
-        return $this->stripeRequest('get', $path);
+        $customerId = $this->ensureCustomer($user);
+        $publishableKey = $this->publishableKey();
+        $ephemeralKey = $this->stripePost('/ephemeral_keys', [
+            'customer' => $customerId,
+        ], [
+            'Stripe-Version' => $this->apiVersion(),
+        ])->json();
+        $setupIntent = $this->stripePost('/setup_intents', [
+            'customer' => $customerId,
+            'usage' => 'off_session',
+            'payment_method_types' => ['card'],
+            'metadata' => [
+                'heybean_user_id' => (string) $user->id,
+                'source' => 'flutter',
+                ...$metadata,
+            ],
+        ])->json();
+
+        $setupIntentSecret = $setupIntent['client_secret'] ?? null;
+        $ephemeralKeySecret = $ephemeralKey['secret'] ?? null;
+        if (! is_string($setupIntentSecret) || $setupIntentSecret === '' || ! is_string($ephemeralKeySecret) || $ephemeralKeySecret === '') {
+            throw new RuntimeException('Stripe did not return mobile payment setup details.');
+        }
+
+        return [
+            'publishable_key' => $publishableKey,
+            'customer_id' => $customerId,
+            'customer_ephemeral_key_secret' => $ephemeralKeySecret,
+            'setup_intent_id' => $setupIntent['id'] ?? null,
+            'setup_intent_client_secret' => $setupIntentSecret,
+            ...$extra,
+        ];
     }
 
-    private function stripePost(string $path, array $payload): Response
+    private function verifiedSetupIntent(User $user, string $setupIntentId): array
     {
-        return $this->stripeRequest('post', $path, $payload);
+        $setupIntent = $this->stripeGet('/setup_intents/'.$setupIntentId, [
+            'expand' => ['payment_method'],
+        ])->json();
+
+        if (($setupIntent['customer'] ?? null) !== $user->stripe_customer_id) {
+            throw new InvalidArgumentException('That payment setup does not belong to this account.');
+        }
+
+        if (($setupIntent['status'] ?? null) !== 'succeeded') {
+            throw new InvalidArgumentException('Payment setup is not complete yet.');
+        }
+
+        return $setupIntent;
     }
 
-    private function stripeRequest(string $method, string $path, array $payload = []): Response
+    private function paymentMethodIdFromSetupIntent(array $setupIntent): string
+    {
+        $paymentMethod = $setupIntent['payment_method'] ?? null;
+        $paymentMethodId = is_array($paymentMethod) ? ($paymentMethod['id'] ?? null) : $paymentMethod;
+        if (! is_string($paymentMethodId) || $paymentMethodId === '') {
+            throw new InvalidArgumentException('Stripe did not attach a payment method to this setup.');
+        }
+
+        return $paymentMethodId;
+    }
+
+    private function setCustomerDefaultPaymentMethod(User $user, string $paymentMethodId): void
+    {
+        $this->stripePost('/customers/'.$this->ensureCustomer($user), [
+            'invoice_settings' => [
+                'default_payment_method' => $paymentMethodId,
+            ],
+        ]);
+    }
+
+    private function defaultPaymentMethodId(User $user): ?string
+    {
+        if ($user->stripe_subscription_id) {
+            $subscription = $this->stripeGet('/subscriptions/'.$user->stripe_subscription_id)->json();
+            $subscriptionPaymentMethod = $subscription['default_payment_method'] ?? null;
+            if (is_string($subscriptionPaymentMethod) && $subscriptionPaymentMethod !== '') {
+                return $subscriptionPaymentMethod;
+            }
+        }
+
+        $customer = $this->stripeGet('/customers/'.$user->stripe_customer_id)->json();
+        $customerPaymentMethod = $customer['invoice_settings']['default_payment_method'] ?? null;
+
+        return is_string($customerPaymentMethod) && $customerPaymentMethod !== '' ? $customerPaymentMethod : null;
+    }
+
+    private function paymentMethodDisplayFromSetupIntent(array $setupIntent, User $user): ?array
+    {
+        $paymentMethod = $setupIntent['payment_method'] ?? null;
+        if (is_array($paymentMethod)) {
+            return $this->paymentMethodDisplay($paymentMethod, $user);
+        }
+
+        if (is_string($paymentMethod) && $paymentMethod !== '') {
+            return $this->paymentMethodDisplay($this->stripeGet('/payment_methods/'.$paymentMethod)->json(), $user);
+        }
+
+        return null;
+    }
+
+    private function paymentMethodDisplay(array $paymentMethod, User $user): ?array
+    {
+        if (($paymentMethod['customer'] ?? $user->stripe_customer_id) !== $user->stripe_customer_id) {
+            return null;
+        }
+
+        $card = $paymentMethod['card'] ?? null;
+        if (! is_array($card)) {
+            return null;
+        }
+
+        return [
+            'id' => $paymentMethod['id'] ?? null,
+            'type' => $paymentMethod['type'] ?? 'card',
+            'brand' => $card['brand'] ?? null,
+            'last4' => $card['last4'] ?? null,
+            'exp_month' => $card['exp_month'] ?? null,
+            'exp_year' => $card['exp_year'] ?? null,
+        ];
+    }
+
+    private function stripeGet(string $path, array $payload = []): Response
+    {
+        return $this->stripeRequest('get', $path, $payload);
+    }
+
+    private function stripePost(string $path, array $payload, array $headers = []): Response
+    {
+        return $this->stripeRequest('post', $path, $payload, $headers);
+    }
+
+    private function stripeRequest(string $method, string $path, array $payload = [], array $headers = []): Response
     {
         $secret = (string) config('services.stripe.secret', '');
         if ($secret === '') {
@@ -249,12 +500,13 @@ class StripeBillingService
         }
 
         $request = Http::withToken($secret)
+            ->withHeaders($headers)
             ->asForm()
             ->acceptJson()
             ->baseUrl('https://api.stripe.com/v1');
 
         $response = $method === 'get'
-            ? $request->get($path)
+            ? $request->get($path, $payload)
             : $request->post($path, $payload);
 
         if ($response->failed()) {
@@ -263,6 +515,23 @@ class StripeBillingService
         }
 
         return $response;
+    }
+
+    private function publishableKey(): string
+    {
+        $key = (string) config('services.stripe.publishable_key', '');
+        if ($key === '') {
+            throw new RuntimeException('Stripe publishable key is not configured.');
+        }
+
+        return $key;
+    }
+
+    private function apiVersion(): string
+    {
+        $version = (string) config('services.stripe.api_version', '');
+
+        return $version !== '' ? $version : '2026-05-27.dahlia';
     }
 
     private function priceId(string $plan): string
