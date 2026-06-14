@@ -238,6 +238,8 @@ if (mount) {
     let kioskRealtimeLastAssistantOutputEndedAt = 0;
     let kioskRealtimeBackgroundProgressContext = null;
     let kioskRealtimeWakeContinuationUntil = 0;
+    let kioskRealtimeResponseCreateSentAt = 0;
+    let kioskRealtimeAwaitingFirstAudio = false;
     const kioskRealtimeBackgroundProgressTimers = new Set();
     const kioskRealtimeSpokenSegments = [];
     const kioskRealtimeMaxReconnectAttempts = 5;
@@ -1921,9 +1923,10 @@ if (mount) {
         const ready = kioskVoiceReady();
         const phase = ready ? (state.kioskVoicePhase === 'idle' ? 'armed' : state.kioskVoicePhase || 'armed') : 'disabled';
         const label = kioskVoicePillLabel({ requested, ready, phase });
-        const actionLabel = ready ? 'Turn off kiosk voice' : label;
+        const cancelable = ready && kioskVoicePillIsCancelable(phase);
+        const actionLabel = kioskVoicePillActionLabel({ ready, phase, label });
         return `
-            <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(phase)} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''} ${options.topbar ? 'hb-kiosk-voice-pill-topbar' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}" aria-pressed="${ready}">
+            <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(phase)} ${cancelable ? 'hb-kiosk-voice-pill-cancelable' : ''} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''} ${options.topbar ? 'hb-kiosk-voice-pill-topbar' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}" aria-pressed="${ready}">
                 <span class="hb-kiosk-voice-pill-icon" aria-hidden="true">${icons.mic}</span>
                 <span>${escapeHtml(label)}</span>
             </button>`;
@@ -1935,7 +1938,19 @@ if (mount) {
             return state.kioskVoiceMessage || phase;
         }
         if (!requested) return 'Enable microphone to chat';
-        return state.kioskVoiceMessage || 'Bean is waking up';
+        return state.kioskVoiceMessage || 'Connecting';
+    }
+
+    function kioskVoicePillIsCancelable(phase = state.kioskVoicePhase) {
+        if (!state.kioskVoiceEnabled || !kioskRealtimeConnected()) return false;
+        if (realtimeBackgroundWorkPending() || realtimeAssistantOutputActive() || kioskRealtimeResponseTimer) return true;
+        return kioskConversationActive && ['heard', 'listening', 'working', 'responding', 'speaking'].includes(phase);
+    }
+
+    function kioskVoicePillActionLabel({ ready, phase, label }) {
+        if (ready && kioskVoicePillIsCancelable(phase)) return 'Cancel voice request';
+        if (ready) return 'Turn off kiosk voice';
+        return label;
     }
 
     function settingsMarkup() {
@@ -4705,6 +4720,8 @@ if (mount) {
         kioskRealtimeLastAssistantText = '';
         kioskRealtimeLastAssistantOutputEndedAt = 0;
         kioskRealtimeWakeContinuationUntil = 0;
+        kioskRealtimeResponseCreateSentAt = 0;
+        kioskRealtimeAwaitingFirstAudio = false;
         kioskRealtimeSpokenSegments.length = 0;
         clearRealtimeAssistantOutputGuard();
         kioskRealtimePendingBackgroundResult = null;
@@ -4718,7 +4735,10 @@ if (mount) {
         kioskRealtimeRunWatchTimers.forEach((timer) => window.clearTimeout(timer));
         kioskRealtimeRunWatchTimers.clear();
         clearDeferredRealtimeFunctionOutputs();
-        if (kioskRealtime?.dataChannel?.readyState === 'open') {
+        if (
+            kioskRealtime?.dataChannel?.readyState === 'open'
+            && (kioskRealtimeAwaitingFirstAudio || realtimeAssistantOutputActive() || ['responding', 'speaking'].includes(state.kioskVoicePhase))
+        ) {
             try { kioskRealtime.dataChannel.send(JSON.stringify({ type: 'response.cancel' })); } catch (_) {}
         }
         stopKioskSpeechPlayback();
@@ -5464,6 +5484,8 @@ if (mount) {
         kioskRealtimeLastAssistantText = '';
         kioskRealtimeLastAssistantOutputEndedAt = 0;
         kioskRealtimeSpokenSegments.length = 0;
+        kioskRealtimeResponseCreateSentAt = 0;
+        kioskRealtimeAwaitingFirstAudio = false;
         clearRealtimeAssistantOutputGuard();
         kioskRealtimeUserTranscriptDrafts.clear();
         window.clearTimeout(kioskRealtimeResponseTimer);
@@ -5509,6 +5531,10 @@ if (mount) {
             }
         }
         if (type === 'input_audio_buffer.speech_started') {
+            if (kioskConversationActive) {
+                window.clearTimeout(kioskConversationTimer);
+                kioskConversationTimer = 0;
+            }
             if (realtimeAssistantRecentlyOutput()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('listening', 'listening');
@@ -5519,6 +5545,7 @@ if (mount) {
             if (realtimeAssistantRecentlyOutput()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('listening', 'listening');
+                armKioskConversationTimeout(kioskRealtimeAwaitingFollowup ? 30000 : undefined);
             }
             return;
         }
@@ -5541,6 +5568,15 @@ if (mount) {
             return;
         }
         if (type === 'response.audio.delta') {
+            if (kioskRealtimeAwaitingFirstAudio) {
+                kioskRealtimeAwaitingFirstAudio = false;
+                logKioskRealtimeVoiceTrace('realtime_voice_first_audio_delta', {
+                    summary: 'First realtime audio delta received.',
+                    ms_after_response_create: kioskRealtimeResponseCreateSentAt
+                        ? Date.now() - kioskRealtimeResponseCreateSentAt
+                        : null,
+                });
+            }
             markRealtimeAssistantOutputActive(2500);
             setKioskVoiceStatus('responding', 'Bean is answering');
             return;
@@ -5563,6 +5599,15 @@ if (mount) {
             return;
         }
         if (type === 'response.done') {
+            if (kioskRealtimeAwaitingFirstAudio) {
+                kioskRealtimeAwaitingFirstAudio = false;
+                logKioskRealtimeVoiceTrace('realtime_voice_response_done_without_audio_delta', {
+                    summary: 'Realtime response completed before an audio delta arrived.',
+                    ms_after_response_create: kioskRealtimeResponseCreateSentAt
+                        ? Date.now() - kioskRealtimeResponseCreateSentAt
+                        : null,
+                });
+            }
             markRealtimeAssistantOutputActive(realtimeAssistantOutputRemainingMs());
             processRealtimeResponseDone(payload);
             return;
@@ -5811,6 +5856,7 @@ if (mount) {
         if (realtimeTranscriptMentionsBean(transcript)) return true;
         if (kioskRealtimeAwaitingFollowup) return true;
         if (realtimeWakeContinuationActive()) return true;
+        if (kioskConversationActive) return true;
         if (kioskRealtimeResponseTimer && kioskRealtimePendingUser && !kioskRealtimePendingUser.persisted) return true;
         if (realtimeBackgroundWorkPending() && realtimeTranscriptLooksLikeStatusCheck(normalized)) return true;
         return false;
@@ -5864,8 +5910,16 @@ if (mount) {
         if (realtimeAssistantOutputActive()) {
             if (realtimeTranscriptRequestsCancel(raw, command, isWakeTurn)) {
                 cancelKioskVoiceCapture();
+                return;
             }
-            return;
+            if (
+                !kioskConversationActive
+                || realtimeUserTranscriptLooksLikeEcho(raw)
+                || (!isWakeTurn && !realtimeTranscriptCanContinueWithoutWake(raw))
+            ) {
+                return;
+            }
+            clearRealtimeAssistantOutputGuard();
         }
         if (realtimeUserTranscriptLooksLikeEcho(raw)) {
             return;
@@ -5896,7 +5950,11 @@ if (mount) {
         }
         const content = (isWakeTurn ? command : raw).trim();
         if (!content) {
-            setKioskVoiceStatus('listening', 'listening');
+            logKioskRealtimeVoiceTrace('realtime_voice_wake_only', {
+                summary: 'Wake phrase heard without a command yet.',
+                transcript: raw,
+            });
+            setKioskVoiceStatus('listening', 'Go ahead');
             armKioskConversationTimeout(kioskRealtimeWakeContinuationMs);
             return;
         }
@@ -5905,14 +5963,21 @@ if (mount) {
             allowArmed: true,
             phase: 'heard',
             force: true,
+            holdMs: kioskRealtimeTurnDebounceMs + 900,
         });
         const shouldAppendToPendingTurn = Boolean(kioskRealtimeResponseTimer && kioskRealtimePendingUser && !kioskRealtimePendingUser.persisted && !isWakeTurn);
         if (shouldAppendToPendingTurn) {
             kioskRealtimePendingUser.content = `${kioskRealtimePendingUser.content} ${content}`.replace(/\s+/g, ' ').trim();
+            logKioskRealtimeVoiceTrace('realtime_voice_pending_transcript_appended', {
+                summary: 'Appended transcript to a pending realtime turn.',
+                appended_content: content,
+                full_content: kioskRealtimePendingUser.content,
+            });
         } else {
             kioskRealtimePendingUser = {
                 itemId: payload.item_id || `rt-user-${Date.now()}`,
                 content,
+                startedAt: Date.now(),
                 persisted: false,
             };
         }
@@ -6021,7 +6086,17 @@ if (mount) {
             kioskRealtimeWakeContinuationUntil = 0;
             armRealtimeToolFallback(content);
             setKioskVoiceStatus('working', 'thinking');
+            kioskRealtimeResponseCreateSentAt = Date.now();
+            kioskRealtimeAwaitingFirstAudio = true;
+            logKioskRealtimeVoiceTrace('realtime_voice_response_create_sent', {
+                summary: 'Sent realtime response.create for user turn.',
+                user_content: content,
+                ms_after_turn_started: kioskRealtimePendingUser?.startedAt
+                    ? kioskRealtimeResponseCreateSentAt - kioskRealtimePendingUser.startedAt
+                    : null,
+            });
             if (!sendRealtimeResponseCreate()) {
+                kioskRealtimeAwaitingFirstAudio = false;
                 recoverKioskRealtimeAfterSendFailure('response_create_unavailable');
             }
         }, kioskRealtimeTurnDebounceMs);
@@ -6643,10 +6718,10 @@ if (mount) {
         const finalVoice = finalVoiceForTurn(context.userContent || '', context.quickReplyText || '', content, {});
         if (finalVoice.suppressFinal) {
             setRealtimeBackgroundWorkActive(false);
+            appendPersistedAssistantMessage(assistantMessage);
             if (state.kioskVoiceEnabled && kioskRealtimeConnected() && kioskConversationActive) {
                 kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(context.quickReplyText || '');
-                setKioskVoiceStatus('listening', 'listening');
-                armKioskConversationTimeout(kioskRealtimeAwaitingFollowup ? 30000 : undefined);
+                deliverRealtimeBackgroundResult('Done. I put the details in chat.', run?.id);
             }
             return;
         }
@@ -6689,12 +6764,15 @@ if (mount) {
             ...kioskRealtimeSpokenSegments,
             kioskRealtimeLastAssistantText,
         ].map((item) => String(item || '').trim()).filter(Boolean))].slice(-6);
+        const voiceResult = realtimeBackgroundVoiceResult(text);
         logKioskRealtimeVoiceTrace('realtime_voice_background_result', {
             summary: 'Delivering realtime background result.',
             run_id: runId,
             result_text: text,
+            voice_result: voiceResult,
             already_spoken: alreadySpoken,
         });
+        if (!voiceResult) return;
         kioskRealtimeSuppressNextAssistantPersist = true;
         kioskRealtimeVoiceOnlyAssistant = true;
         kioskRealtimeIgnoreNextFunctionCalls = true;
@@ -6708,18 +6786,29 @@ if (mount) {
                     text: JSON.stringify({
                         realtime_background_complete: true,
                         result: text,
+                        voice_result: voiceResult,
                         already_spoken: alreadySpoken,
-                        instruction: 'Continue naturally with the completed result. Do not repeat or paraphrase anything already spoken. If the result is long, give a concise voice summary and refer to chat.',
+                        instruction: 'Say voice_result exactly, unless it repeats already_spoken word-for-word. Do not repeat or paraphrase anything already spoken.',
                         rules: [
                             'Do not call tools.',
                             'Do not mention tools, models, connections, or voice.',
                             'Do not use generic filler.',
+                            'Keep the spoken completion to one short sentence.',
                         ],
                     }),
                 }],
             },
         }));
         sendRealtimeResponseCreate();
+    }
+
+    function realtimeBackgroundVoiceResult(text) {
+        const clean = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!clean) return '';
+        if (clean.length > 420 || /(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S/.test(text) || (String(text).match(/\n/g) || []).length >= 3) {
+            return 'Done. I put the details in chat.';
+        }
+        return clean;
     }
 
     function scheduleRealtimeBackgroundResultDelivery(content, runId = null) {
@@ -7117,6 +7206,8 @@ if (mount) {
         kioskRealtimeLastAssistantText = '';
         kioskRealtimeLastAssistantOutputEndedAt = 0;
         kioskRealtimeWakeContinuationUntil = 0;
+        kioskRealtimeResponseCreateSentAt = 0;
+        kioskRealtimeAwaitingFirstAudio = false;
         kioskRealtimeSpokenSegments.length = 0;
         clearRealtimeAssistantOutputGuard();
         kioskRealtimeUserTranscriptDrafts.clear();
@@ -7129,6 +7220,16 @@ if (mount) {
         kioskIntentionalCancelActive = true;
         stopKioskBargeInListening();
         stopKioskSpeechPlayback();
+        if (
+            kioskRealtime?.dataChannel?.readyState === 'open'
+            && (kioskRealtimeAwaitingFirstAudio || realtimeAssistantOutputActive() || ['responding', 'speaking'].includes(state.kioskVoicePhase))
+        ) {
+            try { kioskRealtime.dataChannel.send(JSON.stringify({ type: 'response.cancel' })); } catch (_) {}
+        }
+        logKioskRealtimeVoiceTrace('realtime_voice_cancel_requested', {
+            summary: 'User cancelled the active voice turn.',
+            phase: state.kioskVoicePhase || '',
+        });
         pauseKioskVoiceListening();
         endKioskConversation('Cancelled');
         if (state.busy) {
@@ -7150,10 +7251,11 @@ if (mount) {
         window.clearTimeout(kioskHeardTimer);
         kioskHeardTimer = window.setTimeout(() => {
             kioskHeardTimer = 0;
+            if (kioskRealtimeResponseTimer) return;
             if (state.kioskVoiceEnabled && ['armed', 'heard'].includes(state.kioskVoicePhase)) {
                 setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'Say hey bean');
             }
-        }, 1600);
+        }, options.holdMs || 2200);
     }
 
     function armKioskCommandSubmit() {
@@ -7441,9 +7543,25 @@ if (mount) {
         return `${year}-${month}-${day}T${hour}:${minute}:${second}${offset}`;
     }
 
+    function normalizeKioskVoiceStatus(phase, message) {
+        const text = String(message || '').trim();
+        if (phase === 'armed') return { phase, message: text || 'Say hey bean' };
+        if (phase === 'heard') return { phase, message: text || 'Heard' };
+        if (phase === 'listening') return { phase, message: text === 'Go ahead' ? 'Go ahead' : 'Listening' };
+        if (phase === 'working') {
+            if (/thinking/i.test(text)) return { phase, message: 'Thinking' };
+            if (/waking|connect/i.test(text)) return { phase, message: 'Connecting' };
+            return { phase, message: 'Working' };
+        }
+        if (phase === 'responding' || phase === 'speaking') return { phase, message: 'Speaking' };
+        if (phase === 'idle') return { phase, message: text };
+        return { phase, message: text || phase };
+    }
+
     function setKioskVoiceStatus(phase, message) {
-        state.kioskVoicePhase = phase;
-        state.kioskVoiceMessage = message;
+        const normalized = normalizeKioskVoiceStatus(phase, message);
+        state.kioskVoicePhase = normalized.phase;
+        state.kioskVoiceMessage = normalized.message;
         if (state.phase === 'signedIn' && !updateKioskVoicePillsInPlace()) {
             render();
         }
@@ -7456,12 +7574,14 @@ if (mount) {
         const ready = kioskVoiceReady();
         const phase = ready ? (state.kioskVoicePhase === 'idle' ? 'armed' : state.kioskVoicePhase || 'armed') : 'disabled';
         const label = kioskVoicePillLabel({ requested, ready, phase });
-        const actionLabel = ready ? 'Turn off kiosk voice' : label;
+        const cancelable = ready && kioskVoicePillIsCancelable(phase);
+        const actionLabel = kioskVoicePillActionLabel({ ready, phase, label });
         pills.forEach((pill) => {
             Array.from(pill.classList)
-                .filter((className) => className.startsWith('hb-kiosk-voice-pill-') && !['hb-kiosk-voice-pill-button', 'hb-kiosk-voice-pill-standalone', 'hb-kiosk-voice-pill-topbar'].includes(className))
+                .filter((className) => className.startsWith('hb-kiosk-voice-pill-') && !['hb-kiosk-voice-pill-button', 'hb-kiosk-voice-pill-cancelable', 'hb-kiosk-voice-pill-standalone', 'hb-kiosk-voice-pill-topbar'].includes(className))
                 .forEach((className) => pill.classList.remove(className));
             pill.classList.add(`hb-kiosk-voice-pill-${phase}`);
+            pill.classList.toggle('hb-kiosk-voice-pill-cancelable', cancelable);
             pill.setAttribute('aria-label', actionLabel);
             pill.setAttribute('title', actionLabel);
             pill.setAttribute('aria-pressed', ready ? 'true' : 'false');
@@ -7963,6 +8083,10 @@ if (mount) {
     }
 
     async function toggleKioskVoiceMode() {
+        if (state.kioskVoiceEnabled && kioskRealtimeConnected() && kioskVoicePillIsCancelable()) {
+            cancelKioskVoiceCapture();
+            return;
+        }
         if (state.kioskVoiceEnabled && !kioskRealtimeConnected()) {
             clearKioskRealtimeReconnect();
             kioskRealtimeReconnectAttempts = 0;
@@ -7978,7 +8102,7 @@ if (mount) {
             localStorage.setItem(kioskVoiceKey, 'true');
             kioskConversationActive = false;
             state.kioskVoicePhase = 'working';
-            state.kioskVoiceMessage = 'Bean is waking up';
+            state.kioskVoiceMessage = 'Connecting';
             render();
             await unlockKioskAudio();
             startKioskVoiceMode({ requestPermission: true });
