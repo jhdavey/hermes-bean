@@ -8,10 +8,14 @@ const wakePhrasePattern = new RegExp(
         `(?:^|\\s)${wakeStarter}\\s*,?\\s*${beanVariant}\\b[\\s,.:;!?-]*`,
         `(?:^|\\s)${wakeStarter}\\s*${compactBeanVariant}\\b[\\s,.:;!?-]*`,
         `(?:^|\\s)${wakeStarter}\\s*,?\\s*(?:b|bee)\\b[\\s,.:;!?-]*`,
+        `^\\s*${beanVariant}\\b[\\s,.:;!?-]*`,
+        `^\\s*${compactBeanVariant}\\b[\\s,.:;!?-]*`,
         '^\\s*a\\s+bean\\b[\\s,.:;!?-]*',
     ].join('|'),
     'i',
 );
+
+const wakeStarterOnlyPattern = new RegExp(`^\\s*${wakeStarter}\\s*[,.!?-]*\\s*$`, 'i');
 
 export function commandAfterWakePhrase(transcript) {
     const text = String(transcript || '').replace(/\s+/g, ' ').trim();
@@ -19,6 +23,10 @@ export function commandAfterWakePhrase(transcript) {
     const match = text.match(wakePhrasePattern);
     if (!match) return null;
     return text.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
+}
+
+export function transcriptIsWakeStarterOnly(transcript) {
+    return wakeStarterOnlyPattern.test(String(transcript || ''));
 }
 
 export function normalizedVoiceCommand(transcript) {
@@ -89,6 +97,9 @@ export function realtimeSpokenAnswerAllowsBackgroundQueue(userTranscript, assist
     const spoken = normalizedVoiceCommand(assistantText);
     if (!spoken) return true;
     if (spoken.length > 180) return false;
+    if (/\b(?:i(?:'|’)?ll let you know|i will let you know|when it(?:'|’)?s done|when it is done|once it(?:'|’)?s done|once it is done|i(?:'|’)?ll confirm|i will confirm|i(?:'|’)?ll update you|i will update you)\b/.test(spoken)) {
+        return true;
+    }
     if (spokenContainsConcreteAnswer(spoken, assistantText)) return false;
     if (/\b(?:i don t have|i do not have|i can t see|i cannot see|i don t know|i do not know|let me check|let me get|let me look|i(?:'|’)?ll check|i will check|i(?:'|’)?ll get|i will get|i(?:'|’)?m going to check|i am going to check|i need to check|i can check|checking|pulling|gathering|looking|working|finding|one moment|give me|hang on|hold on)\b/.test(spoken)) {
         return true;

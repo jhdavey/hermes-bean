@@ -2,6 +2,7 @@ import {
     commandAfterWakePhrase,
     normalizedVoiceCommand,
     realtimeSpokenAnswerAllowsBackgroundQueue,
+    transcriptIsWakeStarterOnly,
     voiceCommandNeedsAgentWork,
     voiceCommandRequiresBackgroundWork,
     voiceCommandWantsDetailedChat,
@@ -5725,9 +5726,7 @@ if (mount) {
     function scheduleRealtimeBackgroundProgressUpdates() {
         clearRealtimeBackgroundProgressUpdates();
         [
-            { elapsedMs: 12000, instruction: 'Give one brief, natural progress update specific to the request. Do not say "still working". Do not repeat prior wording.' },
-            { elapsedMs: 24000, instruction: 'Give one brief progress update that acknowledges this is taking a little longer. Do not repeat prior wording.' },
-            { elapsedMs: 42000, instruction: 'Briefly say this is taking longer than expected and that the result will be placed in chat if needed. Do not repeat prior wording.' },
+            { elapsedMs: 20000, instruction: 'Say one brief sentence that you are still working on the request. Do not repeat prior wording.' },
         ].forEach((checkpoint) => {
             const timer = window.setTimeout(() => {
                 kioskRealtimeBackgroundProgressTimers.delete(timer);
@@ -5862,6 +5861,22 @@ if (mount) {
         return false;
     }
 
+    function realtimeCommandShouldQueueImmediately(transcript) {
+        const command = normalizedVoiceCommand(transcript);
+        if (!command || !voiceCommandRequiresBackgroundWork(command)) return false;
+        return /\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b/.test(command)
+            && /\b(?:calendar|event|events|task|tasks|todo|to do|reminder|reminders|agenda|workspace|workspaces|memory|remember)\b/.test(command);
+    }
+
+    function realtimeQueuedWorkAcknowledgement(transcript) {
+        const command = normalizedVoiceCommand(transcript);
+        if (/\b(?:calendar|event|events|agenda|google calendar)\b/.test(command)) return "Got it. I'll update your calendar now.";
+        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return "Got it. I'll update your tasks now.";
+        if (/\b(?:reminder|reminders)\b/.test(command)) return "Got it. I'll set that reminder now.";
+        if (/\b(?:remember|memory)\b/.test(command)) return "Got it. I'll save that now.";
+        return "Got it. I'll take care of that now.";
+    }
+
     function realtimeTranscriptRequestsPoliteClose(transcript) {
         const normalized = normalizedRealtimeTranscript(transcript);
         return /^(?:thanks|thank you|thx|that'?s all|we'?re done|we are done)$/.test(normalized)
@@ -5907,6 +5922,17 @@ if (mount) {
         }
         const command = commandAfterWakePhrase(raw);
         const isWakeTurn = command !== null;
+        if (!isWakeTurn && !kioskConversationActive && transcriptIsWakeStarterOnly(raw)) {
+            beginKioskConversation();
+            kioskRealtimeWakeContinuationUntil = Date.now() + kioskRealtimeWakeContinuationMs;
+            logKioskRealtimeVoiceTrace('realtime_voice_wake_starter_only', {
+                summary: 'Wake starter heard without Bean or a command yet.',
+                transcript: raw,
+            });
+            setKioskVoiceStatus('listening', 'Go ahead');
+            armKioskConversationTimeout(kioskRealtimeWakeContinuationMs);
+            return;
+        }
         if (realtimeAssistantOutputActive()) {
             if (realtimeTranscriptRequestsCancel(raw, command, isWakeTurn)) {
                 cancelKioskVoiceCapture();
@@ -5989,6 +6015,21 @@ if (mount) {
             content: kioskRealtimePendingUser.content,
             metadata: { local_realtime_turn: true },
         });
+        if (realtimeBackgroundWorkPending() && realtimeTranscriptLooksLikeStatusCheck(content)) {
+            logKioskRealtimeVoiceTrace('realtime_voice_status_check_while_background_active', {
+                summary: 'Answered status check locally while background work is active.',
+                user_content: content,
+            });
+            speakKioskAcknowledgement("I'm still working on that.", {
+                shouldPlay: () => kioskConversationActive && realtimeBackgroundWorkPending(),
+            }).catch(() => {});
+            armKioskConversationTimeout(30000);
+            return;
+        }
+        if (realtimeCommandShouldQueueImmediately(content)) {
+            queueImmediateRealtimeBackgroundWork(content);
+            return;
+        }
         scheduleRealtimeResponseCreate();
     }
 
@@ -6201,6 +6242,10 @@ if (mount) {
         kioskRealtimePendingFunctionCalls = [];
         const hasFunctionCall = functionCalls.length > 0;
         const assistantAnswered = responseAssistantText !== '';
+        if (assistantAnswered) {
+            kioskRealtimeLastAssistantText = responseAssistantText;
+            recordRealtimeSpokenSegment(responseAssistantText);
+        }
         const activeUserTurn = kioskRealtimePendingUser || kioskRealtimeCurrentUserTurn;
         const pendingUserContent = String(activeUserTurn?.content || '').trim();
         const functionCallsAreBackgroundQueueOnly = functionCalls.length > 0
@@ -6595,6 +6640,30 @@ if (mount) {
         }
     }
 
+    function queueImmediateRealtimeBackgroundWork(content) {
+        const quickReplyText = realtimeQueuedWorkAcknowledgement(content);
+        logKioskRealtimeVoiceTrace('realtime_voice_immediate_queue_started', {
+            summary: 'Queued app work immediately from transcript.',
+            user_content: content,
+            quick_reply: quickReplyText,
+        });
+        clearRealtimeToolFallback();
+        window.clearTimeout(kioskRealtimeResponseTimer);
+        kioskRealtimeResponseTimer = 0;
+        kioskRealtimeCurrentUserTurn = kioskRealtimePendingUser ? { ...kioskRealtimePendingUser } : kioskRealtimeCurrentUserTurn;
+        persistRealtimeConversationTurn().catch(() => {});
+        setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent: content });
+        setKioskVoiceStatus('working', 'working');
+        recordRealtimeSpokenSegment(quickReplyText);
+        markRealtimeAssistantOutputActive(2600, { started: true });
+        speakKioskAcknowledgement(quickReplyText, {
+            shouldPlay: () => kioskConversationActive && realtimeBackgroundWorkPending(),
+        }).finally(() => {
+            scheduleRealtimeTurnStatusAfterOutput();
+        }).catch(() => {});
+        queueRealtimeFallbackWork(content, quickReplyText);
+    }
+
     function sendRealtimeFunctionOutput(callId, result, options = {}) {
         const dataChannel = kioskRealtime?.dataChannel;
         if (!callId || dataChannel?.readyState !== 'open') return;
@@ -6773,6 +6842,9 @@ if (mount) {
             already_spoken: alreadySpoken,
         });
         if (!voiceResult) return;
+        kioskRealtimeLastAssistantText = voiceResult;
+        recordRealtimeSpokenSegment(voiceResult);
+        markRealtimeAssistantOutputActive(realtimeAssistantOutputDurationMs(voiceResult), { started: true });
         kioskRealtimeSuppressNextAssistantPersist = true;
         kioskRealtimeVoiceOnlyAssistant = true;
         kioskRealtimeIgnoreNextFunctionCalls = true;
@@ -6809,6 +6881,11 @@ if (mount) {
             return 'Done. I put the details in chat.';
         }
         return clean;
+    }
+
+    function realtimeAssistantOutputDurationMs(text) {
+        const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+        return Math.min(16000, Math.max(3000, Math.round(words * 430) + 1800));
     }
 
     function scheduleRealtimeBackgroundResultDelivery(content, runId = null) {
