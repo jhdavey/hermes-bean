@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 class DashboardContextSnapshotService
 {
@@ -25,55 +26,56 @@ class DashboardContextSnapshotService
         $todayStartLocal = $now->copy()->startOfDay();
         $todayEndLocal = $now->copy()->endOfDay();
         $weekEndLocal = $now->copy()->addDays(7)->endOfDay();
-        $monthEndLocal = $now->copy()->endOfMonth();
         $todayStart = $todayStartLocal->copy()->utc();
         $todayEnd = $todayEndLocal->copy()->utc();
         $weekEnd = $weekEndLocal->copy()->utc();
-        $monthEnd = $monthEndLocal->copy()->utc();
+        $workspaces = $this->snapshotWorkspaces($user, $workspace);
+        $workspaceIds = $workspaces->pluck('id')->map(fn ($id): int => (int) $id)->values()->all();
+        $workspacesById = $workspaces->keyBy('id');
 
         $tasksQuery = Task::query()
-            ->where('workspace_id', $workspace->id)
+            ->whereIn('workspace_id', $workspaceIds)
             ->where(function (Builder $query): void {
                 $query->whereNull('status')
                     ->orWhereNotIn('status', ['completed', 'complete', 'done', 'COMPLETED', 'Complete', 'Done']);
             });
 
         $tasks = (clone $tasksQuery)
-            ->where(function (Builder $query) use ($monthEnd): void {
+            ->where(function (Builder $query) use ($weekEnd): void {
                 $query->whereNull('due_at')
-                    ->orWhere('due_at', '<=', $monthEnd)
-                    ->orWhere('is_critical', true);
+                    ->orWhere('due_at', '<=', $weekEnd);
             })
             ->orderByRaw('due_at IS NULL')
             ->orderBy('due_at')
             ->orderBy('id')
-            ->limit(40)
+            ->limit(60)
             ->get();
 
-        $reminders = Reminder::query()
-            ->where('workspace_id', $workspace->id)
+        $remindersQuery = Reminder::query()
+            ->whereIn('workspace_id', $workspaceIds)
             ->where(function (Builder $query): void {
                 $query->whereNull('status')
                     ->orWhereNotIn('status', ['completed', 'complete', 'done', 'COMPLETED', 'Complete', 'Done']);
             })
-            ->where('remind_at', '<=', $weekEnd)
+            ->where('remind_at', '<=', $weekEnd);
+        $reminders = (clone $remindersQuery)
             ->orderBy('remind_at')
             ->orderBy('id')
-            ->limit(25)
+            ->limit(40)
             ->get();
 
         $calendarEventsQuery = CalendarEvent::query()
-            ->where('workspace_id', $workspace->id)
             ->where('starts_at', '<=', $weekEnd)
             ->where(function (Builder $query) use ($todayStart): void {
                 $query->whereNull('ends_at')
                     ->orWhere('ends_at', '>=', $todayStart);
             });
-        $this->scopeVisibleGoogleCalendars($calendarEventsQuery, $user, $workspace);
+        $this->scopeAccessibleWorkspaceCalendars($calendarEventsQuery, $user, $workspaces);
+        $calendarEventsCount = (clone $calendarEventsQuery)->count();
         $calendarEvents = $calendarEventsQuery
             ->orderBy('starts_at')
             ->orderBy('id')
-            ->limit(30)
+            ->limit(60)
             ->get()
             ->reject(fn (CalendarEvent $event): bool => (bool) (($event->metadata ?? [])['recurrence_source_hidden'] ?? false))
             ->values();
@@ -92,56 +94,62 @@ class DashboardContextSnapshotService
             'generated_at_utc' => now()->utc()->toIso8601String(),
             'today' => $todayStartLocal->toDateString(),
             'timezone' => $timezone,
-            'workspace' => [
-                'id' => $workspace->id,
-                'name' => $workspace->name,
-                'type' => $workspace->type,
+            'window' => [
+                'starts_on' => $todayStartLocal->toDateString(),
+                'ends_on' => $weekEndLocal->toDateString(),
+                'future_days' => 7,
             ],
+            'workspace' => $this->workspacePayload($workspace, true),
+            'workspaces' => $workspaces
+                ->map(fn (Workspace $candidate): array => $this->workspacePayload($candidate, (int) $candidate->id === (int) $workspace->id))
+                ->values()
+                ->all(),
             'counts' => [
                 'open_tasks' => (clone $tasksQuery)->count(),
-                'calendar_events_next_7_days' => $calendarEvents->count(),
-                'reminders_next_7_days' => $reminders->count(),
+                'calendar_events_next_7_days' => $calendarEventsCount,
+                'reminders_next_7_days' => (clone $remindersQuery)->count(),
+                'workspaces' => count($workspaceIds),
             ],
             'weather_current' => $weatherCurrent,
             'calendar_today' => $calendarEvents
                 ->filter(fn (CalendarEvent $event): bool => $this->overlaps($event->starts_at, $event->ends_at, $todayStart, $todayEnd))
-                ->take(12)
-                ->map(fn (CalendarEvent $event): array => $this->calendarEventPayload($event, $timezone))
+                ->take(20)
+                ->map(fn (CalendarEvent $event): array => $this->calendarEventPayload($event, $timezone, $workspacesById))
                 ->values()
                 ->all(),
             'calendar_upcoming' => $calendarEvents
                 ->filter(fn (CalendarEvent $event): bool => $event->starts_at?->gt($todayEnd))
-                ->take(12)
-                ->map(fn (CalendarEvent $event): array => $this->calendarEventPayload($event, $timezone))
+                ->take(30)
+                ->map(fn (CalendarEvent $event): array => $this->calendarEventPayload($event, $timezone, $workspacesById))
                 ->values()
                 ->all(),
             'tasks_overdue' => $tasks
                 ->filter(fn (Task $task): bool => $task->due_at?->lt($todayStart) ?? false)
-                ->take(12)
-                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone))
+                ->take(20)
+                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone, $workspacesById))
                 ->values()
                 ->all(),
             'tasks_due_today' => $tasks
                 ->filter(fn (Task $task): bool => $task->due_at ? $task->due_at->betweenIncluded($todayStart, $todayEnd) : false)
-                ->take(12)
-                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone))
+                ->take(20)
+                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone, $workspacesById))
                 ->values()
                 ->all(),
-            'tasks_upcoming_month' => $tasks
+            'tasks_upcoming_next_7_days' => $tasks
                 ->filter(fn (Task $task): bool => $task->due_at?->gt($todayEnd) ?? false)
-                ->take(12)
-                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone))
+                ->take(30)
+                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone, $workspacesById))
                 ->values()
                 ->all(),
             'critical_unscheduled_tasks' => $tasks
                 ->filter(fn (Task $task): bool => $task->due_at === null && (bool) $task->is_critical)
-                ->take(8)
-                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone))
+                ->take(12)
+                ->map(fn (Task $task): array => $this->taskPayload($task, $timezone, $workspacesById))
                 ->values()
                 ->all(),
             'reminders_due' => $reminders
-                ->take(15)
-                ->map(fn (Reminder $reminder): array => $this->reminderPayload($reminder, $timezone))
+                ->take(30)
+                ->map(fn (Reminder $reminder): array => $this->reminderPayload($reminder, $timezone, $workspacesById))
                 ->values()
                 ->all(),
         ];
@@ -158,10 +166,10 @@ class DashboardContextSnapshotService
 
         return <<<TEXT
 Dashboard context snapshot for fast read-only answers.
-Use this snapshot to answer simple questions about today's calendar, upcoming events, current tasks, and reminders without calling tools. If the user asks for anything outside this snapshot, needs a write/change, or needs fresh external data, call queue_bean_work. Treat this snapshot as current as of generated_at.
+Use this cross-workspace snapshot to answer simple questions about today's calendar, upcoming events, current tasks, and reminders without calling tools. It includes the user's accessible workspaces and only warms app data through window.ends_on, up to 7 days in the future. If the user asks for anything outside this snapshot, needs a write/change, or needs fresh external data, call queue_bean_work. Treat this snapshot as current as of generated_at.
 If weather_current.ok is true and the user asks for current weather without naming a location, use weather_current as the default location and answer immediately without tools. Also answer immediately when they name the same place as weather_current.location. If they ask for a different location or a forecast not covered by weather_current, call queue_bean_work.
 When the snapshot contains the answer, the turn is complete: answer once from the snapshot and do not queue background work, bridge updates, or a second final answer.
-Timed *_at timestamps in this snapshot are formatted in the snapshot timezone and match the user-visible dashboard. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date.
+Timed *_at timestamps in this snapshot are formatted in the snapshot timezone and match the user-visible dashboard. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date. When multiple workspaces are relevant, mention the workspace names only when needed to avoid ambiguity.
 {$json}
 TEXT;
     }
@@ -243,10 +251,12 @@ TEXT;
         return $candidate !== '' ? $candidate : null;
     }
 
-    private function taskPayload(Task $task, string $timezone): array
+    private function taskPayload(Task $task, string $timezone, Collection $workspacesById): array
     {
         return [
             'id' => $task->id,
+            'workspace_id' => $task->workspace_id,
+            'workspace' => $this->workspaceReference($workspacesById->get((int) $task->workspace_id), (int) $task->workspace_id),
             'title' => $task->title,
             'due_at' => $this->localIso($task->due_at, $timezone),
             'due_at_utc' => $this->utcIso($task->due_at),
@@ -259,10 +269,12 @@ TEXT;
         ];
     }
 
-    private function reminderPayload(Reminder $reminder, string $timezone): array
+    private function reminderPayload(Reminder $reminder, string $timezone, Collection $workspacesById): array
     {
         return [
             'id' => $reminder->id,
+            'workspace_id' => $reminder->workspace_id,
+            'workspace' => $this->workspaceReference($workspacesById->get((int) $reminder->workspace_id), (int) $reminder->workspace_id),
             'title' => $reminder->title,
             'remind_at' => $this->localIso($reminder->remind_at, $timezone),
             'remind_at_utc' => $this->utcIso($reminder->remind_at),
@@ -273,7 +285,7 @@ TEXT;
         ];
     }
 
-    private function calendarEventPayload(CalendarEvent $event, string $timezone): array
+    private function calendarEventPayload(CalendarEvent $event, string $timezone, Collection $workspacesById): array
     {
         $allDay = $this->eventAllDay($event);
         $displayStartDate = $allDay ? $this->storedDate($event->starts_at) : $this->localDate($event->starts_at, $timezone);
@@ -281,6 +293,8 @@ TEXT;
 
         return [
             'id' => $event->id,
+            'workspace_id' => $event->workspace_id,
+            'workspace' => $this->workspaceReference($workspacesById->get((int) $event->workspace_id), (int) $event->workspace_id),
             'title' => $event->title,
             'starts_at' => $allDay ? $displayStartDate : $this->localIso($event->starts_at, $timezone),
             'ends_at' => $allDay ? $displayEndDate : $this->localIso($event->ends_at, $timezone),
@@ -296,6 +310,41 @@ TEXT;
             'category' => $event->category,
             'critical' => (bool) $event->is_critical,
             'source' => data_get($event->metadata, 'source'),
+        ];
+    }
+
+    private function snapshotWorkspaces(User $user, Workspace $activeWorkspace): Collection
+    {
+        $workspaces = Workspace::query()
+            ->whereHas('memberships', fn (Builder $query) => $query->where('user_id', $user->id)->where('status', 'active'))
+            ->orderByRaw('case when id = ? then 0 else 1 end', [$activeWorkspace->id])
+            ->orderByRaw("case when type = 'personal' then 0 else 1 end")
+            ->orderBy('name')
+            ->get();
+
+        if (! $workspaces->contains(fn (Workspace $workspace): bool => (int) $workspace->id === (int) $activeWorkspace->id)) {
+            $workspaces->prepend($activeWorkspace);
+        }
+
+        return $workspaces->values();
+    }
+
+    private function workspacePayload(Workspace $workspace, bool $active): array
+    {
+        return [
+            'id' => $workspace->id,
+            'name' => $workspace->name,
+            'type' => $workspace->type,
+            'active' => $active,
+        ];
+    }
+
+    private function workspaceReference(?Workspace $workspace, ?int $workspaceId): array
+    {
+        return [
+            'id' => $workspace?->id ?? $workspaceId,
+            'name' => $workspace?->name,
+            'type' => $workspace?->type,
         ];
     }
 
@@ -408,6 +457,18 @@ TEXT;
         }
 
         return "{$startDate} through {$endDate}";
+    }
+
+    private function scopeAccessibleWorkspaceCalendars(Builder $query, User $user, Collection $workspaces): void
+    {
+        $query->where(function (Builder $workspaceQuery) use ($user, $workspaces): void {
+            foreach ($workspaces as $workspace) {
+                $workspaceQuery->orWhere(function (Builder $candidateQuery) use ($user, $workspace): void {
+                    $candidateQuery->where('workspace_id', $workspace->id);
+                    $this->scopeVisibleGoogleCalendars($candidateQuery, $user, $workspace);
+                });
+            }
+        });
     }
 
     private function scopeVisibleGoogleCalendars(Builder $query, User $user, Workspace $workspace): void

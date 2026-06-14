@@ -1,21 +1,16 @@
-const wakeStarter = '(?:hey|hay|hi|hello|okay|ok|kay)';
+const wakeStarter = '(?:hey|hay)';
 const beanVariant =
-    '(?:bean|beans|been|ben|beam|beem|bein|being|bin|bing|bien|bain|bane|dean|deen)';
-const compactBeanVariant = 'b(?:ean|eans|een|en|eam|eem|ein|eing|in|ing|ien|ain|ane)';
+    '(?:bean|beans|been|ben|beam|beem|bien)';
+const compactBeanVariant = 'b(?:ean|eans|een|en|eam|eem|ien)';
 
 const wakePhrasePattern = new RegExp(
     [
-        `(?:^|\\s)${wakeStarter}\\s*,?\\s*${beanVariant}\\b[\\s,.:;!?-]*`,
-        `(?:^|\\s)${wakeStarter}\\s*${compactBeanVariant}\\b[\\s,.:;!?-]*`,
-        `(?:^|\\s)${wakeStarter}\\s*,?\\s*(?:b|bee)\\b[\\s,.:;!?-]*`,
-        `^\\s*${beanVariant}\\b[\\s,.:;!?-]*`,
-        `^\\s*${compactBeanVariant}\\b[\\s,.:;!?-]*`,
-        '^\\s*a\\s+bean\\b[\\s,.:;!?-]*',
+        `^\\s*${wakeStarter}\\s*,?\\s*${beanVariant}\\b[\\s,.:;!?-]*`,
+        `^\\s*${wakeStarter}\\s*${compactBeanVariant}\\b[\\s,.:;!?-]*`,
+        `^\\s*${wakeStarter}\\s*,?\\s*(?:b|bee)\\b[\\s,.:;!?-]*`,
     ].join('|'),
     'i',
 );
-
-const wakeStarterOnlyPattern = new RegExp(`^\\s*${wakeStarter}\\s*[,.!?-]*\\s*$`, 'i');
 
 export function commandAfterWakePhrase(transcript) {
     const text = String(transcript || '').replace(/\s+/g, ' ').trim();
@@ -25,16 +20,14 @@ export function commandAfterWakePhrase(transcript) {
     return text.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
 }
 
-export function transcriptIsWakeStarterOnly(transcript) {
-    return wakeStarterOnlyPattern.test(String(transcript || ''));
-}
-
 export function normalizedVoiceCommand(transcript) {
     return String(transcript || '')
         .toLowerCase()
         .replace(/[^a-z0-9\s']/g, ' ')
         .replace(/\s+/g, ' ')
-        .replace(/^(hey\s+bean|heybean|bean)\s+/, '')
+        .replace(/^(?:hey|hay)\s+(?:bean|beans|been|ben|beam|beem|bien)\s+/, '')
+        .replace(/^(?:hey|hay)b(?:ean|eans|een|en|eam|eem|ien)\s+/, '')
+        .replace(/^bean\s+/, '')
         .replace(/\s+bean$/, '')
         .trim();
 }

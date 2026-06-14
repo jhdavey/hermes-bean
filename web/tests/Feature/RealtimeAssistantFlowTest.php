@@ -10,6 +10,7 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceMembership;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -281,6 +282,19 @@ class RealtimeAssistantFlowTest extends TestCase
         $token = $this->apiToken('realtime-context@example.com');
         $user = User::where('email', 'realtime-context@example.com')->firstOrFail();
         $workspace = Workspace::findOrFail($user->default_workspace_id);
+        $household = Workspace::create([
+            'type' => 'household',
+            'name' => 'Household',
+            'created_by_user_id' => $user->id,
+            'status' => 'active',
+        ]);
+        WorkspaceMembership::create([
+            'workspace_id' => $household->id,
+            'user_id' => $user->id,
+            'role' => 'owner',
+            'status' => 'active',
+            'accepted_at' => now(),
+        ]);
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'runtime_mode' => 'realtime',
             'metadata' => [
@@ -295,16 +309,30 @@ class RealtimeAssistantFlowTest extends TestCase
             'remind_at' => now()->addHour(),
             'status' => 'pending',
         ]);
+        Reminder::create([
+            'user_id' => $user->id,
+            'workspace_id' => $household->id,
+            'title' => 'Move laundry',
+            'remind_at' => now()->addHours(2),
+            'status' => 'pending',
+        ]);
 
         $this->withToken($token)->getJson("/api/assistant/realtime/dashboard-context?session_id={$sessionId}")
             ->assertOk()
             ->assertJsonPath('data.snapshot.workspace.id', $workspace->id)
+            ->assertJsonPath('data.snapshot.workspace.active', true)
+            ->assertJsonPath('data.snapshot.workspaces.0.id', $workspace->id)
+            ->assertJsonPath('data.snapshot.workspaces.1.id', $household->id)
             ->assertJsonPath('data.snapshot.reminders_due.0.title', 'Call insurance')
-            ->assertJsonPath('data.snapshot.counts.reminders_next_7_days', 1)
+            ->assertJsonPath('data.snapshot.reminders_due.1.title', 'Move laundry')
+            ->assertJsonPath('data.snapshot.reminders_due.1.workspace.id', $household->id)
+            ->assertJsonPath('data.snapshot.counts.reminders_next_7_days', 2)
+            ->assertJsonPath('data.snapshot.counts.workspaces', 2)
+            ->assertJsonPath('data.snapshot.window.future_days', 7)
             ->assertJsonPath('data.snapshot.timezone', '-04:00')
             ->assertJson(fn ($json) => $json
-                ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'Dashboard context snapshot') && str_contains($value, 'the turn is complete'))
-                ->where('data.instructions', fn (string $value): bool => str_contains($value, 'Call insurance') && str_contains($value, 'Only respond when the user is clearly talking to Bean'))
+                ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'cross-workspace snapshot') && str_contains($value, 'the turn is complete'))
+                ->where('data.instructions', fn (string $value): bool => str_contains($value, 'Move laundry') && str_contains($value, 'Only respond when the user is clearly talking to Bean'))
                 ->etc()
             );
     }
@@ -453,8 +481,8 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertJsonPath('data.snapshot.calendar_upcoming.1.starts_at_utc', '2026-06-07T00:00:00+00:00')
             ->assertJsonPath('data.snapshot.calendar_upcoming.1.display_start_date', '2026-06-07')
             ->assertJsonPath('data.snapshot.calendar_upcoming.1.display_end_date', '2026-06-09')
-            ->assertJsonPath('data.snapshot.tasks_upcoming_month.0.due_at', '2026-06-08T20:00:00-04:00')
-            ->assertJsonPath('data.snapshot.tasks_upcoming_month.0.display_due_date', '2026-06-08')
+            ->assertJsonPath('data.snapshot.tasks_upcoming_next_7_days.0.due_at', '2026-06-08T20:00:00-04:00')
+            ->assertJsonPath('data.snapshot.tasks_upcoming_next_7_days.0.display_due_date', '2026-06-08')
             ->assertJsonPath('data.snapshot.reminders_due.0.remind_at', '2026-06-08T20:00:00-04:00')
             ->assertJsonPath('data.snapshot.reminders_due.0.display_remind_date', '2026-06-08')
             ->assertJson(fn ($json) => $json

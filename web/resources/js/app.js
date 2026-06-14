@@ -2,7 +2,6 @@ import {
     commandAfterWakePhrase,
     normalizedVoiceCommand,
     realtimeSpokenAnswerAllowsBackgroundQueue,
-    transcriptIsWakeStarterOnly,
     voiceCommandNeedsAgentWork,
     voiceCommandRequiresBackgroundWork,
     voiceCommandWantsDetailedChat,
@@ -5849,13 +5848,20 @@ if (mount) {
         return Boolean(kioskRealtimeWakeContinuationUntil && Date.now() < kioskRealtimeWakeContinuationUntil);
     }
 
+    function realtimeTranscriptLooksLikeFollowup(transcript) {
+        const normalized = normalizedRealtimeTranscript(transcript);
+        if (!normalized) return false;
+        return /^(?:what else|anything else|anything more|and\b|also\b|plus\b|what about\b|how about\b|then\b|next\b|for tomorrow\b|tomorrow\b|today\b|tonight\b|this week\b|do that\b|go ahead\b|sounds good\b)\b/.test(normalized)
+            || /^(?:can you|could you|would you)\s+(?:also|check|show|tell|add|create|move|update|remind|schedule)\b/.test(normalized);
+    }
+
     function realtimeTranscriptCanContinueWithoutWake(transcript) {
         const normalized = normalizedRealtimeTranscript(transcript);
         if (!normalized) return false;
         if (realtimeTranscriptMentionsBean(transcript)) return true;
         if (kioskRealtimeAwaitingFollowup) return true;
         if (realtimeWakeContinuationActive()) return true;
-        if (kioskConversationActive) return true;
+        if (kioskConversationActive && realtimeTranscriptLooksLikeFollowup(normalized)) return true;
         if (kioskRealtimeResponseTimer && kioskRealtimePendingUser && !kioskRealtimePendingUser.persisted) return true;
         if (realtimeBackgroundWorkPending() && realtimeTranscriptLooksLikeStatusCheck(normalized)) return true;
         return false;
@@ -5922,17 +5928,6 @@ if (mount) {
         }
         const command = commandAfterWakePhrase(raw);
         const isWakeTurn = command !== null;
-        if (!isWakeTurn && !kioskConversationActive && transcriptIsWakeStarterOnly(raw)) {
-            beginKioskConversation();
-            kioskRealtimeWakeContinuationUntil = Date.now() + kioskRealtimeWakeContinuationMs;
-            logKioskRealtimeVoiceTrace('realtime_voice_wake_starter_only', {
-                summary: 'Wake starter heard without Bean or a command yet.',
-                transcript: raw,
-            });
-            setKioskVoiceStatus('listening', 'Go ahead');
-            armKioskConversationTimeout(kioskRealtimeWakeContinuationMs);
-            return;
-        }
         if (realtimeAssistantOutputActive()) {
             if (realtimeTranscriptRequestsCancel(raw, command, isWakeTurn)) {
                 cancelKioskVoiceCapture();
