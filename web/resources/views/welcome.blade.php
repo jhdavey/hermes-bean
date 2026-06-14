@@ -81,8 +81,7 @@
         <div class="capability-map">
             <article class="capability-hero">
                 <div>
-                    <span class="capability-kicker">Command center</span>
-                    <h3>One place for the moving pieces.</h3>
+                    <h3>Command center for the moving pieces.</h3>
                     <p>See what Bean has handled, what still needs attention, and where each item belongs.</p>
                 </div>
                 <div>
@@ -90,56 +89,35 @@
                         <b>What stays organized</b>
                         <p>Accounts, critical items, recurring routines, shared spaces, and anything waiting on your approval.</p>
                     </div>
-                    <div class="capability-outcomes" aria-label="Example Bean outcomes">
-                        <span>Accounts connected</span>
-                        <span>Critical items flagged</span>
-                        <span>Routines tracked</span>
-                        <span>Approvals queued</span>
-                    </div>
                 </div>
             </article>
             <div class="capability-lanes">
                 <article class="capability-lane">
-                    <span class="lane-label">Plan your day</span>
-                    <h3>Calendars that show the whole load.</h3>
+                    <h3>Plan your day with calendars that show the whole load.</h3>
                     <p>Connect accounts and scan the day, week, or month before saying yes to anything else.</p>
                     <ul class="capability-list">
                         <li><strong>Connected calendars</strong> for multiple accounts.</li>
                         <li><strong>Daily, weekly, and monthly views</strong> for short and long-range planning.</li>
                         <li><strong>Scheduling assist</strong> for finding room without hunting manually.</li>
                     </ul>
-                    <div class="capability-tags">
-                        <span>Open space</span>
-                        <span>Calendar load</span>
-                    </div>
                 </article>
                 <article class="capability-lane">
-                    <span class="lane-label">Capture what matters</span>
-                    <h3>Tasks and reminders with enough context.</h3>
+                    <h3>Capture what matters with tasks and reminders.</h3>
                     <p>Fast capture for work, home, school, errands, and the recurring routines that are easy to miss.</p>
                     <ul class="capability-list">
                         <li><strong>Task management</strong> for categories, priority, and overdue visibility.</li>
                         <li><strong>Push and email reminders</strong> for one-time nudges.</li>
                         <li><strong>Recurring routines</strong> for the things that repeat.</li>
                     </ul>
-                    <div class="capability-tags">
-                        <span>Critical task</span>
-                        <span>Routine</span>
-                    </div>
                 </article>
                 <article class="capability-lane">
-                    <span class="lane-label">Keep context together</span>
-                    <h3>Workspaces for each part of life.</h3>
+                    <h3>Keep context together in workspaces for each part of life.</h3>
                     <p>Separate household, work, school, and project details without turning them into separate apps.</p>
                     <ul class="capability-list">
                         <li><strong>Workspaces</strong> for personal, household, work, school, and projects.</li>
                         <li><strong>Saved history and context</strong> for conversations, memory, and decisions.</li>
                         <li><strong>Approval guardrails</strong> for changes that should wait for review.</li>
                     </ul>
-                    <div class="capability-tags">
-                        <span>Shared context</span>
-                        <span>Review queue</span>
-                    </div>
                 </article>
             </div>
         </div>
