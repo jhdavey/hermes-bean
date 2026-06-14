@@ -19,6 +19,7 @@
         .capability-map{display:grid;grid-template-columns:minmax(0,1.02fr) minmax(340px,.98fr);gap:18px;align-items:stretch;margin-top:30px}.capability-hero{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;min-height:520px;border:1px solid rgba(191,230,200,.38);border-radius:34px;background:radial-gradient(circle at 80% 18%,rgba(34,197,94,.34),transparent 42%),linear-gradient(180deg,#102016,#182d20);box-shadow:0 30px 80px rgba(16,32,22,.24);color:white;padding:34px}.capability-hero:before{content:"";position:absolute;inset:auto -70px -90px auto;width:250px;height:250px;border-radius:999px;background:rgba(22,163,74,.28);filter:blur(4px)}.capability-kicker{display:inline-flex;width:max-content;border:1px solid rgba(187,247,208,.34);border-radius:999px;background:rgba(187,247,208,.12);color:#bbf7d0;padding:8px 11px;font-size:12px;font-weight:950}.capability-hero h3{position:relative;margin:18px 0 12px;font-size:clamp(34px,4.5vw,56px);line-height:.92;letter-spacing:-.055em}.capability-hero p{position:relative;color:#dbe8dd;line-height:1.55;max-width:560px;margin:0}.capability-command{position:relative;margin-top:28px;border:1px solid rgba(255,255,255,.14);border-radius:24px;background:rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.08);padding:18px}.capability-command b{display:block;color:#bbf7d0;margin-bottom:8px}.capability-command p{font-size:16px!important;color:white!important}.capability-outcomes{position:relative;display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.capability-outcomes span{display:inline-flex;align-items:center;border:1px solid rgba(187,247,208,.34);border-radius:999px;background:rgba(187,247,208,.13);color:#d9fbe4;padding:8px 10px;font-size:12px;font-weight:950}.capability-lanes{display:grid;gap:14px}.capability-lane{background:rgba(255,255,255,.82);border:1px solid var(--line);border-radius:28px;padding:22px;box-shadow:0 16px 48px rgba(24,80,40,.08)}.lane-label{display:inline-flex;border:1px solid #bfe6c8;border-radius:999px;background:#effaf0;color:#087a35;padding:7px 10px;font-size:12px;font-weight:950}.capability-lane h3{margin:12px 0 10px;font-size:24px;line-height:1.05;letter-spacing:-.035em}.capability-lane p{margin:0;color:var(--muted);line-height:1.5}.capability-list{display:grid;gap:9px;margin:16px 0 0;padding:0;list-style:none}.capability-list li{display:grid;grid-template-columns:22px 1fr;gap:9px;align-items:start;color:#26332a;font-weight:820;line-height:1.35}.capability-list li:before{content:"✓";display:grid;place-items:center;width:22px;height:22px;border-radius:999px;background:#dcfce7;color:#087a35;font-size:13px;font-weight:950}.capability-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.capability-tags span{border:1px solid rgba(191,230,200,.96);border-radius:999px;background:#fffdf7;color:#203126;padding:7px 9px;font-size:12px;font-weight:900}@media(max-width:860px){.capability-map{grid-template-columns:1fr}.capability-hero{min-height:auto}.capability-lanes{grid-template-columns:1fr}}@media(max-width:520px){.capability-hero,.capability-lane{border-radius:24px;padding:22px}.capability-hero h3{font-size:36px}.capability-command{padding:15px}}
         .capability-map{grid-template-columns:1fr;gap:18px;margin-top:32px}.capability-hero{display:grid;grid-template-columns:minmax(0,.86fr) minmax(360px,1.14fr);align-items:center;gap:30px;min-height:0;border-radius:32px;padding:30px 32px;background:linear-gradient(135deg,#102016 0%,#173522 58%,#0f2418 100%);box-shadow:0 26px 70px rgba(16,32,22,.2)}.capability-hero:before{width:190px;height:190px;inset:-58px -52px auto auto;background:rgba(34,197,94,.2);filter:blur(2px)}.capability-kicker{background:rgba(187,247,208,.14)}.capability-hero h3{font-size:clamp(30px,3.8vw,48px);line-height:.98;letter-spacing:-.045em;margin:14px 0 10px;max-width:460px}.capability-hero p{font-size:17px;line-height:1.55;max-width:510px}.capability-command{margin-top:0;border-radius:22px;background:rgba(255,255,255,.1);padding:18px 20px}.capability-command p{font-size:18px!important;line-height:1.42!important}.capability-outcomes{margin-top:12px;gap:7px}.capability-outcomes span{background:rgba(239,250,240,.12);padding:8px 10px}.capability-lanes{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.capability-lane{display:flex;flex-direction:column;min-height:100%;border-radius:24px;padding:24px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(255,253,247,.86));box-shadow:0 18px 44px rgba(24,80,40,.075)}.capability-lane h3{font-size:22px;line-height:1.12;letter-spacing:-.03em;margin:14px 0 10px}.capability-lane p{font-size:15px;line-height:1.55}.capability-list{gap:10px;margin-top:18px}.capability-list li{grid-template-columns:20px 1fr;gap:10px;font-size:14.5px;line-height:1.38;font-weight:760}.capability-list li:before{width:20px;height:20px;font-size:12px}.capability-tags{margin-top:auto;padding-top:18px}.capability-tags span{background:#f8fff8}@media(max-width:980px){.capability-hero{grid-template-columns:1fr;gap:22px}.capability-lanes{grid-template-columns:1fr}.capability-lane{min-height:0}}@media(max-width:520px){.capability-map{gap:14px;margin-top:24px}.capability-hero{border-radius:24px;padding:22px}.capability-hero h3{font-size:34px}.capability-command p{font-size:16px!important}.capability-lane{border-radius:22px;padding:20px}}
         .capability-list li{position:relative;display:block;padding-left:30px;color:#4f5d53;font-weight:700}.capability-list li:before{position:absolute;left:0;top:0}.capability-list li strong{display:inline;color:#26332a;font-weight:950}
+        .feature-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.feature-grid .capability-lane h3{margin-top:0}.feature-grid .capability-lane p{font-size:15.5px}.feature-grid .capability-list{margin-top:16px}@media(max-width:1080px){.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:680px){.feature-grid{grid-template-columns:1fr}}
         @media(max-width:860px){.hero{row-gap:18px}.hero-copy{display:contents}.hero-copy h1{order:1}.hero-subhead{order:2}.hero-visual{order:3}.hero-copy .form{order:4}.hero-copy .micro{order:5}.hero-voice{order:6}.prompt-bubbles{order:7}}
         .signup-modal{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:rgba(16,32,22,.46);backdrop-filter:blur(14px)}.signup-modal-card{width:min(520px,100%);border:1px solid rgba(191,230,200,.9);border-radius:34px;background:linear-gradient(180deg,#fffdf7,#f2fbf1);box-shadow:0 34px 100px rgba(16,32,22,.25);padding:32px;text-align:center}.signup-modal-icon{width:58px;height:58px;margin:0 auto 16px;display:grid;place-items:center;border-radius:20px;background:#dcfce7;color:#087a35;font-size:28px;font-weight:950}.signup-modal-card h2{margin:0 0 10px;font-size:clamp(28px,5vw,42px);line-height:1;letter-spacing:-.045em}.signup-modal-card p{margin:0 auto 22px;color:var(--muted);font-size:17px;line-height:1.55;max-width:430px}.signup-modal-card .button{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border-radius:999px;padding:13px 18px;background:var(--ink);color:white;font-weight:900}
         .public-beta-banner{position:sticky;top:0;z-index:25;width:100%;min-height:34px;border-bottom:1px solid rgba(22,163,74,.2);background:linear-gradient(135deg,rgba(22,163,74,.96),rgba(34,197,94,.94));color:#fff;font-size:13px;font-weight:850;letter-spacing:0;text-align:center;box-shadow:0 8px 20px rgba(22,163,74,.16)}.public-beta-banner-inner{width:min(1160px,calc(100% - 32px));min-height:34px;margin:0 auto;display:flex;align-items:center;justify-content:center;padding:8px 0}.public-beta-banner strong{font-weight:950}.public-beta-banner a{color:inherit;font-weight:950;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}@media(max-width:620px){.public-beta-banner-inner{justify-content:flex-start;text-align:left;line-height:1.35}}
@@ -76,52 +77,49 @@
     </section>
 
     <section class="wrap section" id="features">
-        <h2>Everything Bean needs to help run your day.</h2>
-        <p class="lead">The app gives Bean a clear place for every commitment, note, routine, and approval instead of scattering them across separate tools.</p>
+        <h2>Simple schedule and task management, with Bean built in.</h2>
+        <p class="lead">Use the app directly for reliable calendars, tasks, and reminders. Ask Bean when you want AI to help create, find, move, or summarize the work.</p>
         <div class="capability-map">
-            <article class="capability-hero">
-                <div>
-                    <h3>Command center for the moving pieces.</h3>
-                    <p>See what Bean has handled, what still needs attention, and where each item belongs.</p>
-                </div>
-                <div>
-                    <div class="capability-command">
-                        <b>What stays organized</b>
-                        <p>Accounts, critical items, recurring routines, shared spaces, and anything waiting on your approval.</p>
-                    </div>
-                </div>
-            </article>
-            <div class="capability-lanes">
+            <div class="capability-lanes feature-grid">
                 <article class="capability-lane">
-                    <h3>Plan your day with calendars that show the whole load.</h3>
-                    <p>Connect accounts and scan the day, week, or month before saying yes to anything else.</p>
+                    <h3>Calendar</h3>
+                    <p>See your schedule clearly before the day gets away from you.</p>
                     <ul class="capability-list">
-                        <li><strong>Connected calendars</strong> for multiple accounts.</li>
-                        <li><strong>Daily, weekly, and monthly views</strong> for short and long-range planning.</li>
-                        <li><strong>Scheduling assist</strong> for finding room without hunting manually.</li>
+                        <li><strong>Daily, weekly, and monthly views</strong> for quick planning.</li>
+                        <li><strong>Connected accounts</strong> so personal and work events stay visible.</li>
+                        <li><strong>Fast event editing</strong> when plans change.</li>
                     </ul>
                 </article>
                 <article class="capability-lane">
-                    <h3>Capture what matters with tasks and reminders.</h3>
-                    <p>Fast capture for work, home, school, errands, and the recurring routines that are easy to miss.</p>
+                    <h3>Tasks</h3>
+                    <p>Keep the work in front of you until it is finished.</p>
                     <ul class="capability-list">
-                        <li><strong>Task management</strong> for categories, priority, and overdue visibility.</li>
-                        <li><strong>Push and email reminders</strong> for one-time nudges.</li>
-                        <li><strong>Recurring routines</strong> for the things that repeat.</li>
+                        <li><strong>Simple capture</strong> for personal, household, school, and work items.</li>
+                        <li><strong>Priority and categories</strong> so important tasks are easy to spot.</li>
+                        <li><strong>Overdue visibility</strong> so nothing quietly disappears.</li>
                     </ul>
                 </article>
                 <article class="capability-lane">
-                    <h3>Keep context together in workspaces for each part of life.</h3>
-                    <p>Separate household, work, school, and project details without turning them into separate apps.</p>
+                    <h3>Reminders</h3>
+                    <p>Get reliable nudges for the things that need to happen at the right time.</p>
                     <ul class="capability-list">
-                        <li><strong>Workspaces</strong> for personal, household, work, school, and projects.</li>
-                        <li><strong>Saved history and context</strong> for conversations, memory, and decisions.</li>
-                        <li><strong>Approval guardrails</strong> for changes that should wait for review.</li>
+                        <li><strong>One-time reminders</strong> for appointments, errands, and follow-ups.</li>
+                        <li><strong>Recurring routines</strong> for repeated responsibilities.</li>
+                        <li><strong>Push and email alerts</strong> when timing matters.</li>
+                    </ul>
+                </article>
+                <article class="capability-lane">
+                    <h3>Bean AI assistant</h3>
+                    <p>Use chat or voice when you want the app to do the setup with you.</p>
+                    <ul class="capability-list">
+                        <li><strong>Create and update</strong> events, tasks, and reminders from plain language.</li>
+                        <li><strong>Answer schedule questions</strong> without digging through screens.</li>
+                        <li><strong>Approval guardrails</strong> keep sensitive changes under your control.</li>
                     </ul>
                 </article>
             </div>
         </div>
-        <div class="quote"><p>Start with one request. Bean turns it into the next right action.</p><a class="button" href="#early-access">Get early access</a></div>
+        <div class="quote"><p>Open the app to manage your day. Ask Bean when you want it done faster.</p><a class="button" href="#early-access">Get early access</a></div>
     </section>
 
     @if (session('early_access_status'))
