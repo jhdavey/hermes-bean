@@ -40,7 +40,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>HeyBean uses the microphone for realtime voice conversations with Bean.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>HeyBean uses WebRTC for realtime conversations. Camera access is only requested if you choose a video-capable conversation feature.</string>
+	<string>HeyBean uses the camera only when you choose camera-based features, such as scanning a payment card with Stripe or using a video-capable conversation feature.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
