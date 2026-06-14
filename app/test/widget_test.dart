@@ -1589,35 +1589,36 @@ void main() {
     expect(realtime.microphoneEnabled, isFalse);
   });
 
-  testWidgets('typed Bean chat uses realtime text when available', (
-    WidgetTester tester,
-  ) async {
-    final api = _SignedInFakeHermesApiClient();
-    final realtime = _FakeBeanRealtimeConversation(api);
-    await tester.pumpWidget(
-      HermesBeanApp(
-        apiClient: api,
-        tokenStore: _MemoryAuthTokenStore(),
-        realtimeConversation: realtime,
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'typed Bean chat uses queued model route without starting realtime',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      final realtime = _FakeBeanRealtimeConversation(api);
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: _MemoryAuthTokenStore(),
+          realtimeConversation: realtime,
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-bean')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('chat-input')), 'Plan today');
-    await tester.tap(find.byKey(const Key('primary-chat-action')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('chat-input')), 'Plan today');
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle();
 
-    expect(realtime.started, isTrue);
-    expect(realtime.startMicrophoneValues, [false]);
-    expect(realtime.microphoneEnabled, isFalse);
-    expect(realtime.sentTexts, ['Plan today']);
-    expect(api.sentMessages, isEmpty);
-    expect(find.text('Plan today'), findsOneWidget);
-  });
+      expect(realtime.started, isFalse);
+      expect(realtime.startMicrophoneValues, isEmpty);
+      expect(realtime.sentTexts, isEmpty);
+      expect(api.sentMessages, ['Plan today']);
+      expect(find.text('Done — I updated your day.'), findsOneWidget);
+      expect(find.text('Plan today'), findsOneWidget);
+    },
+  );
 
-  testWidgets('typed Bean chat falls back to queued work if realtime fails', (
+  testWidgets('typed Bean chat does not start failing realtime', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -1637,7 +1638,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pumpAndSettle();
 
-    expect(realtime.started, isTrue);
+    expect(realtime.started, isFalse);
     expect(api.sentMessages, ['Plan today']);
     expect(find.text('Done — I updated your day.'), findsOneWidget);
   });

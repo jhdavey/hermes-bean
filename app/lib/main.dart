@@ -2368,22 +2368,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   Future<bool> _trySendRealtimeText(String trimmed) async {
+    if (!_beanVoiceListening || !_realtimeConversation.active) {
+      return false;
+    }
     try {
-      if (!_realtimeConversation.active) {
-        final realtimeSession = await _realtimeConversation.start(
-          sessionId: _session?.id,
-          workspaceId: _user?.activeWorkspace?.numericId,
-          metadata: _flutterChatMetadata(),
-          microphoneEnabled: false,
-        );
-        if (!mounted) return false;
-        _realtimeConversation.setMicrophoneEnabled(false);
-        setState(() => _session = realtimeSession);
-      }
-      await _realtimeConversation.sendText(
-        trimmed,
-        audioResponse: _beanVoiceListening,
-      );
+      await _realtimeConversation.sendText(trimmed, audioResponse: true);
       return true;
     } catch (_) {
       return false;
