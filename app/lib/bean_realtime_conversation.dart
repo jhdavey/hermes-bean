@@ -93,7 +93,7 @@ class BeanRealtimeConversation {
     }
 
     onStatus?.call(
-      microphoneEnabled ? 'Connecting Bean voice' : 'Starting realtime...',
+      microphoneEnabled ? 'Connecting Bean voice' : 'Bean is waking up',
     );
 
     final realtimeSession = await apiClient.startRealtimeSession(

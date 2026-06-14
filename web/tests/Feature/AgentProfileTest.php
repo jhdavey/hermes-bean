@@ -35,6 +35,8 @@ class AgentProfileTest extends TestCase
         $this->assertSame('Balanced helper', $profile->settings['personality_label']);
         $this->assertStringContainsString('calm, practical, concise co-pilot', $profile->settings['personality_prompt']);
         $this->assertStringContainsString('one useful next suggestion', $profile->settings['personality_prompt']);
+        $this->assertContains('direct', AgentProfileService::personalityKeys());
+        $this->assertContains('gentle', AgentProfileService::personalityKeys());
         $this->withToken($token)->getJson('/api/auth/me')
             ->assertOk()
             ->assertJsonPath('data.agent_profile.settings.personality_type', 'balanced');

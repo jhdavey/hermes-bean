@@ -864,10 +864,11 @@ class StructuredHermesActionService
     {
         $profile = $this->profileForSession($session);
         $updates = $this->onlyPresent($parameters, ['slug', 'display_name', 'status', 'provider', 'model', 'router_mode', 'runtime_home', 'tool_policy', 'approval_policy', 'metadata']);
-        if (isset($parameters['settings']) && is_array($parameters['settings'])) {
+        $settings = $this->normalizedAgentProfileSettings($parameters);
+        if ($settings !== []) {
             $agentProfiles = app(AgentProfileService::class);
-            $profile = $agentProfiles->mergeSettings($profile, $parameters['settings'], 'agent');
-            if (data_get($parameters['settings'], 'onboarding.completed') === true) {
+            $profile = $agentProfiles->mergeSettings($profile, $settings, 'agent');
+            if (data_get($settings, 'onboarding.completed') === true) {
                 User::where('id', $session->user_id)->update(['onboard_complete' => $agentProfiles->preferencesReady($profile)]);
             }
         }
@@ -876,6 +877,57 @@ class StructuredHermesActionService
         }
 
         return $this->recordEvent($session, 'assistant.agent_profile.updated', ['agent_profile_id' => $profile->id], 'agent_profile.update', 'succeeded');
+    }
+
+    private function normalizedAgentProfileSettings(array $parameters): array
+    {
+        $settings = (isset($parameters['settings']) && is_array($parameters['settings']))
+            ? $parameters['settings']
+            : [];
+
+        $personality = $parameters['personality_type']
+            ?? $parameters['agent_personality']
+            ?? $parameters['personality']
+            ?? null;
+        if (is_string($personality) && trim($personality) !== '') {
+            $settings['personality_type'] = trim($personality);
+        }
+
+        $onboarding = (isset($settings['onboarding']) && is_array($settings['onboarding']))
+            ? $settings['onboarding']
+            : [];
+
+        foreach (['name', 'city', 'location'] as $key) {
+            if (isset($parameters[$key]) && is_string($parameters[$key]) && trim($parameters[$key]) !== '') {
+                $onboarding[$key === 'location' ? 'city' : $key] = trim($parameters[$key]);
+            }
+        }
+
+        if (isset($parameters['onboarding_priorities']) && is_array($parameters['onboarding_priorities'])) {
+            $onboarding['priorities'] = $parameters['onboarding_priorities'];
+        } elseif (isset($parameters['priorities']) && is_array($parameters['priorities'])) {
+            $onboarding['priorities'] = $parameters['priorities'];
+        } elseif (isset($parameters['what_matters']) && is_string($parameters['what_matters'])) {
+            $onboarding['priorities'] = [trim($parameters['what_matters'])];
+        }
+
+        $context = $parameters['onboarding_context']
+            ?? $parameters['context']
+            ?? $parameters['what_matters_most']
+            ?? null;
+        if (is_string($context) && trim($context) !== '') {
+            $onboarding['context'] = trim($context);
+        }
+
+        if (array_key_exists('completed', $parameters)) {
+            $onboarding['completed'] = (bool) $parameters['completed'];
+        }
+
+        if ($onboarding !== []) {
+            $settings['onboarding'] = $onboarding;
+        }
+
+        return $settings;
     }
 
     private function updateConversationSession(ConversationSession $session, array $parameters): ActivityEvent

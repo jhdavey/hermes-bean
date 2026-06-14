@@ -240,28 +240,42 @@ void main() {
       expect(api.registeredContext, isNull);
 
       expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
+      expect(
+        find.byKey(const Key('bean-intro-spotlight-overlay')),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('bean-intro-callout')), findsOneWidget);
       expect(
         find.text('Start by introducing yourself to Bean'),
         findsOneWidget,
       );
+      final introArrow = tester.getRect(
+        find.byKey(const Key('bean-intro-callout-arrow')),
+      );
+      final beanButton = tester.getRect(
+        find.byKey(const Key('heybean-center-bean-button')),
+      );
+      final arrowGap = beanButton.top - introArrow.bottom;
+      expect(arrowGap, greaterThanOrEqualTo(3));
+      expect(arrowGap, lessThanOrEqualTo(5));
 
       await tester.tap(find.byKey(const Key('bean-intro-callout')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('nav-bean')), findsOneWidget);
-      expect(
-        find.textContaining('Hi, I’m Bean. Start by introducing yourself'),
-        findsOneWidget,
-      );
+      expect(find.text("Hi, I'm Bean. What is your name?"), findsOneWidget);
 
       await tester.enterText(
         find.byKey(const Key('chat-input')),
-        'I am Bean User. I care about family, reminders, and planning. Please be a motivating coach.',
+        "Hi, I'm Harley",
       );
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pumpAndSettle();
 
-      expect(api.sentMessages.first, contains('I am Bean User'));
+      expect(api.sentMessages.first, contains("Hi, I'm Harley"));
+      expect(
+        find.text('Nice to meet you — I saved those Bean preferences.'),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('bean-intro-callout')), findsNothing);
 
       await tester.tap(find.byKey(const Key('nav-today')));
@@ -299,6 +313,11 @@ void main() {
         matches(RegExp(r'^[+-]\d{2}:\d{2}$')),
       );
       expect(typedClientContext['timezone_offset_minutes'], isA<int>());
+      await tester.drag(
+        find.byKey(const Key('chat-message-list')),
+        const Offset(0, -1000),
+      );
+      await tester.pumpAndSettle();
       expect(find.text('Done — I updated your day.'), findsOneWidget);
       expect(find.text('gpt-5.4'), findsOneWidget);
       expect(
@@ -1047,7 +1066,15 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('agent-personality-organizer')));
+    await tester.ensureVisible(
+      find.byKey(const Key('onboarding-priority-Family')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('onboarding-priority-Family')));
+    await tester.ensureVisible(
+      find.byKey(const Key('onboarding-priority-Work')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('onboarding-priority-Work')));
     await tester.enterText(
       find.byKey(const Key('onboarding-context')),
@@ -1222,6 +1249,8 @@ void main() {
     expect(find.text('A motivating helper for momentum'), findsOneWidget);
     expect(find.text('A detail-focused planner'), findsOneWidget);
     expect(find.text('A warm brainstorming partner'), findsOneWidget);
+    expect(find.text('A concise operator'), findsOneWidget);
+    expect(find.text('A calm companion'), findsOneWidget);
     expect(
       find.text('Best when you want gentle nudges without guilt or pressure.'),
       findsOneWidget,
@@ -1230,6 +1259,14 @@ void main() {
       find.text(
         'Turns brainstorms into real tasks, reminders, and calendar events.',
       ),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Best when you want Bean to be brief and efficient.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Best when you want Bean to help without adding urgency.'),
       findsOneWidget,
     );
   });
@@ -1303,10 +1340,7 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
-      expect(
-        find.textContaining('Hi, I’m Bean. Start by introducing yourself'),
-        findsOneWidget,
-      );
+      expect(find.text("Hi, I'm Bean. What is your name?"), findsOneWidget);
     },
   );
 
@@ -6082,6 +6116,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   List<String> selectedGoogleCalendarIds = <String>['primary'];
   String defaultGoogleCalendarId = 'primary';
   int cancelledSessionCalls = 0;
+  String? updatedName;
   String? registeredAgentPersonality;
   List<String>? registeredPriorities;
   String? registeredContext;
@@ -6305,6 +6340,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? onboardingContext,
     HermesNotificationPreferences? notificationPreferences,
   }) async {
+    updatedName = name ?? updatedName;
     updatedEmail = email ?? updatedEmail;
     updatedTheme = theme ?? updatedTheme;
     updatedAgentPersonality = agentPersonality ?? updatedAgentPersonality;
@@ -6313,7 +6349,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     updatedNotificationPreferences =
         notificationPreferences ?? updatedNotificationPreferences;
     return _user(
-      name: name ?? 'Bean User',
+      name: updatedName ?? 'Bean User',
       email: updatedEmail ?? 'bean@example.com',
     );
   }
@@ -6622,14 +6658,12 @@ class _FakeHermesApiClient extends HermesApiClient {
       }
       updatedContext =
           metadata?['onboarding_context']?.toString() ?? updatedContext;
-    } else if (content.toLowerCase().contains('i am bean user')) {
+    } else if (_looksLikeIntroMessage(content)) {
       updatedAgentPersonality = 'coach';
       updatedPriorities = ['Family', 'Reminders', 'Planning'];
       updatedContext = content;
     }
-    final isIntroductionMessage = content.toLowerCase().contains(
-      'i am bean user',
-    );
+    final isIntroductionMessage = _looksLikeIntroMessage(content);
     if (!isPreferenceOnlyMessage && !isIntroductionMessage) {
       plannedToday = true;
     }
@@ -6651,6 +6685,12 @@ class _FakeHermesApiClient extends HermesApiClient {
         ),
       ],
     );
+  }
+
+  bool _looksLikeIntroMessage(String content) {
+    final normalized = content.toLowerCase().replaceAll('’', "'");
+    return normalized.contains('i am bean user') ||
+        normalized.contains("i'm harley");
   }
 
   @override

@@ -60,12 +60,16 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         Http::assertSent(function ($request): bool {
             $payload = $request->data();
+            $systemPrompt = (string) data_get($payload, 'messages.0.content');
             $context = json_decode(str_replace("Runtime context:\n", '', (string) data_get($payload, 'messages.1.content')), true, flags: JSON_THROW_ON_ERROR);
             $toolNames = collect($payload['tools'] ?? [])->map(fn (array $tool): ?string => data_get($tool, 'function.name'));
 
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && $request->hasHeader('Authorization', 'Bearer test-key')
                 && data_get($payload, 'messages.0.role') === 'system'
+                && str_contains($systemPrompt, "location at city level only")
+                && str_contains($systemPrompt, "Balanced helper, Motivating coach, Detail organizer, Creative partner, Direct operator, and Gentle companion")
+                && str_contains($systemPrompt, "Settings > Bean preferences")
                 && data_get($payload, 'messages.1.role') === 'system'
                 && data_get($payload, 'messages.2.role') === 'user'
                 && data_get($payload, 'messages.2.content') === 'hello bean'
@@ -76,6 +80,68 @@ class HermesToolRuntimeServiceTest extends TestCase
                 && $toolNames->contains('update_task')
                 && ! $toolNames->contains('create_approval');
         });
+    }
+
+    public function test_tool_runtime_saves_onboarding_profile_from_top_level_tool_fields(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-onboarding-tool',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_profile',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'update_agent_profile',
+                                'arguments' => json_encode([
+                                    'name' => 'Harley',
+                                    'city' => 'Orlando',
+                                    'what_matters' => 'Family, reminders, and planning',
+                                    'personality_type' => 'coach',
+                                    'completed' => true,
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-onboarding-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'All set, Harley.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('onboarding-tool@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'onboarding',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => "Hi, I'm Harley",
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'All set, Harley.');
+
+        $user = User::where('email', 'onboarding-tool@example.com')->firstOrFail();
+        $profile = $user->agentProfile()->firstOrFail();
+
+        $this->assertTrue($user->refresh()->onboard_complete);
+        $this->assertSame('coach', $profile->settings['personality_type']);
+        $this->assertSame('Harley', data_get($profile->settings, 'onboarding.name'));
+        $this->assertSame('Orlando', data_get($profile->settings, 'onboarding.city'));
+        $this->assertTrue(data_get($profile->settings, 'onboarding.completed'));
+        $this->assertSame(['Family, reminders, and planning'], data_get($profile->settings, 'onboarding.priorities'));
     }
 
     public function test_tool_runtime_receives_voice_quick_reply_context_for_continuation(): void

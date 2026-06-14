@@ -1903,6 +1903,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     required String agentPersonality,
     required List<String> onboardingPriorities,
     String? onboardingContext,
+    String? name,
   }) async {
     final wasEditingAgentPreferences = _editingAgentPreferences;
     setState(() {
@@ -1911,6 +1912,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     });
     try {
       final updatedUser = await widget.apiClient.updateMe(
+        name: name,
         agentPersonality: agentPersonality,
         onboardingPriorities: onboardingPriorities,
         onboardingContext: onboardingContext,
@@ -1994,6 +1996,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         !(user.currentAgentProfile?.preferencesReady ?? false);
   }
 
+  bool get _showAgentOnboardingOverlay =>
+      _forceAgentOnboarding || _editingAgentPreferences;
+
+  bool get _showBeanIntroSpotlight =>
+      _phase == _AuthPhase.signedIn &&
+      _needsBeanIntroduction &&
+      _selectedDestination != _HomeDestination.bean &&
+      !_editingAgentPreferences &&
+      !_forceAgentOnboarding;
+
   Future<HermesSessionDetails?> _loadDailySessionForUser(
     HermesUser user, {
     String source = 'flutter',
@@ -2050,15 +2062,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   void _ensureBeanIntroductionPrompt() {
-    const prompt =
-        'Hi, I’m Bean. Start by introducing yourself — tell me what you want help with, what matters most day to day, and how you’d like me to work with you.';
+    const prompt = "Hi, I'm Bean. What is your name?";
     final alreadyPrompted = _messages.any(
       (message) => message.role == 'assistant' && message.content == prompt,
     );
     if (!alreadyPrompted) {
       _messages.add(
         HermesMessage(
-          id: _messages.length + 1,
+          id: _nextLocalMessageId(),
           role: 'assistant',
           content: prompt,
         ),
@@ -4361,6 +4372,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   @override
   Widget build(BuildContext context) {
     final criticalItemCount = _criticalItemCountForToday();
+    final showBeanIntroSpotlight = _showBeanIntroSpotlight;
     _scheduleAppIconBadgeSync(criticalItemCount);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: HeyBeanTheme.lightSystemOverlayStyle,
@@ -4453,6 +4465,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                     )
                   : null,
             ),
+            if (showBeanIntroSpotlight)
+              _BeanIntroSpotlightOverlay(
+                onBeanTap: () => _selectDestination(_HomeDestination.bean),
+              ),
           ],
         ),
       ),
@@ -4509,13 +4525,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
     final user = _user!;
     _scheduleApprovalSheet();
-    final showAgentOnboarding =
-        _forceAgentOnboarding || _editingAgentPreferences;
-    final showBeanIntroBubble =
-        _needsBeanIntroduction &&
-        _selectedDestination != _HomeDestination.bean &&
-        !_editingAgentPreferences &&
-        !_forceAgentOnboarding;
+    final showAgentOnboarding = _showAgentOnboardingOverlay;
     final editingAgentPreferences = _editingAgentPreferences;
     final dueReminder = _dueReminderBanner();
     final signedInContent = _signedInContent(user);
@@ -4556,15 +4566,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 _dismissedReminderBannerIds.add(dueReminder.id);
                 await _toggleReminderCompletion(dueReminder);
               },
-            ),
-          ),
-        if (showBeanIntroBubble)
-          Positioned(
-            left: 24,
-            right: 24,
-            bottom: 104 + MediaQuery.paddingOf(context).bottom,
-            child: _BeanIntroCallout(
-              onTap: () => _selectDestination(_HomeDestination.bean),
             ),
           ),
         if (showAgentOnboarding)
@@ -5305,6 +5306,30 @@ const List<_AgentPersonalityOption> _agentPersonalityOptions = [
       'Best when you want planning to feel a little more fun and imaginative.',
     ],
     icon: Icons.auto_awesome_rounded,
+  ),
+  _AgentPersonalityOption(
+    key: 'direct',
+    label: 'Direct',
+    description: 'Crisp, decisive, and action-first.',
+    infoTitle: 'A concise operator',
+    infoDetails: [
+      'Leads with the answer or completed action.',
+      'Asks only the minimum follow-up needed to move work forward.',
+      'Best when you want Bean to be brief and efficient.',
+    ],
+    icon: Icons.bolt_rounded,
+  ),
+  _AgentPersonalityOption(
+    key: 'gentle',
+    label: 'Gentle',
+    description: 'Patient, reassuring, and low-pressure.',
+    infoTitle: 'A calm companion',
+    infoDetails: [
+      'Keeps the tone soft and settled.',
+      'Breaks busy days into manageable next steps.',
+      'Best when you want Bean to help without adding urgency.',
+    ],
+    icon: Icons.spa_rounded,
   ),
 ];
 
@@ -19001,48 +19026,106 @@ class _BeanIntroCallout extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    key: const Key('bean-intro-callout'),
-    onTap: onTap,
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: HeyBeanTheme.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: HeyBeanTheme.accent),
-            boxShadow: [
-              BoxShadow(
-                color: HeyBeanTheme.accent.withValues(alpha: .14),
-                blurRadius: 24,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.eco_rounded, color: HeyBeanTheme.accentStrong),
-              const SizedBox(width: 10),
-              const Flexible(
-                child: Text(
-                  'Start by introducing yourself to Bean',
-                  key: Key('bean-intro-callout-text'),
-                  style: TextStyle(fontWeight: FontWeight.w800),
+  Widget build(BuildContext context) => Material(
+    type: MaterialType.transparency,
+    child: GestureDetector(
+      key: const Key('bean-intro-callout'),
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: HeyBeanTheme.surface,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: HeyBeanTheme.accent),
+              boxShadow: [
+                BoxShadow(
+                  color: HeyBeanTheme.accent.withValues(alpha: .14),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
                 ),
-              ),
-            ],
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.eco_rounded, color: HeyBeanTheme.accentStrong),
+                const SizedBox(width: 10),
+                const Flexible(
+                  child: Text(
+                    'Start by introducing yourself to Bean',
+                    key: Key('bean-intro-callout-text'),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: HeyBeanTheme.text,
+                      decoration: TextDecoration.none,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      height: 1.15,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        CustomPaint(
-          size: const Size(28, 22),
-          painter: _BeanIntroArrowPainter(),
-        ),
-      ],
+          CustomPaint(
+            key: const Key('bean-intro-callout-arrow'),
+            size: const Size(28, 22),
+            painter: _BeanIntroArrowPainter(),
+          ),
+        ],
+      ),
     ),
   );
+}
+
+class _BeanIntroSpotlightOverlay extends StatelessWidget {
+  const _BeanIntroSpotlightOverlay({required this.onBeanTap});
+
+  final VoidCallback onBeanTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final dockBottomPadding = bottomInset > 0 ? bottomInset + 2 : 6.0;
+    final bottomMenuHeight = 78.0 + dockBottomPadding;
+    const beanFabTopOffset = 7.0;
+    const beanFabSize = 98.0;
+    const beanButtonDiameter = 72.0;
+    const arrowGap = 4.0;
+    final beanFabBottom =
+        78.0 + dockBottomPadding - beanFabTopOffset - beanFabSize;
+    final beanButtonTopFromBottom =
+        beanFabBottom + (beanFabSize + beanButtonDiameter) / 2;
+    final calloutBottom = beanButtonTopFromBottom + arrowGap;
+
+    return Positioned.fill(
+      key: const Key('bean-intro-spotlight-overlay'),
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: bottomMenuHeight,
+            child: IgnorePointer(
+              child: ColoredBox(color: Colors.black.withValues(alpha: .32)),
+            ),
+          ),
+          Positioned(
+            left: 24,
+            right: 24,
+            bottom: calloutBottom,
+            child: _BeanIntroCallout(onTap: onBeanTap),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _BeanIntroArrowPainter extends CustomPainter {
