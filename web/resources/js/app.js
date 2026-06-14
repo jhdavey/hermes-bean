@@ -379,11 +379,14 @@ if (mount) {
             const normalized = String(value).toLowerCase();
             if (['1', 'true', 'yes', 'on'].includes(normalized)) {
                 localStorage.setItem(kioskVoiceKey, 'true');
+                return true;
             } else if (['0', 'false', 'no', 'off'].includes(normalized)) {
                 localStorage.removeItem(kioskVoiceKey);
+                return false;
             }
         }
-        return localStorage.getItem(kioskVoiceKey) === 'true';
+        localStorage.removeItem(kioskVoiceKey);
+        return false;
     }
 
     function pathForView(view) {
