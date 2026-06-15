@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Notifications\SubscriptionReceiptNotification;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
+use Throwable;
 
 class StripeBillingService
 {
@@ -276,6 +278,9 @@ class StripeBillingService
         $item = $subscription['items']['data'][0] ?? [];
         $priceId = $item['price']['id'] ?? null;
         $plan = $this->planForSubscription($subscription, $priceId);
+        $previousPlan = $user->subscriptionTier();
+        $previousSubscriptionId = $user->stripe_subscription_id;
+        $previousCancelAtPeriodEnd = (bool) $user->subscription_cancel_at_period_end;
 
         $user->forceFill([
             'subscription_tier' => $plan,
@@ -288,6 +293,61 @@ class StripeBillingService
             'subscription_trial_ends_at' => $this->timestampToCarbon($subscription['trial_end'] ?? null),
             'subscription_cancel_at_period_end' => (bool) ($subscription['cancel_at_period_end'] ?? false),
         ])->save();
+
+        $freshUser = $user->fresh();
+        if ($freshUser) {
+            $this->sendSubscriptionReceiptIfNeeded(
+                $freshUser,
+                $previousPlan,
+                $previousSubscriptionId,
+                $previousCancelAtPeriodEnd,
+            );
+        }
+    }
+
+    private function sendSubscriptionReceiptIfNeeded(
+        User $user,
+        string $previousPlan,
+        ?string $previousSubscriptionId,
+        bool $previousCancelAtPeriodEnd,
+    ): void {
+        if (! $user->stripe_subscription_id) {
+            return;
+        }
+
+        $type = null;
+        if (! $previousSubscriptionId) {
+            $type = 'signup';
+        } elseif (! $previousCancelAtPeriodEnd && (bool) $user->subscription_cancel_at_period_end) {
+            $type = 'cancellation';
+        } elseif ($this->planRank($user->subscriptionTier()) > $this->planRank($previousPlan)) {
+            $type = 'upgrade';
+        }
+
+        if (! $type) {
+            return;
+        }
+
+        try {
+            $user->notify(new SubscriptionReceiptNotification(
+                $type,
+                $user->subscriptionTier(),
+                $user->subscription_current_period_end,
+                $user->subscription_trial_ends_at,
+            ));
+        } catch (Throwable $exception) {
+            Log::warning('Subscription receipt notification failed.', [
+                'user_id' => $user->id,
+                'type' => $type,
+                'subscription_id' => $user->stripe_subscription_id,
+                'message' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function planRank(string $plan): int
+    {
+        return self::PLAN_RANKS[strtolower($plan)] ?? 0;
     }
 
     private function markSubscriptionDeleted(array $subscription): void

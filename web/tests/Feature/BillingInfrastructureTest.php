@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Notifications\SubscriptionReceiptNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class BillingInfrastructureTest extends TestCase
@@ -139,6 +141,7 @@ class BillingInfrastructureTest extends TestCase
     public function test_mobile_subscription_confirmation_creates_subscription_with_verified_payment_method(): void
     {
         $this->configureStripe();
+        Notification::fake();
         $token = $this->apiToken('mobile-confirm@example.com');
         $user = User::where('email', 'mobile-confirm@example.com')->firstOrFail();
         $user->forceFill(['stripe_customer_id' => 'cus_mobile_confirm_123'])->save();
@@ -216,6 +219,13 @@ class BillingInfrastructureTest extends TestCase
         $this->assertSame('premium', $user->subscription_tier);
         $this->assertSame('sub_mobile_123', $user->stripe_subscription_id);
         $this->assertSame('si_mobile_123', $user->stripe_subscription_item_id);
+
+        Notification::assertSentTo($user, SubscriptionReceiptNotification::class, function (SubscriptionReceiptNotification $notification) use ($user): bool {
+            $html = (string) $notification->toMail($user)->render();
+
+            return str_contains($html, 'Subscription started')
+                && str_contains($html, 'Your HeyBean Premium subscription is set up.');
+        });
     }
 
     public function test_mobile_subscription_confirmation_rejects_setup_intent_for_another_customer(): void
@@ -312,6 +322,7 @@ class BillingInfrastructureTest extends TestCase
     public function test_existing_subscription_upgrade_charges_proration_for_current_cycle(): void
     {
         $this->configureStripe();
+        Notification::fake();
         $token = $this->apiToken('upgrade@example.com');
         $user = User::where('email', 'upgrade@example.com')->firstOrFail();
         $user->forceFill([
@@ -360,11 +371,19 @@ class BillingInfrastructureTest extends TestCase
         $user->refresh();
         $this->assertSame('pro', $user->subscription_tier);
         $this->assertSame('price_pro_test', $user->stripe_price_id);
+
+        Notification::assertSentTo($user, SubscriptionReceiptNotification::class, function (SubscriptionReceiptNotification $notification) use ($user): bool {
+            $html = (string) $notification->toMail($user)->render();
+
+            return str_contains($html, 'Subscription upgraded')
+                && str_contains($html, 'Your HeyBean subscription is now on the Pro plan.');
+        });
     }
 
     public function test_existing_subscription_cancel_sets_renewal_to_period_end(): void
     {
         $this->configureStripe();
+        Notification::fake();
         $token = $this->apiToken('cancel@example.com');
         $user = User::where('email', 'cancel@example.com')->firstOrFail();
         $user->forceFill([
@@ -412,11 +431,19 @@ class BillingInfrastructureTest extends TestCase
         $user->refresh();
         $this->assertSame('trialing', $user->subscription_status);
         $this->assertTrue($user->subscription_cancel_at_period_end);
+
+        Notification::assertSentTo($user, SubscriptionReceiptNotification::class, function (SubscriptionReceiptNotification $notification) use ($user): bool {
+            $html = (string) $notification->toMail($user)->render();
+
+            return str_contains($html, 'Renewal canceled')
+                && str_contains($html, 'Renewal has been canceled for your Base plan.');
+        });
     }
 
     public function test_stripe_webhook_updates_user_subscription_tier(): void
     {
         $this->configureStripe();
+        Notification::fake();
         config()->set('services.stripe.webhook_secret', 'whsec_test');
         $user = User::factory()->create([
             'email' => 'webhook@example.com',
@@ -455,6 +482,13 @@ class BillingInfrastructureTest extends TestCase
         $this->assertSame('premium', $user->subscription_tier);
         $this->assertSame('sub_test_123', $user->stripe_subscription_id);
         $this->assertSame('si_test_123', $user->stripe_subscription_item_id);
+
+        Notification::assertSentTo($user, SubscriptionReceiptNotification::class, function (SubscriptionReceiptNotification $notification) use ($user): bool {
+            $html = (string) $notification->toMail($user)->render();
+
+            return str_contains($html, 'Subscription started')
+                && str_contains($html, 'Your HeyBean Premium subscription is set up.');
+        });
     }
 
     public function test_missing_stripe_configuration_returns_clear_error(): void
