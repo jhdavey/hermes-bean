@@ -394,6 +394,45 @@ void main() {
   );
 
   testWidgets(
+    'Bean onboarding reports client send failures without storing user content',
+    (WidgetTester tester) async {
+      final api = _MessageSendAlwaysFailsFakeHermesApiClient(
+        onboardingCompleted: false,
+      );
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('auth-email')),
+        'bean@example.com',
+      );
+      await tester.enterText(
+        find.byKey(const Key('auth-password')),
+        'correct-horse-battery-staple',
+      );
+      await tester.tap(find.byKey(const Key('auth-submit')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('bean-intro-callout')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('chat-input')), "I'm Harley");
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+
+      expect(api.sendMessageCalls, 2);
+      expect(api.queueMessageCalls, 1);
+      expect(find.text('Failed'), findsOneWidget);
+      expect(api.issueReports, hasLength(1));
+      expect(api.issueReports.single, contains('Flutter Bean chat failure'));
+      expect(api.issueReports.single, contains('bean_introduction: true'));
+      expect(api.issueReports.single, contains('content_length: 10'));
+      expect(api.issueReports.single, isNot(contains("I'm Harley")));
+    },
+  );
+
+  testWidgets(
     'creating a household keeps settings mounted without Flutter tree errors',
     (WidgetTester tester) async {
       final api = _WorkspaceFakeHermesApiClient();
@@ -6779,6 +6818,31 @@ class _DirectSendDropsFakeHermesApiClient extends _FakeHermesApiClient {
       content: content,
       metadata: metadata,
     );
+  }
+}
+
+class _MessageSendAlwaysFailsFakeHermesApiClient extends _FakeHermesApiClient {
+  _MessageSendAlwaysFailsFakeHermesApiClient({super.onboardingCompleted});
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) {
+    sendMessageCalls++;
+    throw StateError('simulated client send failure');
+  }
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) {
+    queueMessageCalls++;
+    throw StateError('simulated queued send failure');
   }
 }
 

@@ -1108,7 +1108,9 @@ class HermesApiClient {
           .openUrl(request.method, request.uri)
           .timeout(const Duration(seconds: 15));
       request.headers.forEach(ioRequest.headers.set);
-      if (request.body != null) ioRequest.write(jsonEncode(request.body));
+      if (request.body != null) {
+        ioRequest.add(utf8.encode(jsonEncode(request.body)));
+      }
 
       final ioResponse = await ioRequest.close().timeout(
         request.responseTimeout,

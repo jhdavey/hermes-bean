@@ -2240,6 +2240,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     var session = _session;
     if (trimmed.isEmpty || session == null) return;
     final runToken = ++_chatRunToken;
+    var chatPhase = 'preparing message';
     setState(() {
       _busy = true;
       _chatRunState = 'Bean is working…';
@@ -2248,6 +2249,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
     });
     try {
+      chatPhase = 'checking realtime text';
       final sentRealtime = await _trySendRealtimeText(trimmed);
       if (!mounted || runToken != _chatRunToken) return;
       if (sentRealtime) {
@@ -2258,6 +2260,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         return;
       }
       session = _session ?? session;
+      chatPhase = _needsBeanIntroduction
+          ? 'sending Bean introduction message'
+          : 'queueing Bean chat message';
       final result = _needsBeanIntroduction
           ? await _sendBeanIntroductionMessage(session.id, trimmed)
           : await widget.apiClient.queueMessage(
@@ -2284,6 +2289,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         return;
       }
 
+      chatPhase = 'refreshing Bean chat results';
       final refreshedEvents = await widget.apiClient
           .pollActivityEvents(session.id)
           .catchError((_) => result.events);
@@ -2351,7 +2357,18 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
       });
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint('Bean chat failed during $chatPhase: $error\n$stackTrace');
+      unawaited(
+        _reportChatFailure(
+          error: error,
+          stackTrace: stackTrace,
+          sessionId: session?.id,
+          phase: chatPhase,
+          beanIntroduction: _needsBeanIntroduction,
+          contentLength: trimmed.length,
+        ),
+      );
       if (!mounted || runToken != _chatRunToken) return;
       setState(() {
         _chatRunState = 'Failed';
@@ -2367,6 +2384,46 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _reportChatFailure({
+    required Object error,
+    required StackTrace stackTrace,
+    required int? sessionId,
+    required String phase,
+    required bool beanIntroduction,
+    required int contentLength,
+  }) async {
+    final stack = stackTrace.toString();
+    final message =
+        '''
+Flutter Bean chat failure
+phase: $phase
+bean_introduction: $beanIntroduction
+session_id: ${sessionId ?? 'unknown'}
+workspace_id: ${_user?.activeWorkspace?.numericId ?? 'unknown'}
+content_length: $contentLength
+error_type: ${error.runtimeType}
+error: ${_truncateDiagnostic(error.toString(), 1000)}
+stack:
+${_truncateDiagnostic(stack, 2200)}
+'''
+            .trim();
+
+    try {
+      await widget.apiClient.submitIssueReport(
+        message: message,
+        workspaceId: _user?.activeWorkspace?.numericId,
+        pageUrl: 'flutter://bean/chat',
+      );
+    } catch (reportError) {
+      debugPrint('Bean chat failure report failed: $reportError');
+    }
+  }
+
+  String _truncateDiagnostic(String value, int maxLength) {
+    if (value.length <= maxLength) return value;
+    return '${value.substring(0, maxLength)}…';
   }
 
   Future<HermesMessageResult> _sendBeanIntroductionMessage(

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_bean_app/hermes_api_client.dart';
@@ -31,6 +32,53 @@ void main() {
       ),
       Uri.parse('https://heybean.org/api'),
     );
+  });
+
+  test('default transport sends UTF-8 JSON request bodies', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    final requestFuture = server.first.then((request) async {
+      expect(request.method, 'POST');
+      expect(request.uri.path, '/api/assistant/sessions/42/messages');
+      expect(
+        request.headers.value(HttpHeaders.authorizationHeader),
+        'Bearer t',
+      );
+
+      final body = await utf8.decoder.bind(request).join();
+      expect(body, contains('I’m Harley'));
+      expect(jsonDecode(body), {
+        'content': 'I’m Harley',
+        'metadata': {'source': 'flutter'},
+      });
+
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'data': {
+            'status': 'completed',
+            'session': {'id': 42, 'status': 'active'},
+            'events': [],
+          },
+        }),
+      );
+      await request.response.close();
+    });
+
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://127.0.0.1:${server.port}/api'),
+      bearerToken: 't',
+    );
+
+    final result = await client.sendMessage(
+      sessionId: 42,
+      content: 'I’m Harley',
+      metadata: const {'source': 'flutter'},
+    );
+    await requestFuture;
+
+    expect(result.status, 'completed');
   });
 
   test('requests a password reset link without authenticating', () async {
