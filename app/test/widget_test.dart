@@ -1697,6 +1697,41 @@ void main() {
     },
   );
 
+  testWidgets('declining optional Bean setup uses a direct reply', (
+    WidgetTester tester,
+  ) async {
+    final api = _OptionalSetupDeclineFakeHermesApiClient();
+    final realtime = _FakeBeanRealtimeConversation(api);
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'All set — I’ll use the Detail organizer personality. Want me to help set up a few reminders or import existing lists now?',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.enterText(find.byKey(const Key('chat-input')), 'no thanks');
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle();
+
+    expect(realtime.started, isFalse);
+    expect(api.sentMessages, ['no thanks']);
+    expect(api.sendMessageCalls, 1);
+    expect(api.queueMessageCalls, 0);
+    expect(find.text('I’m working on that in the background.'), findsNothing);
+    expect(find.text('No problem — we can skip that.'), findsOneWidget);
+  });
+
   testWidgets('typed Bean chat does not start failing realtime', (
     WidgetTester tester,
   ) async {
@@ -7562,6 +7597,53 @@ class _ChatRefreshOverdueTaskFakeHermesApiClient
       ),
       events: [],
     );
+  }
+}
+
+class _OptionalSetupDeclineFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  _OptionalSetupDeclineFakeHermesApiClient() {
+    todaySession = const HermesSession(id: 42, status: 'active', title: 'Bean');
+    todaySessionMessages = const [
+      HermesMessage(
+        id: 70,
+        role: 'assistant',
+        content:
+            'All set — I’ll use the Detail organizer personality. Want me to help set up a few reminders or import existing lists now?',
+      ),
+    ];
+  }
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sendMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Bean'),
+      assistantMessage: HermesMessage(
+        id: 71,
+        role: 'assistant',
+        content: 'No problem — we can skip that.',
+      ),
+      events: [],
+    );
+  }
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) {
+    queueMessageCalls++;
+    throw StateError('declines should not be queued');
   }
 }
 

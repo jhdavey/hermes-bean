@@ -2260,11 +2260,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         return;
       }
       session = _session ?? session;
-      chatPhase = _needsBeanIntroduction
+      final needsBeanIntroduction = _needsBeanIntroduction;
+      final useDirectConversationReply =
+          !needsBeanIntroduction && _shouldUseDirectConversationReply(trimmed);
+      chatPhase = needsBeanIntroduction
           ? 'sending Bean introduction message'
+          : useDirectConversationReply
+          ? 'sending Bean conversation reply'
           : 'queueing Bean chat message';
-      final result = _needsBeanIntroduction
+      final result = needsBeanIntroduction
           ? await _sendBeanIntroductionMessage(session.id, trimmed)
+          : useDirectConversationReply
+          ? await widget.apiClient.sendMessage(
+              sessionId: session.id,
+              content: trimmed,
+              metadata: _flutterChatMetadata(),
+            )
           : await widget.apiClient.queueMessage(
               sessionId: session.id,
               content: trimmed,
@@ -2385,6 +2396,37 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
     }
   }
+
+  bool _shouldUseDirectConversationReply(String content) {
+    if (!_isConversationDecline(content)) return false;
+    final lastAssistant = _messages.reversed.where(
+      (message) => message.role == 'assistant',
+    );
+    if (lastAssistant.isEmpty) return false;
+    final normalized = _normalizeChatRoutingText(
+      lastAssistant.first.content ?? '',
+    );
+    return normalized.contains('want me to') ||
+        normalized.contains('would you like') ||
+        normalized.contains('do you want') ||
+        normalized.contains('should i') ||
+        normalized.contains('want help') ||
+        normalized.contains('help set up');
+  }
+
+  bool _isConversationDecline(String content) {
+    final normalized = _normalizeChatRoutingText(content);
+    return RegExp(
+      r"^(no|nope|nah|no thanks|no thank you|not now|not right now|skip|nothing else|all set|i'm good|im good|i am good|that's all|that is all)$",
+    ).hasMatch(normalized);
+  }
+
+  String _normalizeChatRoutingText(String value) => value
+      .toLowerCase()
+      .replaceAll('’', "'")
+      .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 
   Future<void> _reportChatFailure({
     required Object error,
