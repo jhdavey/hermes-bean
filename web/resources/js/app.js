@@ -14,6 +14,7 @@ if (mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const initialMode = mount.dataset.authMode || 'login';
     const initialSelectedPlan = ['base', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
+    const initialBillingStatus = new URLSearchParams(window.location.search).get('billing') || '';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
     const activeWorkspaceKey = 'heybean.web.activeWorkspace';
@@ -104,6 +105,10 @@ if (mount) {
         selectedPlan: initialSelectedPlan,
         subscriptionSummary: null,
         subscriptionCheckoutStatus: new URLSearchParams(window.location.search).get('checkout') || '',
+        billingCheckoutStatus: initialBillingStatus,
+        billingPaymentMethod: null,
+        billingPaymentLoading: false,
+        billingBusy: false,
         token: readToken(),
         remember: localStorage.getItem(rememberKey) === 'true',
         phase: 'loading',
@@ -529,7 +534,7 @@ if (mount) {
                 render();
             }
 
-            const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
+            const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus, subscription, billingPayment] = await Promise.all([
                 recover(api(workspaceScopedPath('/today')), state.summary || {}),
                 recover(api(workspaceScopedPath('/tasks')), state.tasks),
                 recover(api(workspaceScopedPath('/tasks/past')), []),
@@ -537,9 +542,13 @@ if (mount) {
                 recover(api(workspaceScopedPath('/calendar-events?skip_google_sync=1')), state.calendar),
                 recover(api(workspaceScopedPath('/event-categories')), state.categories),
                 api('/google-calendar/status?cached=1').catch(() => null),
+                api('/billing/subscription').catch(() => state.subscriptionSummary),
+                api('/billing/payment-method').catch(() => ({ payment_method: null })),
             ]);
             state.user = mergeUser(user, summary?.user, summary);
             state.summary = summary;
+            state.subscriptionSummary = subscription || state.subscriptionSummary;
+            state.billingPaymentMethod = billingPayment?.payment_method || billingPayment?.paymentMethod || null;
             setActiveWorkspaceLocally(currentWorkspaceId(), { persist: false });
             state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
             state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
@@ -553,6 +562,7 @@ if (mount) {
             state.messages = [];
             state.phase = 'signedIn';
             state.error = refreshError ? friendlyError(refreshError, 'refresh your latest data') : '';
+            applyBillingReturnNotice();
             if (needsBeanOnboarding()) {
                 state.selected = 'bean';
                 state.chatExpanded = false;
@@ -2029,6 +2039,7 @@ if (mount) {
                         ${labelInput('End hour', 'endHour', 'number', localStorage.getItem('heybean.calendar.endHour') || '22', 'min="1" max="24" data-calendar-pref="endHour"')}
                     </div>
                 </div>
+                ${billingSettingsMarkup()}
                 <div class="hb-card hb-card-pad">
                     <strong>Account controls</strong>
                     <div class="hb-account-actions">
@@ -2041,6 +2052,74 @@ if (mount) {
                     </div>
                 </div>
             </section>`;
+    }
+
+    function billingSettingsMarkup() {
+        const subscription = state.subscriptionSummary || {};
+        const user = state.user || {};
+        const tier = String(subscription.tier || user.subscription_tier || user.subscriptionTier || 'base').toLowerCase();
+        const status = String(subscription.status || user.subscription_status || user.subscriptionStatus || '').toLowerCase();
+        const cancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end || subscription.cancelAtPeriodEnd);
+        const trialEndsAt = subscription.trial_ends_at || subscription.trialEndsAt || user.subscription_trial_ends_at || user.subscriptionTrialEndsAt || '';
+        const currentPeriodEnd = subscription.current_period_end || subscription.currentPeriodEnd || '';
+        const paymentMethod = state.billingPaymentMethod;
+        const selectedPlan = subscriptionPlans[tier] ? tier : 'base';
+        const cancelDisabled = state.billingBusy || !status || cancelAtPeriodEnd;
+        return `
+            <div class="hb-surface-soft hb-card-pad hb-billing-settings" data-billing-settings>
+                <div class="hb-billing-header">
+                    <span class="hb-compact-icon">${icons.activity}</span>
+                    <div>
+                        <strong>Billing</strong>
+                        <small>${escapeHtml(billingStatusLine(selectedPlan, status, cancelAtPeriodEnd))}</small>
+                    </div>
+                </div>
+                <div class="hb-billing-summary-grid">
+                    <div><span>Plan</span><strong>${escapeHtml(subscriptionPlans[selectedPlan]?.label || 'Base')}</strong></div>
+                    <div><span>Renewal</span><strong>${escapeHtml(billingRenewalLine(trialEndsAt, currentPeriodEnd, cancelAtPeriodEnd))}</strong></div>
+                    <div><span>Payment</span><strong>${escapeHtml(paymentMethodDisplayLine(paymentMethod))}</strong></div>
+                </div>
+                <div class="hb-billing-plan-row">
+                    <label class="hb-label">Change plan
+                        <select class="hb-select" data-billing-plan-select ${state.billingBusy ? 'disabled' : ''}>
+                            ${Object.entries(subscriptionPlans).map(([key, plan]) => `<option value="${escapeAttr(key)}" ${key === selectedPlan ? 'selected' : ''}>${escapeHtml(plan.label)} ${escapeHtml(plan.price)}/mo</option>`).join('')}
+                        </select>
+                    </label>
+                    <button class="hb-button" type="button" data-billing-change-plan ${state.billingBusy ? 'disabled' : ''}>${state.billingBusy ? 'Working...' : 'Change plan'}</button>
+                </div>
+                <div class="hb-account-actions">
+                    <button class="hb-button-secondary" type="button" data-billing-update-payment ${state.billingBusy ? 'disabled' : ''}>Update payment</button>
+                    <button class="hb-button-secondary" type="button" data-billing-refresh ${state.billingBusy || state.billingPaymentLoading ? 'disabled' : ''}>${state.billingPaymentLoading ? 'Refreshing...' : 'Refresh billing'}</button>
+                    <button class="hb-button-danger" type="button" data-billing-cancel-renewal ${cancelDisabled ? 'disabled' : ''}>${cancelAtPeriodEnd ? 'Renewal canceled' : 'Cancel renewal'}</button>
+                </div>
+                <p class="hb-item-meta">Stripe securely handles payment processing. HeyBean stores only subscription status and safe payment summaries.</p>
+            </div>`;
+    }
+
+    function billingStatusLine(planKey, status, cancelAtPeriodEnd) {
+        const plan = subscriptionPlans[planKey]?.label || 'Base';
+        if (cancelAtPeriodEnd) return `${plan} plan, renewal canceled`;
+        if (!status) return `Current plan: ${plan}`;
+        return `Current plan: ${plan} • ${status.replaceAll('_', ' ')}`;
+    }
+
+    function billingRenewalLine(trialEndsAt, currentPeriodEnd, cancelAtPeriodEnd) {
+        if (cancelAtPeriodEnd && currentPeriodEnd) return `Access through ${formatDateTime(currentPeriodEnd)}`;
+        if (cancelAtPeriodEnd) return 'Canceled at period end';
+        if (trialEndsAt) return `Trial through ${formatDateTime(trialEndsAt)}`;
+        if (currentPeriodEnd) return `Renews around ${formatDateTime(currentPeriodEnd)}`;
+        return 'Monthly';
+    }
+
+    function paymentMethodDisplayLine(paymentMethod) {
+        if (state.billingPaymentLoading) return 'Loading payment method...';
+        if (!paymentMethod) return 'No saved payment method yet';
+        const brand = String(paymentMethod.brand || paymentMethod.type || 'Card');
+        const last4 = paymentMethod.last4 ? ` ending in ${paymentMethod.last4}` : '';
+        const expiry = paymentMethod.exp_month || paymentMethod.expMonth
+            ? `, expires ${paymentMethod.exp_month || paymentMethod.expMonth}/${paymentMethod.exp_year || paymentMethod.expYear}`
+            : '';
+        return `${capitalize(brand)}${last4}${expiry}`;
     }
 
     function workspaceSwitcherMarkup(workspaceItems, activeWorkspaceId) {
@@ -3465,6 +3544,10 @@ if (mount) {
         mount.querySelectorAll('[data-theme-option]').forEach((button) => button.addEventListener('click', updateThemePreference));
         mount.querySelector('[data-home-city-form]')?.addEventListener('submit', updateHomeCityPreference);
         mount.querySelector('[data-clear-home-city]')?.addEventListener('click', clearHomeCityPreference);
+        mount.querySelector('[data-billing-change-plan]')?.addEventListener('click', changeBillingPlan);
+        mount.querySelector('[data-billing-update-payment]')?.addEventListener('click', startBillingPaymentUpdate);
+        mount.querySelector('[data-billing-refresh]')?.addEventListener('click', () => refreshBillingSettings({ user: true }));
+        mount.querySelector('[data-billing-cancel-renewal]')?.addEventListener('click', cancelBillingRenewal);
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
         mount.querySelectorAll('[data-approval-approve]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalApprove, false)));
@@ -8562,6 +8645,122 @@ if (mount) {
         } catch (error) {
             state.user = previousUser;
             state.error = friendlyError(error, 'save theme');
+            render();
+        }
+    }
+
+    function applyBillingReturnNotice() {
+        const status = String(state.billingCheckoutStatus || '').toLowerCase();
+        if (!status) return;
+        if (status === 'payment_success') {
+            state.notice ||= 'Payment method update received. Refresh billing if the card summary does not appear yet.';
+        } else if (status === 'payment_cancel') {
+            state.notice ||= 'Payment method update canceled. No payment details were changed.';
+        } else if (status === 'plan_success') {
+            state.notice ||= 'Subscription checkout completed. Refresh billing if the plan summary does not appear yet.';
+        } else if (status === 'plan_cancel') {
+            state.notice ||= 'Subscription checkout canceled. No plan change was made.';
+        }
+        state.billingCheckoutStatus = '';
+        if (window.location.pathname === '/app') {
+            history.replaceState({}, '', '/app');
+        }
+    }
+
+    async function refreshBillingSettings({ user = false } = {}) {
+        if (state.billingBusy || state.billingPaymentLoading) return;
+        state.billingPaymentLoading = true;
+        state.error = '';
+        render();
+        try {
+            const requests = [
+                api('/billing/subscription'),
+                api('/billing/payment-method'),
+            ];
+            if (user) requests.push(api('/auth/me'));
+            const [subscription, payment, freshUser] = await Promise.all(requests);
+            state.subscriptionSummary = subscription;
+            state.billingPaymentMethod = payment?.payment_method || payment?.paymentMethod || null;
+            if (freshUser) state.user = freshUser;
+            state.notice = 'Billing refreshed.';
+        } catch (error) {
+            state.error = friendlyError(error, 'refresh billing');
+        } finally {
+            state.billingPaymentLoading = false;
+            render();
+        }
+    }
+
+    async function changeBillingPlan() {
+        if (state.billingBusy) return;
+        const plan = mount.querySelector('[data-billing-plan-select]')?.value || '';
+        if (!subscriptionPlans[plan]) return;
+        const currentPlan = String(state.subscriptionSummary?.tier || state.user?.subscription_tier || state.user?.subscriptionTier || 'base').toLowerCase();
+        if (plan === currentPlan) {
+            state.notice = 'That plan is already active.';
+            state.error = '';
+            render();
+            return;
+        }
+        state.billingBusy = true;
+        state.error = '';
+        state.notice = '';
+        render();
+        try {
+            const result = await api('/billing/subscription/change-plan', {
+                method: 'POST',
+                body: { plan },
+            });
+            if (result?.url) {
+                window.location.href = result.url;
+                return;
+            }
+            state.subscriptionSummary = result?.subscription || state.subscriptionSummary;
+            const freshUser = await api('/auth/me').catch(() => null);
+            if (freshUser) state.user = freshUser;
+            state.notice = `Plan changed to ${subscriptionPlans[plan].label}.`;
+        } catch (error) {
+            state.error = friendlyError(error, 'change your subscription');
+        } finally {
+            state.billingBusy = false;
+            render();
+        }
+    }
+
+    async function startBillingPaymentUpdate() {
+        if (state.billingBusy) return;
+        state.billingBusy = true;
+        state.error = '';
+        state.notice = '';
+        render();
+        try {
+            const checkout = await api('/billing/payment-method/checkout-session', { method: 'POST' });
+            if (!checkout?.url) throw new Error('Stripe did not return a payment update page.');
+            window.location.href = checkout.url;
+        } catch (error) {
+            state.billingBusy = false;
+            state.error = friendlyError(error, 'update your payment method');
+            render();
+        }
+    }
+
+    async function cancelBillingRenewal() {
+        if (state.billingBusy) return;
+        if (!confirm('Cancel subscription renewal? Your current access stays active until the end of the paid period or trial.')) return;
+        state.billingBusy = true;
+        state.error = '';
+        state.notice = '';
+        render();
+        try {
+            const result = await api('/billing/subscription/cancel', { method: 'POST' });
+            state.subscriptionSummary = result?.subscription || state.subscriptionSummary;
+            const freshUser = await api('/auth/me').catch(() => null);
+            if (freshUser) state.user = freshUser;
+            state.notice = 'Subscription renewal canceled.';
+        } catch (error) {
+            state.error = friendlyError(error, 'cancel your subscription');
+        } finally {
+            state.billingBusy = false;
             render();
         }
     }

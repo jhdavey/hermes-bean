@@ -89,6 +89,15 @@ class BillingController extends Controller
         }
     }
 
+    public function paymentMethodCheckoutSession(Request $request): JsonResponse
+    {
+        try {
+            return response()->json(['data' => $this->billing->createPaymentMethodCheckoutSession($request->user())], 201);
+        } catch (RuntimeException|InvalidArgumentException $exception) {
+            return $this->billingError($exception);
+        }
+    }
+
     public function confirmPaymentMethod(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -113,6 +122,19 @@ class BillingController extends Controller
 
         try {
             return response()->json(['data' => $this->billing->upgradeSubscription($request->user(), $data['plan'])]);
+        } catch (RuntimeException|InvalidArgumentException $exception) {
+            return $this->billingError($exception);
+        }
+    }
+
+    public function changePlan(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'plan' => ['required', Rule::in(['base', 'premium', 'pro'])],
+        ]);
+
+        try {
+            return response()->json(['data' => $this->billing->changeSubscriptionPlan($request->user(), $data['plan'])]);
         } catch (RuntimeException|InvalidArgumentException $exception) {
             return $this->billingError($exception);
         }

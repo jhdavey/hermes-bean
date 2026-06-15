@@ -57,8 +57,13 @@ class StripeBillingService
         $customerId = $this->ensureCustomer($user);
         $source = $this->cleanSource($source);
         $returnPath = in_array($source, ['register', 'signup', 'subscribe'], true) ? '/subscribe' : '/pricing';
-        $successUrl = url($returnPath.'?checkout=success&plan='.$plan.($source ? '&source='.$source : ''));
-        $cancelUrl = url($returnPath.'?checkout=cancel&plan='.$plan.($source ? '&source='.$source : ''));
+        if ($source === 'settings') {
+            $successUrl = url('/app?billing=plan_success&plan='.$plan);
+            $cancelUrl = url('/app?billing=plan_cancel&plan='.$plan);
+        } else {
+            $successUrl = url($returnPath.'?checkout=success&plan='.$plan.($source ? '&source='.$source : ''));
+            $cancelUrl = url($returnPath.'?checkout=cancel&plan='.$plan.($source ? '&source='.$source : ''));
+        }
 
         $payload = [
             'mode' => 'subscription',
@@ -90,6 +95,37 @@ class StripeBillingService
             'id' => $session['id'] ?? null,
             'url' => $session['url'] ?? null,
             'plan' => $plan,
+            'status' => $session['status'] ?? 'created',
+        ];
+    }
+
+    public function createPaymentMethodCheckoutSession(User $user): array
+    {
+        $customerId = $this->ensureCustomer($user);
+
+        $session = $this->stripePost('/checkout/sessions', [
+            'mode' => 'setup',
+            'customer' => $customerId,
+            'payment_method_types' => ['card'],
+            'success_url' => url('/app?billing=payment_success'),
+            'cancel_url' => url('/app?billing=payment_cancel'),
+            'metadata' => [
+                'heybean_user_id' => (string) $user->id,
+                'purpose' => 'payment_method_update',
+                'source' => 'web',
+            ],
+            'setup_intent_data' => [
+                'metadata' => [
+                    'heybean_user_id' => (string) $user->id,
+                    'purpose' => 'payment_method_update',
+                    'source' => 'web',
+                ],
+            ],
+        ])->json();
+
+        return [
+            'id' => $session['id'] ?? null,
+            'url' => $session['url'] ?? null,
             'status' => $session['status'] ?? 'created',
         ];
     }
@@ -218,6 +254,41 @@ class StripeBillingService
         ];
     }
 
+    public function changeSubscriptionPlan(User $user, string $plan): array
+    {
+        $this->assertCheckoutPlan($plan);
+        if (! $user->stripe_subscription_id || ! $user->stripe_subscription_item_id) {
+            return $this->createCheckoutSession($user, $plan, 'settings');
+        }
+
+        if ($user->subscriptionTier() === $plan) {
+            throw new InvalidArgumentException('That plan is already active for this account.');
+        }
+
+        $subscription = $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
+            'cancel_at_period_end' => false,
+            'items' => [[
+                'id' => $user->stripe_subscription_item_id,
+                'price' => $this->priceId($plan),
+            ]],
+            'proration_behavior' => 'always_invoice',
+            'payment_behavior' => 'allow_incomplete',
+            'metadata' => [
+                'heybean_user_id' => (string) $user->id,
+                'plan' => $plan,
+                'source' => 'web',
+            ],
+        ])->json();
+
+        $this->syncSubscription($subscription, $user);
+
+        return [
+            'plan' => $plan,
+            'status' => $subscription['status'] ?? $user->subscription_status,
+            'subscription' => $this->subscriptionSummary($user->fresh()),
+        ];
+    }
+
     public function cancelSubscription(User $user): array
     {
         if (! $user->stripe_subscription_id) {
@@ -259,6 +330,12 @@ class StripeBillingService
 
     private function handleCheckoutCompleted(array $session): void
     {
+        if (($session['mode'] ?? null) === 'setup' || ($session['metadata']['purpose'] ?? null) === 'payment_method_update') {
+            $this->handlePaymentMethodCheckoutCompleted($session);
+
+            return;
+        }
+
         $subscriptionId = $session['subscription'] ?? null;
         if (! is_string($subscriptionId) || $subscriptionId === '') {
             return;
@@ -266,6 +343,31 @@ class StripeBillingService
 
         $subscription = $this->stripeGet('/subscriptions/'.$subscriptionId)->json();
         $this->syncSubscription($subscription);
+    }
+
+    private function handlePaymentMethodCheckoutCompleted(array $session): void
+    {
+        $setupIntentId = $session['setup_intent'] ?? null;
+        if (! is_string($setupIntentId) || $setupIntentId === '') {
+            return;
+        }
+
+        $user = $this->userForSubscription([
+            'customer' => $session['customer'] ?? null,
+            'metadata' => $session['metadata'] ?? [],
+        ]);
+        if (! $user) {
+            return;
+        }
+
+        $setupIntent = $this->verifiedSetupIntent($user, $setupIntentId);
+        $paymentMethodId = $this->paymentMethodIdFromSetupIntent($setupIntent);
+        $this->setCustomerDefaultPaymentMethod($user, $paymentMethodId);
+        if ($user->stripe_subscription_id) {
+            $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
+                'default_payment_method' => $paymentMethodId,
+            ]);
+        }
     }
 
     private function syncSubscription(array $subscription, ?User $fallbackUser = null): void

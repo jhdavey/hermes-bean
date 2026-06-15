@@ -41,9 +41,11 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/billing/mobile-subscriptions/confirm', [BillingController::class, 'confirmMobileSubscription']);
         Route::get('/billing/payment-method', [BillingController::class, 'paymentMethod']);
         Route::post('/billing/payment-method/setup', [BillingController::class, 'paymentMethodSetup']);
+        Route::post('/billing/payment-method/checkout-session', [BillingController::class, 'paymentMethodCheckoutSession']);
         Route::post('/billing/payment-method/confirm', [BillingController::class, 'confirmPaymentMethod']);
         Route::post('/billing/checkout-sessions', [BillingController::class, 'checkoutSession']);
         Route::post('/billing/subscription/upgrade', [BillingController::class, 'upgrade']);
+        Route::post('/billing/subscription/change-plan', [BillingController::class, 'changePlan']);
         Route::post('/billing/subscription/cancel', [BillingController::class, 'cancel']);
 
         Route::get('/workspaces', [WorkspaceController::class, 'index']);

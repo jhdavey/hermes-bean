@@ -319,6 +319,37 @@ class BillingInfrastructureTest extends TestCase
             ->assertJsonPath('data.payment_method.last4', '4242');
     }
 
+    public function test_user_can_create_hosted_payment_method_checkout_session(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('payment-checkout@example.com');
+        $user = User::where('email', 'payment-checkout@example.com')->firstOrFail();
+        $user->forceFill(['stripe_customer_id' => 'cus_payment_checkout_123'])->save();
+
+        Http::fake(function (HttpRequest $request) use ($user) {
+            $this->assertSame('https://api.stripe.com/v1/checkout/sessions', $request->url());
+            $data = $request->data();
+            $this->assertSame('setup', $data['mode']);
+            $this->assertSame('cus_payment_checkout_123', $data['customer']);
+            $this->assertSame(['card'], $data['payment_method_types']);
+            $this->assertStringContainsString('/app?billing=payment_success', $data['success_url']);
+            $this->assertStringContainsString('/app?billing=payment_cancel', $data['cancel_url']);
+            $this->assertSame('payment_method_update', $data['metadata']['purpose']);
+            $this->assertSame((string) $user->id, $data['setup_intent_data']['metadata']['heybean_user_id']);
+
+            return Http::response([
+                'id' => 'cs_payment_update_123',
+                'url' => 'https://checkout.stripe.com/c/pay/cs_payment_update_123',
+                'status' => 'open',
+            ], 200);
+        });
+
+        $this->withToken($token)->postJson('/api/billing/payment-method/checkout-session')
+            ->assertCreated()
+            ->assertJsonPath('data.id', 'cs_payment_update_123')
+            ->assertJsonPath('data.url', 'https://checkout.stripe.com/c/pay/cs_payment_update_123');
+    }
+
     public function test_existing_subscription_upgrade_charges_proration_for_current_cycle(): void
     {
         $this->configureStripe();
@@ -378,6 +409,62 @@ class BillingInfrastructureTest extends TestCase
             return str_contains($html, 'Subscription upgraded')
                 && str_contains($html, 'Your HeyBean subscription is now on the Pro plan.');
         });
+    }
+
+    public function test_existing_subscription_plan_change_updates_current_subscription_item(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('change-plan@example.com');
+        $user = User::where('email', 'change-plan@example.com')->firstOrFail();
+        $user->forceFill([
+            'subscription_tier' => 'premium',
+            'stripe_customer_id' => 'cus_change_123',
+            'stripe_subscription_id' => 'sub_change_123',
+            'stripe_subscription_item_id' => 'si_change_123',
+            'stripe_price_id' => 'price_premium_test',
+            'subscription_status' => 'active',
+            'subscription_cancel_at_period_end' => true,
+        ])->save();
+
+        Http::fake(function (HttpRequest $request) use ($user) {
+            $this->assertSame('https://api.stripe.com/v1/subscriptions/sub_change_123', $request->url());
+            $data = $request->data();
+            $this->assertFalse($data['cancel_at_period_end']);
+            $this->assertSame('si_change_123', $data['items'][0]['id']);
+            $this->assertSame('price_base_test', $data['items'][0]['price']);
+            $this->assertSame('always_invoice', $data['proration_behavior']);
+            $this->assertSame('allow_incomplete', $data['payment_behavior']);
+
+            return Http::response([
+                'id' => 'sub_change_123',
+                'customer' => 'cus_change_123',
+                'status' => 'active',
+                'current_period_end' => now()->addDays(15)->timestamp,
+                'trial_end' => null,
+                'cancel_at_period_end' => false,
+                'metadata' => [
+                    'heybean_user_id' => (string) $user->id,
+                    'plan' => 'base',
+                ],
+                'items' => ['data' => [[
+                    'id' => 'si_change_123',
+                    'price' => ['id' => 'price_base_test'],
+                ]]],
+            ], 200);
+        });
+
+        $this->withToken($token)->postJson('/api/billing/subscription/change-plan', [
+            'plan' => 'base',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.plan', 'base')
+            ->assertJsonPath('data.subscription.tier', 'base')
+            ->assertJsonPath('data.subscription.cancel_at_period_end', false);
+
+        $user->refresh();
+        $this->assertSame('base', $user->subscription_tier);
+        $this->assertSame('price_base_test', $user->stripe_price_id);
+        $this->assertFalse($user->subscription_cancel_at_period_end);
     }
 
     public function test_existing_subscription_cancel_sets_renewal_to_period_end(): void
@@ -489,6 +576,64 @@ class BillingInfrastructureTest extends TestCase
             return str_contains($html, 'Subscription started')
                 && str_contains($html, 'Your HeyBean Premium subscription is set up.');
         });
+    }
+
+    public function test_setup_checkout_webhook_updates_customer_and_subscription_payment_method(): void
+    {
+        $this->configureStripe();
+        $user = User::factory()->create([
+            'email' => 'setup-webhook@example.com',
+            'stripe_customer_id' => 'cus_setup_webhook_123',
+            'stripe_subscription_id' => 'sub_setup_webhook_123',
+        ]);
+
+        Http::fake(function (HttpRequest $request) {
+            if (str_starts_with($request->url(), 'https://api.stripe.com/v1/setup_intents/seti_checkout_123')) {
+                $this->assertSame(['payment_method'], $request->data()['expand']);
+
+                return Http::response([
+                    'id' => 'seti_checkout_123',
+                    'customer' => 'cus_setup_webhook_123',
+                    'status' => 'succeeded',
+                    'payment_method' => [
+                        'id' => 'pm_checkout_123',
+                        'customer' => 'cus_setup_webhook_123',
+                        'type' => 'card',
+                        'card' => ['brand' => 'visa', 'last4' => '4242'],
+                    ],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/customers/cus_setup_webhook_123') {
+                $this->assertSame('pm_checkout_123', $request->data()['invoice_settings']['default_payment_method']);
+
+                return Http::response(['id' => 'cus_setup_webhook_123'], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/subscriptions/sub_setup_webhook_123') {
+                $this->assertSame('pm_checkout_123', $request->data()['default_payment_method']);
+
+                return Http::response(['id' => 'sub_setup_webhook_123'], 200);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->postJson('/api/billing/stripe/webhook', [
+            'id' => 'evt_setup_123',
+            'type' => 'checkout.session.completed',
+            'data' => ['object' => [
+                'id' => 'cs_setup_123',
+                'mode' => 'setup',
+                'customer' => 'cus_setup_webhook_123',
+                'setup_intent' => 'seti_checkout_123',
+                'metadata' => [
+                    'heybean_user_id' => (string) $user->id,
+                    'purpose' => 'payment_method_update',
+                ],
+            ]],
+        ])->assertOk()
+            ->assertJsonPath('received', true);
     }
 
     public function test_missing_stripe_configuration_returns_clear_error(): void

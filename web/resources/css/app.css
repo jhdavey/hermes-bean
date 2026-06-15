@@ -3715,6 +3715,66 @@
     gap: 10px;
 }
 
+.hb-billing-settings {
+    display: grid;
+    gap: 12px;
+}
+
+.hb-billing-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.hb-billing-header strong {
+    display: block;
+}
+
+.hb-billing-header small {
+    display: block;
+    margin-top: 3px;
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.hb-billing-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+}
+
+.hb-billing-summary-grid > div {
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .58);
+}
+
+.hb-billing-summary-grid span {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.hb-billing-summary-grid strong {
+    display: block;
+    overflow-wrap: anywhere;
+    color: var(--hb-text);
+}
+
+.hb-billing-plan-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 8px;
+}
+
 .hb-theme-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
@@ -4633,6 +4693,12 @@
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+    .hb-billing-plan-row {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (min-width: 900px) {
