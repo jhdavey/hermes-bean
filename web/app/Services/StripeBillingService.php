@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
@@ -499,6 +500,8 @@ class StripeBillingService
             throw new RuntimeException('Stripe is not configured.');
         }
 
+        $headers = ['Stripe-Version' => $this->apiVersion(), ...$headers];
+
         $request = Http::withToken($secret)
             ->withHeaders($headers)
             ->asForm()
@@ -511,6 +514,17 @@ class StripeBillingService
 
         if ($response->failed()) {
             $message = $response->json('error.message') ?: 'Stripe request failed.';
+            Log::warning('Stripe billing request failed.', [
+                'method' => $method,
+                'path' => $path,
+                'status' => $response->status(),
+                'message' => $message,
+            ]);
+
+            if ($response->clientError()) {
+                throw new InvalidArgumentException($message);
+            }
+
             throw new RuntimeException($message);
         }
 
