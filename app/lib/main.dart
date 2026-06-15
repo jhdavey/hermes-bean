@@ -15313,12 +15313,6 @@ class _SettingsView extends StatelessWidget {
               title: user.name,
               subtitle: user.email,
             ),
-            _BillingSettingsCard(
-              apiClient: apiClient,
-              user: user,
-              stripePaymentHandler: stripePaymentHandler,
-              onBillingChanged: onBillingChanged,
-            ),
             _CompactItemTile(
               icon: Icons.tune_rounded,
               title: 'Bean preferences',
@@ -15365,6 +15359,12 @@ class _SettingsView extends StatelessWidget {
         onDeleteAccount: onDeleteAccount,
         onSignOut: onSignOut,
         launchExternalUrl: launchExternalUrl,
+        beforeAccountActions: _BillingSettingsCard(
+          apiClient: apiClient,
+          user: user,
+          stripePaymentHandler: stripePaymentHandler,
+          onBillingChanged: onBillingChanged,
+        ),
       ),
     ],
   );
@@ -18252,6 +18252,7 @@ class _AccountCard extends StatelessWidget {
     required this.onDeleteAccount,
     required this.onSignOut,
     required this.launchExternalUrl,
+    this.beforeAccountActions,
   });
 
   final HermesUser user;
@@ -18259,6 +18260,7 @@ class _AccountCard extends StatelessWidget {
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
   final ExternalUrlLauncher launchExternalUrl;
+  final Widget? beforeAccountActions;
 
   Future<void> _editEmail(BuildContext context) async {
     final nextEmail = await _showEmailEditor(context, initialEmail: user.email);
@@ -18309,6 +18311,10 @@ class _AccountCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
+        if (beforeAccountActions != null) ...[
+          beforeAccountActions!,
+          const SizedBox(height: 10),
+        ],
         Wrap(
           spacing: 8,
           runSpacing: 8,

@@ -1388,6 +1388,35 @@ void main() {
     );
   });
 
+  testWidgets('billing settings sit above account actions at bottom', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('sign-out-action')));
+    await tester.pumpAndSettle();
+
+    final billingRect = tester.getRect(
+      find.byKey(const Key('billing-settings-card')),
+    );
+    final signOutRect = tester.getRect(
+      find.byKey(const Key('sign-out-action')),
+    );
+    final deleteRect = tester.getRect(
+      find.byKey(const Key('delete-account-action')),
+    );
+
+    expect(billingRect.bottom, lessThan(signOutRect.top));
+    expect(billingRect.bottom, lessThan(deleteRect.top));
+  });
+
   testWidgets(
     'finish closes onboarding even when save response returns stale profile',
     (WidgetTester tester) async {
