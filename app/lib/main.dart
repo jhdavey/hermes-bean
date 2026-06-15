@@ -2259,11 +2259,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       }
       session = _session ?? session;
       final result = _needsBeanIntroduction
-          ? await widget.apiClient.sendMessage(
-              sessionId: session.id,
-              content: trimmed,
-              metadata: _flutterChatMetadata(),
-            )
+          ? await _sendBeanIntroductionMessage(session.id, trimmed)
           : await widget.apiClient.queueMessage(
               sessionId: session.id,
               content: trimmed,
@@ -2370,6 +2366,36 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
+    }
+  }
+
+  Future<HermesMessageResult> _sendBeanIntroductionMessage(
+    int sessionId,
+    String content,
+  ) async {
+    final metadata = _flutterChatMetadata();
+    try {
+      return await widget.apiClient.sendMessage(
+        sessionId: sessionId,
+        content: content,
+        metadata: metadata,
+      );
+    } catch (firstError) {
+      debugPrint('Bean onboarding direct message failed: $firstError');
+      try {
+        return await widget.apiClient.sendMessage(
+          sessionId: sessionId,
+          content: content,
+          metadata: metadata,
+        );
+      } catch (secondError) {
+        debugPrint('Bean onboarding direct message retry failed: $secondError');
+        return widget.apiClient.queueMessage(
+          sessionId: sessionId,
+          content: content,
+          metadata: metadata,
+        );
+      }
     }
   }
 

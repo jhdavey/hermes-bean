@@ -356,6 +356,44 @@ void main() {
   );
 
   testWidgets(
+    'Bean onboarding falls back to queued work after client send drops',
+    (WidgetTester tester) async {
+      final api = _DirectSendDropsFakeHermesApiClient(
+        onboardingCompleted: false,
+      );
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('auth-email')),
+        'bean@example.com',
+      );
+      await tester.enterText(
+        find.byKey(const Key('auth-password')),
+        'correct-horse-battery-staple',
+      );
+      await tester.tap(find.byKey(const Key('auth-submit')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('bean-intro-callout')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('chat-input')), "I'm Harley");
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+
+      expect(api.directFailures, 2);
+      expect(api.queueMessageCalls, 1);
+      expect(
+        find.text('Nice to meet you — I saved those Bean preferences.'),
+        findsOneWidget,
+      );
+      expect(find.text('Failed'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'creating a household keeps settings mounted without Flutter tree errors',
     (WidgetTester tester) async {
       final api = _WorkspaceFakeHermesApiClient();
@@ -6718,6 +6756,29 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<void> deleteAccount() async {
     deletedAccount = true;
     bearerToken = null;
+  }
+}
+
+class _DirectSendDropsFakeHermesApiClient extends _FakeHermesApiClient {
+  _DirectSendDropsFakeHermesApiClient({super.onboardingCompleted});
+
+  int directFailures = 0;
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) {
+    if (directFailures < 2) {
+      directFailures++;
+      throw StateError('simulated client send drop');
+    }
+    return super.sendMessage(
+      sessionId: sessionId,
+      content: content,
+      metadata: metadata,
+    );
   }
 }
 
