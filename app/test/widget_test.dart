@@ -272,6 +272,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.sentMessages.first, contains("Hi, I'm Harley"));
+      expect(api.sendMessageCalls, 1);
+      expect(api.queueMessageCalls, 0);
       expect(
         find.text('Nice to meet you — I saved those Bean preferences.'),
         findsOneWidget,
@@ -6139,6 +6141,8 @@ class _FakeHermesApiClient extends HermesApiClient {
   final passwordResetRequests = <String>[];
   final registeredUsers = <Map<String, String>>[];
   final checkoutRequests = <Map<String, String>>[];
+  int sendMessageCalls = 0;
+  int queueMessageCalls = 0;
   final mobileSubscriptionSetupRequests = <String>[];
   final mobileSubscriptionConfirmRequests = <Map<String, String>>[];
   int paymentMethodSetupRequests = 0;
@@ -6644,6 +6648,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     required String content,
     Map<String, Object?>? metadata,
   }) async {
+    sendMessageCalls++;
     sentMessages.add(content);
     sentMessageMetadata.add(metadata);
     var isPreferenceOnlyMessage = false;
@@ -6701,6 +6706,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     Map<String, Object?>? metadata,
     String source = 'flutter',
   }) {
+    queueMessageCalls++;
     return sendMessage(
       sessionId: sessionId,
       content: content,

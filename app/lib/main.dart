@@ -2258,11 +2258,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         return;
       }
       session = _session ?? session;
-      final result = await widget.apiClient.queueMessage(
-        sessionId: session.id,
-        content: trimmed,
-        metadata: _flutterChatMetadata(),
-      );
+      final result = _needsBeanIntroduction
+          ? await widget.apiClient.sendMessage(
+              sessionId: session.id,
+              content: trimmed,
+              metadata: _flutterChatMetadata(),
+            )
+          : await widget.apiClient.queueMessage(
+              sessionId: session.id,
+              content: trimmed,
+              metadata: _flutterChatMetadata(),
+            );
       if (!mounted || runToken != _chatRunToken) return;
       if (result.status == 'queued') {
         setState(() {
