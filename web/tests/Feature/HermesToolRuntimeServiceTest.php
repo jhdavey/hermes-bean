@@ -67,7 +67,10 @@ class HermesToolRuntimeServiceTest extends TestCase
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && $request->hasHeader('Authorization', 'Bearer test-key')
                 && data_get($payload, 'messages.0.role') === 'system'
-                && str_contains($systemPrompt, "location at city level only")
+                && str_contains($systemPrompt, 'Ask this exact location question after learning the user\'s name')
+                && str_contains($systemPrompt, 'What city are you in? This will help me be more useful')
+                && str_contains($systemPrompt, 'just say "skip"')
+                && str_contains($systemPrompt, 'A skipped location still counts as enough onboarding detail')
                 && str_contains($systemPrompt, "Balanced helper, Motivating coach, Detail organizer, Creative partner, Direct operator, and Gentle companion")
                 && str_contains($systemPrompt, "Settings > Bean preferences")
                 && data_get($payload, 'messages.1.role') === 'system'
@@ -142,6 +145,73 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertSame('Orlando', data_get($profile->settings, 'onboarding.city'));
         $this->assertTrue(data_get($profile->settings, 'onboarding.completed'));
         $this->assertSame(['Family, reminders, and planning'], data_get($profile->settings, 'onboarding.priorities'));
+    }
+
+    public function test_tool_runtime_does_not_store_skipped_onboarding_location(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-onboarding-skip-location-tool',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_profile',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'update_agent_profile',
+                                'arguments' => json_encode([
+                                    'settings' => [
+                                        'personality_type' => 'gentle',
+                                        'onboarding' => [
+                                            'completed' => true,
+                                            'name' => 'Harley',
+                                            'city' => 'skip',
+                                            'priorities' => ['Family and planning'],
+                                            'context' => 'Family and planning matter most day to day.',
+                                        ],
+                                    ],
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-onboarding-skip-location-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'All set — I will keep your location private.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('onboarding-skip-location@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'onboarding',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'skip',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'All set — I will keep your location private.');
+
+        $user = User::where('email', 'onboarding-skip-location@example.com')->firstOrFail();
+        $profile = $user->agentProfile()->firstOrFail();
+
+        $this->assertTrue($user->refresh()->onboard_complete);
+        $this->assertSame('gentle', $profile->settings['personality_type']);
+        $this->assertSame('Harley', data_get($profile->settings, 'onboarding.name'));
+        $this->assertNull(data_get($profile->settings, 'onboarding.city'));
+        $this->assertNull(data_get($profile->settings, 'onboarding.location'));
+        $this->assertTrue(data_get($profile->settings, 'onboarding.completed'));
     }
 
     public function test_tool_runtime_receives_voice_quick_reply_context_for_continuation(): void

@@ -899,7 +899,22 @@ class StructuredHermesActionService
 
         foreach (['name', 'city', 'location'] as $key) {
             if (isset($parameters[$key]) && is_string($parameters[$key]) && trim($parameters[$key]) !== '') {
-                $onboarding[$key === 'location' ? 'city' : $key] = trim($parameters[$key]);
+                $value = trim($parameters[$key]);
+                if ($key === 'city' || $key === 'location') {
+                    if ($this->isSkippedOnboardingLocation($value)) {
+                        unset($onboarding['city'], $onboarding['location']);
+                        continue;
+                    }
+                    $onboarding['city'] = $value;
+                    continue;
+                }
+                $onboarding[$key] = $value;
+            }
+        }
+
+        foreach (['city', 'location'] as $key) {
+            if (isset($onboarding[$key]) && is_string($onboarding[$key]) && $this->isSkippedOnboardingLocation($onboarding[$key])) {
+                unset($onboarding[$key]);
             }
         }
 
@@ -928,6 +943,11 @@ class StructuredHermesActionService
         }
 
         return $settings;
+    }
+
+    private function isSkippedOnboardingLocation(string $value): bool
+    {
+        return preg_match('/^(skip|skipped|no|no thanks|no thank you|prefer not to say|private|keep private)$/i', trim($value)) === 1;
     }
 
     private function updateConversationSession(ConversationSession $session, array $parameters): ActivityEvent
