@@ -109,6 +109,8 @@ if (mount) {
         billingPaymentMethod: null,
         billingPaymentLoading: false,
         billingBusy: false,
+        billingMessage: '',
+        billingError: '',
         token: readToken(),
         remember: localStorage.getItem(rememberKey) === 'true',
         phase: 'loading',
@@ -2064,7 +2066,8 @@ if (mount) {
         const currentPeriodEnd = subscription.current_period_end || subscription.currentPeriodEnd || '';
         const paymentMethod = state.billingPaymentMethod;
         const selectedPlan = subscriptionPlans[tier] ? tier : 'base';
-        const cancelDisabled = state.billingBusy || !status || cancelAtPeriodEnd;
+        const canCancel = subscription.can_cancel === true || subscription.canCancel === true;
+        const cancelDisabled = state.billingBusy || !canCancel;
         return `
             <div class="hb-surface-soft hb-card-pad hb-billing-settings" data-billing-settings>
                 <div class="hb-billing-header">
@@ -2092,6 +2095,8 @@ if (mount) {
                     <button class="hb-button-secondary" type="button" data-billing-refresh ${state.billingBusy || state.billingPaymentLoading ? 'disabled' : ''}>${state.billingPaymentLoading ? 'Refreshing...' : 'Refresh billing'}</button>
                     <button class="hb-button-danger" type="button" data-billing-cancel-renewal ${cancelDisabled ? 'disabled' : ''}>${cancelAtPeriodEnd ? 'Renewal canceled' : 'Cancel renewal'}</button>
                 </div>
+                ${state.billingError ? `<div class="hb-error"><div><strong>Billing needs attention</strong><span>${escapeHtml(state.billingError)}</span></div></div>` : ''}
+                ${state.billingMessage ? `<div class="hb-success"><strong>${escapeHtml(state.billingMessage)}</strong></div>` : ''}
                 <p class="hb-item-meta">Stripe securely handles payment processing. HeyBean stores only subscription status and safe payment summaries.</p>
             </div>`;
     }
@@ -8667,10 +8672,11 @@ if (mount) {
         }
     }
 
-    async function refreshBillingSettings({ user = false } = {}) {
-        if (state.billingBusy || state.billingPaymentLoading) return;
+    async function refreshBillingSettings({ user = false, force = false, message = 'Billing refreshed.' } = {}) {
+        if (!force && (state.billingBusy || state.billingPaymentLoading)) return;
         state.billingPaymentLoading = true;
         state.error = '';
+        state.billingError = '';
         render();
         try {
             const requests = [
@@ -8682,9 +8688,9 @@ if (mount) {
             state.subscriptionSummary = subscription;
             state.billingPaymentMethod = payment?.payment_method || payment?.paymentMethod || null;
             if (freshUser) state.user = freshUser;
-            state.notice = 'Billing refreshed.';
+            state.billingMessage = message;
         } catch (error) {
-            state.error = friendlyError(error, 'refresh billing');
+            state.billingError = friendlyError(error, 'refresh billing');
         } finally {
             state.billingPaymentLoading = false;
             render();
@@ -8704,6 +8710,8 @@ if (mount) {
         }
         state.billingBusy = true;
         state.error = '';
+        state.billingError = '';
+        state.billingMessage = '';
         state.notice = '';
         render();
         try {
@@ -8718,9 +8726,9 @@ if (mount) {
             state.subscriptionSummary = result?.subscription || state.subscriptionSummary;
             const freshUser = await api('/auth/me').catch(() => null);
             if (freshUser) state.user = freshUser;
-            state.notice = `Plan changed to ${subscriptionPlans[plan].label}.`;
+            state.billingMessage = `Plan changed to ${subscriptionPlans[plan].label}.`;
         } catch (error) {
-            state.error = friendlyError(error, 'change your subscription');
+            state.billingError = friendlyError(error, 'change your subscription');
         } finally {
             state.billingBusy = false;
             render();
@@ -8731,6 +8739,8 @@ if (mount) {
         if (state.billingBusy) return;
         state.billingBusy = true;
         state.error = '';
+        state.billingError = '';
+        state.billingMessage = '';
         state.notice = '';
         render();
         try {
@@ -8739,7 +8749,7 @@ if (mount) {
             window.location.href = checkout.url;
         } catch (error) {
             state.billingBusy = false;
-            state.error = friendlyError(error, 'update your payment method');
+            state.billingError = friendlyError(error, 'update your payment method');
             render();
         }
     }
@@ -8749,6 +8759,8 @@ if (mount) {
         if (!confirm('Cancel subscription renewal? Your current access stays active until the end of the paid period or trial.')) return;
         state.billingBusy = true;
         state.error = '';
+        state.billingError = '';
+        state.billingMessage = 'Canceling renewal...';
         state.notice = '';
         render();
         try {
@@ -8756,9 +8768,13 @@ if (mount) {
             state.subscriptionSummary = result?.subscription || state.subscriptionSummary;
             const freshUser = await api('/auth/me').catch(() => null);
             if (freshUser) state.user = freshUser;
-            state.notice = 'Subscription renewal canceled.';
+            await refreshBillingSettings({
+                user: true,
+                force: true,
+                message: 'Subscription renewal canceled. Current access stays active through the end of this period.',
+            });
         } catch (error) {
-            state.error = friendlyError(error, 'cancel your subscription');
+            state.billingError = friendlyError(error, 'cancel your subscription');
         } finally {
             state.billingBusy = false;
             render();

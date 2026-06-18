@@ -513,7 +513,8 @@ class BillingInfrastructureTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.subscription.tier', 'base')
             ->assertJsonPath('data.subscription.status', 'trialing')
-            ->assertJsonPath('data.subscription.cancel_at_period_end', true);
+            ->assertJsonPath('data.subscription.cancel_at_period_end', true)
+            ->assertJsonPath('data.subscription.can_cancel', false);
 
         $user->refresh();
         $this->assertSame('trialing', $user->subscription_status);

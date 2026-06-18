@@ -31,6 +31,7 @@ class StripeBillingService
             'trial_ends_at' => $user->subscription_trial_ends_at?->toIso8601String(),
             'cancel_at_period_end' => (bool) $user->subscription_cancel_at_period_end,
             'can_upgrade' => $user->subscriptionTier() !== 'pro',
+            'can_cancel' => (bool) $user->stripe_subscription_id && ! (bool) $user->subscription_cancel_at_period_end,
         ];
     }
 
