@@ -695,6 +695,59 @@ class BillingInfrastructureTest extends TestCase
             ->assertJsonPath('received', true);
     }
 
+    public function test_subscription_summary_recovers_cancelled_access_end_from_stripe(): void
+    {
+        $this->configureStripe();
+        Notification::fake();
+        $token = $this->apiToken('summary-cancelled@example.com');
+        $user = User::where('email', 'summary-cancelled@example.com')->firstOrFail();
+        $periodEnd = now()->addDays(6)->startOfSecond();
+        $user->forceFill([
+            'subscription_tier' => 'premium',
+            'stripe_customer_id' => 'cus_summary_cancelled_123',
+            'stripe_subscription_id' => 'sub_summary_cancelled_123',
+            'stripe_subscription_item_id' => 'si_summary_cancelled_123',
+            'stripe_price_id' => 'price_premium_test',
+            'subscription_status' => 'active',
+            'subscription_current_period_end' => null,
+            'subscription_cancel_at_period_end' => true,
+        ])->save();
+
+        Http::fake(function (HttpRequest $request) use ($periodEnd, $user) {
+            $this->assertSame('https://api.stripe.com/v1/subscriptions/sub_summary_cancelled_123', $request->url());
+
+            return Http::response([
+                'id' => 'sub_summary_cancelled_123',
+                'customer' => 'cus_summary_cancelled_123',
+                'status' => 'active',
+                'current_period_end' => $periodEnd->timestamp,
+                'trial_end' => null,
+                'cancel_at_period_end' => true,
+                'metadata' => [
+                    'heybean_user_id' => (string) $user->id,
+                    'plan' => 'premium',
+                ],
+                'items' => ['data' => [[
+                    'id' => 'si_summary_cancelled_123',
+                    'price' => ['id' => 'price_premium_test'],
+                ]]],
+            ], 200);
+        });
+
+        $this->withToken($token)->getJson('/api/billing/subscription')
+            ->assertOk()
+            ->assertJsonPath('data.cancel_at_period_end', true)
+            ->assertJsonPath('data.can_resume', true)
+            ->assertJsonPath('data.access_ends_at', $periodEnd->toIso8601String());
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'subscription_current_period_end' => $periodEnd->toDateTimeString(),
+            'subscription_cancel_at_period_end' => true,
+        ]);
+        Notification::assertNothingSent();
+    }
+
     public function test_missing_stripe_configuration_returns_clear_error(): void
     {
         config()->set('services.stripe.secret', null);

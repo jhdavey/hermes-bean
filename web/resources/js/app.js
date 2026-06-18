@@ -2116,13 +2116,15 @@ if (mount) {
                 <div class="hb-card hb-card-pad">
                     <strong>Account controls</strong>
                     <div class="hb-account-actions">
-                        <a class="hb-button-secondary" href="/privacy">Privacy</a>
-                        <a class="hb-button-secondary" href="/terms">Terms</a>
-                        <a class="hb-button-secondary" href="/support">Support</a>
                         <button class="hb-button-secondary" type="button" data-export-account>Export data</button>
                         <button class="hb-button-secondary" type="button" data-logout>Sign out</button>
                         <button class="hb-button-danger" type="button" data-delete-account>Delete account</button>
                     </div>
+                </div>
+                <div class="hb-settings-legal-row">
+                    <a href="/privacy">Privacy</a>
+                    <a href="/terms">Terms</a>
+                    <a href="/support">Support</a>
                 </div>
             </section>`;
     }
@@ -2139,7 +2141,9 @@ if (mount) {
         const paymentMethod = state.billingPaymentMethod;
         const selectedPlan = subscriptionPlans[tier] ? tier : 'base';
         const canCancel = subscription.can_cancel === true || subscription.canCancel === true;
-        const canResume = subscription.can_resume === true || subscription.canResume === true;
+        const canResume = subscription.can_resume === true
+            || subscription.canResume === true
+            || (cancelAtPeriodEnd && accessEndsAt && new Date(accessEndsAt) > new Date());
         const cancelDisabled = state.billingBusy || !canCancel;
         return `
             <div class="hb-surface-soft hb-card-pad hb-billing-settings" data-billing-settings>
@@ -2163,10 +2167,11 @@ if (mount) {
                     </label>
                     <button class="hb-button" type="button" data-billing-change-plan ${state.billingBusy ? 'disabled' : ''}>${state.billingBusy ? 'Working...' : 'Change plan'}</button>
                 </div>
+                ${cancelAtPeriodEnd ? `<p class="hb-item-meta"><strong>Renewal is canceled.</strong> ${accessEndsAt ? `Your access stays active through ${escapeHtml(formatDateOnly(accessEndsAt))}. You can restart renewal before then to keep this account and data active.` : 'Your access stays active through the end of the current paid period or trial.'}</p>` : ''}
                 <div class="hb-account-actions">
                     <button class="hb-button-secondary" type="button" data-billing-update-payment ${state.billingBusy ? 'disabled' : ''}>Update payment</button>
                     <button class="hb-button-secondary" type="button" data-billing-refresh ${state.billingBusy || state.billingPaymentLoading ? 'disabled' : ''}>${state.billingPaymentLoading ? 'Refreshing...' : 'Refresh billing'}</button>
-                    ${canResume ? `<button class="hb-button" type="button" data-billing-resume-subscription ${state.billingBusy ? 'disabled' : ''}>${state.billingBusy ? 'Working...' : 'Restart subscription'}</button>` : ''}
+                    ${canResume ? `<button class="hb-button" type="button" data-billing-resume-subscription ${state.billingBusy ? 'disabled' : ''}>${state.billingBusy ? 'Working...' : 'Restart renewal'}</button>` : ''}
                     <button class="hb-button-danger" type="button" data-billing-cancel-renewal ${cancelDisabled ? 'disabled' : ''}>${cancelAtPeriodEnd ? 'Renewal canceled' : 'Cancel renewal'}</button>
                 </div>
                 ${state.billingError ? `<div class="hb-error"><div><strong>Billing needs attention</strong><span>${escapeHtml(state.billingError)}</span></div></div>` : ''}

@@ -1896,6 +1896,24 @@
     line-height: 1.05;
 }
 
+.hb-glance-card > .hb-section-action-row .hb-section-icon,
+.hb-today-tasks-card > .hb-section-action-row .hb-section-icon {
+    background: transparent;
+    border-radius: 0;
+}
+
+.hb-glance-card > .hb-section-action-row .hb-icon-button,
+.hb-today-tasks-card > .hb-section-action-row .hb-icon-button {
+    background: transparent;
+    border-color: transparent;
+}
+
+.hb-glance-card > .hb-section-action-row .hb-icon-button:hover,
+.hb-today-tasks-card > .hb-section-action-row .hb-icon-button:hover {
+    background: transparent;
+    border-color: transparent;
+}
+
 .hb-calendar-card .hb-calendar {
     gap: 0;
 }
@@ -2143,8 +2161,8 @@
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
     grid-template-rows: auto repeat(var(--hb-month-week-count, 6), minmax(0, 1fr));
-    column-gap: 4px;
-    row-gap: 4px;
+    column-gap: 0;
+    row-gap: 0;
 }
 
 .hb-month-weekday {
@@ -2160,7 +2178,7 @@
     grid-template-rows: auto minmax(0, 1fr);
     gap: 7px;
     border: 1px solid var(--hb-border);
-    border-radius: 16px;
+    border-radius: 2px;
     background: rgba(255, 255, 255, .72);
     color: var(--hb-text);
     padding: 8px;
@@ -3828,6 +3846,25 @@
 .hb-settings-grid {
     display: grid;
     gap: 10px;
+}
+
+.hb-settings-legal-row {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 2px;
+}
+
+.hb-settings-legal-row a {
+    color: var(--hb-muted);
+    font-size: 13px;
+    font-weight: 400;
+    text-decoration: none;
+}
+
+.hb-settings-legal-row a:hover {
+    color: var(--hb-text);
 }
 
 .hb-billing-settings {

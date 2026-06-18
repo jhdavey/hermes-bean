@@ -15542,6 +15542,7 @@ class _SettingsView extends StatelessWidget {
         onDeleteAccount: onDeleteAccount,
         onSignOut: onSignOut,
         launchExternalUrl: launchExternalUrl,
+        showLegalLinks: false,
         beforeAccountActions: _BillingSettingsCard(
           apiClient: apiClient,
           user: user,
@@ -15549,6 +15550,8 @@ class _SettingsView extends StatelessWidget {
           onBillingChanged: onBillingChanged,
         ),
       ),
+      const SizedBox(height: 10),
+      _SettingsLegalLinksRow(launchExternalUrl: launchExternalUrl),
     ],
   );
 }
@@ -18602,6 +18605,7 @@ class _AccountCard extends StatelessWidget {
     required this.onDeleteAccount,
     required this.onSignOut,
     required this.launchExternalUrl,
+    this.showLegalLinks = true,
     this.beforeAccountActions,
   });
 
@@ -18610,6 +18614,7 @@ class _AccountCard extends StatelessWidget {
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
   final ExternalUrlLauncher launchExternalUrl;
+  final bool showLegalLinks;
   final Widget? beforeAccountActions;
 
   Future<void> _editEmail(BuildContext context) async {
@@ -18684,31 +18689,64 @@ class _AccountCard extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            TextButton(
-              key: const Key('settings-privacy-policy-link'),
-              onPressed: () => launchExternalUrl(_privacyPolicyUrl),
-              child: const Text('Privacy Policy'),
-            ),
-            TextButton(
-              key: const Key('settings-terms-of-service-link'),
-              onPressed: () => launchExternalUrl(_termsOfServiceUrl),
-              child: const Text('Terms of Use'),
-            ),
-            TextButton(
-              key: const Key('settings-support-link'),
-              onPressed: () => launchExternalUrl(_supportUrl),
-              child: const Text('Support'),
-            ),
-          ],
-        ),
+        if (showLegalLinks) ...[
+          const SizedBox(height: 10),
+          _SettingsLegalLinksRow(launchExternalUrl: launchExternalUrl),
+        ],
       ],
     ),
   );
+}
+
+class _SettingsLegalLinksRow extends StatelessWidget {
+  const _SettingsLegalLinksRow({required this.launchExternalUrl});
+
+  final ExternalUrlLauncher launchExternalUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontWeight: FontWeight.w400,
+    );
+    final buttonStyle = TextButton.styleFrom(
+      foregroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: Size.zero,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      textStyle: style,
+    );
+
+    return Align(
+      alignment: Alignment.center,
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 12,
+        runSpacing: 6,
+        children: [
+          TextButton(
+            key: const Key('settings-privacy-policy-link'),
+            style: buttonStyle,
+            onPressed: () => launchExternalUrl(_privacyPolicyUrl),
+            child: const Text('Privacy Policy'),
+          ),
+          TextButton(
+            key: const Key('settings-terms-of-service-link'),
+            style: buttonStyle,
+            onPressed: () => launchExternalUrl(_termsOfServiceUrl),
+            child: const Text('Terms of Use'),
+          ),
+          TextButton(
+            key: const Key('settings-support-link'),
+            style: buttonStyle,
+            onPressed: () => launchExternalUrl(_supportUrl),
+            child: const Text('Support'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 Future<String?> _showEmailEditor(

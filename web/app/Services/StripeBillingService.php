@@ -24,6 +24,7 @@ class StripeBillingService
 
     public function subscriptionSummary(User $user): array
     {
+        $user = $this->refreshCancelledSubscriptionForSummary($user);
         $accessEndsAt = $user->subscription_current_period_end;
         $canResume = (bool) $user->stripe_subscription_id
             && (bool) $user->subscription_cancel_at_period_end
@@ -413,7 +414,33 @@ class StripeBillingService
         }
     }
 
-    private function syncSubscription(array $subscription, ?User $fallbackUser = null): void
+    private function refreshCancelledSubscriptionForSummary(User $user): User
+    {
+        if (! $user->stripe_subscription_id || ! $user->subscription_cancel_at_period_end) {
+            return $user;
+        }
+
+        if ($user->subscription_current_period_end && $user->subscription_current_period_end->isFuture()) {
+            return $user;
+        }
+
+        try {
+            $subscription = $this->stripeGet('/subscriptions/'.$user->stripe_subscription_id)->json();
+            $this->syncSubscription($subscription, $user, sendReceipt: false);
+
+            return $user->fresh() ?: $user;
+        } catch (Throwable $exception) {
+            Log::warning('Stripe subscription summary refresh failed.', [
+                'user_id' => $user->id,
+                'subscription_id' => $user->stripe_subscription_id,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return $user;
+        }
+    }
+
+    private function syncSubscription(array $subscription, ?User $fallbackUser = null, bool $sendReceipt = true): void
     {
         $user = $this->userForSubscription($subscription, $fallbackUser);
         if (! $user) {
@@ -440,7 +467,7 @@ class StripeBillingService
         ])->save();
 
         $freshUser = $user->fresh();
-        if ($freshUser) {
+        if ($freshUser && $sendReceipt) {
             $this->sendSubscriptionReceiptIfNeeded(
                 $freshUser,
                 $previousPlan,

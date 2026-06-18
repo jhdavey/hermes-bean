@@ -15,6 +15,8 @@ class LandingPageFeatureTest extends TestCase
         foreach ([
             'images/bean-logo.png',
             'images/bean-real-home-screen.png',
+            'images/bean-real-calendar-screen.png',
+            'images/bean-real-reminders-screen.png',
             'images/iphone16promax-template.png',
             'images/heybean-review-alex.svg',
             'images/heybean-review-maya.svg',
@@ -47,12 +49,12 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Reminder set: bring the gift before you leave.', false)
             ->assertSee('class="bean-demo-tap calendar"', false)
             ->assertSee('class="bean-demo-tap reminders"', false)
-            ->assertSee('class="bean-proof-screen calendar"', false)
-            ->assertSee('class="bean-proof-day active"', false)
-            ->assertSee('Friday · household calendar', false)
-            ->assertSee('class="bean-proof-screen reminders"', false)
-            ->assertSee('Bring the gift', false)
-            ->assertSee('Friday · 6:00 PM', false)
+            ->assertSee('Calendar navigation tap', false)
+            ->assertSee('Reminders navigation tap', false)
+            ->assertSee('images/bean-real-calendar-screen.png', false)
+            ->assertSee('images/bean-real-reminders-screen.png', false)
+            ->assertSee('class="bean-proof-hotspot event"', false)
+            ->assertSee('class="bean-proof-hotspot reminder-card"', false)
             ->assertSee('Keep every calendar moving.', false)
             ->assertSee('Turn loose ends into managed tasks.', false)
             ->assertSee('See the day Bean is helping you run.', false)
