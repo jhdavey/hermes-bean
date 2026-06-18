@@ -16,23 +16,11 @@
     @include('partials.public-beta-banner')
     @include('partials.public-nav')
 
-    <main class="wrap hero pricing-hero">
-        <h1>More Bean, with less effort.</h1>
-        <p class="hero-subhead">Start simple, then give Bean more room for workspaces, connected calendars, reminders, history, and daily planning across your real life.</p>
-        <div class="hero-actions">
-            <a class="button" href="#plans">Compare plans <span aria-hidden="true">-></span></a>
-            <a class="button outline" href="/register?plan=premium">Start trial</a>
-        </div>
-        @if ($fromFlutter)
-            <p class="hero-subhead" style="font-size:15px"><strong>Coming from the app?</strong> After upgrading on the site, close and reopen the Flutter app to apply your upgrade.</p>
-        @endif
-    </main>
-
     <section class="pricing-panel" id="plans">
         <div class="wrap">
             <div class="section-head">
                 <span class="section-kicker">Pricing</span>
-                <h2>Choose the amount of Bean your day needs.</h2>
+                <h2>Organized Your Days With Less Effort</h2>
             </div>
 
             <div class="billing-switch" aria-label="Plan options">
@@ -43,10 +31,13 @@
                 </div>
                 <span class="trial-toggle">Free trial <i class="toggle-ui" aria-hidden="true"></i></span>
             </div>
+            @if ($fromFlutter)
+                <p class="hero-subhead" style="font-size:15px;text-align:center;margin-top:-30px;margin-bottom:44px"><strong>Coming from the app?</strong> After upgrading on the site, close and reopen the Flutter app to apply your upgrade.</p>
+            @endif
 
             <div class="plans">
-                <article class="plan popular">
-                    <h3>Base <span class="badge">Most popular</span></h3>
+                <article class="plan">
+                    <h3>Base</h3>
                     <p class="for">Best for getting your personal day into one organized place.</p>
                     <div class="price"><span class="amount">$4.99</span><span class="period">/month</span></div>
                     <ul class="features">
@@ -61,8 +52,8 @@
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
 
-                <article class="plan">
-                    <h3>Premium</h3>
+                <article class="plan popular">
+                    <h3>Premium <span class="badge">Most popular</span></h3>
                     <p class="for">Best for families and power users who want Bean in the daily routine.</p>
                     <div class="price"><span class="amount">$19.99</span><span class="period">/month</span></div>
                     <ul class="features">
@@ -79,7 +70,7 @@
                 </article>
 
                 <article class="plan">
-                    <h3>Pro <span class="badge">Best deal</span></h3>
+                    <h3>Pro</h3>
                     <p class="for">Best for people who want Bean across every workspace and workflow.</p>
                     <div class="price"><span class="amount">$49.99</span><span class="period">/month</span></div>
                     <ul class="features">
