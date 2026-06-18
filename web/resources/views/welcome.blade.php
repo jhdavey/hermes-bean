@@ -18,13 +18,23 @@
 
     <main class="wrap hero">
         <div class="hero-icons" aria-label="HeyBean tools">
-            <span class="hero-icon green">Cal</span>
-            <span class="hero-icon blue">Task</span>
-            <span class="hero-icon">AI</span>
-            <span class="hero-icon green">Rem</span>
-            <span class="hero-icon blue">Voice</span>
+            <span class="hero-icon green" aria-label="Calendar">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="3"/></svg>
+            </span>
+            <span class="hero-icon blue" aria-label="Tasks">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12.5 11 14.5 15.5 9.5"/><circle cx="12" cy="12" r="9"/></svg>
+            </span>
+            <span class="hero-icon bean" aria-label="Bean AI">
+                <img src="{{ asset('images/bean-logo.png') }}" alt="">
+            </span>
+            <span class="hero-icon green" aria-label="Reminders">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
+            </span>
+            <span class="hero-icon blue" aria-label="Voice">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
+            </span>
         </div>
-        <h1>Run your day from one calm assistant dashboard</h1>
+        <h1>Run your day with Bean</h1>
         <p class="hero-subhead">Easy calendar, task, and reminder management with Bean, your AI assistant for the real-life details that keep slipping between apps.</p>
         <div class="hero-actions">
             <a class="button" href="#early-access">Try it for free <span aria-hidden="true">-></span></a>
@@ -93,21 +103,90 @@
 
             <div class="feature-row reverse">
                 <div class="feature-media">
-                    <div class="mock-card schedule-board" aria-label="HeyBean schedule board preview">
+                    <div class="mock-card schedule-board product-window" aria-label="HeyBean scheduling preview">
+                        <div class="mock-header">
+                            <span>Scheduling</span>
+                            <strong>Jun 18</strong>
+                        </div>
+                        <div class="calendar-grid" aria-hidden="true">
+                            <span>Mon</span><span>Tue</span><span>Wed</span><span class="is-today">Thu</span><span>Fri</span>
+                            <b>15</b><b>16</b><b>17</b><b class="is-today">18</b><b>19</b>
+                        </div>
                         <div class="schedule-card"><span class="schedule-dot"></span><div><b>School drop-off</b><span>Today, 8:15 AM - household</span></div><strong>Ready</strong></div>
-                        <div class="schedule-card"><span class="schedule-dot"></span><div><b>Team check-in</b><span>Today, 11:30 AM - work</span></div><strong>Synced</strong></div>
-                        <div class="schedule-card"><span class="schedule-dot"></span><div><b>Bring the gift</b><span>Reminder before dinner</span></div><strong>7 PM</strong></div>
-                        <div class="schedule-card"><span class="schedule-dot"></span><div><b>Trash and recycling</b><span>Repeats every Thursday</span></div><strong>8 PM</strong></div>
+                        <div class="schedule-card"><span class="schedule-dot blue"></span><div><b>Team check-in</b><span>Today, 11:30 AM - work</span></div><strong>Synced</strong></div>
+                        <div class="schedule-card"><span class="schedule-dot"></span><div><b>Dinner with Lauren</b><span>Friday at 7:00 PM</span></div><strong>Set</strong></div>
+                    </div>
+                </div>
+                <div class="feature-copy">
+                    <span class="section-kicker" style="text-align:left">SCHEDULING</span>
+                    <h3>Keep every calendar moving.</h3>
+                    <p>Bean helps you create, adjust, and review events across the calendars that shape your day, without making scheduling feel like a separate job.</p>
+                    <ul class="feature-list">
+                        <li>Daily, weekly, and monthly calendar views.</li>
+                        <li>Shared workspaces for home, work, and recurring plans.</li>
+                        <li>Calendar-aware suggestions before Bean changes anything important.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="feature-row">
+                <div class="feature-media">
+                    <div class="mock-card task-board product-window" aria-label="HeyBean task management preview">
+                        <div class="mock-header">
+                            <span>Tasks</span>
+                            <strong>12 open</strong>
+                        </div>
+                        <div class="task-lanes">
+                            <div>
+                                <span class="lane-label">Today</span>
+                                <div class="task-card"><b>Send field trip form</b><span>Household - due 3 PM</span></div>
+                                <div class="task-card"><b>Review proposal edits</b><span>Work - waiting on Sam</span></div>
+                            </div>
+                            <div>
+                                <span class="lane-label">Next</span>
+                                <div class="task-card"><b>Renew parking pass</b><span>Reminder tomorrow</span></div>
+                                <div class="task-card done"><b>Order birthday gift</b><span>Completed by Bean</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="feature-copy">
+                    <span class="section-kicker" style="text-align:left">TASK MANAGEMENT</span>
+                    <h3>Turn loose ends into managed tasks.</h3>
+                    <p>Capture what needs to happen, let Bean sort the next step, and keep task work connected to the people, dates, and reminders that make it real.</p>
+                    <ul class="feature-list">
+                        <li>Natural-language task capture from chat or voice.</li>
+                        <li>Due dates, owners, and workspace context in one list.</li>
+                        <li>Follow-up reminders when a task needs another nudge.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="feature-row reverse">
+                <div class="feature-media">
+                    <div class="mock-card daily-board product-window" aria-label="HeyBean daily control preview">
+                        <div class="mock-header">
+                            <span>Daily Control</span>
+                            <strong>Ready</strong>
+                        </div>
+                        <div class="daily-summary">
+                            <b>4 events</b>
+                            <b>7 tasks</b>
+                            <b>3 reminders</b>
+                        </div>
+                        <div class="schedule-card"><span class="schedule-dot"></span><div><b>Morning plan</b><span>Bean grouped the day by time and workspace</span></div><strong>Done</strong></div>
+                        <div class="schedule-card"><span class="schedule-dot blue"></span><div><b>Needs approval</b><span>Move dentist reminder to Monday?</span></div><strong>Review</strong></div>
+                        <div class="daily-note">One calm view for the calendar items, tasks, reminders, and approvals that need your attention.</div>
                     </div>
                 </div>
                 <div class="feature-copy">
                     <span class="section-kicker" style="text-align:left">DAILY CONTROL</span>
-                    <h3>Calendar, tasks, and reminders stay together.</h3>
-                    <p>HeyBean gives you a simple place to see what is scheduled, what is due, and what still needs a nudge across home, work, school, errands, and recurring routines.</p>
+                    <h3>See the day Bean is helping you run.</h3>
+                    <p>HeyBean gives you a simple control layer for what is scheduled, what is due, and what still needs a nudge across home, work, school, errands, and recurring routines.</p>
                     <ul class="feature-list">
-                        <li>Daily, weekly, and monthly calendar views.</li>
-                        <li>Personal and shared workspaces for real-life context.</li>
-                        <li>Push and email reminders when timing matters.</li>
+                        <li>One place for calendar events, tasks, and reminders.</li>
+                        <li>Approvals stay visible before sensitive actions happen.</li>
+                        <li>Daily planning that adapts as the day changes.</li>
                     </ul>
                 </div>
             </div>
