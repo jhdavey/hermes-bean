@@ -19339,7 +19339,7 @@ class _BetaFeedbackBanner extends StatelessWidget {
               SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  'You are in beta testing. If you have any issues please report them here.',
+                  'You are in our Beta testing phase. If you have any issues, please report them here.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,

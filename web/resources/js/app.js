@@ -1274,7 +1274,7 @@ if (mount) {
     function betaBannerMarkup() {
         if (!userIsEarlyAccess()) return '';
 
-        return `<button class="hb-beta-banner" type="button" data-open-issue-report>If you have any issues, please report them here.</button>`;
+        return `<button class="hb-beta-banner" type="button" data-open-issue-report>You are in our Beta testing phase. If you have any issues, please report them here.</button>`;
     }
 
     function appPanelMarkup() {
