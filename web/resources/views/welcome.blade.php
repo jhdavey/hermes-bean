@@ -76,13 +76,13 @@
                     <div class="bean-demo-stack">
                         <div class="bean-user-bubble">
                             <strong>You</strong>
-                            <p id="bean-demo-request"></p>
+                            <p id="bean-demo-request">Add dinner with Lauren Friday at 7, remind me to bring the gift, and check if the weather changes the plan.</p>
                         </div>
                         <div class="bean-progress-card" data-bean-progress>
                             <span class="bean-dots"><i></i><i></i><i></i></span>
                             <span>Checking calendar, reminders, and weather…</span>
                         </div>
-                        <div class="bean-result-card" data-bean-result>
+                        <div class="bean-result-card is-visible" data-bean-result>
                             <strong>Done — your plan is organized.</strong>
                             <div><span>✓</span>Dinner with Lauren · Friday 7 PM</div>
                             <div><span>✓</span>Gift reminder before you leave</div>
@@ -267,6 +267,8 @@
             const initialChars = 11;
             const typeDuration = 4300;
             const ease = (n) => 0.5 - Math.cos(Math.PI * Math.max(0, Math.min(1, n))) / 2;
+            progress.classList.remove('is-visible');
+            result.classList.remove('is-visible');
             text.textContent = request.slice(0, initialChars);
 
             // Run one polished story beat instead of hard-looping the UI. The screen never clears,
