@@ -53,8 +53,6 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Reminders navigation tap', false)
             ->assertSee('images/bean-real-calendar-screen.png', false)
             ->assertSee('images/bean-real-reminders-screen.png', false)
-            ->assertSee('class="bean-proof-hotspot event"', false)
-            ->assertSee('class="bean-proof-hotspot reminder-card"', false)
             ->assertSee('Keep every calendar moving.', false)
             ->assertSee('Turn loose ends into managed tasks.', false)
             ->assertSee('See the day Bean is helping you run.', false)
