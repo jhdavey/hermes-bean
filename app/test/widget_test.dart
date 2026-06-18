@@ -2305,7 +2305,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.updatedTask?.category, isNull);
-    expect(api.updatedTask?.color, '#16A34A');
+    expect(api.updatedTask?.color, '#7BC98C');
 
     await tester.tap(find.byKey(const Key('nav-reminders')));
     await tester.pumpAndSettle();
@@ -2322,7 +2322,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.updatedReminder?.category, isNull);
-    expect(api.updatedReminder?.color, '#16A34A');
+    expect(api.updatedReminder?.color, '#7BC98C');
   });
 
   testWidgets('new task date saves on the task without creating a reminder', (
@@ -3824,7 +3824,7 @@ void main() {
     },
   );
 
-  testWidgets('uses old HeyBean green Material 3 styling indicators', (
+  testWidgets('uses landing-page green Material 3 styling indicators', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -3837,8 +3837,8 @@ void main() {
 
     final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(materialApp.theme?.useMaterial3, isTrue);
-    expect(materialApp.theme?.colorScheme.primary, const Color(0xFF16A34A));
-    expect(materialApp.theme?.canvasColor, const Color(0xFFF8FBF6));
+    expect(materialApp.theme?.colorScheme.primary, const Color(0xFF7BC98C));
+    expect(materialApp.theme?.canvasColor, const Color(0xFFFFFFFF));
 
     expect(
       find.byKey(const Key('heybean-background-gradient')),
@@ -4176,7 +4176,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.createdEvent?.category, isNull);
-      expect(api.createdEvent?.color, '#16A34A');
+      expect(api.createdEvent?.color, '#7BC98C');
     },
   );
 

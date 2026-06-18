@@ -648,6 +648,7 @@ class HeyBeanColorTheme {
     required this.surface2,
     required this.accent,
     required this.accentStrong,
+    required this.accentInk,
     required this.success,
   });
 
@@ -659,6 +660,7 @@ class HeyBeanColorTheme {
   final Color surface2;
   final Color accent;
   final Color accentStrong;
+  final Color accentInk;
   final Color success;
 }
 
@@ -666,13 +668,14 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
   HeyBeanColorTheme(
     key: 'green',
     label: 'Green',
-    bg0: Color(0xFFF8FBF6),
-    bg1: Color(0xFFF1F7EE),
-    bg2: Color(0xFFEAF2E6),
-    surface2: Color(0xFFF6FAF4),
-    accent: Color(0xFF16A34A),
-    accentStrong: Color(0xFF15803D),
-    success: Color(0xFF22C55E),
+    bg0: Color(0xFFFFFFFF),
+    bg1: Color(0xFFF8FBF6),
+    bg2: Color(0xFFF1F7EE),
+    surface2: Color(0xFFFBFCFB),
+    accent: Color(0xFF7BC98C),
+    accentStrong: Color(0xFF52A869),
+    accentInk: Color(0xFF173A28),
+    success: Color(0xFF7BC98C),
   ),
   HeyBeanColorTheme(
     key: 'gray',
@@ -680,10 +683,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFF9FAFB),
     bg1: Color(0xFFF1F5F9),
     bg2: Color(0xFFE2E8F0),
-    surface2: Color(0xFFF8FAFC),
-    accent: Color(0xFF64748B),
-    accentStrong: Color(0xFF475569),
-    success: Color(0xFF64748B),
+    surface2: Color(0xFFFBFCFD),
+    accent: Color(0xFF94A3B8),
+    accentStrong: Color(0xFF64748B),
+    accentInk: Color(0xFF263241),
+    success: Color(0xFF94A3B8),
   ),
   HeyBeanColorTheme(
     key: 'blue',
@@ -691,10 +695,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFF8FBFF),
     bg1: Color(0xFFEFF6FF),
     bg2: Color(0xFFDBEAFE),
-    surface2: Color(0xFFF7FBFF),
-    accent: Color(0xFF2563EB),
-    accentStrong: Color(0xFF1D4ED8),
-    success: Color(0xFF3B82F6),
+    surface2: Color(0xFFFBFDFF),
+    accent: Color(0xFF8CC9FF),
+    accentStrong: Color(0xFF3DA2F5),
+    accentInk: Color(0xFF173451),
+    success: Color(0xFF8CC9FF),
   ),
   HeyBeanColorTheme(
     key: 'purple',
@@ -702,10 +707,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFFBF9FF),
     bg1: Color(0xFFF5F0FF),
     bg2: Color(0xFFEDE9FE),
-    surface2: Color(0xFFFAF7FF),
-    accent: Color(0xFF7C3AED),
-    accentStrong: Color(0xFF6D28D9),
-    success: Color(0xFF8B5CF6),
+    surface2: Color(0xFFFCFBFF),
+    accent: Color(0xFFC4B5FD),
+    accentStrong: Color(0xFF8B5CF6),
+    accentInk: Color(0xFF2F1B54),
+    success: Color(0xFFC4B5FD),
   ),
   HeyBeanColorTheme(
     key: 'pink',
@@ -713,10 +719,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFFFF8FB),
     bg1: Color(0xFFFDF2F8),
     bg2: Color(0xFFFCE7F3),
-    surface2: Color(0xFFFFF7FB),
-    accent: Color(0xFFDB2777),
-    accentStrong: Color(0xFFBE185D),
-    success: Color(0xFFEC4899),
+    surface2: Color(0xFFFFFBFD),
+    accent: Color(0xFFF9A8D4),
+    accentStrong: Color(0xFFEC4899),
+    accentInk: Color(0xFF4A1730),
+    success: Color(0xFFF9A8D4),
   ),
   HeyBeanColorTheme(
     key: 'red',
@@ -724,10 +731,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFFFFAFA),
     bg1: Color(0xFFFEF2F2),
     bg2: Color(0xFFFEE2E2),
-    surface2: Color(0xFFFFF7F7),
-    accent: Color(0xFFDC2626),
-    accentStrong: Color(0xFFB91C1C),
-    success: Color(0xFFEF4444),
+    surface2: Color(0xFFFFFAFA),
+    accent: Color(0xFFFCA5A5),
+    accentStrong: Color(0xFFEF4444),
+    accentInk: Color(0xFF4F1717),
+    success: Color(0xFFFCA5A5),
   ),
   HeyBeanColorTheme(
     key: 'orange',
@@ -735,10 +743,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFFFFAF5),
     bg1: Color(0xFFFFF7ED),
     bg2: Color(0xFFFFEDD5),
-    surface2: Color(0xFFFFFAF4),
-    accent: Color(0xFFEA580C),
-    accentStrong: Color(0xFFC2410C),
-    success: Color(0xFFF97316),
+    surface2: Color(0xFFFFFAF5),
+    accent: Color(0xFFFDBA74),
+    accentStrong: Color(0xFFF97316),
+    accentInk: Color(0xFF4A2207),
+    success: Color(0xFFFDBA74),
   ),
   HeyBeanColorTheme(
     key: 'gold',
@@ -746,10 +755,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFFFFDF7),
     bg1: Color(0xFFFFFBEB),
     bg2: Color(0xFFFEF3C7),
-    surface2: Color(0xFFFFFAF0),
-    accent: Color(0xFFD97706),
-    accentStrong: Color(0xFFB45309),
-    success: Color(0xFFF59E0B),
+    surface2: Color(0xFFFFFDF7),
+    accent: Color(0xFFFCD34D),
+    accentStrong: Color(0xFFD97706),
+    accentInk: Color(0xFF3F2C07),
+    success: Color(0xFFFCD34D),
   ),
   HeyBeanColorTheme(
     key: 'teal',
@@ -757,10 +767,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFF7FFFD),
     bg1: Color(0xFFF0FDFA),
     bg2: Color(0xFFCCFBF1),
-    surface2: Color(0xFFF6FFFD),
-    accent: Color(0xFF0D9488),
-    accentStrong: Color(0xFF0F766E),
-    success: Color(0xFF14B8A6),
+    surface2: Color(0xFFFBFFFE),
+    accent: Color(0xFF7DD3C7),
+    accentStrong: Color(0xFF14B8A6),
+    accentInk: Color(0xFF113C38),
+    success: Color(0xFF7DD3C7),
   ),
   HeyBeanColorTheme(
     key: 'indigo',
@@ -768,10 +779,11 @@ const List<HeyBeanColorTheme> heyBeanColorThemes = [
     bg0: Color(0xFFF9FAFF),
     bg1: Color(0xFFEEF2FF),
     bg2: Color(0xFFE0E7FF),
-    surface2: Color(0xFFF7F8FF),
-    accent: Color(0xFF4F46E5),
-    accentStrong: Color(0xFF4338CA),
-    success: Color(0xFF6366F1),
+    surface2: Color(0xFFFBFBFF),
+    accent: Color(0xFFA5B4FC),
+    accentStrong: Color(0xFF6366F1),
+    accentInk: Color(0xFF202857),
+    success: Color(0xFFA5B4FC),
   ),
 ];
 
@@ -790,12 +802,13 @@ class HeyBeanTheme {
   static Color bg2 = _current.bg2;
   static const Color surface = Color(0xFFFFFFFF);
   static Color surface2 = _current.surface2;
-  static const Color text = Color(0xFF1F2937);
-  static const Color muted = Color(0xFF64748B);
-  static const Color border = Color(0x2694A3B8);
-  static const Color borderStrong = Color(0x4D94A3B8);
+  static const Color text = Color(0xFF2D3748);
+  static const Color muted = Color(0xFF667085);
+  static const Color border = Color(0xFFD9DDE3);
+  static const Color borderStrong = Color(0xFFCBD1DA);
   static Color accent = _current.accent;
   static Color accentStrong = _current.accentStrong;
+  static Color accentInk = _current.accentInk;
   static Color success = _current.success;
   static const Color warning = Color(0xFFF59E0B);
   static const Color destructive = Color(0xFFDC2626);
@@ -817,6 +830,7 @@ class HeyBeanTheme {
     surface2 = _current.surface2;
     accent = _current.accent;
     accentStrong = _current.accentStrong;
+    accentInk = _current.accentInk;
     success = _current.success;
   }
 
@@ -828,6 +842,9 @@ class HeyBeanTheme {
           seedColor: accent,
         ).copyWith(
           primary: accent,
+          onPrimary: accentInk,
+          primaryContainer: accent,
+          onPrimaryContainer: accentInk,
           secondary: accentStrong,
           tertiary: success,
           surface: surface,
@@ -840,6 +857,8 @@ class HeyBeanTheme {
       useMaterial3: true,
       brightness: Brightness.light,
       colorScheme: colorScheme,
+      fontFamily: 'Plus Jakarta Sans',
+      fontFamilyFallback: const ['Avenir Next', 'Inter', 'Roboto', 'Arial'],
       scaffoldBackgroundColor: Colors.transparent,
       canvasColor: bg0,
       appBarTheme: const AppBarTheme(
@@ -856,7 +875,7 @@ class HeyBeanTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           side: const BorderSide(color: border),
         ),
       ),
@@ -875,19 +894,19 @@ class HeyBeanTheme {
           fontWeight: FontWeight.w900,
         ),
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 13,
-          vertical: 13,
+          horizontal: 16,
+          vertical: 14,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0x241C314E)),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0x241C314E)),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(
             color: accent.withValues(alpha: .56),
             width: 1.2,
@@ -897,10 +916,10 @@ class HeyBeanTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: accent,
-          foregroundColor: Colors.white,
+          foregroundColor: accentInk,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(999),
           ),
         ),
       ),
@@ -909,7 +928,7 @@ class HeyBeanTheme {
           foregroundColor: text,
           side: const BorderSide(color: borderStrong),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(999),
           ),
         ),
       ),
@@ -5324,7 +5343,7 @@ class _SignupPlanCard extends StatelessWidget {
               style: prominent
                   ? FilledButton.styleFrom(
                       backgroundColor: HeyBeanTheme.accent,
-                      foregroundColor: Colors.white,
+                      foregroundColor: HeyBeanTheme.accentInk,
                     )
                   : null,
               onPressed: disabled || busy ? null : onPressed,
