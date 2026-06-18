@@ -66,8 +66,6 @@
         </section>
         <section class="hero-visual" aria-label="HeyBean mobile planning screenshot mockup">
             <div class="halo"></div>
-            <div class="hero-callout events">3 updates made<small>event, reminder, weather</small></div>
-            <div class="hero-callout voice">Voice-first control<small>Speak or type from the mobile app</small></div>
             <div class="hero-phone image-mockup hero-device" data-bean-demo>
                 <div class="hero-device-screen" aria-hidden="true">
                     <img class="bean-real-screen" src="{{ asset('images/bean-real-home-screen.png') }}?v={{ filemtime(public_path('images/bean-real-home-screen.png')) }}" width="1320" height="2868" alt="">
