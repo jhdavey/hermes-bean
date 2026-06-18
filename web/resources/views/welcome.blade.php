@@ -274,7 +274,7 @@
                 // Keep the completed request through the loop seam while the result fades away,
                 // then restart typing once the screen is clean. This avoids a blank/overlapped reset frame.
                 if (t < typeStart) chars = request.length;
-                else if (t < typeStart + typeDuration) chars = Math.round(request.length * ease((t - typeStart) / typeDuration));
+                else if (t < typeStart + typeDuration) chars = Math.max(11, Math.round(request.length * ease((t - typeStart) / typeDuration)));
                 else chars = request.length;
                 text.textContent = request.slice(0, chars);
                 progress.classList.toggle('is-visible', t >= 5000 && t < 6900);
