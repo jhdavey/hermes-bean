@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -15,6 +16,8 @@ class LandingPageFeatureTest extends TestCase
             'images/bean-logo.png',
             'images/bean-real-home-screen.png',
             'images/iphone16promax-template.png',
+            'videos/bean-assistant-mockup.mp4',
+            'videos/bean-assistant-mockup.webm',
             'images/heybean-review-alex.svg',
             'images/heybean-review-maya.svg',
             'images/heybean-review-sam.svg',
@@ -29,20 +32,18 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Easy calendar, task, and reminder management with Bean', false)
             ->assertSee('aria-label="Calendar"', false)
             ->assertSee('aria-label="Tasks"', false)
-            ->assertSee('aria-label="Bean AI"', false)
             ->assertSee('aria-label="Reminders"', false)
             ->assertSee('aria-label="Voice"', false)
             ->assertSee('M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z', false)
-            ->assertSee('Used by <strong>1,782</strong> busy households and operators', false)
+            ->assertSee('Used by <strong>1,122</strong> busy households and operators', false)
             ->assertSee('Try it for free', false)
             ->assertSee('Ask by voice', false)
             ->assertSee('Coordinate home + work', false)
             ->assertSee('Approve sensitive changes', false)
             ->assertSee('Ask once. Bean organizes the follow-through.', false)
-            ->assertSee('class="feature-demo hero-phone image-mockup hero-device"', false)
-            ->assertSee('images/bean-real-home-screen.png', false)
-            ->assertSee('images/iphone16promax-template.png', false)
-            ->assertSee('beanCardUserCycle', false)
+            ->assertSee('class="feature-demo bean-video-mockup"', false)
+            ->assertSee('videos/bean-assistant-mockup.webm', false)
+            ->assertSee('videos/bean-assistant-mockup.mp4', false)
             ->assertSee('Keep every calendar moving.', false)
             ->assertSee('Turn loose ends into managed tasks.', false)
             ->assertSee('See the day Bean is helping you run.', false)
@@ -67,11 +68,21 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('class="nav-login" href="/login">Login</a>', false)
             ->assertDontSee('How it works', false)
             ->assertDontSee('href="/#how"', false)
+            ->assertDontSee('aria-label="Bean AI"', false)
             ->assertDontSee('Platforms', false)
             ->assertDontSee('FAQ', false)
             ->assertDontSee('Blog', false)
             ->assertDontSee('API', false)
             ->assertDontSee('Billing', false);
+    }
+
+    public function test_homepage_proof_count_adds_registered_users_to_seed_count(): void
+    {
+        User::factory()->count(3)->create();
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Used by <strong>1,125</strong> busy households and operators', false);
     }
 
     public function test_browser_app_auth_routes_render_the_heybean_app_shell(): void
