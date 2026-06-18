@@ -24,14 +24,22 @@ class StripeBillingService
 
     public function subscriptionSummary(User $user): array
     {
+        $accessEndsAt = $user->subscription_current_period_end;
+        $canResume = (bool) $user->stripe_subscription_id
+            && (bool) $user->subscription_cancel_at_period_end
+            && $accessEndsAt
+            && $accessEndsAt->isFuture();
+
         return [
             'tier' => $user->subscriptionTier(),
             'status' => $user->subscription_status,
             'current_period_end' => $user->subscription_current_period_end?->toIso8601String(),
             'trial_ends_at' => $user->subscription_trial_ends_at?->toIso8601String(),
+            'access_ends_at' => $user->subscription_cancel_at_period_end ? $accessEndsAt?->toIso8601String() : null,
             'cancel_at_period_end' => (bool) $user->subscription_cancel_at_period_end,
             'can_upgrade' => $user->subscriptionTier() !== 'pro',
             'can_cancel' => (bool) $user->stripe_subscription_id && ! (bool) $user->subscription_cancel_at_period_end,
+            'can_resume' => $canResume,
         ];
     }
 
@@ -263,6 +271,10 @@ class StripeBillingService
         }
 
         if ($user->subscriptionTier() === $plan) {
+            if ($user->subscription_cancel_at_period_end) {
+                return $this->resumeSubscription($user);
+            }
+
             throw new InvalidArgumentException('That plan is already active for this account.');
         }
 
@@ -302,6 +314,36 @@ class StripeBillingService
                 'heybean_user_id' => (string) $user->id,
                 'plan' => $user->subscriptionTier(),
                 'source' => 'flutter',
+            ],
+        ])->json();
+
+        $this->syncSubscription($subscription, $user);
+
+        return [
+            'subscription' => $this->subscriptionSummary($user->fresh()),
+        ];
+    }
+
+    public function resumeSubscription(User $user): array
+    {
+        if (! $user->stripe_subscription_id) {
+            throw new InvalidArgumentException('No active Stripe subscription was found for this account.');
+        }
+
+        if (! $user->subscription_cancel_at_period_end) {
+            throw new InvalidArgumentException('This subscription is already set to renew.');
+        }
+
+        if (! $user->subscription_current_period_end || $user->subscription_current_period_end->isPast()) {
+            throw new InvalidArgumentException('This subscription access has already ended. Start a new plan to continue.');
+        }
+
+        $subscription = $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
+            'cancel_at_period_end' => 'false',
+            'metadata' => [
+                'heybean_user_id' => (string) $user->id,
+                'plan' => $user->subscriptionTier(),
+                'source' => 'web',
             ],
         ])->json();
 

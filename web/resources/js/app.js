@@ -2064,9 +2064,11 @@ if (mount) {
         const cancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end || subscription.cancelAtPeriodEnd);
         const trialEndsAt = subscription.trial_ends_at || subscription.trialEndsAt || user.subscription_trial_ends_at || user.subscriptionTrialEndsAt || '';
         const currentPeriodEnd = subscription.current_period_end || subscription.currentPeriodEnd || '';
+        const accessEndsAt = subscription.access_ends_at || subscription.accessEndsAt || (cancelAtPeriodEnd ? currentPeriodEnd : '');
         const paymentMethod = state.billingPaymentMethod;
         const selectedPlan = subscriptionPlans[tier] ? tier : 'base';
         const canCancel = subscription.can_cancel === true || subscription.canCancel === true;
+        const canResume = subscription.can_resume === true || subscription.canResume === true;
         const cancelDisabled = state.billingBusy || !canCancel;
         return `
             <div class="hb-surface-soft hb-card-pad hb-billing-settings" data-billing-settings>
@@ -2079,7 +2081,7 @@ if (mount) {
                 </div>
                 <div class="hb-billing-summary-grid">
                     <div><span>Plan</span><strong>${escapeHtml(subscriptionPlans[selectedPlan]?.label || 'Base')}</strong></div>
-                    <div><span>Renewal</span><strong>${escapeHtml(billingRenewalLine(trialEndsAt, currentPeriodEnd, cancelAtPeriodEnd))}</strong></div>
+                    <div><span>${cancelAtPeriodEnd ? 'Access ends' : 'Renewal'}</span><strong>${escapeHtml(billingRenewalLine(trialEndsAt, currentPeriodEnd, cancelAtPeriodEnd, accessEndsAt))}</strong></div>
                     <div><span>Payment</span><strong>${escapeHtml(paymentMethodDisplayLine(paymentMethod))}</strong></div>
                 </div>
                 <div class="hb-billing-plan-row">
@@ -2093,6 +2095,7 @@ if (mount) {
                 <div class="hb-account-actions">
                     <button class="hb-button-secondary" type="button" data-billing-update-payment ${state.billingBusy ? 'disabled' : ''}>Update payment</button>
                     <button class="hb-button-secondary" type="button" data-billing-refresh ${state.billingBusy || state.billingPaymentLoading ? 'disabled' : ''}>${state.billingPaymentLoading ? 'Refreshing...' : 'Refresh billing'}</button>
+                    ${canResume ? `<button class="hb-button" type="button" data-billing-resume-subscription ${state.billingBusy ? 'disabled' : ''}>${state.billingBusy ? 'Working...' : 'Restart subscription'}</button>` : ''}
                     <button class="hb-button-danger" type="button" data-billing-cancel-renewal ${cancelDisabled ? 'disabled' : ''}>${cancelAtPeriodEnd ? 'Renewal canceled' : 'Cancel renewal'}</button>
                 </div>
                 ${state.billingError ? `<div class="hb-error"><div><strong>Billing needs attention</strong><span>${escapeHtml(state.billingError)}</span></div></div>` : ''}
@@ -2108,8 +2111,8 @@ if (mount) {
         return `Current plan: ${plan} • ${status.replaceAll('_', ' ')}`;
     }
 
-    function billingRenewalLine(trialEndsAt, currentPeriodEnd, cancelAtPeriodEnd) {
-        if (cancelAtPeriodEnd && currentPeriodEnd) return `Access through ${formatDateTime(currentPeriodEnd)}`;
+    function billingRenewalLine(trialEndsAt, currentPeriodEnd, cancelAtPeriodEnd, accessEndsAt = '') {
+        if (cancelAtPeriodEnd && accessEndsAt) return `Last day: ${formatDateOnly(accessEndsAt)}`;
         if (cancelAtPeriodEnd) return 'Canceled at period end';
         if (trialEndsAt) return `Trial through ${formatDateTime(trialEndsAt)}`;
         if (currentPeriodEnd) return `Renews around ${formatDateTime(currentPeriodEnd)}`;
@@ -3553,6 +3556,7 @@ if (mount) {
         mount.querySelector('[data-billing-update-payment]')?.addEventListener('click', startBillingPaymentUpdate);
         mount.querySelector('[data-billing-refresh]')?.addEventListener('click', () => refreshBillingSettings({ user: true }));
         mount.querySelector('[data-billing-cancel-renewal]')?.addEventListener('click', cancelBillingRenewal);
+        mount.querySelector('[data-billing-resume-subscription]')?.addEventListener('click', resumeBillingSubscription);
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
         mount.querySelectorAll('[data-approval-approve]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalApprove, false)));
@@ -8781,6 +8785,32 @@ if (mount) {
         }
     }
 
+    async function resumeBillingSubscription() {
+        if (state.billingBusy) return;
+        state.billingBusy = true;
+        state.error = '';
+        state.billingError = '';
+        state.billingMessage = 'Restarting subscription...';
+        state.notice = '';
+        render();
+        try {
+            const result = await api('/billing/subscription/resume', { method: 'POST' });
+            state.subscriptionSummary = result?.subscription || state.subscriptionSummary;
+            const freshUser = await api('/auth/me').catch(() => null);
+            if (freshUser) state.user = freshUser;
+            await refreshBillingSettings({
+                user: true,
+                force: true,
+                message: 'Subscription restarted. Renewal is active again.',
+            });
+        } catch (error) {
+            state.billingError = friendlyError(error, 'restart your subscription');
+        } finally {
+            state.billingBusy = false;
+            render();
+        }
+    }
+
     async function setWorkspace(id) {
         if (!id || String(id) === String(currentWorkspaceId())) return;
         const workspace = findWorkspace(id);
@@ -9606,6 +9636,11 @@ if (mount) {
     function formatDateTime(value) {
         if (!value) return '';
         return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+
+    function formatDateOnly(value) {
+        if (!value) return '';
+        return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
     function currentChatTitle() {

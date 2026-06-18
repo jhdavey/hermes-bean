@@ -149,6 +149,15 @@ class BillingController extends Controller
         }
     }
 
+    public function resume(Request $request): JsonResponse
+    {
+        try {
+            return response()->json(['data' => $this->billing->resumeSubscription($request->user())]);
+        } catch (RuntimeException|InvalidArgumentException $exception) {
+            return $this->billingError($exception);
+        }
+    }
+
     public function webhook(Request $request): JsonResponse
     {
         try {

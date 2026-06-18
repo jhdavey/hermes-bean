@@ -473,6 +473,7 @@ class BillingInfrastructureTest extends TestCase
         Notification::fake();
         $token = $this->apiToken('cancel@example.com');
         $user = User::where('email', 'cancel@example.com')->firstOrFail();
+        $periodEnd = now()->addDays(7)->startOfSecond();
         $user->forceFill([
             'subscription_tier' => 'base',
             'stripe_customer_id' => 'cus_cancel_123',
@@ -482,7 +483,7 @@ class BillingInfrastructureTest extends TestCase
             'subscription_status' => 'trialing',
         ])->save();
 
-        Http::fake(function (HttpRequest $request) use ($user) {
+        Http::fake(function (HttpRequest $request) use ($user, $periodEnd) {
             $this->assertSame('https://api.stripe.com/v1/subscriptions/sub_cancel_123', $request->url());
             $this->assertSame('2026-05-27.dahlia', $request->header('Stripe-Version')[0] ?? null);
             $data = $request->data();
@@ -495,8 +496,8 @@ class BillingInfrastructureTest extends TestCase
                 'id' => 'sub_cancel_123',
                 'customer' => 'cus_cancel_123',
                 'status' => 'trialing',
-                'current_period_end' => now()->addDays(7)->timestamp,
-                'trial_end' => now()->addDays(7)->timestamp,
+                'current_period_end' => $periodEnd->timestamp,
+                'trial_end' => $periodEnd->timestamp,
                 'cancel_at_period_end' => true,
                 'metadata' => [
                     'heybean_user_id' => (string) $user->id,
@@ -514,7 +515,9 @@ class BillingInfrastructureTest extends TestCase
             ->assertJsonPath('data.subscription.tier', 'base')
             ->assertJsonPath('data.subscription.status', 'trialing')
             ->assertJsonPath('data.subscription.cancel_at_period_end', true)
-            ->assertJsonPath('data.subscription.can_cancel', false);
+            ->assertJsonPath('data.subscription.can_cancel', false)
+            ->assertJsonPath('data.subscription.can_resume', true)
+            ->assertJsonPath('data.subscription.access_ends_at', $periodEnd->toIso8601String());
 
         $user->refresh();
         $this->assertSame('trialing', $user->subscription_status);
@@ -526,6 +529,61 @@ class BillingInfrastructureTest extends TestCase
             return str_contains($html, 'Renewal canceled')
                 && str_contains($html, 'Renewal has been canceled for your Base plan.');
         });
+    }
+
+    public function test_existing_subscription_resume_undoes_cancel_at_period_end(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('resume@example.com');
+        $user = User::where('email', 'resume@example.com')->firstOrFail();
+        $periodEnd = now()->addDays(5)->startOfSecond();
+        $user->forceFill([
+            'subscription_tier' => 'premium',
+            'stripe_customer_id' => 'cus_resume_123',
+            'stripe_subscription_id' => 'sub_resume_123',
+            'stripe_subscription_item_id' => 'si_resume_123',
+            'stripe_price_id' => 'price_premium_test',
+            'subscription_status' => 'active',
+            'subscription_current_period_end' => $periodEnd,
+            'subscription_cancel_at_period_end' => true,
+        ])->save();
+
+        Http::fake(function (HttpRequest $request) use ($user, $periodEnd) {
+            $this->assertSame('https://api.stripe.com/v1/subscriptions/sub_resume_123', $request->url());
+            $data = $request->data();
+            $this->assertSame('false', $data['cancel_at_period_end']);
+            $this->assertSame((string) $user->id, $data['metadata']['heybean_user_id']);
+            $this->assertSame('premium', $data['metadata']['plan']);
+            $this->assertSame('web', $data['metadata']['source']);
+
+            return Http::response([
+                'id' => 'sub_resume_123',
+                'customer' => 'cus_resume_123',
+                'status' => 'active',
+                'current_period_end' => $periodEnd->timestamp,
+                'trial_end' => null,
+                'cancel_at_period_end' => false,
+                'metadata' => [
+                    'heybean_user_id' => (string) $user->id,
+                    'plan' => 'premium',
+                ],
+                'items' => ['data' => [[
+                    'id' => 'si_resume_123',
+                    'price' => ['id' => 'price_premium_test'],
+                ]]],
+            ], 200);
+        });
+
+        $this->withToken($token)->postJson('/api/billing/subscription/resume')
+            ->assertOk()
+            ->assertJsonPath('data.subscription.tier', 'premium')
+            ->assertJsonPath('data.subscription.cancel_at_period_end', false)
+            ->assertJsonPath('data.subscription.can_cancel', true)
+            ->assertJsonPath('data.subscription.can_resume', false)
+            ->assertJsonPath('data.subscription.access_ends_at', null);
+
+        $user->refresh();
+        $this->assertFalse($user->subscription_cancel_at_period_end);
     }
 
     public function test_stripe_webhook_updates_user_subscription_tier(): void
