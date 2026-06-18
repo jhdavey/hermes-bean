@@ -18,19 +18,19 @@
 
     <main class="wrap hero">
         <div class="hero-icons" aria-label="HeyBean tools">
-            <span class="hero-icon green" aria-label="Calendar">
+            <span class="hero-icon" aria-label="Calendar">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="3"/></svg>
             </span>
-            <span class="hero-icon blue" aria-label="Tasks">
+            <span class="hero-icon" aria-label="Tasks">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12.5 11 14.5 15.5 9.5"/><circle cx="12" cy="12" r="9"/></svg>
             </span>
-            <span class="hero-icon bean" aria-label="Bean AI">
-                <img src="{{ asset('images/bean-logo.png') }}" alt="">
+            <span class="hero-icon" aria-label="Bean AI">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.5l-1.9-5.7-5.6-1.9L10.1 9 12 3.5Z"/><path d="M19 3v4M21 5h-4M5 17v3M6.5 18.5h-3"/></svg>
             </span>
-            <span class="hero-icon green" aria-label="Reminders">
+            <span class="hero-icon" aria-label="Reminders">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
             </span>
-            <span class="hero-icon blue" aria-label="Voice">
+            <span class="hero-icon" aria-label="Voice">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
             </span>
         </div>

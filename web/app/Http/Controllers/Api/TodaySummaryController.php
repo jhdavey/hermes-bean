@@ -12,6 +12,8 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Services\AgentProfileService;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\PlanHistoryService;
+use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -36,8 +38,10 @@ class TodaySummaryController extends Controller
         $agentProfile = $agentProfile->refresh();
         $user->setAttribute('needs_bean_onboarding', $agentProfileService->needsOnboarding($user, $agentProfile));
         $user->setAttribute('bean_preferences_ready', $agentProfileService->preferencesReady($agentProfile));
+        $user->setAttribute('plan_limits', app(PlanLimitService::class)->publicLimitsFor($user));
         $agentProfileService->exposePublicSettings($agentProfile);
-        $reminders = Reminder::where('workspace_id', $workspace->id)->latest('remind_at')->get();
+        $history = app(PlanHistoryService::class);
+        $reminders = $history->filterReminders(Reminder::where('workspace_id', $workspace->id)->latest('remind_at')->get(), $user);
         $calendarEventsQuery = CalendarEvent::where('workspace_id', $workspace->id);
         $visibleGoogleCalendarIds = app(GoogleCalendarSyncService::class)->visibleGoogleCalendarIdsForWorkspace($user, $workspace);
         if ($visibleGoogleCalendarIds !== null) {
@@ -60,10 +64,10 @@ class TodaySummaryController extends Controller
                 }
             });
         }
-        $calendarEvents = $calendarEventsQuery->orderBy('starts_at')->get();
-        $activityEvents = ActivityEvent::where('user_id', $user->id)->orderBy('id')->get();
-        $approvals = Approval::where('user_id', $user->id)->latest('updated_at')->get();
-        $blockers = Blocker::where('user_id', $user->id)->latest('updated_at')->get();
+        $calendarEvents = $history->filterCalendarEvents($calendarEventsQuery->orderBy('starts_at')->get(), $user);
+        $activityEvents = $history->filterActivityEvents(ActivityEvent::where('user_id', $user->id)->orderBy('id')->get(), $user);
+        $approvals = $history->filterApprovals(Approval::where('user_id', $user->id)->latest('updated_at')->get(), $user);
+        $blockers = $history->filterBlockers(Blocker::where('user_id', $user->id)->latest('updated_at')->get(), $user);
 
         return response()->json([
             'data' => [

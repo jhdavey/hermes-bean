@@ -3,11 +3,22 @@
 namespace Tests\Feature;
 
 use App\Models\AdminSetting;
+use App\Models\ActivityEvent;
+use App\Models\Approval;
+use App\Models\Blocker;
+use App\Models\CalendarEvent;
+use App\Models\ConversationMessage;
+use App\Models\ConversationSession;
+use App\Models\DashboardChange;
 use App\Models\EnterpriseCustomerLimit;
+use App\Models\Reminder;
+use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceItemLink;
 use App\Services\AiUsageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class PlanLimitEntitlementTest extends TestCase
@@ -190,6 +201,280 @@ class PlanLimitEntitlementTest extends TestCase
         $this->assertTrue($usage->preflightDirect($admin, null, 'gpt-test-tools', 0, 0, 1_000_000, 'text')['allowed']);
     }
 
+    public function test_base_plan_history_filtering_and_pruning_preserve_active_and_future_items(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-18 12:00:00'));
+
+        try {
+            $token = $this->apiToken('history-prune@example.com');
+            $user = User::where('email', 'history-prune@example.com')->firstOrFail();
+            $workspace = Workspace::where('personal_owner_user_id', $user->id)->firstOrFail();
+            $old = now()->subDays(20);
+            $recent = now()->subDays(7);
+            $future = now()->addDays(10);
+
+            $oldCompletedTask = Task::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old completed task',
+                'status' => 'completed',
+                'completed_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $recentCompletedTask = Task::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Recent completed task',
+                'status' => 'completed',
+                'completed_at' => $recent,
+                'updated_at' => $recent,
+            ]);
+            $oldOpenTask = Task::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old open task',
+                'status' => 'open',
+                'due_at' => $old,
+                'updated_at' => $old,
+            ]);
+
+            $oldCompletedReminder = Reminder::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old completed reminder',
+                'status' => 'completed',
+                'remind_at' => $old,
+            ]);
+            $oldScheduledReminder = Reminder::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old scheduled reminder',
+                'status' => 'scheduled',
+                'remind_at' => $old,
+            ]);
+            $recentCompletedReminder = Reminder::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Recent completed reminder',
+                'status' => 'completed',
+                'remind_at' => $recent,
+            ]);
+
+            $oldSingleEvent = CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old single event',
+                'starts_at' => $old,
+                'ends_at' => $old->copy()->addHour(),
+            ]);
+            $oldGeneratedOccurrence = CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old generated occurrence',
+                'starts_at' => $old,
+                'ends_at' => $old->copy()->addHour(),
+                'metadata' => ['recurrence_generated' => true, 'recurrence_parent_event_id' => 999],
+            ]);
+            $ongoingRecurringEvent = CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Ongoing monthly event',
+                'starts_at' => now()->subDays(60),
+                'ends_at' => now()->subDays(60)->addHour(),
+                'recurrence' => 'monthly',
+            ]);
+            $futureEvent = CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Future event',
+                'starts_at' => $future,
+                'ends_at' => $future->copy()->addHour(),
+            ]);
+
+            WorkspaceItemLink::create([
+                'source_workspace_id' => $workspace->id,
+                'target_workspace_id' => $workspace->id,
+                'source_type' => 'tasks',
+                'source_id' => $oldCompletedTask->id,
+                'target_type' => 'calendar_events',
+                'target_id' => $futureEvent->id,
+                'link_type' => 'sync',
+            ]);
+
+            $oldSession = ConversationSession::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old chat',
+                'last_activity_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $recentSession = ConversationSession::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Recent chat',
+                'last_activity_at' => $recent,
+                'updated_at' => $recent,
+            ]);
+            $oldMessage = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $oldSession->id,
+                'role' => 'user',
+                'content' => 'Old message',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $oldMessageInRecentSession = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $recentSession->id,
+                'role' => 'user',
+                'content' => 'Old message in recent session',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $recentMessage = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $recentSession->id,
+                'role' => 'assistant',
+                'content' => 'Recent message',
+                'created_at' => $recent,
+                'updated_at' => $recent,
+            ]);
+
+            $oldActivity = ActivityEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $recentSession->id,
+                'event_type' => 'tool',
+                'status' => 'recorded',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $recentActivity = ActivityEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $recentSession->id,
+                'event_type' => 'tool',
+                'status' => 'recorded',
+                'created_at' => $recent,
+                'updated_at' => $recent,
+            ]);
+
+            $oldApprovedApproval = Approval::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old approved approval',
+                'status' => 'approved',
+                'updated_at' => $old,
+                'created_at' => $old,
+            ]);
+            $oldPendingApproval = Approval::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old pending approval',
+                'status' => 'pending',
+                'updated_at' => $old,
+                'created_at' => $old,
+            ]);
+            $oldResolvedBlocker = Blocker::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'reason' => 'Old resolved blocker',
+                'status' => 'resolved',
+                'updated_at' => $old,
+                'created_at' => $old,
+            ]);
+            $oldOpenBlocker = Blocker::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'reason' => 'Old open blocker',
+                'status' => 'open',
+                'updated_at' => $old,
+                'created_at' => $old,
+            ]);
+            $oldDashboardChange = DashboardChange::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'resource_type' => 'task',
+                'action' => 'updated',
+                'resource_id' => $oldCompletedTask->id,
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+
+            foreach ([
+                $oldSession,
+                $oldMessage,
+                $oldMessageInRecentSession,
+                $oldActivity,
+                $oldApprovedApproval,
+                $oldPendingApproval,
+                $oldResolvedBlocker,
+                $oldOpenBlocker,
+                $oldDashboardChange,
+            ] as $model) {
+                $this->stampModel($model, $old);
+            }
+            foreach ([$recentSession, $recentMessage, $recentActivity] as $model) {
+                $this->stampModel($model, $recent);
+            }
+
+            $this->withToken($token)->getJson('/api/tasks/past')
+                ->assertOk()
+                ->assertJsonMissing(['title' => 'Old completed task'])
+                ->assertJsonFragment(['title' => 'Recent completed task']);
+
+            $this->withToken($token)->getJson('/api/reminders')
+                ->assertOk()
+                ->assertJsonMissing(['title' => 'Old completed reminder'])
+                ->assertJsonFragment(['title' => 'Old scheduled reminder'])
+                ->assertJsonFragment(['title' => 'Recent completed reminder']);
+
+            $this->withToken($token)->getJson('/api/calendar-events')
+                ->assertOk()
+                ->assertJsonMissing(['title' => 'Old single event'])
+                ->assertJsonMissing(['title' => 'Old generated occurrence'])
+                ->assertJsonFragment(['title' => 'Ongoing monthly event'])
+                ->assertJsonFragment(['title' => 'Future event']);
+
+            $this->withToken($token)->getJson('/api/approvals')
+                ->assertOk()
+                ->assertJsonMissing(['title' => 'Old approved approval'])
+                ->assertJsonFragment(['title' => 'Old pending approval']);
+
+            $this->withToken($token)->getJson('/api/blockers')
+                ->assertOk()
+                ->assertJsonMissing(['reason' => 'Old resolved blocker'])
+                ->assertJsonFragment(['reason' => 'Old open blocker']);
+
+            $this->artisan('plan-history:prune')->assertExitCode(0);
+
+            $this->assertDatabaseMissing('tasks', ['id' => $oldCompletedTask->id]);
+            $this->assertDatabaseHas('tasks', ['id' => $recentCompletedTask->id]);
+            $this->assertDatabaseHas('tasks', ['id' => $oldOpenTask->id]);
+            $this->assertDatabaseMissing('reminders', ['id' => $oldCompletedReminder->id]);
+            $this->assertDatabaseHas('reminders', ['id' => $oldScheduledReminder->id]);
+            $this->assertDatabaseHas('reminders', ['id' => $recentCompletedReminder->id]);
+            $this->assertDatabaseMissing('calendar_events', ['id' => $oldSingleEvent->id]);
+            $this->assertDatabaseMissing('calendar_events', ['id' => $oldGeneratedOccurrence->id]);
+            $this->assertDatabaseHas('calendar_events', ['id' => $ongoingRecurringEvent->id]);
+            $this->assertDatabaseHas('calendar_events', ['id' => $futureEvent->id]);
+            $this->assertDatabaseMissing('conversation_sessions', ['id' => $oldSession->id]);
+            $this->assertDatabaseMissing('conversation_messages', ['id' => $oldMessage->id]);
+            $this->assertDatabaseMissing('conversation_messages', ['id' => $oldMessageInRecentSession->id]);
+            $this->assertDatabaseHas('conversation_messages', ['id' => $recentMessage->id]);
+            $this->assertDatabaseMissing('activity_events', ['id' => $oldActivity->id]);
+            $this->assertDatabaseHas('activity_events', ['id' => $recentActivity->id]);
+            $this->assertDatabaseMissing('approvals', ['id' => $oldApprovedApproval->id]);
+            $this->assertDatabaseHas('approvals', ['id' => $oldPendingApproval->id]);
+            $this->assertDatabaseMissing('blockers', ['id' => $oldResolvedBlocker->id]);
+            $this->assertDatabaseHas('blockers', ['id' => $oldOpenBlocker->id]);
+            $this->assertDatabaseMissing('dashboard_changes', ['id' => $oldDashboardChange->id]);
+            $this->assertDatabaseMissing('workspace_item_links', ['source_type' => 'tasks', 'source_id' => $oldCompletedTask->id]);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     private function limits(array $overrides = []): array
     {
         return [
@@ -206,5 +491,13 @@ class PlanLimitEntitlementTest extends TestCase
             'priority_background_work' => false,
             ...$overrides,
         ];
+    }
+
+    private function stampModel($model, Carbon $timestamp): void
+    {
+        $model->forceFill([
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
+        ])->saveQuietly();
     }
 }

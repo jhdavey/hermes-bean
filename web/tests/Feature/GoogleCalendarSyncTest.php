@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\WorkspaceGoogleCalendarMapping;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -23,6 +24,14 @@ class GoogleCalendarSyncTest extends TestCase
         config()->set('services.google_calendar.client_id', 'google-client-id');
         config()->set('services.google_calendar.client_secret', 'google-client-secret');
         config()->set('services.google_calendar.redirect_uri', 'https://heybean.test/api/google-calendar/callback');
+        Carbon::setTestNow('2026-05-15T12:00:00Z');
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     public function test_user_can_start_google_calendar_oauth_and_callback_imports_events(): void

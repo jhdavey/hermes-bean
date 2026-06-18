@@ -3211,6 +3211,109 @@
     background: rgba(var(--hb-accent-rgb), .10);
 }
 
+.hb-onboarding-tour {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgba(15, 23, 42, .54);
+    backdrop-filter: blur(1px);
+}
+
+.hb-onboarding-tour-highlight {
+    position: fixed;
+    z-index: 81;
+    pointer-events: none;
+    border: 3px solid #fff;
+    border-radius: 999px;
+    box-shadow: 0 0 0 10px rgba(var(--hb-accent-rgb), .18), 0 18px 42px rgba(var(--hb-accent-strong-rgb), .28);
+}
+
+.hb-onboarding-tour-card {
+    position: fixed;
+    z-index: 82;
+    width: min(420px, calc(100vw - 32px));
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid rgba(var(--hb-accent-rgb), .30);
+    border-radius: 20px;
+    background: var(--hb-surface);
+    box-shadow: 0 20px 46px rgba(15, 23, 42, .18);
+}
+
+.hb-onboarding-tour-card p {
+    margin: 0;
+    color: var(--hb-text);
+    font-size: 17px;
+    line-height: 1.25;
+    font-weight: 850;
+}
+
+.hb-onboarding-tour-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.hb-onboarding-tour-bean .hb-onboarding-tour-highlight {
+    left: 12px;
+    top: 8px;
+    width: 52px;
+    height: 52px;
+}
+
+.hb-onboarding-tour-bean .hb-onboarding-tour-card {
+    left: 20px;
+    top: 78px;
+}
+
+.hb-onboarding-tour-create .hb-onboarding-tour-highlight {
+    right: 86px;
+    top: 8px;
+    width: 52px;
+    height: 52px;
+}
+
+.hb-onboarding-tour-critical .hb-onboarding-tour-highlight {
+    right: 34px;
+    top: 8px;
+    width: 52px;
+    height: 52px;
+}
+
+.hb-onboarding-tour-create .hb-onboarding-tour-card,
+.hb-onboarding-tour-critical .hb-onboarding-tour-card {
+    right: 20px;
+    top: 78px;
+}
+
+.hb-onboarding-tour-date-month .hb-onboarding-tour-highlight {
+    left: clamp(76px, 38vw, 520px);
+    top: 8px;
+    width: min(270px, calc(100vw - 156px));
+    height: 52px;
+    border-radius: 18px;
+}
+
+.hb-onboarding-tour-date-month .hb-onboarding-tour-card {
+    left: clamp(16px, 32vw, 500px);
+    top: 78px;
+}
+
+@media (max-width: 720px) {
+    .hb-onboarding-tour-card {
+        left: 16px !important;
+        right: 16px !important;
+        width: auto;
+    }
+
+    .hb-onboarding-tour-date-month .hb-onboarding-tour-highlight {
+        left: 74px;
+        width: min(250px, calc(100vw - 148px));
+    }
+}
+
 .hb-message {
     max-width: 560px;
     display: grid;

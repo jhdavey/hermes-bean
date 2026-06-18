@@ -12,6 +12,7 @@ use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
 use App\Services\RecurringCalendarEventService;
 use App\Services\StructuredHermesActionService;
@@ -35,6 +36,7 @@ class DomainResourceController extends Controller
         private readonly GoogleCalendarSyncService $googleCalendar,
         private readonly RecurringCalendarEventService $recurringCalendarEvents,
         private readonly PlanLimitService $planLimits,
+        private readonly PlanHistoryService $history,
     ) {}
 
     public function listTasks(Request $request): JsonResponse
@@ -58,12 +60,12 @@ class DomainResourceController extends Controller
 
     public function listPastTasks(Request $request): JsonResponse
     {
-        $historyDays = $this->planLimits->historyDaysFor($request->user());
+        $historyCutoff = $this->planLimits->historyCutoffFor($request->user());
 
         return $this->listed(
             $this->scoped(Task::query(), $request)
                 ->whereNotNull('completed_at')
-                ->when($historyDays !== null, fn ($query) => $query->where('completed_at', '>=', now()->subDays($historyDays)))
+                ->when($historyCutoff !== null, fn ($query) => $query->where('completed_at', '>=', $historyCutoff))
                 ->where(function ($query): void {
                     $query->whereIn('status', ['completed', 'complete', 'done'])
                         ->orWhereIn('status', ['COMPLETED', 'Complete', 'Done']);
@@ -77,6 +79,7 @@ class DomainResourceController extends Controller
     public function listReminders(Request $request): JsonResponse
     {
         $reminders = $this->scoped(Reminder::query(), $request)->orderBy('remind_at')->orderBy('id')->get();
+        $reminders = $this->history->filterReminders($reminders, $request->user());
         $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
         $reminders->each(function (Reminder $reminder) use ($accessibleWorkspaceIds): void {
             $reminder->setAttribute('linked_workspace_ids', $this->linkedItemWorkspaceIds($reminder, 'reminders', $accessibleWorkspaceIds));
@@ -95,7 +98,7 @@ class DomainResourceController extends Controller
         $query = $this->scoped(CalendarEvent::query(), $request);
         $this->scopeVisibleGoogleCalendars($query, $request, $workspace);
 
-        $events = $query->orderBy('starts_at')->orderBy('id')->get()
+        $events = $this->history->filterCalendarEvents($query->orderBy('starts_at')->orderBy('id')->get(), $request->user())
             ->reject(fn (CalendarEvent $event): bool => (bool) (($event->metadata ?? [])['recurrence_source_hidden'] ?? false))
             ->values();
         $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
@@ -138,12 +141,18 @@ class DomainResourceController extends Controller
 
     public function listApprovals(Request $request): JsonResponse
     {
-        return $this->listed(Approval::where('user_id', $request->user()->id)->orderBy('id')->get());
+        return $this->listed($this->history->filterApprovals(
+            Approval::where('user_id', $request->user()->id)->orderBy('id')->get(),
+            $request->user()
+        ));
     }
 
     public function listBlockers(Request $request): JsonResponse
     {
-        return $this->listed(Blocker::where('user_id', $request->user()->id)->orderBy('id')->get());
+        return $this->listed($this->history->filterBlockers(
+            Blocker::where('user_id', $request->user()->id)->orderBy('id')->get(),
+            $request->user()
+        ));
     }
 
     public function storeTask(Request $request): JsonResponse

@@ -6,6 +6,7 @@ use App\Models\AdminSetting;
 use App\Models\EnterpriseCustomerLimit;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 
 class PlanLimitService
 {
@@ -142,6 +143,32 @@ class PlanLimitService
         $days = $this->limitsFor($user)['history_days'] ?? null;
 
         return is_numeric($days) && (int) $days > 0 ? (int) $days : null;
+    }
+
+    public function historyCutoffFor(User $user): ?Carbon
+    {
+        $days = $this->historyDaysFor($user);
+
+        return $days === null ? null : now()->subDays($days)->startOfDay();
+    }
+
+    public function publicLimitsFor(User $user): array
+    {
+        $limits = $this->limitsFor($user);
+
+        return [
+            'tier' => $limits['tier'] ?? $user->subscriptionTier(),
+            'workspace_limit' => $limits['workspace_limit'] ?? null,
+            'calendar_connection_limit' => $limits['calendar_connection_limit'] ?? null,
+            'connected_account_limit' => $limits['connected_account_limit'] ?? null,
+            'history_days' => $limits['history_days'] ?? null,
+            'history_cutoff' => $this->historyCutoffFor($user)?->toIso8601String(),
+            'recurring_tasks_enabled' => (bool) ($limits['recurring_tasks_enabled'] ?? false),
+            'recurring_reminders_enabled' => (bool) ($limits['recurring_reminders_enabled'] ?? false),
+            'recurring_calendar_enabled' => (bool) ($limits['recurring_calendar_enabled'] ?? false),
+            'email_reminders_enabled' => (bool) ($limits['email_reminders_enabled'] ?? false),
+            'priority_background_work' => (bool) ($limits['priority_background_work'] ?? false),
+        ];
     }
 
     public function canUseEmailReminders(User $user): bool

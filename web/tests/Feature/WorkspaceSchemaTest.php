@@ -11,12 +11,27 @@ use App\Models\WorkspaceItemLink;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class WorkspaceSchemaTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Carbon::setTestNow('2026-05-15T12:00:00Z');
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
 
     public function test_user_provisioning_creates_personal_workspace_and_owner_membership(): void
     {

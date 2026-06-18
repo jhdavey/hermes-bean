@@ -1461,6 +1461,7 @@ class HermesUser {
     this.isBeta = false,
     this.isAdmin = false,
     this.notificationPreferences = const HermesNotificationPreferences(),
+    this.planLimits = const HermesPlanLimits(),
   });
 
   final int id;
@@ -1482,6 +1483,7 @@ class HermesUser {
   final bool isBeta;
   final bool isAdmin;
   final HermesNotificationPreferences notificationPreferences;
+  final HermesPlanLimits planLimits;
 
   HermesAgentProfile? get currentAgentProfile =>
       activeWorkspaceAgentProfile ?? agentProfile;
@@ -1505,6 +1507,7 @@ class HermesUser {
     bool? isBeta,
     bool? isAdmin,
     HermesNotificationPreferences? notificationPreferences,
+    HermesPlanLimits? planLimits,
   }) => HermesUser(
     id: id,
     name: name ?? this.name,
@@ -1528,6 +1531,7 @@ class HermesUser {
     isAdmin: isAdmin ?? this.isAdmin,
     notificationPreferences:
         notificationPreferences ?? this.notificationPreferences,
+    planLimits: planLimits ?? this.planLimits,
   );
 
   factory HermesUser.fromJson(Map<String, Object?> json) => HermesUser(
@@ -1583,7 +1587,73 @@ class HermesUser {
     notificationPreferences: HermesNotificationPreferences.fromJson(
       _expectMapOrNull(json['notification_preferences']),
     ),
+    planLimits: HermesPlanLimits.fromJson(
+      _expectMapOrNull(json['plan_limits']),
+    ),
   );
+}
+
+class HermesPlanLimits {
+  const HermesPlanLimits({
+    this.tier = 'base',
+    this.workspaceLimit,
+    this.calendarConnectionLimit,
+    this.connectedAccountLimit,
+    this.historyDays,
+    this.historyCutoff,
+    this.recurringTasksEnabled = false,
+    this.recurringRemindersEnabled = false,
+    this.recurringCalendarEnabled = false,
+    this.emailRemindersEnabled = false,
+    this.priorityBackgroundWork = false,
+  });
+
+  final String tier;
+  final int? workspaceLimit;
+  final int? calendarConnectionLimit;
+  final int? connectedAccountLimit;
+  final int? historyDays;
+  final String? historyCutoff;
+  final bool recurringTasksEnabled;
+  final bool recurringRemindersEnabled;
+  final bool recurringCalendarEnabled;
+  final bool emailRemindersEnabled;
+  final bool priorityBackgroundWork;
+
+  factory HermesPlanLimits.fromJson(Map<String, Object?>? json) {
+    if (json == null) return const HermesPlanLimits();
+    return HermesPlanLimits(
+      tier: _readStringOrDefault(json['tier'], 'base'),
+      workspaceLimit: _readIntOrNull(
+        json['workspace_limit'] ?? json['workspaceLimit'],
+      ),
+      calendarConnectionLimit: _readIntOrNull(
+        json['calendar_connection_limit'] ?? json['calendarConnectionLimit'],
+      ),
+      connectedAccountLimit: _readIntOrNull(
+        json['connected_account_limit'] ?? json['connectedAccountLimit'],
+      ),
+      historyDays: _readIntOrNull(json['history_days'] ?? json['historyDays']),
+      historyCutoff: (json['history_cutoff'] ?? json['historyCutoff'])
+          ?.toString(),
+      recurringTasksEnabled: _readBool(
+        json['recurring_tasks_enabled'] ?? json['recurringTasksEnabled'],
+      ),
+      recurringRemindersEnabled: _readBool(
+        json['recurring_reminders_enabled'] ??
+            json['recurringRemindersEnabled'],
+      ),
+      recurringCalendarEnabled: _readBool(
+        json['recurring_calendar_enabled'] ?? json['recurringCalendarEnabled'],
+      ),
+      emailRemindersEnabled: _readBool(
+        json['email_reminders_enabled'] ?? json['emailRemindersEnabled'],
+      ),
+      priorityBackgroundWork: _readBool(
+        json['priority_background_work'] ?? json['priorityBackgroundWork'],
+      ),
+    );
+  }
 }
 
 class HermesWorkspace {

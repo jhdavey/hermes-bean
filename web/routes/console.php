@@ -1,7 +1,7 @@
 <?php
 
-use App\Models\Task;
 use App\Models\User;
+use App\Services\PlanHistoryService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
@@ -11,16 +11,21 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Artisan::command('tasks:purge-completed', function () {
-    $deleted = Task::whereNotNull('completed_at')
-        ->where('completed_at', '<', now()->subDays(10))
-        ->whereIn('status', ['completed', 'complete', 'done'])
-        ->delete();
+Artisan::command('plan-history:prune', function (PlanHistoryService $history) {
+    $totals = $history->pruneAllUsers();
 
-    $this->info("Purged {$deleted} completed task(s).");
+    $this->info('Pruned plan-limited history: '.json_encode($totals));
 
     return self::SUCCESS;
-})->purpose('Delete completed tasks 10 days after completion');
+})->purpose('Delete user data that is older than each user plan history window');
+
+Artisan::command('tasks:purge-completed', function (PlanHistoryService $history) {
+    $totals = $history->pruneAllUsers();
+
+    $this->info('Pruned plan-limited history: '.json_encode($totals));
+
+    return self::SUCCESS;
+})->purpose('Compatibility alias for plan-history:prune');
 
 Artisan::command('admin:user {email} {--password=} {--name=Hey Bean Admin}', function (string $email): int {
     $password = (string) ($this->option('password') ?: env('ADMIN_PASSWORD', ''));
@@ -66,6 +71,6 @@ Artisan::command('admin:grant {email}', function (string $email): int {
     return self::SUCCESS;
 })->purpose('Grant admin permissions to an existing user without changing their password');
 
-Schedule::command('tasks:purge-completed')->daily();
+Schedule::command('plan-history:prune')->daily();
 Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();

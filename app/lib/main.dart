@@ -458,6 +458,7 @@ String? _subscriptionLimitMessageFromApiBody(String body) {
 bool _isPlanLimitMessage(String? message) {
   final normalized = (message ?? '').toLowerCase();
   return normalized.contains('current plan includes') ||
+      normalized.contains('current plan has limited') ||
       normalized.contains('available on premium') ||
       normalized.contains('ai usage limit') ||
       normalized.contains('external lookup usage limit');
@@ -1154,6 +1155,7 @@ enum _HomeDestination { today, tasks, bean, reminders, settings }
 
 const _dashboardChangePollInterval = Duration(seconds: 15);
 const _pendingCalendarEventWriteTtl = Duration(minutes: 2);
+const _onboardingTourSeenPreferencePrefix = 'heybean.onboarding_tour_seen';
 
 class _DashboardSnapshot {
   const _DashboardSnapshot({
@@ -1250,6 +1252,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final Set<int> _pendingTaskIds = <int>{};
   bool _forceAgentOnboarding = false;
   bool _editingAgentPreferences = false;
+  bool _onboardingTourVisible = false;
+  int _onboardingTourStep = 0;
   bool _beanVoiceListening = false;
   String? _beanVoiceDraft;
   int _localMessageSequence = -1;
@@ -1314,6 +1318,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanVoiceDraft = null;
     _dashboardLoading = false;
     _loadingStatusText = null;
+    _onboardingTourVisible = false;
+    _onboardingTourStep = 0;
   }
 
   void _rememberPendingCalendarEventWrite(HermesCalendarEvent event) {
@@ -2025,6 +2031,44 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       !_editingAgentPreferences &&
       !_forceAgentOnboarding;
 
+  String _onboardingTourSeenPreferenceKey(HermesUser user) =>
+      '$_onboardingTourSeenPreferencePrefix.${user.id}';
+
+  Future<void> _startOnboardingTourAfterBeanIntroduction() async {
+    final user = _user;
+    if (user == null || _userNeedsBeanIntroduction(user)) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_onboardingTourSeenPreferenceKey(user)) == true) return;
+    if (!mounted || _phase != _AuthPhase.signedIn) return;
+    setState(() {
+      _onboardingTourStep = 0;
+      _onboardingTourVisible = true;
+    });
+  }
+
+  void _advanceOnboardingTour() {
+    setState(() {
+      _onboardingTourStep = math.min(_onboardingTourStep + 1, 3);
+    });
+  }
+
+  void _dismissOnboardingTour() {
+    unawaited(_markOnboardingTourSeenAndClose());
+  }
+
+  Future<void> _markOnboardingTourSeenAndClose() async {
+    final user = _user;
+    if (user != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_onboardingTourSeenPreferenceKey(user), true);
+    }
+    if (!mounted) return;
+    setState(() {
+      _onboardingTourVisible = false;
+      _onboardingTourStep = 0;
+    });
+  }
+
   Future<HermesSessionDetails?> _loadDailySessionForUser(
     HermesUser user, {
     String source = 'flutter',
@@ -2343,6 +2387,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         (_) => refreshedSummary.tasks,
       );
       if (!mounted || runToken != _chatRunToken) return;
+      final completedBeanIntroduction =
+          needsBeanIntroduction && !_userNeedsBeanIntroduction(refreshedUser);
       setState(() {
         _user = refreshedUser;
         _session = result.session;
@@ -2387,6 +2433,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
       });
+      if (completedBeanIntroduction) {
+        unawaited(_startOnboardingTourAfterBeanIntroduction());
+      }
     } catch (error, stackTrace) {
       debugPrint('Bean chat failed during $chatPhase: $error\n$stackTrace');
       unawaited(
@@ -2647,23 +2696,50 @@ ${_truncateDiagnostic(stack, 2200)}
   }
 
   void _selectCalendarDay(DateTime date) {
+    final allowedDate = _allowedCalendarDate(date);
+    final blocked = !_sameCalendarDay(_dateOnly(date), allowedDate);
     setState(() {
-      _selectedCalendarDay = _dateOnly(date);
+      _selectedCalendarDay = allowedDate;
       _showCalendarMonth = false;
+      if (blocked) _error = _calendarHistoryLimitMessage();
     });
   }
 
   void _selectCalendarMonth(DateTime month) {
     final selected = _dateOnly(_selectedCalendarDay);
     final daysInTargetMonth = DateTime(month.year, month.month + 1, 0).day;
+    final requested = DateTime(
+      month.year,
+      month.month,
+      selected.day.clamp(1, daysInTargetMonth),
+    );
+    final allowedDate = _allowedCalendarDate(requested);
+    final blocked = !_sameCalendarDay(_dateOnly(requested), allowedDate);
     setState(() {
-      _selectedCalendarDay = DateTime(
-        month.year,
-        month.month,
-        selected.day.clamp(1, daysInTargetMonth),
-      );
+      _selectedCalendarDay = allowedDate;
       _showCalendarMonth = true;
+      if (blocked) _error = _calendarHistoryLimitMessage();
     });
+  }
+
+  DateTime? get _calendarHistoryCutoffDay {
+    final cutoff = _parseCalendarEventDateTime(_user?.planLimits.historyCutoff);
+    return cutoff == null ? null : _dateOnly(cutoff);
+  }
+
+  DateTime _allowedCalendarDate(DateTime date) {
+    final requested = _dateOnly(date);
+    final cutoff = _calendarHistoryCutoffDay;
+    if (cutoff == null || !requested.isBefore(cutoff)) return requested;
+    return cutoff;
+  }
+
+  String _calendarHistoryLimitMessage() {
+    final days = _user?.planLimits.historyDays;
+    if (days != null && days > 0) {
+      return 'Your current plan includes $days days of calendar history.';
+    }
+    return 'Your current plan has limited calendar history access.';
   }
 
   Future<void> _loadCalendarPreferences() async {
@@ -4423,7 +4499,7 @@ ${_truncateDiagnostic(stack, 2200)}
   Widget _topWorkspaceSwitcher() {
     final user = _user;
     final workspaces = user?.workspaces ?? const <HermesWorkspace>[];
-    if (_phase != _AuthPhase.signedIn || workspaces.isEmpty) {
+    if (_phase != _AuthPhase.signedIn || workspaces.length < 2) {
       return const SizedBox.shrink();
     }
     final activeWorkspace =
@@ -4437,7 +4513,7 @@ ${_truncateDiagnostic(stack, 2200)}
     return PopupMenuButton<int>(
       key: const Key('top-workspace-switcher'),
       tooltip: 'Switch workspace',
-      enabled: !_busy && workspaces.length > 1,
+      enabled: !_busy,
       onSelected: (workspaceId) {
         final workspace = workspaces.firstWhere(
           (candidate) => candidate.numericId == workspaceId,
@@ -4608,6 +4684,13 @@ ${_truncateDiagnostic(stack, 2200)}
               _BeanIntroSpotlightOverlay(
                 onBeanTap: () => _selectDestination(_HomeDestination.bean),
               ),
+            if (_onboardingTourVisible)
+              _OnboardingTourOverlay(
+                step: _onboardingTourStep,
+                onNext: _advanceOnboardingTour,
+                onSkip: _dismissOnboardingTour,
+                onFinish: _dismissOnboardingTour,
+              ),
           ],
         ),
       ),
@@ -4776,6 +4859,10 @@ ${_truncateDiagnostic(stack, 2200)}
     calendarEndHour: _calendarEndHour,
     onCalendarDaySelected: _selectCalendarDay,
     onCalendarMonthSelected: _selectCalendarMonth,
+    calendarMinimumDay: _calendarHistoryCutoffDay,
+    onCalendarHistoryLimitReached: () {
+      setState(() => _error = _calendarHistoryLimitMessage());
+    },
     onBackToCalendarDay: _returnToCalendarDay,
     onCalendarStartHourChanged: _setCalendarStartHour,
     onCalendarEndHourChanged: _setCalendarEndHour,
@@ -6308,6 +6395,8 @@ class _CommandCenterContent extends StatelessWidget {
     required this.calendarEndHour,
     required this.onCalendarDaySelected,
     required this.onCalendarMonthSelected,
+    required this.calendarMinimumDay,
+    required this.onCalendarHistoryLimitReached,
     required this.onBackToCalendarDay,
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
@@ -6362,6 +6451,8 @@ class _CommandCenterContent extends StatelessWidget {
   final int calendarEndHour;
   final ValueChanged<DateTime> onCalendarDaySelected;
   final ValueChanged<DateTime> onCalendarMonthSelected;
+  final DateTime? calendarMinimumDay;
+  final VoidCallback onCalendarHistoryLimitReached;
   final VoidCallback onBackToCalendarDay;
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
@@ -6514,6 +6605,8 @@ class _CommandCenterContent extends StatelessWidget {
             showMonth: showCalendarMonth,
             startHour: calendarStartHour,
             endHour: calendarEndHour,
+            calendarMinimumDay: calendarMinimumDay,
+            onCalendarHistoryLimitReached: onCalendarHistoryLimitReached,
             onDateSelected: onCalendarDaySelected,
             onMonthSelected: onCalendarMonthSelected,
             onBackToDay: onBackToCalendarDay,
@@ -7830,6 +7923,8 @@ class _TodayHomeView extends StatelessWidget {
     required this.showMonth,
     required this.startHour,
     required this.endHour,
+    required this.calendarMinimumDay,
+    required this.onCalendarHistoryLimitReached,
     required this.onDateSelected,
     required this.onMonthSelected,
     required this.onBackToDay,
@@ -7852,6 +7947,8 @@ class _TodayHomeView extends StatelessWidget {
   final bool showMonth;
   final int startHour;
   final int endHour;
+  final DateTime? calendarMinimumDay;
+  final VoidCallback onCalendarHistoryLimitReached;
   final ValueChanged<DateTime> onDateSelected;
   final ValueChanged<DateTime> onMonthSelected;
   final VoidCallback onBackToDay;
@@ -7973,6 +8070,8 @@ class _TodayHomeView extends StatelessWidget {
                 selectedDay: selectedDay,
                 startHour: startHour,
                 endHour: endHour,
+                minimumDay: calendarMinimumDay,
+                onHistoryLimitReached: onCalendarHistoryLimitReached,
                 onDayChanged: onDateSelected,
                 onEventTap: onCalendarEventEdited,
                 onEventDeleted: onCalendarEventDeleted,
@@ -8305,6 +8404,8 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     required this.selectedDay,
     required this.startHour,
     required this.endHour,
+    this.minimumDay,
+    this.onHistoryLimitReached,
     required this.onDayChanged,
     required this.onEventTap,
     required this.onEventDeleted,
@@ -8320,6 +8421,8 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
   final DateTime selectedDay;
   final int startHour;
   final int endHour;
+  final DateTime? minimumDay;
+  final VoidCallback? onHistoryLimitReached;
   final ValueChanged<DateTime> onDayChanged;
   final Future<void> Function(
     HermesCalendarEvent event, {
@@ -8423,6 +8526,14 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
   DateTime _dateForDayOffset(int dayOffset) =>
       _pageAnchorDay.add(Duration(days: dayOffset));
 
+  DateTime? get _minimumDay =>
+      widget.minimumDay == null ? null : _dateOnly(widget.minimumDay!);
+
+  bool _isBeforeMinimumDay(DateTime date) {
+    final minimumDay = _minimumDay;
+    return minimumDay != null && _dateOnly(date).isBefore(minimumDay);
+  }
+
   void _syncVisibleDayOffsetFromPage() {
     if (!_dayPageController.hasClients) return;
     final page = _dayPageController.page ?? _initialDayPage.toDouble();
@@ -8434,10 +8545,26 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
 
   void _handlePageChanged(int page) {
     final nextOffset = (page - _initialDayPage) * _daysPerTimelinePage;
+    final nextSelectedDay = _dateForPage(page);
+    if (_isBeforeMinimumDay(nextSelectedDay)) {
+      final minimumDay = _minimumDay!;
+      widget.onHistoryLimitReached?.call();
+      if (!_sameCalendarDay(minimumDay, widget.selectedDay)) {
+        widget.onDayChanged(minimumDay);
+      }
+      _pageAnchorDay = minimumDay;
+      if (_visibleDayOffset != 0) {
+        setState(() => _visibleDayOffset = 0);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_dayPageController.hasClients) return;
+        _dayPageController.jumpToPage(_initialDayPage);
+      });
+      return;
+    }
     if (nextOffset != _visibleDayOffset) {
       setState(() => _visibleDayOffset = nextOffset);
     }
-    final nextSelectedDay = _dateForPage(page);
     if (!_sameCalendarDay(nextSelectedDay, widget.selectedDay)) {
       widget.onDayChanged(nextSelectedDay);
     }
@@ -19366,6 +19493,211 @@ class _BetaFeedbackThanksDialog extends StatelessWidget {
         child: const Text('Done'),
       ),
     ],
+  );
+}
+
+class _OnboardingTourOverlay extends StatelessWidget {
+  const _OnboardingTourOverlay({
+    required this.step,
+    required this.onNext,
+    required this.onSkip,
+    required this.onFinish,
+  });
+
+  final int step;
+  final VoidCallback onNext;
+  final VoidCallback onSkip;
+  final VoidCallback onFinish;
+
+  String get _caption => switch (step) {
+    0 => 'Hold for voice to text, or tap to type',
+    1 => 'Create new events, tasks, and reminders here',
+    2 =>
+      "Your critical count includes today's critical events, and tasks that have been marked critical, or are overdue",
+    _ => 'These will snap you back to the current day or month at any point',
+  };
+
+  String get _highlightKey => switch (step) {
+    0 => 'bean',
+    1 => 'create',
+    2 => 'critical',
+    _ => 'date-month',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final safe = media.padding;
+    final dockBottomPadding = safe.bottom > 0 ? safe.bottom + 2 : 6.0;
+    final bottomMenuHeight = 78.0 + dockBottomPadding;
+
+    return Positioned.fill(
+      key: const Key('onboarding-tour-overlay'),
+      child: Material(
+        color: Colors.transparent,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final size = constraints.biggest;
+            final topCenterY = safe.top + 28.0;
+            final highlight = switch (step) {
+              0 => Rect.fromCenter(
+                center: Offset(
+                  size.width / 2,
+                  size.height - bottomMenuHeight + 56,
+                ),
+                width: 96,
+                height: 96,
+              ),
+              1 => Rect.fromCenter(
+                center: Offset(size.width - 36, topCenterY),
+                width: 58,
+                height: 58,
+              ),
+              2 => Rect.fromCenter(
+                center: Offset(size.width - 82, topCenterY),
+                width: 58,
+                height: 58,
+              ),
+              _ => Rect.fromLTWH(
+                10,
+                safe.top + 6,
+                math.min(248, math.max(210, size.width - 128)),
+                48,
+              ),
+            };
+            final captionTop = step == 0 ? null : highlight.bottom + 18;
+            final captionBottom = step == 0
+                ? math.max(bottomMenuHeight + 92, safe.bottom + 174)
+                : null;
+
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: ModalBarrier(
+                    color: Colors.black.withValues(alpha: .52),
+                    dismissible: false,
+                  ),
+                ),
+                _TourHighlight(rect: highlight, targetKey: _highlightKey),
+                Positioned(
+                  left: 22,
+                  right: 22,
+                  top: captionTop == null
+                      ? null
+                      : math.min(captionTop, size.height - 224),
+                  bottom: captionBottom,
+                  child: _TourCaptionCard(
+                    caption: _caption,
+                    isLast: step >= 3,
+                    onNext: onNext,
+                    onSkip: onSkip,
+                    onFinish: onFinish,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _TourHighlight extends StatelessWidget {
+  const _TourHighlight({required this.rect, required this.targetKey});
+
+  final Rect rect;
+  final String targetKey;
+
+  @override
+  Widget build(BuildContext context) => Positioned.fromRect(
+    rect: rect,
+    child: IgnorePointer(
+      child: Container(
+        key: Key('onboarding-tour-highlight-$targetKey'),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(
+            targetKey == 'date-month' ? 18 : 999,
+          ),
+          border: Border.all(color: Colors.white, width: 3),
+          boxShadow: [
+            BoxShadow(
+              color: HeyBeanTheme.accent.withValues(alpha: .45),
+              blurRadius: 30,
+              spreadRadius: 10,
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _TourCaptionCard extends StatelessWidget {
+  const _TourCaptionCard({
+    required this.caption,
+    required this.isLast,
+    required this.onNext,
+    required this.onSkip,
+    required this.onFinish,
+  });
+
+  final String caption;
+  final bool isLast;
+  final VoidCallback onNext;
+  final VoidCallback onSkip;
+  final VoidCallback onFinish;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .28)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x26020617),
+          blurRadius: 28,
+          offset: Offset(0, 16),
+        ),
+      ],
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          caption,
+          key: const Key('onboarding-tour-caption'),
+          style: const TextStyle(
+            color: HeyBeanTheme.text,
+            decoration: TextDecoration.none,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            height: 1.25,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            TextButton(
+              key: const Key('onboarding-tour-skip'),
+              onPressed: onSkip,
+              child: const Text('Skip'),
+            ),
+            const Spacer(),
+            FilledButton(
+              key: Key(
+                isLast ? 'onboarding-tour-finish' : 'onboarding-tour-next',
+              ),
+              onPressed: isLast ? onFinish : onNext,
+              child: Text(isLast ? 'Finish' : 'Next'),
+            ),
+          ],
+        ),
+      ],
+    ),
   );
 }
 

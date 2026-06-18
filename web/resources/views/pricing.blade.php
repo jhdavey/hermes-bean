@@ -91,7 +91,7 @@
 
     <section class="cta-band">
         <div class="wrap">
-            <h2>Still shaping a larger rollout?</h2>
+            <h2>Shaping a larger rollout?</h2>
             <p class="hero-subhead">For teams or special requirements, contact us and we will help shape the right HeyBean setup.</p>
             <div class="hero-actions"><a class="button outline" href="mailto:support@heybean.org?subject=HeyBean%20Enterprise">Contact us</a></div>
         </div>

@@ -658,7 +658,7 @@ class AssistantDomainApiTest extends TestCase
             ->assertJsonFragment(['title' => 'Finish today checklist']);
     }
 
-    public function test_completed_tasks_are_purged_after_ten_days(): void
+    public function test_completed_tasks_are_purged_after_plan_history_window(): void
     {
         $token = $this->apiToken();
 
@@ -666,8 +666,8 @@ class AssistantDomainApiTest extends TestCase
             'title' => 'Old completed task',
             'type' => 'todo',
             'status' => 'completed',
-            'due_at' => now()->subDays(14)->toIso8601String(),
-            'completed_at' => now()->subDays(11)->toIso8601String(),
+            'due_at' => now()->subDays(18)->toIso8601String(),
+            'completed_at' => now()->subDays(16)->toIso8601String(),
         ])->assertCreated()->json('data.id');
 
         $recentCompletedId = $this->withToken($token)->postJson('/api/tasks', [

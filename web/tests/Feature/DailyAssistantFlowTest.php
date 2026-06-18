@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -11,8 +12,17 @@ class DailyAssistantFlowTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
+
     public function test_signed_in_user_can_plan_today_and_get_user_scoped_today_summary(): void
     {
+        Carbon::setTestNow('2026-05-12T12:00:00Z');
+
         $aliceToken = $this->apiToken('alice@example.com');
         $bobToken = $this->apiToken('bob@example.com');
 

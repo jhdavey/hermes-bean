@@ -157,6 +157,8 @@ if (mount) {
         kioskVoicePhase: 'idle',
         kioskVoiceMessage: '',
         onboardingJustCompleted: false,
+        onboardingTourActive: false,
+        onboardingTourStep: 0,
         calendarRefreshing: false,
         taskFilter: 'active',
         reminderFilter: 'pending',
@@ -1265,6 +1267,7 @@ if (mount) {
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
                 ${bottomMenuMarkup()}
                 ${state.chatExpanded && state.selected !== 'bean' ? desktopChatMarkup({ expanded: true }) : ''}
+                ${onboardingTourMarkup()}
             </div>`;
     }
 
@@ -1906,6 +1909,74 @@ if (mount) {
             </article>`;
     }
 
+    const onboardingTourSteps = [
+        {
+            target: 'bean',
+            caption: 'Hold for voice to text, or tap to type',
+        },
+        {
+            target: 'create',
+            caption: 'Create new events, tasks, and reminders here',
+        },
+        {
+            target: 'critical',
+            caption: "Your critical count includes today's critical events, and tasks that have been marked critical, or are overdue",
+        },
+        {
+            target: 'date-month',
+            caption: 'These will snap you back to the current day or month at any point',
+        },
+    ];
+
+    function onboardingTourStorageKey(user = state.user) {
+        return `heybean.onboarding_tour_seen.${user?.id || 'anonymous'}`;
+    }
+
+    function onboardingTourSeen() {
+        try {
+            return localStorage.getItem(onboardingTourStorageKey()) === 'true';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function markOnboardingTourSeen() {
+        try {
+            localStorage.setItem(onboardingTourStorageKey(), 'true');
+        } catch (_) {
+            // A blocked storage write should not trap the user in the tour.
+        }
+    }
+
+    function startOnboardingTourIfNeeded() {
+        if (needsBeanOnboarding() || onboardingTourSeen()) return;
+        state.onboardingTourStep = 0;
+        state.onboardingTourActive = true;
+    }
+
+    function closeOnboardingTour() {
+        markOnboardingTourSeen();
+        state.onboardingTourActive = false;
+        state.onboardingTourStep = 0;
+    }
+
+    function onboardingTourMarkup() {
+        if (!state.onboardingTourActive) return '';
+        const step = onboardingTourSteps[Math.min(state.onboardingTourStep, onboardingTourSteps.length - 1)];
+        const isLast = state.onboardingTourStep >= onboardingTourSteps.length - 1;
+        return `
+            <section class="hb-onboarding-tour hb-onboarding-tour-${escapeAttr(step.target)}" role="dialog" aria-modal="true" aria-live="polite" aria-label="HeyBean tour">
+                <div class="hb-onboarding-tour-highlight" data-tour-highlight="${escapeAttr(step.target)}" aria-hidden="true"></div>
+                <article class="hb-onboarding-tour-card">
+                    <p>${escapeHtml(step.caption)}</p>
+                    <div class="hb-onboarding-tour-actions">
+                        <button class="hb-button-ghost" type="button" data-onboarding-tour-skip>Skip</button>
+                        <button class="hb-button" type="button" ${isLast ? 'data-onboarding-tour-finish' : 'data-onboarding-tour-next'}>${isLast ? 'Finish' : 'Next'}</button>
+                    </div>
+                </article>
+            </section>`;
+    }
+
     function desktopChatMarkup(options = {}) {
         return `
             <section class="hb-desktop-chat ${options.expanded ? 'hb-desktop-chat-expanded' : ''}" aria-label="Bean chat">
@@ -2150,7 +2221,7 @@ if (mount) {
 
     function topWorkspaceSwitcherMarkup(extraClass = '') {
         const workspaceItems = workspaces();
-        if (!workspaceItems.length) return '';
+        if (workspaceItems.length < 2) return '';
         const activeWorkspaceId = String(currentWorkspaceId() || '');
         const activeWorkspace = workspaceItems.find((workspace) => String(workspace.id) === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault) || workspaceItems[0];
         return `
@@ -2173,7 +2244,7 @@ if (mount) {
                     ${overflowMenuAction('today', 'Calendar', icons.calendar)}
                     ${overflowMenuAction('tasks', 'Tasks', icons.tasks)}
                     ${overflowMenuAction('reminders', 'Reminders', icons.reminders)}
-                    ${workspaceItems.length ? `<label class="hb-overflow-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select ${workspaceItems.length < 2 ? 'disabled' : ''} aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
+                    ${workspaceItems.length > 1 ? `<label class="hb-overflow-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
                     <button class="hb-overflow-action" type="button" data-open-create="event">${icons.add}<span>New event</span></button>
                     <button class="hb-overflow-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
                     ${overflowMenuAction('settings', 'Settings', icons.settings)}
@@ -3456,6 +3527,18 @@ if (mount) {
             state.notice = '';
             render();
         });
+        mount.querySelector('[data-onboarding-tour-next]')?.addEventListener('click', () => {
+            state.onboardingTourStep = Math.min(state.onboardingTourStep + 1, onboardingTourSteps.length - 1);
+            render();
+        });
+        mount.querySelector('[data-onboarding-tour-skip]')?.addEventListener('click', () => {
+            closeOnboardingTour();
+            render();
+        });
+        mount.querySelector('[data-onboarding-tour-finish]')?.addEventListener('click', () => {
+            closeOnboardingTour();
+            render();
+        });
         mount.querySelector('[data-admin-login]')?.addEventListener('click', () => {
             stopDashboardChangeFeed();
             stopKioskVoiceMode();
@@ -3487,7 +3570,10 @@ if (mount) {
             render();
         });
         mount.querySelectorAll('[data-select-day]').forEach((button) => button.addEventListener('click', () => {
-            state.selectedDay = button.dataset.selectDay;
+            const selected = allowedCalendarDate(button.dataset.selectDay);
+            if (selected.blocked) showCalendarHistoryLimit();
+            state.selectedDay = dateOnly(selected.date);
+            resetCalendarWindow(selected.date);
             state.showMonth = false;
             render();
         }));
@@ -4925,6 +5011,7 @@ if (mount) {
             await refreshOnly(false);
             if (wasOnboarding && !needsBeanOnboarding()) {
                 state.onboardingJustCompleted = true;
+                startOnboardingTourIfNeeded();
             }
             loadChatSessions({ resumeToday: false, shouldRender: false }).then(() => render()).catch(() => {});
         } catch (error) {
@@ -8580,7 +8667,11 @@ if (mount) {
         const month = parseLocalDate(value);
         const selected = parseLocalDate(state.selectedDay);
         const daysInTargetMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-        state.selectedDay = dateOnly(new Date(month.getFullYear(), month.getMonth(), Math.min(selected.getDate(), daysInTargetMonth)));
+        const requested = new Date(month.getFullYear(), month.getMonth(), Math.min(selected.getDate(), daysInTargetMonth));
+        const allowed = allowedCalendarDate(requested);
+        if (allowed.blocked) showCalendarHistoryLimit();
+        state.selectedDay = dateOnly(allowed.date);
+        resetCalendarWindow(allowed.date);
         state.showMonth = true;
         render();
     }
@@ -9443,15 +9534,66 @@ if (mount) {
         });
     }
 
+    function currentPlanLimits() {
+        return state.user?.plan_limits || state.user?.planLimits || {};
+    }
+
+    function calendarHistoryCutoffDate() {
+        const cutoff = currentPlanLimits().history_cutoff || currentPlanLimits().historyCutoff;
+        if (!cutoff) return null;
+        return parseLocalDate(String(cutoff).slice(0, 10));
+    }
+
+    function calendarHistoryLimitMessage() {
+        const days = currentPlanLimits().history_days ?? currentPlanLimits().historyDays;
+        const parsedDays = Number(days);
+        if (Number.isFinite(parsedDays) && parsedDays > 0) {
+            return `Your current plan includes ${parsedDays} days of calendar history.`;
+        }
+        return 'Your current plan has limited calendar history access.';
+    }
+
+    function showCalendarHistoryLimit() {
+        state.notice = '';
+        state.error = calendarHistoryLimitMessage();
+    }
+
+    function clampCalendarDate(date) {
+        const requested = parseLocalDate(date);
+        const cutoff = calendarHistoryCutoffDate();
+        return cutoff && requested < cutoff ? cutoff : requested;
+    }
+
+    function calendarDateAllowed(date) {
+        const requested = parseLocalDate(date);
+        const cutoff = calendarHistoryCutoffDate();
+        return !cutoff || requested >= cutoff;
+    }
+
+    function allowedCalendarDate(date) {
+        const requested = parseLocalDate(date);
+        const allowed = clampCalendarDate(requested);
+        return {
+            date: allowed,
+            blocked: !sameDate(requested, allowed),
+        };
+    }
+
     function visibleCalendarDays(start) {
         ensureCalendarWindowCovers(start);
         const firstVisible = parseLocalDate(state.calendarWindowStart);
         const dayCount = Math.max(calendarInitialWindowDays, Number(state.calendarWindowDayCount || calendarInitialWindowDays));
-        return Array.from({ length: dayCount }, (_, index) => addDays(firstVisible, index));
+        return Array.from({ length: dayCount }, (_, index) => addDays(firstVisible, index))
+            .filter((day) => calendarDateAllowed(day));
     }
 
     function initialCalendarWindowStart(date) {
-        return dateOnly(addDays(weekDays(parseLocalDate(date))[0], -14));
+        const rawStart = addDays(weekDays(parseLocalDate(date))[0], -14);
+        try {
+            return dateOnly(clampCalendarDate(rawStart));
+        } catch (_) {
+            return dateOnly(rawStart);
+        }
     }
 
     function resetCalendarWindow(date) {
@@ -9465,9 +9607,17 @@ if (mount) {
         let start = state.calendarWindowStart ? parseLocalDate(state.calendarWindowStart) : parseLocalDate(initialCalendarWindowStart(selected));
         let dayCount = Math.max(calendarInitialWindowDays, Number(state.calendarWindowDayCount || calendarInitialWindowDays));
         let changed = false;
+        const cutoff = calendarHistoryCutoffDate();
+        if (cutoff && start < cutoff) {
+            dayCount = Math.max(dayCount - Math.ceil((cutoff - start) / 86400000), calendarInitialWindowDays);
+            start = cutoff;
+            changed = true;
+        }
 
         while (selected < addDays(start, 14)) {
+            if (cutoff && start <= cutoff) break;
             start = addDays(start, -calendarWindowChunkDays);
+            if (cutoff && start < cutoff) start = cutoff;
             dayCount += calendarWindowChunkDays;
             changed = true;
         }
@@ -9917,12 +10067,20 @@ if (mount) {
         if (!shouldPrepend && !shouldAppend) return false;
 
         const start = state.calendarWindowStart ? parseLocalDate(state.calendarWindowStart) : parseLocalDate(initialCalendarWindowStart(state.selectedDay));
-        state.calendarWindowStart = shouldPrepend ? dateOnly(addDays(start, -calendarWindowChunkDays)) : dateOnly(start);
+        const cutoff = calendarHistoryCutoffDate();
+        if (shouldPrepend && cutoff && start <= cutoff) {
+            showCalendarHistoryLimit();
+            render();
+            return false;
+        }
+        const nextStart = shouldPrepend ? clampCalendarDate(addDays(start, -calendarWindowChunkDays)) : start;
+        const addedPreviousDays = shouldPrepend ? Math.max(0, Math.round((start - nextStart) / 86400000)) : 0;
+        state.calendarWindowStart = dateOnly(nextStart);
         state.calendarWindowDayCount = Math.max(calendarInitialWindowDays, Number(state.calendarWindowDayCount || calendarInitialWindowDays))
-            + (shouldPrepend ? calendarWindowChunkDays : 0)
+            + addedPreviousDays
             + (shouldAppend ? calendarWindowChunkDays : 0);
         state.timelineScrollRestore = {
-            left: timeline.scrollLeft + (shouldPrepend ? dayWidth * calendarWindowChunkDays : 0),
+            left: timeline.scrollLeft + (shouldPrepend ? dayWidth * addedPreviousDays : 0),
             top: timeline.scrollTop,
         };
         render();
@@ -10007,6 +10165,7 @@ if (mount) {
     function isPlanLimitMessage(message) {
         const normalized = String(message || '').toLowerCase();
         return normalized.includes('current plan includes')
+            || normalized.includes('current plan has limited')
             || normalized.includes('available on premium')
             || normalized.includes('ai usage limit')
             || normalized.includes('external lookup usage limit');

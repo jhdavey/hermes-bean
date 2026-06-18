@@ -13,8 +13,10 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
 
         $this->assertStringContainsString('data-top-workspace-select', $appJs);
         $this->assertStringContainsString('function topWorkspaceSwitcherMarkup', $appJs);
+        $this->assertStringContainsString('if (workspaceItems.length < 2) return \'\';', $appJs);
         $this->assertStringContainsString("topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-mobile')", $appJs);
         $this->assertStringContainsString("topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')", $appJs);
+        $this->assertStringContainsString('workspaceItems.length > 1 ? `<label class="hb-overflow-workspace"', $appJs);
         $this->assertStringContainsString('.hb-top-workspace-switcher', $appCss);
     }
 

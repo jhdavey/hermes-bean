@@ -279,6 +279,61 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const Key('bean-intro-callout')), findsNothing);
+      expect(find.byKey(const Key('onboarding-tour-overlay')), findsOneWidget);
+      expect(
+        find.text('Hold for voice to text, or tap to type'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('onboarding-tour-highlight-bean')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Create new events, tasks, and reminders here'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('onboarding-tour-highlight-create')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          "Your critical count includes today's critical events, and tasks that have been marked critical, or are overdue",
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('onboarding-tour-highlight-critical')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'These will snap you back to the current day or month at any point',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('onboarding-tour-highlight-date-month')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('onboarding-tour-finish')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('onboarding-tour-overlay')), findsNothing);
+      final onboardingTourPrefs = await SharedPreferences.getInstance();
+      expect(
+        onboardingTourPrefs.getBool('heybean.onboarding_tour_seen.1'),
+        isTrue,
+      );
 
       await tester.tap(find.byKey(const Key('nav-today')));
       await tester.pumpAndSettle();
@@ -464,6 +519,28 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('single-workspace users do not see the top workspace switcher', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _WorkspaceFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('top-workspace-switcher')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('nav-settings')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('workspace-create-household-action')),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('workspace limit errors show upgrade CTA in Flutter settings', (
     WidgetTester tester,

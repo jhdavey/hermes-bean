@@ -318,6 +318,7 @@ class AuthController extends Controller
         $user->setAttribute('bean_preferences_ready', $agentProfiles->preferencesReady($activeProfile));
         $user->setAttribute('is_early_access', $earlyAccessSignup !== null);
         $user->setAttribute('early_access_signup', $earlyAccessSignup);
+        $user->setAttribute('plan_limits', app(PlanLimitService::class)->publicLimitsFor($user));
 
         return $user;
     }
