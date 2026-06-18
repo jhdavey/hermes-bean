@@ -25,6 +25,9 @@
         @media(max-width:860px){.hero{row-gap:18px}.hero-copy{display:contents}.hero-copy h1{order:1}.hero-subhead{order:2}.hero-visual{order:3}.hero-copy .form{order:4}.hero-copy .micro{order:5}.hero-voice{order:6}.prompt-bubbles{order:7}}
         .signup-modal{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:rgba(16,32,22,.46);backdrop-filter:blur(14px)}.signup-modal-card{width:min(520px,100%);border:1px solid rgba(191,230,200,.9);border-radius:34px;background:linear-gradient(180deg,#fffdf7,#f2fbf1);box-shadow:0 34px 100px rgba(16,32,22,.25);padding:32px;text-align:center}.signup-modal-icon{width:58px;height:58px;margin:0 auto 16px;display:grid;place-items:center;border-radius:20px;background:#dcfce7;color:#087a35;font-size:28px;font-weight:950}.signup-modal-card h2{margin:0 0 10px;font-size:clamp(28px,5vw,42px);line-height:1;letter-spacing:-.045em}.signup-modal-card p{margin:0 auto 22px;color:var(--muted);font-size:17px;line-height:1.55;max-width:430px}.signup-modal-card .button{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border-radius:999px;padding:13px 18px;background:var(--ink);color:white;font-weight:900}
         .public-beta-banner{position:sticky;top:0;z-index:25;width:100%;min-height:34px;border-bottom:1px solid rgba(22,163,74,.2);background:linear-gradient(135deg,rgba(22,163,74,.96),rgba(34,197,94,.94));color:#fff;font-size:13px;font-weight:850;letter-spacing:0;text-align:center;box-shadow:0 8px 20px rgba(22,163,74,.16)}.public-beta-banner-inner{width:min(1160px,calc(100% - 32px));min-height:34px;margin:0 auto;display:flex;align-items:center;justify-content:center;padding:8px 0}.public-beta-banner strong{font-weight:950}.public-beta-banner a{color:inherit;font-weight:950;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}@media(max-width:620px){.public-beta-banner-inner{justify-content:flex-start;text-align:left;line-height:1.35}}
+
+        /* Live hero phone: real transparent iPhone template + DOM screen animation (no video rectangle). */
+        .hero-phone.image-mockup.hero-device{width:min(306px,31vw);aspect-ratio:487/940;position:relative;background:transparent!important;border:0!important;border-radius:0!important;box-shadow:none!important;overflow:visible!important;filter:drop-shadow(0 34px 78px rgba(9,40,20,.28))}.hero-device-template{position:absolute;inset:0;z-index:3;display:block;width:100%;height:100%;object-fit:contain;pointer-events:none}.hero-device-screen{position:absolute;left:8.18%;top:8.5%;width:83.78%;height:87.23%;z-index:1;overflow:hidden;border-radius:11%/5.7%;background:linear-gradient(180deg,#f8fcf7 0%,#fbfdf9 64%,#edf8ef 100%);padding:5.2% 5.2% 0;color:#10181f;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bean-status-row{height:7.2%;display:flex;align-items:center;justify-content:space-between;padding:0 3.5%;font-size:13px;font-weight:900;color:#090d0b}.bean-status-icons{font-size:10px;letter-spacing:1.5px;color:#a9b0aa}.bean-app-topline{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:5.2%}.bean-chip{display:inline-flex;align-items:center;justify-content:center;min-height:26px;padding:0 10px;border:1px solid #edf0ec;border-radius:999px;background:#fff;box-shadow:0 7px 18px rgba(21,45,28,.07);font-size:9px;font-weight:900;color:#202733;white-space:nowrap}.bean-count{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#16a34a;color:white;font-weight:950;font-size:14px;box-shadow:0 8px 16px rgba(22,163,74,.22)}.bean-tools-row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;margin:0 1.5% 5%}.bean-ready{justify-self:start;border:1px solid #edf0ec;border-radius:999px;background:#fff;padding:6px 9px;color:#627066;font-size:9px;font-weight:900}.bean-menu{justify-self:center;font-size:22px;font-weight:950;color:#172119;line-height:1}.bean-new{justify-self:end;color:#16a34a;font-size:14px;font-weight:950}.bean-demo-stack{display:flex;flex-direction:column;gap:9px}.bean-user-bubble{min-height:108px;border-radius:20px;background:linear-gradient(135deg,#16a34a,#04964a);color:white;padding:14px 16px;box-shadow:0 13px 30px rgba(22,163,74,.16);overflow:hidden}.bean-user-bubble strong{display:block;margin-bottom:6px;font-size:13px;line-height:1}.bean-user-bubble p{margin:0!important;color:white!important;font-size:12.1px!important;line-height:1.28!important;letter-spacing:-.01em;max-width:none!important}.bean-progress-card,.bean-result-card{border:1px solid #e5ebe4;border-radius:18px;background:rgba(255,255,255,.94);box-shadow:0 12px 26px rgba(21,45,28,.07)}.bean-progress-card{min-height:45px;display:flex;align-items:center;gap:10px;padding:10px 13px;color:#2b3542;font-size:10.5px;font-weight:850;opacity:0;transform:translateY(8px);transition:opacity .36s ease,transform .36s ease}.bean-progress-card.is-visible{opacity:1;transform:translateY(0)}.bean-dots{display:inline-flex;gap:4px}.bean-dots i{width:5px;height:5px;border-radius:50%;background:#94a39a;animation:beanDot 1.05s ease-in-out infinite}.bean-dots i:nth-child(2){animation-delay:.15s}.bean-dots i:nth-child(3){animation-delay:.3s}.bean-result-card{display:grid;gap:8px;padding:13px 14px;opacity:0;transform:translateY(10px) scale(.985);transition:opacity .42s ease,transform .42s cubic-bezier(.2,.8,.2,1)}.bean-result-card.is-visible{opacity:1;transform:translateY(0) scale(1)}.bean-result-card strong{font-size:12px;line-height:1.2;color:#102016}.bean-result-card div{display:grid;grid-template-columns:18px 1fr;gap:6px;align-items:start;color:#2b3a30;font-size:10.6px;font-weight:850;line-height:1.22}.bean-result-card div span{display:grid;place-items:center;width:16px;height:16px;border-radius:50%;background:#dcfce7;color:#12893a;font-size:10px;font-weight:950}.bean-input-row{position:absolute;left:5.2%;right:5.2%;bottom:10.6%;height:44px;border:1px solid #edf0ec;border-radius:18px;background:rgba(255,255,255,.96);display:flex;align-items:center;justify-content:space-between;padding:0 8px 0 15px;box-shadow:0 8px 20px rgba(21,45,28,.06);font-size:10px;font-weight:750;color:#94a3b8}.bean-input-row b{display:grid;place-items:center;width:32px;height:32px;border-radius:12px;background:#16a34a;color:#fff;font-size:22px;line-height:1}.bean-bottom-nav{position:absolute;left:0;right:0;bottom:0;height:9%;display:grid;grid-template-columns:repeat(5,1fr);align-items:center;padding:0 5.5%;border-top:1px solid rgba(226,235,226,.62);background:rgba(248,252,247,.88);backdrop-filter:blur(8px)}.bean-bottom-nav span{display:grid;place-items:center;gap:2px;color:#65728b;font-size:17px;font-weight:900;line-height:1}.bean-bottom-nav small{font-size:7px;font-weight:850}.bean-bottom-nav .active{color:#12893a}.bean-paw{width:38px;height:38px;justify-self:center;border-radius:50%;background:#16a34a!important;color:#fff!important;border:4px solid #e8f8ed;box-shadow:0 8px 18px rgba(22,163,74,.22)}@keyframes beanDot{0%,80%,100%{opacity:.35;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}@media(max-width:860px){.hero-phone.image-mockup.hero-device{width:min(318px,78vw)}}@media(max-width:520px){.hero-phone.image-mockup.hero-device{width:min(286px,76vw)}.bean-user-bubble p{font-size:11.4px!important}.bean-result-card div{font-size:10px}.bean-chip{font-size:8px;padding:0 8px}.bean-callout{display:none}}@media(prefers-reduced-motion:reduce){.bean-dots i{animation:none}.bean-progress-card,.bean-result-card{transition:none}}
     </style>
 </head>
 <body>
@@ -57,12 +60,45 @@
             <div class="halo"></div>
             <div class="hero-callout events">3 updates made<small>event, reminder, weather</small></div>
             <div class="hero-callout voice">Voice-first control<small>Speak or type from the mobile app</small></div>
-            <div class="hero-phone image-mockup">
-                <video class="hero-phone-video" width="500" height="1126" autoplay muted loop playsinline preload="metadata" poster="{{ asset('images/bean-hero-conversation.png') }}?v={{ filemtime(public_path('images/bean-hero-conversation.png')) }}" aria-label="HeyBean mobile chat demo showing Bean adding an event, setting a reminder, and checking weather">
-                    <source src="{{ asset('videos/heybean-hero-loop.webm') }}?v={{ filemtime(public_path('videos/heybean-hero-loop.webm')) }}" type="video/webm">
-                    <source src="{{ asset('videos/heybean-hero-loop.mp4') }}?v={{ filemtime(public_path('videos/heybean-hero-loop.mp4')) }}" type="video/mp4">
-                </video>
-                <img class="hero-phone-image motion-fallback" src="{{ asset('images/bean-hero-conversation.png') }}?v={{ filemtime(public_path('images/bean-hero-conversation.png')) }}" width="500" height="1125" alt="HeyBean mobile chat mockup showing Bean adding an event, setting a reminder, and checking weather">
+            <div class="hero-phone image-mockup hero-device" data-bean-demo>
+                <div class="hero-device-screen" aria-hidden="true">
+                    <div class="bean-status-row"><span>3:57</span><span class="bean-status-icons">•••• ◒ ▰</span></div>
+                    <div class="bean-app-topline">
+                        <span class="bean-chip">▦ May ’26</span>
+                        <span class="bean-chip">Fri May 22</span>
+                        <span class="bean-count">1</span>
+                    </div>
+                    <div class="bean-tools-row">
+                        <span class="bean-ready">● Working</span>
+                        <span class="bean-menu">≡</span>
+                        <span class="bean-new">+ /new</span>
+                    </div>
+                    <div class="bean-demo-stack">
+                        <div class="bean-user-bubble">
+                            <strong>You</strong>
+                            <p id="bean-demo-request"></p>
+                        </div>
+                        <div class="bean-progress-card" data-bean-progress>
+                            <span class="bean-dots"><i></i><i></i><i></i></span>
+                            <span>Checking calendar, reminders, and weather…</span>
+                        </div>
+                        <div class="bean-result-card" data-bean-result>
+                            <strong>Done — your plan is organized.</strong>
+                            <div><span>✓</span>Dinner with Lauren · Friday 7 PM</div>
+                            <div><span>✓</span>Gift reminder before you leave</div>
+                            <div><span>✓</span>Weather check stays attached</div>
+                        </div>
+                    </div>
+                    <div class="bean-input-row"><span>Message Bean…</span><b>↑</b></div>
+                    <div class="bean-bottom-nav">
+                        <span class="active">▦<small>Calendar</small></span>
+                        <span>✓<small>Tasks</small></span>
+                        <span class="bean-paw">◉</span>
+                        <span>♧<small>Reminders</small></span>
+                        <span>≡<small>Settings</small></span>
+                    </div>
+                </div>
+                <img class="hero-device-template" src="{{ asset('images/iphone16promax-template.png') }}?v={{ filemtime(public_path('images/iphone16promax-template.png')) }}" width="487" height="940" alt="HeyBean mobile chat demo showing Bean adding an event, setting a reminder, and checking weather">
                 <noscript><img class="hero-phone-image" src="{{ asset('images/bean-hero-conversation.png') }}?v={{ filemtime(public_path('images/bean-hero-conversation.png')) }}" width="500" height="1125" alt="HeyBean mobile chat mockup showing Bean adding an event, setting a reminder, and checking weather"></noscript>
             </div>
         </section>
@@ -213,5 +249,40 @@
     @endif
 
     <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a></span></footer>
+
+    <script>
+        (() => {
+            const request = 'Add dinner with Lauren Friday at 7, remind me to bring the gift, and check if the weather changes the plan.';
+            const text = document.getElementById('bean-demo-request');
+            const progress = document.querySelector('[data-bean-progress]');
+            const result = document.querySelector('[data-bean-result]');
+            if (!text || !progress || !result) return;
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reduceMotion) {
+                text.textContent = request;
+                progress.classList.add('is-visible');
+                result.classList.add('is-visible');
+                return;
+            }
+            const cycle = 10000;
+            const typeStart = 450;
+            const typeDuration = 4300;
+            const ease = (n) => 0.5 - Math.cos(Math.PI * Math.max(0, Math.min(1, n))) / 2;
+            function tick(now) {
+                const t = now % cycle;
+                let chars = 0;
+                // Keep the completed request through the loop seam while the result fades away,
+                // then restart typing once the screen is clean. This avoids a blank/overlapped reset frame.
+                if (t < typeStart) chars = request.length;
+                else if (t < typeStart + typeDuration) chars = Math.round(request.length * ease((t - typeStart) / typeDuration));
+                else chars = request.length;
+                text.textContent = request.slice(0, chars);
+                progress.classList.toggle('is-visible', t >= 5000 && t < 6900);
+                result.classList.toggle('is-visible', t >= 6350);
+                window.requestAnimationFrame(tick);
+            }
+            window.requestAnimationFrame(tick);
+        })();
+    </script>
 </body>
 </html>
