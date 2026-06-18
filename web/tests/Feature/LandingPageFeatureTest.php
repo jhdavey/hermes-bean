@@ -16,8 +16,6 @@ class LandingPageFeatureTest extends TestCase
             'images/bean-logo.png',
             'images/bean-real-home-screen.png',
             'images/iphone16promax-template.png',
-            'videos/bean-assistant-mockup.mp4',
-            'videos/bean-assistant-mockup.webm',
             'images/heybean-review-alex.svg',
             'images/heybean-review-maya.svg',
             'images/heybean-review-sam.svg',
@@ -41,9 +39,12 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Coordinate home + work', false)
             ->assertSee('Approve sensitive changes', false)
             ->assertSee('Ask once. Bean organizes the follow-through.', false)
-            ->assertSee('class="feature-demo bean-video-mockup"', false)
-            ->assertSee('videos/bean-assistant-mockup.webm', false)
-            ->assertSee('videos/bean-assistant-mockup.mp4', false)
+            ->assertSee('class="feature-demo hero-phone image-mockup hero-device"', false)
+            ->assertSee('Add dinner with Lauren Friday at 7 and remind me to bring the gift.', false)
+            ->assertSee('Bean is checking your calendar...', false)
+            ->assertSee('Done - dinner is on your calendar.', false)
+            ->assertSee('Friday at 7:00 PM with Lauren', false)
+            ->assertSee('Reminder set: bring the gift before you leave.', false)
             ->assertSee('Keep every calendar moving.', false)
             ->assertSee('Turn loose ends into managed tasks.', false)
             ->assertSee('See the day Bean is helping you run.', false)
@@ -67,8 +68,6 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('href="/#features">Features</a>', false)
             ->assertSee('class="nav-login" href="/login">Login</a>', false)
             ->assertDontSee('How it works', false)
-            ->assertDontSee('href="/#how"', false)
-            ->assertDontSee('aria-label="Bean AI"', false)
             ->assertDontSee('Platforms', false)
             ->assertDontSee('FAQ', false)
             ->assertDontSee('Blog', false)
