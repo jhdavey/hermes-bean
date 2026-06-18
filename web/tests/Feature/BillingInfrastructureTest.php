@@ -429,7 +429,7 @@ class BillingInfrastructureTest extends TestCase
         Http::fake(function (HttpRequest $request) use ($user) {
             $this->assertSame('https://api.stripe.com/v1/subscriptions/sub_change_123', $request->url());
             $data = $request->data();
-            $this->assertFalse($data['cancel_at_period_end']);
+            $this->assertSame('false', $data['cancel_at_period_end']);
             $this->assertSame('si_change_123', $data['items'][0]['id']);
             $this->assertSame('price_base_test', $data['items'][0]['price']);
             $this->assertSame('always_invoice', $data['proration_behavior']);
@@ -486,7 +486,7 @@ class BillingInfrastructureTest extends TestCase
             $this->assertSame('https://api.stripe.com/v1/subscriptions/sub_cancel_123', $request->url());
             $this->assertSame('2026-05-27.dahlia', $request->header('Stripe-Version')[0] ?? null);
             $data = $request->data();
-            $this->assertTrue($data['cancel_at_period_end']);
+            $this->assertSame('true', $data['cancel_at_period_end']);
             $this->assertSame((string) $user->id, $data['metadata']['heybean_user_id']);
             $this->assertSame('base', $data['metadata']['plan']);
             $this->assertSame('flutter', $data['metadata']['source']);

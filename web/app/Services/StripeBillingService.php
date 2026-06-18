@@ -151,7 +151,7 @@ class StripeBillingService
 
         if ($user->stripe_subscription_id && $user->stripe_subscription_item_id) {
             $subscription = $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
-                'cancel_at_period_end' => false,
+                'cancel_at_period_end' => 'false',
                 'default_payment_method' => $paymentMethodId,
                 'items' => [[
                     'id' => $user->stripe_subscription_item_id,
@@ -267,7 +267,7 @@ class StripeBillingService
         }
 
         $subscription = $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
-            'cancel_at_period_end' => false,
+            'cancel_at_period_end' => 'false',
             'items' => [[
                 'id' => $user->stripe_subscription_item_id,
                 'price' => $this->priceId($plan),
@@ -297,7 +297,7 @@ class StripeBillingService
         }
 
         $subscription = $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
-            'cancel_at_period_end' => true,
+            'cancel_at_period_end' => 'true',
             'metadata' => [
                 'heybean_user_id' => (string) $user->id,
                 'plan' => $user->subscriptionTier(),
