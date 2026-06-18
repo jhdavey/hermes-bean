@@ -264,22 +264,23 @@
                 result.classList.add('is-visible');
                 return;
             }
-            const cycle = 10000;
-            const typeStart = 450;
+            const initialChars = 11;
             const typeDuration = 4300;
             const ease = (n) => 0.5 - Math.cos(Math.PI * Math.max(0, Math.min(1, n))) / 2;
+            text.textContent = request.slice(0, initialChars);
+
+            // Run one polished story beat instead of hard-looping the UI. The screen never clears,
+            // so there is no blank square/flash or overlapping reset state when visitors pause on it.
+            const startedAt = performance.now();
             function tick(now) {
-                const t = now % cycle;
-                let chars = 0;
-                // Keep the completed request through the loop seam while the result fades away,
-                // then restart typing once the screen is clean. This avoids a blank/overlapped reset frame.
-                if (t < typeStart) chars = request.length;
-                else if (t < typeStart + typeDuration) chars = Math.max(11, Math.round(request.length * ease((t - typeStart) / typeDuration)));
-                else chars = request.length;
+                const t = now - startedAt;
+                const chars = t < typeDuration
+                    ? Math.max(initialChars, Math.round(request.length * ease(t / typeDuration)))
+                    : request.length;
                 text.textContent = request.slice(0, chars);
                 progress.classList.toggle('is-visible', t >= 5000 && t < 6900);
                 result.classList.toggle('is-visible', t >= 6350);
-                window.requestAnimationFrame(tick);
+                if (t < 7200) window.requestAnimationFrame(tick);
             }
             window.requestAnimationFrame(tick);
         })();
