@@ -160,6 +160,18 @@ class HermesApiClient {
     );
   }
 
+  Future<HermesSubscriptionSummary> resumeSubscription() async {
+    final data = await _sendJson('POST', '/billing/subscription/resume');
+    return HermesSubscriptionSummary.fromJson(
+      _expectMap(_expectMap(data['data'])['subscription']),
+    );
+  }
+
+  Future<HermesSubscriptionSummary> getSubscriptionSummary() async {
+    final data = await _sendJson('GET', '/billing/subscription');
+    return HermesSubscriptionSummary.fromJson(_expectMap(data['data']));
+  }
+
   Future<void> logout({bool clearBearerToken = true}) async {
     await _sendJson('POST', '/auth/logout');
     if (clearBearerToken) bearerToken = null;
@@ -1239,16 +1251,22 @@ class HermesSubscriptionSummary {
     this.status,
     this.currentPeriodEnd,
     this.trialEndsAt,
+    this.accessEndsAt,
     this.cancelAtPeriodEnd = false,
     this.canUpgrade = false,
+    this.canCancel = false,
+    this.canResume = false,
   });
 
   final String tier;
   final String? status;
   final String? currentPeriodEnd;
   final String? trialEndsAt;
+  final String? accessEndsAt;
   final bool cancelAtPeriodEnd;
   final bool canUpgrade;
+  final bool canCancel;
+  final bool canResume;
 
   factory HermesSubscriptionSummary.fromJson(Map<String, Object?> json) =>
       HermesSubscriptionSummary(
@@ -1256,8 +1274,12 @@ class HermesSubscriptionSummary {
         status: json['status']?.toString(),
         currentPeriodEnd: json['current_period_end']?.toString(),
         trialEndsAt: json['trial_ends_at']?.toString(),
+        accessEndsAt: (json['access_ends_at'] ?? json['accessEndsAt'])
+            ?.toString(),
         cancelAtPeriodEnd: _readBool(json['cancel_at_period_end'] ?? false),
         canUpgrade: _readBool(json['can_upgrade'] ?? false),
+        canCancel: _readBool(json['can_cancel'] ?? json['canCancel'] ?? false),
+        canResume: _readBool(json['can_resume'] ?? json['canResume'] ?? false),
       );
 }
 

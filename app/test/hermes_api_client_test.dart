@@ -349,97 +349,156 @@ void main() {
     ]);
   });
 
-  test('loads updates and cancels billing payment method state', () async {
-    final requests = <HermesApiRequest>[];
-    final client = HermesApiClient(
-      baseUrl: Uri.parse('http://local.test/api'),
-      bearerToken: 'token-123',
-      transport: (request) async {
-        requests.add(request);
-        switch (request.path) {
-          case '/billing/payment-method':
-            expect(request.method, 'GET');
-            return HermesApiResponse(
-              200,
-              jsonEncode({
-                'data': {
-                  'payment_method': {
-                    'brand': 'mastercard',
-                    'last4': '4444',
-                    'exp_month': 10,
-                    'exp_year': 2031,
+  test(
+    'loads updates cancels and resumes billing payment method state',
+    () async {
+      final requests = <HermesApiRequest>[];
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        bearerToken: 'token-123',
+        transport: (request) async {
+          requests.add(request);
+          switch (request.path) {
+            case '/billing/payment-method':
+              expect(request.method, 'GET');
+              return HermesApiResponse(
+                200,
+                jsonEncode({
+                  'data': {
+                    'payment_method': {
+                      'brand': 'mastercard',
+                      'last4': '4444',
+                      'exp_month': 10,
+                      'exp_year': 2031,
+                    },
                   },
-                },
-              }),
-            );
-          case '/billing/payment-method/setup':
-            expect(request.method, 'POST');
-            return HermesApiResponse(
-              201,
-              jsonEncode({
-                'data': {
-                  'publishable_key': 'pk_test_123',
-                  'customer_id': 'cus_test_123',
-                  'customer_ephemeral_key_secret': 'ek_test_123',
-                  'setup_intent_id': 'seti_update_123',
-                  'setup_intent_client_secret': 'seti_update_123_secret',
-                },
-              }),
-            );
-          case '/billing/payment-method/confirm':
-            expect(request.method, 'POST');
-            expect(request.body, {'setup_intent_id': 'seti_update_123'});
-            return HermesApiResponse(
-              200,
-              jsonEncode({
-                'data': {
-                  'payment_method': {
-                    'brand': 'visa',
-                    'last4': '4242',
-                    'exp_month': 12,
-                    'exp_year': 2032,
+                }),
+              );
+            case '/billing/payment-method/setup':
+              expect(request.method, 'POST');
+              return HermesApiResponse(
+                201,
+                jsonEncode({
+                  'data': {
+                    'publishable_key': 'pk_test_123',
+                    'customer_id': 'cus_test_123',
+                    'customer_ephemeral_key_secret': 'ek_test_123',
+                    'setup_intent_id': 'seti_update_123',
+                    'setup_intent_client_secret': 'seti_update_123_secret',
                   },
-                },
-              }),
-            );
-          case '/billing/subscription/cancel':
-            expect(request.method, 'POST');
-            return HermesApiResponse(
-              200,
-              jsonEncode({
-                'data': {
-                  'subscription': {
+                }),
+              );
+            case '/billing/payment-method/confirm':
+              expect(request.method, 'POST');
+              expect(request.body, {'setup_intent_id': 'seti_update_123'});
+              return HermesApiResponse(
+                200,
+                jsonEncode({
+                  'data': {
+                    'payment_method': {
+                      'brand': 'visa',
+                      'last4': '4242',
+                      'exp_month': 12,
+                      'exp_year': 2032,
+                    },
+                  },
+                }),
+              );
+            case '/billing/subscription':
+              expect(request.method, 'GET');
+              expect(request.body, isNull);
+              return HermesApiResponse(
+                200,
+                jsonEncode({
+                  'data': {
                     'tier': 'premium',
                     'status': 'active',
-                    'cancel_at_period_end': true,
-                    'can_upgrade': true,
+                    'current_period_end': '2026-06-25T00:00:00+00:00',
+                    'cancel_at_period_end': false,
+                    'can_cancel': true,
+                    'can_resume': false,
                   },
-                },
-              }),
-            );
-        }
-        fail('Unexpected request ${request.method} ${request.path}');
-      },
-    );
+                }),
+              );
+            case '/billing/subscription/cancel':
+              expect(request.method, 'POST');
+              expect(request.body, isNull);
+              return HermesApiResponse(
+                200,
+                jsonEncode({
+                  'data': {
+                    'subscription': {
+                      'tier': 'premium',
+                      'status': 'active',
+                      'current_period_end': '2026-06-25T00:00:00+00:00',
+                      'access_ends_at': '2026-06-25T00:00:00+00:00',
+                      'cancel_at_period_end': true,
+                      'can_upgrade': true,
+                      'can_cancel': false,
+                      'can_resume': true,
+                    },
+                  },
+                }),
+              );
+            case '/billing/subscription/resume':
+              expect(request.method, 'POST');
+              expect(request.body, isNull);
+              return HermesApiResponse(
+                200,
+                jsonEncode({
+                  'data': {
+                    'subscription': {
+                      'tier': 'premium',
+                      'status': 'active',
+                      'current_period_end': '2026-06-25T00:00:00+00:00',
+                      'cancel_at_period_end': false,
+                      'can_upgrade': true,
+                      'can_cancel': true,
+                      'can_resume': false,
+                    },
+                  },
+                }),
+              );
+          }
+          fail('Unexpected request ${request.method} ${request.path}');
+        },
+      );
 
-    final existing = await client.getBillingPaymentMethod();
-    expect(existing?.displayLine, 'Mastercard ending 4444 • expires 10/2031');
+      final existing = await client.getBillingPaymentMethod();
+      expect(existing?.displayLine, 'Mastercard ending 4444 • expires 10/2031');
 
-    final setup = await client.createPaymentMethodSetup();
-    final updated = await client.confirmPaymentMethodSetup(
-      setupIntentId: setup.setupIntentId,
-    );
-    expect(updated?.displayLine, 'Visa ending 4242 • expires 12/2032');
+      final setup = await client.createPaymentMethodSetup();
+      final updated = await client.confirmPaymentMethodSetup(
+        setupIntentId: setup.setupIntentId,
+      );
+      expect(updated?.displayLine, 'Visa ending 4242 • expires 12/2032');
 
-    final subscription = await client.cancelSubscription();
-    expect(subscription.cancelAtPeriodEnd, isTrue);
-    expect(requests.map((request) => request.path), [
-      '/billing/payment-method',
-      '/billing/payment-method/setup',
-      '/billing/payment-method/confirm',
-      '/billing/subscription/cancel',
-    ]);
-  });
+      final summary = await client.getSubscriptionSummary();
+      expect(summary.tier, 'premium');
+      expect(summary.canCancel, isTrue);
+      expect(summary.canResume, isFalse);
+
+      final subscription = await client.cancelSubscription();
+      expect(subscription.cancelAtPeriodEnd, isTrue);
+      expect(subscription.accessEndsAt, '2026-06-25T00:00:00+00:00');
+      expect(subscription.canCancel, isFalse);
+      expect(subscription.canResume, isTrue);
+
+      final resumed = await client.resumeSubscription();
+      expect(resumed.cancelAtPeriodEnd, isFalse);
+      expect(resumed.canCancel, isTrue);
+      expect(resumed.canResume, isFalse);
+
+      expect(requests.map((request) => request.path), [
+        '/billing/payment-method',
+        '/billing/payment-method/setup',
+        '/billing/payment-method/confirm',
+        '/billing/subscription',
+        '/billing/subscription/cancel',
+        '/billing/subscription/resume',
+      ]);
+    },
+  );
 
   test(
     'updates Bean onboarding preferences through auth profile update',

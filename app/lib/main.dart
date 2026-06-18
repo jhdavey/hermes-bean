@@ -7736,6 +7736,43 @@ class _InlinePlanLimitError extends StatelessWidget {
   }
 }
 
+class _SuccessNotice extends StatelessWidget {
+  const _SuccessNotice({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.accent.withValues(alpha: .10),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .22)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          Icons.check_circle_rounded,
+          color: HeyBeanTheme.accentStrong,
+          size: 20,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            message,
+            style: const TextStyle(
+              color: HeyBeanTheme.text,
+              fontWeight: FontWeight.w800,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _ActivityCard extends StatelessWidget {
   const _ActivityCard({required this.events});
 
@@ -15389,16 +15426,22 @@ class _BillingSettingsCard extends StatefulWidget {
 
 class _BillingSettingsCardState extends State<_BillingSettingsCard> {
   HermesBillingPaymentMethod? _paymentMethod;
+  HermesSubscriptionSummary? _subscription;
   bool _loadingPaymentMethod = true;
+  bool _loadingSubscription = true;
   bool _busy = false;
   String? _error;
+  String? _message;
 
-  String get _planLabel => _planLabelForUser(widget.user);
+  String get _planLabel => _subscriptionPlanLabel(
+    _subscription?.tier ?? widget.user.subscriptionTier,
+  );
 
   @override
   void initState() {
     super.initState();
     unawaited(_loadPaymentMethod());
+    unawaited(_loadSubscriptionSummary());
   }
 
   @override
@@ -15407,8 +15450,19 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
     if (oldWidget.user.subscriptionTier != widget.user.subscriptionTier ||
         oldWidget.user.subscriptionStatus != widget.user.subscriptionStatus) {
       unawaited(_loadPaymentMethod());
+      unawaited(_loadSubscriptionSummary());
     }
   }
+
+  HermesSubscriptionSummary get _fallbackSubscription =>
+      HermesSubscriptionSummary(
+        tier: widget.user.subscriptionTier,
+        status: widget.user.subscriptionStatus,
+        trialEndsAt: widget.user.subscriptionTrialEndsAt,
+      );
+
+  HermesSubscriptionSummary get _currentSubscription =>
+      _subscription ?? _fallbackSubscription;
 
   Future<void> _loadPaymentMethod() async {
     setState(() {
@@ -15432,11 +15486,44 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
     }
   }
 
+  Future<void> _loadSubscriptionSummary() async {
+    setState(() {
+      _loadingSubscription = true;
+      _error = null;
+    });
+    try {
+      final summary = await widget.apiClient.getSubscriptionSummary();
+      if (!mounted) return;
+      setState(() => _subscription = summary);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'load your subscription',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _loadingSubscription = false);
+    }
+  }
+
+  Future<void> _refreshBillingAfterChange({String? message}) async {
+    final summary = await widget.apiClient.getSubscriptionSummary();
+    if (!mounted) return;
+    setState(() {
+      _subscription = summary;
+      _message = message;
+    });
+    await widget.onBillingChanged();
+  }
+
   Future<void> _updatePaymentMethod() async {
     if (_busy) return;
     setState(() {
       _busy = true;
       _error = null;
+      _message = null;
     });
     try {
       final setup = await widget.apiClient.createPaymentMethodSetup();
@@ -15472,6 +15559,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
     setState(() {
       _busy = true;
       _error = null;
+      _message = null;
     });
     try {
       final setup = await widget.apiClient.createMobileSubscriptionSetup(
@@ -15489,7 +15577,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
       );
       if (!mounted) return;
       setState(() => _paymentMethod = result.paymentMethod ?? _paymentMethod);
-      await widget.onBillingChanged();
+      await _refreshBillingAfterChange(message: 'Subscription updated.');
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -15522,17 +15610,23 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
       context,
       title: 'Cancel subscription?',
       message:
-          'Your current access stays active until the end of the paid period or trial. Bean will stop renewal with Stripe.',
+          'Your current access stays active until the end of the paid period or trial. Once the final active period has ended, your HeyBean data will be deleted and you will need to create a new account if you choose to keep using the app in the future.',
       confirmLabel: 'Cancel renewal',
     );
     if (!confirmed) return;
     setState(() {
       _busy = true;
       _error = null;
+      _message = 'Canceling renewal...';
     });
     try {
-      await widget.apiClient.cancelSubscription();
-      await widget.onBillingChanged();
+      final summary = await widget.apiClient.cancelSubscription();
+      if (!mounted) return;
+      setState(() => _subscription = summary);
+      await _refreshBillingAfterChange(
+        message:
+            'Subscription renewal canceled. Current access stays active through the end of this period.',
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -15546,15 +15640,48 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
     }
   }
 
+  Future<void> _resumeSubscription() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _message = 'Restarting subscription...';
+    });
+    try {
+      final summary = await widget.apiClient.resumeSubscription();
+      if (!mounted) return;
+      setState(() => _subscription = summary);
+      await _refreshBillingAfterChange(
+        message: 'Subscription restarted. Renewal is active again.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'restart your subscription',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final status = widget.user.subscriptionStatus;
+    final subscription = _currentSubscription;
+    final status = subscription.status;
+    final canceled = subscription.cancelAtPeriodEnd;
     final statusLine = status == null || status.isEmpty
         ? 'Current plan: $_planLabel'
+        : canceled
+        ? 'Current plan: $_planLabel • renewal canceled'
         : 'Current plan: $_planLabel • ${status.replaceAll('_', ' ')}';
     final paymentLine = _loadingPaymentMethod
         ? 'Loading payment method...'
         : _paymentMethod?.displayLine ?? 'No saved payment method yet';
+    final accessEndLine = _subscriptionAccessEndLine(subscription);
+    final renewalLine = _subscriptionRenewalLine(subscription);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -15597,7 +15724,9 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      statusLine,
+                      _loadingSubscription
+                          ? 'Loading subscription...'
+                          : statusLine,
                       style: const TextStyle(
                         color: HeyBeanTheme.muted,
                         fontWeight: FontWeight.w700,
@@ -15612,7 +15741,39 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (widget.user.subscriptionStatus == 'trialing') ...[
+                    if (accessEndLine != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        accessEndLine,
+                        key: const Key('settings-subscription-access-end'),
+                        style: const TextStyle(
+                          color: HeyBeanTheme.destructive,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Once the final active period has ended, your HeyBean data will be deleted and you will need to create a new account to keep using the app.',
+                        style: TextStyle(
+                          color: HeyBeanTheme.muted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          height: 1.25,
+                        ),
+                      ),
+                    ] else if (renewalLine != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        renewalLine,
+                        key: const Key('settings-subscription-renewal-summary'),
+                        style: const TextStyle(
+                          color: HeyBeanTheme.muted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ] else if (subscription.status == 'trialing') ...[
                       const SizedBox(height: 4),
                       const Text(
                         'Trial renewal uses the saved Stripe payment method.',
@@ -15631,6 +15792,10 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
           if (_error != null) ...[
             const SizedBox(height: 10),
             _InlinePlanLimitError(message: _error!),
+          ],
+          if (_message != null) ...[
+            const SizedBox(height: 10),
+            _SuccessNotice(message: _message!),
           ],
           const SizedBox(height: 12),
           Wrap(
@@ -15656,12 +15821,24 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
               ),
               OutlinedButton.icon(
                 key: const Key('settings-cancel-subscription-action'),
-                onPressed: _busy || widget.user.subscriptionStatus == null
+                onPressed: _busy || !subscription.canCancel
                     ? null
                     : _cancelSubscription,
                 icon: const Icon(Icons.event_busy_rounded),
-                label: const Text('Cancel renewal'),
+                label: Text(canceled ? 'Renewal canceled' : 'Cancel renewal'),
               ),
+              if (subscription.canResume)
+                FilledButton.icon(
+                  key: const Key('settings-resume-subscription-action'),
+                  onPressed: _busy ? null : _resumeSubscription,
+                  icon: _busy
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.restart_alt_rounded),
+                  label: const Text('Restart subscription'),
+                ),
             ],
           ),
         ],
@@ -15670,8 +15847,35 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
   }
 }
 
-String _planLabelForUser(HermesUser user) =>
-    _subscriptionPlanLabel(user.subscriptionTier);
+String? _subscriptionAccessEndLine(HermesSubscriptionSummary subscription) {
+  if (!subscription.cancelAtPeriodEnd) return null;
+  final accessEndsAt =
+      subscription.accessEndsAt ?? subscription.currentPeriodEnd;
+  final label = _formatBillingDate(accessEndsAt);
+  return label == null
+      ? 'Access ends at the end of this period'
+      : 'Last day of access: $label';
+}
+
+String? _subscriptionRenewalLine(HermesSubscriptionSummary subscription) {
+  if (subscription.cancelAtPeriodEnd) return null;
+  if (subscription.trialEndsAt != null &&
+      subscription.trialEndsAt!.isNotEmpty) {
+    final label = _formatBillingDate(subscription.trialEndsAt);
+    return label == null
+        ? 'Trial renewal uses the saved Stripe payment method.'
+        : 'Trial runs through $label.';
+  }
+  final currentPeriodEnd = subscription.currentPeriodEnd;
+  if (currentPeriodEnd == null || currentPeriodEnd.isEmpty) return null;
+  final label = _formatBillingDate(currentPeriodEnd);
+  return label == null ? null : 'Renews around $label.';
+}
+
+String? _formatBillingDate(String? value) {
+  final parsed = _parseCalendarEventDateTime(value);
+  return parsed == null ? null : _formatCalendarDateLabel(parsed);
+}
 
 class _PlanManagementSheet extends StatelessWidget {
   const _PlanManagementSheet({required this.currentPlan});

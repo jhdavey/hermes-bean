@@ -3415,6 +3415,30 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.cancelSubscriptionRequests, 1);
+    expect(find.textContaining('Last day of access:'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'Once the final active period has ended, your HeyBean data will be deleted',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('settings-resume-subscription-action')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const Key('settings-resume-subscription-action')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.resumeSubscriptionRequests, 1);
+    expect(find.textContaining('Last day of access:'), findsNothing);
+    expect(
+      find.byKey(const Key('settings-resume-subscription-action')),
+      findsNothing,
+    );
+    expect(find.textContaining('Subscription restarted.'), findsOneWidget);
   });
 
   testWidgets(
@@ -6272,6 +6296,10 @@ class _FakeHermesApiClient extends HermesApiClient {
   String updatedTheme = 'green';
   String subscriptionTier = 'base';
   String? currentSubscriptionStatus = 'active';
+  String subscriptionCurrentPeriodEnd = '2026-06-25T00:00:00+00:00';
+  String? subscriptionAccessEndsAt;
+  bool subscriptionCancelAtPeriodEnd = false;
+  bool subscriptionCanResume = false;
   HermesBillingPaymentMethod? billingPaymentMethod =
       const HermesBillingPaymentMethod(
         brand: 'visa',
@@ -6289,12 +6317,26 @@ class _FakeHermesApiClient extends HermesApiClient {
   int paymentMethodSetupRequests = 0;
   final paymentMethodConfirmRequests = <String>[];
   int cancelSubscriptionRequests = 0;
+  int resumeSubscriptionRequests = 0;
   final issueReports = <String>[];
   HermesReminder? bannerUpdatedReminder;
   List<HermesApproval> approvals = const [];
   int? approvedApprovalId;
   bool alwaysApprovedApproval = false;
   int? deniedApprovalId;
+
+  HermesSubscriptionSummary get _billingSubscriptionSummary =>
+      HermesSubscriptionSummary(
+        tier: subscriptionTier,
+        status: currentSubscriptionStatus,
+        currentPeriodEnd: subscriptionCurrentPeriodEnd,
+        accessEndsAt: subscriptionAccessEndsAt,
+        cancelAtPeriodEnd: subscriptionCancelAtPeriodEnd,
+        canUpgrade: subscriptionTier != 'pro',
+        canCancel:
+            currentSubscriptionStatus != null && !subscriptionCancelAtPeriodEnd,
+        canResume: subscriptionCanResume,
+      );
 
   HermesUser _user({
     required String name,
@@ -6419,16 +6461,19 @@ class _FakeHermesApiClient extends HermesApiClient {
     });
     subscriptionTier = plan;
     currentSubscriptionStatus = 'trialing';
+    subscriptionCancelAtPeriodEnd = false;
+    subscriptionAccessEndsAt = null;
+    subscriptionCanResume = false;
     return HermesSubscriptionResult(
       plan: plan,
-      subscription: HermesSubscriptionSummary(
-        tier: plan,
-        status: currentSubscriptionStatus,
-        canUpgrade: plan != 'pro',
-      ),
+      subscription: _billingSubscriptionSummary,
       paymentMethod: billingPaymentMethod,
     );
   }
+
+  @override
+  Future<HermesSubscriptionSummary> getSubscriptionSummary() async =>
+      _billingSubscriptionSummary;
 
   @override
   Future<HermesBillingPaymentMethod?> getBillingPaymentMethod() async =>
@@ -6463,13 +6508,21 @@ class _FakeHermesApiClient extends HermesApiClient {
   @override
   Future<HermesSubscriptionSummary> cancelSubscription() async {
     cancelSubscriptionRequests++;
-    currentSubscriptionStatus = 'active';
-    return HermesSubscriptionSummary(
-      tier: subscriptionTier,
-      status: currentSubscriptionStatus,
-      cancelAtPeriodEnd: true,
-      canUpgrade: subscriptionTier != 'pro',
-    );
+    currentSubscriptionStatus ??= 'active';
+    subscriptionCancelAtPeriodEnd = true;
+    subscriptionAccessEndsAt = subscriptionCurrentPeriodEnd;
+    subscriptionCanResume = true;
+    return _billingSubscriptionSummary;
+  }
+
+  @override
+  Future<HermesSubscriptionSummary> resumeSubscription() async {
+    resumeSubscriptionRequests++;
+    currentSubscriptionStatus ??= 'active';
+    subscriptionCancelAtPeriodEnd = false;
+    subscriptionAccessEndsAt = null;
+    subscriptionCanResume = false;
+    return _billingSubscriptionSummary;
   }
 
   @override
