@@ -2143,7 +2143,8 @@
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
     grid-template-rows: auto repeat(var(--hb-month-week-count, 6), minmax(0, 1fr));
-    gap: 7px;
+    column-gap: 4px;
+    row-gap: 4px;
 }
 
 .hb-month-weekday {
