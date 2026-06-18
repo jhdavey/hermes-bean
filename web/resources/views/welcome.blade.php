@@ -33,9 +33,8 @@
         /* Match the real Bean app screen inside the device. */
         .hero-phone.image-mockup.hero-device .hero-device-screen{left:2.65%;top:1.2%;width:94.7%;height:97.7%;border-radius:15.6%/7.7%;background:linear-gradient(180deg,#f6fcf6 0%,#fbfdf8 58%,#eef9ef 100%);padding:7.7% 4.55% 0}.bean-status-row{height:6.9%;padding:0 6.4%;font-size:13.5px;font-weight:900;color:#000}.bean-status-icons{font-size:13px;letter-spacing:1px;color:#0b0d0d}.bean-app-topline{display:grid;grid-template-columns:1fr .92fr 1.06fr 31px 31px;gap:4px;align-items:center;margin:3.6% 0 8.3%}.bean-chip{min-height:31px;padding:0 5px;border-color:#eef1ee;border-radius:999px;background:rgba(255,255,255,.96);box-shadow:0 1px 0 rgba(255,255,255,.9),0 1px 3px rgba(30,41,59,.06);font-size:9.9px;font-weight:950;color:#222b3a;letter-spacing:-.035em}.bean-chip svg{width:11px;height:11px;margin-right:3px;color:#1b2635}.bean-count{width:31px;height:31px;font-size:14px;background:#16a34a;box-shadow:none}.bean-plus-circle{display:grid;place-items:center;width:31px;height:31px;border:1px solid rgba(22,163,74,.22);border-radius:50%;background:#dff6e5;color:#12893a;font-size:24px;font-weight:650;line-height:1}.bean-tools-row{grid-template-columns:1fr auto 1fr;margin:0 1.4% 5.4%;align-items:center}.bean-ready{justify-self:start;border:1px solid #c9d2cd;border-radius:999px;background:rgba(239,247,241,.72);padding:7px 11px;color:#6d7d96;font-size:11.2px;font-weight:950}.bean-ready:before{content:'●';margin-right:6px;color:#6d7d96}.bean-menu{font-size:27px;font-weight:800;color:#1e211e;letter-spacing:-.08em;line-height:.8}.bean-new{justify-self:end;display:flex;align-items:center;gap:7px;color:#12893a;font-size:14.6px;font-weight:800}.bean-new:before{content:'+';display:grid;place-items:center;width:18px;height:18px;border-radius:3px;background:#12893a;color:white;font-size:16px;font-weight:900;line-height:1}.bean-demo-stack{gap:8px}.bean-user-bubble{min-height:71px;border:1px solid #e5ebe4;border-radius:18px;background:rgba(255,255,255,.56);color:#202733;padding:13px 14px;box-shadow:none}.bean-user-bubble strong{margin-bottom:6px;color:#12893a;font-size:13px;font-weight:950}.bean-user-bubble p{color:#222b3a!important;font-size:12.4px!important;line-height:1.22!important}.bean-progress-card,.bean-result-card{border-color:#e5ebe4;background:rgba(255,255,255,.78);box-shadow:0 4px 10px rgba(21,45,28,.035)}.bean-input-row{left:4.7%;right:4.7%;bottom:17.1%;height:47px;border-color:#e8ecea;border-radius:19px;background:#fff;padding:0 8px 0 17px;font-size:15px;font-weight:500;color:#6d7d96;box-shadow:0 2px 4px rgba(30,41,59,.035)}.bean-input-row b{width:40px;height:35px;border-radius:13px;background:#16a34a;color:#fff;font-size:24px;font-weight:400}.bean-bottom-nav{height:15.2%;padding:0 4.8% 5.1%;grid-template-columns:1fr 1fr 1.32fr 1fr 1fr;background:#fff;border-top:1px solid rgba(226,232,240,.72);backdrop-filter:none;align-items:center}.bean-bottom-nav span{height:40px;color:#6d7d96;font-size:19px;font-weight:800;gap:3px}.bean-bottom-nav small{font-size:7.9px;font-weight:900;letter-spacing:.01em}.bean-bottom-nav .active{color:#6d7d96}.bean-paw{align-self:start;width:64px!important;height:64px!important;margin-top:-32px;border:5px solid #fff!important;background:linear-gradient(135deg,#22d45b,#0d9c42)!important;color:#fff!important;box-shadow:0 9px 24px rgba(22,163,74,.28)!important;font-size:30px!important;line-height:1}.bean-paw small{display:none}@media(max-width:520px){.bean-chip{font-size:10.6px;padding:0 5px}.bean-status-row{font-size:12.6px}.bean-input-row{font-size:13.5px}.bean-bottom-nav small{font-size:8.5px}.bean-paw{width:58px!important;height:58px!important}}
 
-        /* Exact real-app screenshot layer for the hero phone. */
-        .hero-phone.image-mockup.hero-device .hero-device-screen{left:5.95%;top:.85%;width:88.25%;height:98.2%;padding:0;border-radius:15.8%/7.35%;background:#f8fcf6;overflow:hidden}.bean-real-screen{display:block;width:100%;height:100%;object-fit:cover;object-position:center top}
-        .hero-device-screen .bean-user-bubble{animation:beanHeroBubbleIn .72s cubic-bezier(.2,.8,.2,1) both,beanHeroBubblePulse 11s ease 8s infinite}.hero-device-screen .bean-user-bubble p{animation:beanHeroRequestIn 1.9s cubic-bezier(.2,.8,.2,1) .18s both}.hero-device-screen .bean-progress-card{animation:beanHeroProgressLoop 9s ease infinite both}.hero-device-screen .bean-result-card{animation:beanHeroResultLoop 9s cubic-bezier(.2,.8,.2,1) infinite both}@keyframes beanHeroBubbleIn{0%{opacity:0;transform:translateY(14px) scale(.975)}100%{opacity:1;transform:translateY(0) scale(1)}}@keyframes beanHeroRequestIn{0%{opacity:0;clip-path:inset(0 78% 0 0);transform:translateY(4px)}55%{opacity:1}100%{opacity:1;clip-path:inset(0 0 0 0);transform:translateY(0)}}@keyframes beanHeroProgressLoop{0%,13%{opacity:0;transform:translateY(8px)}20%,36%{opacity:1;transform:translateY(0)}44%,100%{opacity:0;transform:translateY(-5px)}}@keyframes beanHeroResultLoop{0%,14%{opacity:1;transform:translateY(0) scale(1)}24%,40%{opacity:0;transform:translateY(8px) scale(.99)}50%,100%{opacity:1;transform:translateY(0) scale(1)}}@keyframes beanHeroBubblePulse{0%,100%{box-shadow:0 13px 30px rgba(22,163,74,.16)}45%,65%{box-shadow:0 18px 36px rgba(22,163,74,.26)}}@media(prefers-reduced-motion:reduce){.hero-device-screen .bean-user-bubble,.hero-device-screen .bean-user-bubble p,.hero-device-screen .bean-progress-card,.hero-device-screen .bean-result-card{animation:none!important}.bean-result-card{opacity:1;transform:none}}
+        /* Real app screenshot layer + live Bean interaction overlay. The screenshot fits inside the frame; only the chat/input layer animates. */
+        .hero-phone.image-mockup.hero-device .hero-device-screen{left:6.25%;top:1.62%;width:87.55%;height:96.88%;padding:0;border-radius:15.8%/7.35%;background:#f8fcf6;overflow:hidden}.bean-real-screen{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:fill;object-position:center top}.bean-demo-overlay{position:absolute;inset:0;z-index:2;pointer-events:none;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#15221a}.bean-demo-soft-mask{position:absolute;left:4.8%;right:4.8%;top:28.5%;bottom:9.8%;border-radius:22px;background:linear-gradient(180deg,rgba(249,252,247,.96),rgba(247,252,246,.94));box-shadow:0 0 24px 24px rgba(248,252,247,.86)}.bean-demo-thread{position:absolute;left:5.2%;right:5.2%;top:30.2%;display:grid;gap:8px}.bean-demo-card{border:1px solid rgba(226,235,226,.96);background:rgba(255,255,255,.94);border-radius:18px;box-shadow:0 8px 18px rgba(21,45,28,.06);transform:translateY(8px);opacity:0}.bean-demo-user{padding:11px 13px;color:#222b3a;font-size:11.8px;font-weight:760;line-height:1.22}.bean-demo-user strong{display:block;color:#12893a;font-size:12.2px;font-weight:950;margin-bottom:5px}.bean-demo-progress{display:flex;align-items:center;gap:9px;padding:11px 13px;color:#2b3542;font-size:11px;font-weight:850}.bean-demo-dots{display:inline-flex;gap:4px}.bean-demo-dots i{width:5px;height:5px;border-radius:50%;background:#8b9a90;animation:beanDot 1.05s ease-in-out infinite}.bean-demo-dots i:nth-child(2){animation-delay:.15s}.bean-demo-dots i:nth-child(3){animation-delay:.3s}.bean-demo-result{display:grid;gap:7px;padding:12px 13px}.bean-demo-result strong{font-size:12.3px;color:#102016;line-height:1.18}.bean-demo-result div{display:grid;grid-template-columns:17px 1fr;gap:6px;align-items:start;color:#2b3a30;font-size:10.8px;font-weight:840;line-height:1.2}.bean-demo-result div span:first-child{display:grid;place-items:center;width:16px;height:16px;border-radius:50%;background:#dcfce7;color:#12893a;font-size:10px;font-weight:950}.bean-demo-input{position:absolute;left:4.7%;right:4.7%;bottom:17.1%;height:47px;border:1px solid #e8ecea;border-radius:19px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 8px 0 17px;box-shadow:0 2px 4px rgba(30,41,59,.035);font-size:13px;font-weight:620;color:#26332a}.bean-demo-input-text{overflow:hidden;white-space:nowrap;text-overflow:clip;max-width:calc(100% - 48px)}.bean-demo-input-text.placeholder{color:#6d7d96;font-weight:500}.bean-demo-send{display:grid;place-items:center;width:40px;height:35px;border-radius:13px;background:#16a34a;color:#fff;font-size:24px;font-weight:400;line-height:1}.bean-demo-card.is-visible{opacity:1;transform:translateY(0);transition:opacity .42s ease,transform .42s cubic-bezier(.2,.8,.2,1)}.bean-demo-card.is-hidden-up{opacity:0;transform:translateY(-6px);transition:opacity .32s ease,transform .32s ease}.bean-demo-progress.is-visible{transition-delay:.05s}.bean-demo-result.is-visible{transition-delay:.08s}@media(max-width:520px){.bean-demo-user{font-size:11px}.bean-demo-result div{font-size:10px}.bean-demo-input{font-size:12px}}@media(prefers-reduced-motion:reduce){.bean-demo-card{opacity:1;transform:none}.bean-demo-dots i{animation:none}.bean-demo-input-text{white-space:normal}}
     </style>
 </head>
 <body>
@@ -69,6 +68,28 @@
             <div class="hero-phone image-mockup hero-device" data-bean-demo>
                 <div class="hero-device-screen" aria-hidden="true">
                     <img class="bean-real-screen" src="{{ asset('images/bean-real-home-screen.png') }}?v={{ filemtime(public_path('images/bean-real-home-screen.png')) }}" width="1320" height="2868" alt="">
+                    <div class="bean-demo-overlay">
+                        <div class="bean-demo-soft-mask"></div>
+                        <div class="bean-demo-thread">
+                            <div class="bean-demo-card bean-demo-user" data-bean-user>
+                                <strong>You</strong>
+                                <span data-bean-submitted>Add dinner with Lauren Friday at 7 and remind me to bring the gift.</span>
+                            </div>
+                            <div class="bean-demo-card bean-demo-progress" data-bean-progress>
+                                <span class="bean-demo-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                                <span>Bean is checking your calendar…</span>
+                            </div>
+                            <div class="bean-demo-card bean-demo-result" data-bean-result>
+                                <strong>Done — dinner is on your calendar.</strong>
+                                <div><span>✓</span><span>Friday at 7:00 PM with Lauren</span></div>
+                                <div><span>✓</span><span>Reminder set: bring the gift before you leave.</span></div>
+                            </div>
+                        </div>
+                        <div class="bean-demo-input" data-bean-input>
+                            <span id="bean-demo-request" class="bean-demo-input-text placeholder">Message Bean…</span>
+                            <span class="bean-demo-send">›</span>
+                        </div>
+                    </div>
                 </div>
                 <img class="hero-device-template" src="{{ asset('images/iphone16promax-template.png') }}?v={{ filemtime(public_path('images/iphone16promax-template.png')) }}" width="487" height="940" alt="HeyBean mobile chat demo showing Bean adding an event, setting a reminder, and checking weather">
                 <noscript><img class="hero-phone-image" src="{{ asset('images/bean-hero-conversation.png') }}?v={{ filemtime(public_path('images/bean-hero-conversation.png')) }}" width="500" height="1125" alt="HeyBean mobile chat mockup showing Bean adding an event, setting a reminder, and checking weather"></noscript>
@@ -224,37 +245,47 @@
 
     <script>
         (() => {
-            const request = 'Add dinner with Lauren Friday at 7, remind me to bring the gift, and check if the weather changes the plan.';
+            const request = 'Add dinner with Lauren Friday at 7 and remind me to bring the gift.';
             const text = document.getElementById('bean-demo-request');
+            const user = document.querySelector('[data-bean-user]');
+            const submitted = document.querySelector('[data-bean-submitted]');
             const progress = document.querySelector('[data-bean-progress]');
             const result = document.querySelector('[data-bean-result]');
-            if (!text || !progress || !result) return;
+            if (!text || !user || !submitted || !progress || !result) return;
+            submitted.textContent = request;
             const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             if (reduceMotion) {
                 text.textContent = request;
+                text.classList.remove('placeholder');
+                user.classList.add('is-visible');
                 progress.classList.add('is-visible');
                 result.classList.add('is-visible');
                 return;
             }
-            const initialChars = 11;
-            const typeDuration = 4300;
+            const typeDuration = 3600;
+            const cycleDuration = 11000;
             const ease = (n) => 0.5 - Math.cos(Math.PI * Math.max(0, Math.min(1, n))) / 2;
-            progress.classList.remove('is-visible');
-            result.classList.remove('is-visible');
-            text.textContent = request.slice(0, initialChars);
 
-            // Run one polished story beat instead of hard-looping the UI. The screen never clears,
-            // so there is no blank square/flash or overlapping reset state when visitors pause on it.
             const startedAt = performance.now();
             function tick(now) {
-                const t = now - startedAt;
-                const chars = t < typeDuration
-                    ? Math.max(initialChars, Math.round(request.length * ease(t / typeDuration)))
-                    : request.length;
-                text.textContent = request.slice(0, chars);
-                progress.classList.toggle('is-visible', t >= 5000 && t < 6900);
-                result.classList.toggle('is-visible', t >= 6350);
-                if (t < 7200) window.requestAnimationFrame(tick);
+                const t = (now - startedAt) % cycleDuration;
+                if (t < typeDuration) {
+                    const chars = Math.max(0, Math.round(request.length * ease(t / typeDuration)));
+                    text.textContent = chars ? request.slice(0, chars) : 'Message Bean…';
+                    text.classList.toggle('placeholder', chars === 0);
+                } else if (t < 4300) {
+                    text.textContent = request;
+                    text.classList.remove('placeholder');
+                } else {
+                    text.textContent = 'Message Bean…';
+                    text.classList.add('placeholder');
+                }
+
+                user.classList.toggle('is-visible', t >= 4200 && t < 10400);
+                progress.classList.toggle('is-visible', t >= 5150 && t < 7050);
+                progress.classList.toggle('is-hidden-up', t >= 7050 && t < 10400);
+                result.classList.toggle('is-visible', t >= 6800 && t < 10400);
+                window.requestAnimationFrame(tick);
             }
             window.requestAnimationFrame(tick);
         })();
