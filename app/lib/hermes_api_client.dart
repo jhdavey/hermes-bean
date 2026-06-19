@@ -2641,17 +2641,25 @@ class HermesActivityEvent {
     required this.id,
     required this.eventType,
     this.status,
+    this.toolName,
+    this.payload = const {},
   });
 
   final int id;
   final String eventType;
   final String? status;
+  final String? toolName;
+  final Map<String, Object?> payload;
 
   factory HermesActivityEvent.fromJson(Map<String, Object?> json) =>
       HermesActivityEvent(
         id: _expectInt(json['id']),
         eventType: _expectString(json['event_type']),
         status: json['status'] as String?,
+        toolName: json['tool_name'] as String?,
+        payload: json['payload'] == null
+            ? const {}
+            : _expectMap(json['payload']),
       );
 }
 

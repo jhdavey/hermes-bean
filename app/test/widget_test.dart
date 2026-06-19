@@ -1709,7 +1709,7 @@ void main() {
     },
   );
 
-  testWidgets('holding the Bean chat button warms realtime voice', (
+  testWidgets('holding the Bean button starts voice without opening chat', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -1729,9 +1729,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 650));
 
     expect(realtime.started, isTrue);
-    expect(find.byKey(const Key('chat-view')), findsOneWidget);
+    expect(find.byKey(const Key('chat-view')), findsNothing);
     expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
-    expect(find.text('listening'), findsWidgets);
+    expect(find.text('Listening'), findsWidgets);
 
     await gesture.up();
     await tester.pump();

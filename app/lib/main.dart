@@ -72,6 +72,33 @@ final Uri _enterpriseContactUrl = Uri.parse(
 );
 const String _beanGreenCategoryColor = '#34C759';
 
+class _BeanWorkItem {
+  const _BeanWorkItem({
+    required this.id,
+    required this.label,
+    this.status = 'running',
+  });
+
+  final String id;
+  final String label;
+  final String status;
+
+  bool get done => const {
+    'completed',
+    'succeeded',
+    'recorded',
+    'cancelled',
+    'failed',
+    'skipped',
+  }.contains(status.toLowerCase());
+
+  _BeanWorkItem copyWith({String? label, String? status}) => _BeanWorkItem(
+    id: id,
+    label: label ?? this.label,
+    status: status ?? this.status,
+  );
+}
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (!HeyBeanFirebaseOptions.configured) return;
@@ -1281,6 +1308,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _dashboardLoading = false;
   String _chatRunState = 'Ready';
   int _chatRunToken = 0;
+  List<_BeanWorkItem> _beanWorkItems = const [];
   _HomeDestination _selectedDestination = _HomeDestination.today;
   bool _showCalendarMonth = false;
   DateTime _selectedCalendarDay = _dateOnly(DateTime.now());
@@ -1722,6 +1750,152 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         RegExp(r'(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S').hasMatch(raw);
   }
 
+  void _resetBeanWorkItems(String label, {String status = 'running'}) {
+    _beanWorkItems = [
+      _BeanWorkItem(
+        id: 'turn-${DateTime.now().microsecondsSinceEpoch}',
+        label: label,
+        status: status,
+      ),
+    ];
+  }
+
+  void _upsertBeanWorkItem(
+    String id,
+    String label, {
+    String status = 'running',
+  }) {
+    if (id.isEmpty || label.trim().isEmpty) return;
+    final existingIndex = _beanWorkItems.indexWhere((item) => item.id == id);
+    final next = _BeanWorkItem(id: id, label: label.trim(), status: status);
+    if (existingIndex >= 0) {
+      _beanWorkItems = [
+        for (var i = 0; i < _beanWorkItems.length; i++)
+          if (i == existingIndex)
+            _beanWorkItems[i].copyWith(label: next.label, status: next.status)
+          else
+            _beanWorkItems[i],
+      ];
+      return;
+    }
+    _beanWorkItems = [..._beanWorkItems, next];
+    if (_beanWorkItems.length > 8) {
+      _beanWorkItems = _beanWorkItems.sublist(_beanWorkItems.length - 8);
+    }
+  }
+
+  void _completeBeanWorkItem(String id, {String? label}) {
+    if (id.isEmpty) return;
+    final existingIndex = _beanWorkItems.indexWhere((item) => item.id == id);
+    if (existingIndex >= 0) {
+      _beanWorkItems = [
+        for (var i = 0; i < _beanWorkItems.length; i++)
+          if (i == existingIndex)
+            _beanWorkItems[i].copyWith(status: 'completed')
+          else
+            _beanWorkItems[i],
+      ];
+      return;
+    }
+    if (label != null && label.trim().isNotEmpty) {
+      _upsertBeanWorkItem(id, label, status: 'completed');
+    }
+  }
+
+  void _applyBeanWorkEvents(List<HermesActivityEvent> events) {
+    for (final event in events) {
+      final item = _beanWorkItemFromEvent(event);
+      if (item == null) continue;
+      _upsertBeanWorkItem(item.id, item.label, status: item.status);
+    }
+  }
+
+  _BeanWorkItem? _beanWorkItemFromEvent(HermesActivityEvent event) {
+    final type = event.eventType;
+    final payload = event.payload;
+    final status = (event.status ?? '').toLowerCase();
+    if (type.isEmpty || type == 'runtime.run_queued') return null;
+    if (type == 'runtime.run_started') {
+      final runId = payload['run_id'] ?? payload['runId'] ?? event.id;
+      return _BeanWorkItem(
+        id: 'run-$runId',
+        label: 'Bean started working',
+        status: 'completed',
+      );
+    }
+    if (type == 'runtime.run_completed') {
+      final runId = payload['run_id'] ?? payload['runId'] ?? event.id;
+      return _BeanWorkItem(
+        id: 'run-completed-$runId',
+        label: 'Finish request',
+        status: status.isEmpty ? 'completed' : status,
+      );
+    }
+    if (type == 'runtime.run_failed') {
+      return _BeanWorkItem(
+        id: 'event-${event.id}',
+        label: 'Finish request',
+        status: 'failed',
+      );
+    }
+    if (!type.startsWith('assistant.')) return null;
+    final label = _beanWorkEventLabel(type, payload);
+    if (label == null) return null;
+    return _BeanWorkItem(
+      id: 'event-${event.id}',
+      label: label,
+      status: _beanWorkEventStatus(status),
+    );
+  }
+
+  String _beanWorkEventStatus(String status) {
+    if (const {
+      'failed',
+      'skipped',
+      'cancelled',
+      'succeeded',
+      'recorded',
+      'completed',
+    }.contains(status)) {
+      return status;
+    }
+    return 'completed';
+  }
+
+  String? _beanWorkEventLabel(String type, Map<String, Object?> payload) {
+    final title =
+        payload['title'] ??
+        payload['summary'] ??
+        payload['name'] ??
+        payload['reason'] ??
+        payload['display_name'] ??
+        payload['displayName'];
+    final cleanTitle = title?.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    final readable = cleanTitle == null || cleanTitle.isEmpty
+        ? ''
+        : ': ${cleanTitle.length > 72 ? '${cleanTitle.substring(0, 72)}...' : cleanTitle}';
+    if (type.contains('.task.created')) return 'Create task$readable';
+    if (type.contains('.task.updated')) return 'Update task$readable';
+    if (type.contains('.task.deleted')) return 'Delete task$readable';
+    if (type.contains('.reminder.created')) return 'Create reminder$readable';
+    if (type.contains('.reminder.updated')) return 'Update reminder$readable';
+    if (type.contains('.reminder.deleted')) return 'Delete reminder$readable';
+    if (type.contains('.calendar_event.created')) {
+      return 'Create calendar event$readable';
+    }
+    if (type.contains('.calendar_event.updated')) {
+      return 'Update calendar event$readable';
+    }
+    if (type.contains('.calendar_event.deleted')) {
+      return 'Delete calendar event$readable';
+    }
+    if (type.contains('.approval.created')) return 'Prepare approval$readable';
+    if (type.contains('.blocker.created')) return 'Flag blocker$readable';
+    if (type.contains('.workspace_memory.noted')) return 'Save memory';
+    if (type.contains('.google_calendar.')) return 'Sync Google Calendar';
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1748,6 +1922,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 }
                 _beanVoiceDraft = _beanVoiceListening ? trimmed : null;
                 _chatRunState = 'Heard: $trimmed';
+                if (_beanVoiceListening) {
+                  _upsertBeanWorkItem(
+                    'voice-dictation',
+                    'Send dictated request',
+                  );
+                }
                 final alreadyDisplayed =
                     _messages.isNotEmpty &&
                     _messages.last.role == 'user' &&
@@ -1788,6 +1968,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             if (!mounted) return;
             setState(() {
               _chatRunState = 'working...';
+              _upsertBeanWorkItem(
+                'run-$runId',
+                'Background work',
+                status: 'running',
+              );
             });
             unawaited(_pollQueuedRun(runId, _chatRunToken));
             unawaited(_pollDashboardChanges());
@@ -2508,6 +2693,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           );
         _events = events;
         _chatRunState = 'Ready';
+        _beanWorkItems = const [];
       });
     } catch (error) {
       if (!mounted) return;
@@ -2523,11 +2709,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _startBeanVoiceDraft() async {
     if (_busy || _beanVoiceListening) return;
     setState(() {
-      _selectedDestination = _HomeDestination.bean;
       _beanVoiceListening = true;
       _beanVoiceDraft = '';
       _error = null;
       _chatRunState = 'Connecting Bean voice';
+      _resetBeanWorkItems('Listening for your request');
     });
 
     try {
@@ -2542,6 +2728,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _session = realtimeSession;
         _chatRunState = 'listening';
+        _upsertBeanWorkItem(
+          'voice-dictation',
+          'Listening for your request',
+          status: 'running',
+        );
       });
     } catch (error) {
       if (!mounted) return;
@@ -2549,6 +2740,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
         _chatRunState = 'Ready';
+        _beanWorkItems = const [];
         _error = beanFriendlyErrorMessage(
           error,
           action: 'start realtime voice',
@@ -2570,6 +2762,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
         _chatRunState = 'Ready';
+        _beanWorkItems = const [];
       });
       return;
     }
@@ -2609,6 +2802,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _beanVoiceListening = false;
       _beanVoiceDraft = null;
       _chatRunState = 'thinking';
+      _upsertBeanWorkItem('voice-dictation', 'Send dictated request');
     });
   }
 
@@ -2621,6 +2815,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _busy = true;
       _chatRunState = 'Bean is working…';
+      _resetBeanWorkItems('Read request');
       _messages.add(
         HermesMessage(id: _messages.length + 1, role: 'user', content: trimmed),
       );
@@ -2664,6 +2859,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _session = result.session;
           _chatRunState = 'working...';
           _events = _mergeEvents(result.events, _events);
+          _applyBeanWorkEvents(result.events);
           _messages.add(
             HermesMessage(
               id: _messages.length + 1,
@@ -2673,7 +2869,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           );
         });
         final run = result.run;
-        if (run != null) unawaited(_pollQueuedRun(run.id, runToken));
+        if (run != null) {
+          setState(() {
+            _upsertBeanWorkItem(
+              'run-${run.id}',
+              'Work on request',
+              status: 'running',
+            );
+          });
+          unawaited(_pollQueuedRun(run.id, runToken));
+        }
         return;
       }
 
@@ -2746,6 +2951,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _calendar = refreshedCalendar;
         _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
+        _applyBeanWorkEvents(_events);
+        _completeBeanWorkItem(
+          _beanWorkItems.isNotEmpty ? _beanWorkItems.first.id : 'turn',
+          label: 'Finish request',
+        );
       });
       if (completedBeanIntroduction) {
         unawaited(_startOnboardingTourAfterBeanIntroduction());
@@ -2765,6 +2975,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (!mounted || runToken != _chatRunToken) return;
       setState(() {
         _chatRunState = 'Failed';
+        _upsertBeanWorkItem(
+          'failed-$runToken',
+          'Finish request',
+          status: 'failed',
+        );
         _messages.add(
           HermesMessage(
             id: _messages.length + 1,
@@ -2899,6 +3114,19 @@ ${_truncateDiagnostic(stack, 2200)}
       try {
         final run = await widget.apiClient.getAssistantRun(runId);
         if (!mounted || runToken != _chatRunToken) return;
+        final sessionId = _session?.id;
+        if (sessionId != null) {
+          final events = await widget.apiClient
+              .pollActivityEvents(sessionId)
+              .catchError((_) => const <HermesActivityEvent>[]);
+          if (!mounted || runToken != _chatRunToken) return;
+          if (events.isNotEmpty) {
+            setState(() {
+              _events = _mergeEvents(events, _events);
+              _applyBeanWorkEvents(events);
+            });
+          }
+        }
         if (run.status == 'completed' ||
             run.status == 'failed' ||
             run.status == 'cancelled') {
@@ -2910,6 +3138,15 @@ ${_truncateDiagnostic(stack, 2200)}
               'cancelled' => 'Stopped',
               _ => 'Failed',
             };
+            _upsertBeanWorkItem(
+              'run-$runId',
+              'Finish background work',
+              status: switch (run.status) {
+                'completed' => 'completed',
+                'cancelled' => 'cancelled',
+                _ => 'failed',
+              },
+            );
             final message = run.assistantMessage;
             if (message != null &&
                 !_messages.any((candidate) => candidate.id == message.id)) {
@@ -5229,6 +5466,18 @@ ${_truncateDiagnostic(stack, 2200)}
                   ? _HeyBeanBottomMenu(
                       selected: _selectedDestination,
                       beanListening: _beanVoiceListening,
+                      beanWorkItems: _beanWorkItems,
+                      beanWorkStatus: _beanVoiceListening
+                          ? (_beanVoiceDraft?.trim().isNotEmpty == true
+                                ? 'Ready to send'
+                                : 'Listening')
+                          : _chatRunState,
+                      beanWorkActive:
+                          _beanVoiceListening ||
+                          _busy ||
+                          (_chatRunState != 'Ready' &&
+                              _beanWorkItems.isNotEmpty) ||
+                          _beanWorkItems.any((item) => !item.done),
                       onSelected: _selectDestination,
                       onBeanLongPressStart: () =>
                           unawaited(_startBeanVoiceDraft()),
@@ -20427,6 +20676,9 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     required this.beanListening,
+    required this.beanWorkItems,
+    required this.beanWorkStatus,
+    required this.beanWorkActive,
     required this.onBeanLongPressStart,
     required this.onBeanLongPressEnd,
   });
@@ -20434,6 +20686,9 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   final _HomeDestination selected;
   final ValueChanged<_HomeDestination> onSelected;
   final bool beanListening;
+  final List<_BeanWorkItem> beanWorkItems;
+  final String beanWorkStatus;
+  final bool beanWorkActive;
   final VoidCallback onBeanLongPressStart;
   final VoidCallback onBeanLongPressEnd;
 
@@ -20521,7 +20776,148 @@ class _HeyBeanBottomMenu extends StatelessWidget {
               onLongPressEnd: onBeanLongPressEnd,
             ),
           ),
+          if (beanWorkActive)
+            Positioned(
+              bottom: 86 + dockBottomPadding,
+              child: _BeanWorkStatusTag(
+                status: beanWorkStatus,
+                items: beanWorkItems,
+                listening: beanListening,
+              ),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+class _BeanWorkStatusTag extends StatelessWidget {
+  const _BeanWorkStatusTag({
+    required this.status,
+    required this.items,
+    required this.listening,
+  });
+
+  final String status;
+  final List<_BeanWorkItem> items;
+  final bool listening;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = switch (status.toLowerCase()) {
+      'failed' => 'Bean failed',
+      'blocked' => 'Bean blocked',
+      'stopped' => 'Bean stopped',
+      'updated' => 'Bean updated',
+      _ => status,
+    };
+    final displayItems = items.isNotEmpty
+        ? items.take(6).toList()
+        : [
+            _BeanWorkItem(
+              id: 'status',
+              label: listening ? 'Listening for your request' : title,
+            ),
+          ];
+    final completed = displayItems.where((item) => item.done).length;
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: math.min(MediaQuery.sizeOf(context).width - 32, 330.0),
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface.withValues(alpha: .96),
+          border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .26)),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: .14),
+              blurRadius: 26,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: HeyBeanTheme.accentStrong,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: HeyBeanTheme.accentStrong,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  if (displayItems.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      '$completed/${displayItems.length}',
+                      style: const TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 7),
+              for (final item in displayItems)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        item.done
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded,
+                        size: 17,
+                        color: item.done
+                            ? HeyBeanTheme.accentStrong
+                            : HeyBeanTheme.muted,
+                      ),
+                      const SizedBox(width: 7),
+                      Flexible(
+                        child: Text(
+                          item.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: item.done
+                                ? HeyBeanTheme.muted
+                                : HeyBeanTheme.text,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

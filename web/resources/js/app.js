@@ -148,6 +148,7 @@ if (mount) {
         chatSessions: [],
         chatHistoryOpen: false,
         chatRunState: 'Ready',
+        beanWorkItems: [],
         voiceListening: false,
         voiceRecognition: null,
         voiceDraft: '',
@@ -269,6 +270,8 @@ if (mount) {
     const kioskRealtimeDeferredFunctionOutputTimers = new Set();
     let chatRequestCounter = 0;
     let activeChatRequestId = 0;
+    let beanWorkEventPollTimer = 0;
+    let beanWorkEventPollToken = 0;
     const cancelledChatRequestIds = new Set();
 
     boot();
@@ -1827,6 +1830,171 @@ if (mount) {
             </button>`;
     }
 
+    function beanWorkStatusMarkup(options = {}) {
+        const active = beanWorkStatusActive();
+        if (!active && options.mobile) return '';
+        const items = beanWorkDisplayItems();
+        const completedCount = items.filter((item) => beanWorkItemDone(item)).length;
+        const label = active ? beanWorkStatusLabel(items) : state.chatRunState || 'Ready';
+        const expanded = active && items.length > 0;
+        return `
+            <section class="hb-bean-work-status ${active ? 'hb-bean-work-status-active' : ''} ${options.mobile ? 'hb-bean-work-status-mobile' : ''}" aria-live="polite">
+                <div class="hb-bean-work-status-head">
+                    <span class="hb-bean-work-status-dot" aria-hidden="true"></span>
+                    <span class="hb-bean-work-status-title">${escapeHtml(label)}</span>
+                    ${items.length ? `<span class="hb-bean-work-status-count">${escapeHtml(`${completedCount}/${items.length}`)}</span>` : ''}
+                </div>
+                ${expanded ? `
+                    <ul class="hb-bean-work-list" aria-label="Bean work queue">
+                        ${items.map(beanWorkItemMarkup).join('')}
+                    </ul>
+                ` : ''}
+            </section>`;
+    }
+
+    function beanWorkItemMarkup(item) {
+        const done = beanWorkItemDone(item);
+        return `
+            <li class="hb-bean-work-item ${done ? 'hb-bean-work-item-done' : ''}">
+                <span class="hb-bean-work-checkbox" aria-hidden="true">${done ? icons.checkCircle : ''}</span>
+                <span>${escapeHtml(item.label || 'Bean work item')}</span>
+            </li>`;
+    }
+
+    function beanWorkStatusActive() {
+        return state.busy
+            || state.voiceListening
+            || realtimeBackgroundWorkPending()
+            || state.kioskVoicePhase === 'working'
+            || (state.chatRunState !== 'Ready' && state.beanWorkItems.length > 0)
+            || state.beanWorkItems.some((item) => !beanWorkItemDone(item));
+    }
+
+    function beanWorkDisplayItems() {
+        const items = state.beanWorkItems.filter((item) => item?.label);
+        if (items.length) return items.slice(-6);
+        if (state.voiceListening) {
+            return [{ id: 'voice-dictation', label: state.voiceDraft ? 'Send dictated request' : 'Listening for your request', status: 'running' }];
+        }
+        if (state.busy && state.chatRunState !== 'Ready') {
+            return [{ id: 'active-turn', label: state.chatRunState || 'Bean is working', status: 'running' }];
+        }
+        return [];
+    }
+
+    function beanWorkStatusLabel(items = beanWorkDisplayItems()) {
+        if (state.voiceListening) return state.voiceDraft ? 'Ready to send' : 'Listening';
+        const current = items.find((item) => !beanWorkItemDone(item));
+        if (current) return current.label;
+        return state.chatRunState && state.chatRunState !== 'Ready' ? state.chatRunState : 'Bean is ready';
+    }
+
+    function beanWorkItemDone(item) {
+        return ['completed', 'succeeded', 'recorded', 'cancelled', 'failed', 'skipped'].includes(String(item?.status || '').toLowerCase());
+    }
+
+    function resetBeanWorkItems(label, status = 'running') {
+        stopBeanWorkEventPolling();
+        state.beanWorkItems = [{ id: `turn-${Date.now()}`, label, status }];
+    }
+
+    function upsertBeanWorkItem(id, label, status = 'running') {
+        if (!id || !label) return;
+        const existingIndex = state.beanWorkItems.findIndex((item) => item.id === id);
+        const next = { id, label, status };
+        if (existingIndex >= 0) {
+            state.beanWorkItems = state.beanWorkItems.map((item, index) => index === existingIndex ? { ...item, ...next } : item);
+            return;
+        }
+        state.beanWorkItems = [...state.beanWorkItems, next].slice(-8);
+    }
+
+    function completeBeanWorkItem(id, label = '') {
+        if (!id) return;
+        const existingIndex = state.beanWorkItems.findIndex((item) => item.id === id);
+        if (existingIndex >= 0) {
+            state.beanWorkItems = state.beanWorkItems.map((item, index) => index === existingIndex ? { ...item, status: 'completed' } : item);
+            return;
+        }
+        if (label) upsertBeanWorkItem(id, label, 'completed');
+    }
+
+    function applyBeanWorkEvents(events = []) {
+        normalizeList(events).forEach((event) => {
+            const item = beanWorkItemFromEvent(event);
+            if (!item) return;
+            upsertBeanWorkItem(item.id, item.label, item.status);
+        });
+    }
+
+    function beanWorkItemFromEvent(event) {
+        const type = String(event?.event_type || event?.eventType || '');
+        const status = String(event?.status || '').toLowerCase();
+        const payload = event?.payload || {};
+        const id = event?.id ? `event-${event.id}` : `${type}-${JSON.stringify(payload).slice(0, 80)}`;
+        if (!type || type === 'runtime.run_queued') return null;
+        if (type === 'runtime.run_started') {
+            return { id: `run-${payload.run_id || payload.runId || id}`, label: 'Bean started working', status: 'completed' };
+        }
+        if (type === 'runtime.run_completed') {
+            return { id: `run-completed-${payload.run_id || payload.runId || id}`, label: 'Finish request', status: status || 'completed' };
+        }
+        if (type === 'runtime.run_failed') return { id, label: 'Finish request', status: 'failed' };
+        if (!type.startsWith('assistant.')) return null;
+        const label = beanWorkEventLabel(type, payload);
+        if (!label) return null;
+        return { id, label, status: beanWorkEventStatus(status) };
+    }
+
+    function beanWorkEventStatus(status) {
+        if (['failed', 'skipped', 'cancelled', 'succeeded', 'recorded', 'completed'].includes(status)) return status;
+        return 'completed';
+    }
+
+    function beanWorkEventLabel(type, payload = {}) {
+        const title = payload.title || payload.summary || payload.name || payload.reason || payload.display_name || payload.displayName || '';
+        const readable = title ? `: ${String(title).slice(0, 72)}` : '';
+        if (type.includes('.task.created')) return `Create task${readable}`;
+        if (type.includes('.task.updated')) return `Update task${readable}`;
+        if (type.includes('.task.deleted')) return `Delete task${readable}`;
+        if (type.includes('.reminder.created')) return `Create reminder${readable}`;
+        if (type.includes('.reminder.updated')) return `Update reminder${readable}`;
+        if (type.includes('.reminder.deleted')) return `Delete reminder${readable}`;
+        if (type.includes('.calendar_event.created')) return `Create calendar event${readable}`;
+        if (type.includes('.calendar_event.updated')) return `Update calendar event${readable}`;
+        if (type.includes('.calendar_event.deleted')) return `Delete calendar event${readable}`;
+        if (type.includes('.approval.created')) return `Prepare approval${readable}`;
+        if (type.includes('.blocker.created')) return `Flag blocker${readable}`;
+        if (type.includes('.workspace_memory.noted')) return 'Save memory';
+        if (type.includes('.google_calendar.')) return 'Sync Google Calendar';
+        return null;
+    }
+
+    function startBeanWorkEventPolling(sessionId) {
+        stopBeanWorkEventPolling();
+        const token = ++beanWorkEventPollToken;
+        const poll = async (attempt = 0) => {
+            if (!sessionId || token !== beanWorkEventPollToken) return;
+            try {
+                const events = await api(`/assistant/sessions/${sessionId}/events`);
+                if (token !== beanWorkEventPollToken) return;
+                applyBeanWorkEvents(events);
+                render();
+            } catch (_) {}
+            if (token !== beanWorkEventPollToken) return;
+            if ((beanWorkStatusActive() || attempt < 3) && attempt < 50) {
+                beanWorkEventPollTimer = window.setTimeout(() => poll(attempt + 1), 1600);
+            }
+        };
+        beanWorkEventPollTimer = window.setTimeout(() => poll(0), 900);
+    }
+
+    function stopBeanWorkEventPolling() {
+        window.clearTimeout(beanWorkEventPollTimer);
+        beanWorkEventPollTimer = 0;
+        beanWorkEventPollToken += 1;
+    }
+
     function chatMarkup(options = {}) {
         const working = state.busy && state.chatRunState !== 'Ready';
         const messages = state.messages.length ? state.messages : [
@@ -1837,7 +2005,7 @@ if (mount) {
         return `
             <section class="hb-chat">
                 <div class="hb-chat-top">
-                    <span class="hb-run-pill ${working ? 'hb-run-pill-working' : ''}">${escapeHtml(state.chatRunState)}</span>
+                    ${beanWorkStatusMarkup()}
                     <strong class="hb-chat-session-title">${escapeHtml(title)}</strong>
                     <span class="hb-spacer"></span>
                     <button class="hb-button-ghost hb-chat-history-toggle ${state.chatHistoryOpen ? 'hb-chat-history-toggle-active' : ''}" type="button" data-toggle-chat-history aria-expanded="${state.chatHistoryOpen ? 'true' : 'false'}">${icons.history}<span>History</span></button>
@@ -2427,6 +2595,7 @@ if (mount) {
         const active = state.selected === 'bean' || state.chatExpanded;
         const listening = state.voiceListening;
         return `
+            ${beanWorkStatusMarkup({ mobile: true })}
             <button class="hb-bean-button hb-mobile-bean-button ${active ? 'hb-bean-button-active' : ''} ${listening ? 'hb-bean-button-listening' : ''}" type="button" data-mobile-bean-button aria-label="Bean chat. Hold to dictate, tap to type." title="Bean">
                 <img src="${escapeAttr(logoUrl)}" alt="">
             </button>`;
@@ -5163,7 +5332,6 @@ if (mount) {
         mobileBeanHoldTimer = 0;
         if (!mobileBeanPressing || state.busy) return;
         mobileBeanHoldStarted = true;
-        openBeanTextChat();
         voiceHoldPressed = true;
         voiceStartPending = true;
         startVoiceHoldInput().then((started) => {
@@ -5222,8 +5390,10 @@ if (mount) {
         if (activeChatRequestId) {
             cancelledChatRequestIds.add(activeChatRequestId);
         }
+        stopBeanWorkEventPolling();
         state.busy = false;
         state.chatRunState = 'Ready';
+        state.beanWorkItems = [];
         state.voiceStatus = '';
         state.voiceStatusTone = '';
         kioskConversationActive = false;
@@ -5301,6 +5471,7 @@ if (mount) {
         state.voiceStatus = '';
         state.voiceStatusTone = '';
         state.chatRunState = 'Working…';
+        resetBeanWorkItems(options.voiceQuickReply || options.voiceQuickReplyPending ? 'Follow up on voice request' : 'Read request');
         state.error = '';
         render();
         try {
@@ -5311,6 +5482,7 @@ if (mount) {
                     body: chatSessionPayload(onboarding),
                 });
             }
+            startBeanWorkEventPolling(state.session.id);
             const metadata = {
                 client_context: clientContextPayload(),
                 ...(options.voiceQuickReply || options.voiceQuickReplyPending
@@ -5340,11 +5512,13 @@ if (mount) {
             }
             state.session = result.session || state.session;
             state.activity = normalizeList(result.events).length ? result.events : state.activity;
+            applyBeanWorkEvents(result.events);
             if (result.user_message) replaceLocalUserMessage(result.user_message);
             if (result.assistant_message) {
                 state.messages.push(result.assistant_message);
                 assistantContent = result.assistant_message.content || '';
             }
+            completeBeanWorkItem(state.beanWorkItems[0]?.id, 'Finish request');
             if (result.status === 'blocked' && isPlanLimitMessage(assistantContent)) {
                 state.error = assistantContent;
             }
@@ -5367,6 +5541,7 @@ if (mount) {
             if (activeChatRequestId === requestId) {
                 activeChatRequestId = 0;
                 state.busy = false;
+                stopBeanWorkEventPolling();
             }
             render();
             scrollChatToBottom();
@@ -5416,6 +5591,7 @@ if (mount) {
             const transcript = Array.from(event.results).map((result) => result[0]?.transcript || '').join(' ').trim();
             state.voiceDraft = transcript;
             if (transcript) {
+                upsertBeanWorkItem('voice-dictation', 'Send dictated request', 'running');
                 setVoiceStatus('Release to send.', '');
             }
             const textarea = mount.querySelector('textarea[name="message"]');
@@ -5441,6 +5617,7 @@ if (mount) {
             if (shouldSubmit && !content) {
                 state.voiceStatus = 'I did not catch anything. Hold the Bean button, speak, then release.';
                 state.voiceStatusTone = 'error';
+                state.beanWorkItems = [];
             }
             render();
             restartKioskVoiceListeningSoon(700);
@@ -5451,6 +5628,7 @@ if (mount) {
             voiceHoldActive = false;
             voiceHoldPressed = false;
             voiceSubmitOnEnd = false;
+            state.beanWorkItems = [];
             state.voiceStatus = voiceErrorMessage(event.error);
             state.voiceStatusTone = 'error';
             render();
@@ -5459,6 +5637,7 @@ if (mount) {
         state.voiceRecognition = recognition;
         state.voiceListening = true;
         state.error = '';
+        resetBeanWorkItems('Listening for your request');
         setVoiceStatus('Starting microphone…', '');
         try {
             recognition.start();
@@ -7049,6 +7228,7 @@ if (mount) {
                 call_id: callId || null,
                 arguments: args,
             });
+            resetBeanWorkItems(userContent ? `Queue: ${userContent.slice(0, 72)}` : 'Queue background work', 'queued');
             setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent });
         }
         showRealtimeWorkingInBackgroundWhenReady();
@@ -7074,6 +7254,8 @@ if (mount) {
             if (result?.run_id) {
                 kioskRealtimePendingUser = null;
                 kioskRealtimeCurrentUserTurn = null;
+                upsertBeanWorkItem(`run-${result.run_id}`, userContent ? `Work on: ${userContent.slice(0, 72)}` : 'Background work', 'running');
+                startBeanWorkEventPolling(kioskRealtime?.sessionId || state.session?.id);
                 watchRealtimeAssistantRun(result.run_id, { quickReplyText, userContent });
             } else if (name === 'queue_bean_work') {
                 setRealtimeBackgroundWorkActive(false);
@@ -7269,16 +7451,19 @@ if (mount) {
                     return;
                 }
                 if (status === 'completed') {
+                    completeBeanWorkItem(`run-${id}`, 'Finish background work');
                     handleRealtimeAssistantRunCompleted(run, context);
                     return;
                 }
                 if (status === 'failed') {
+                    upsertBeanWorkItem(`run-${id}`, 'Finish background work', 'failed');
                     setRealtimeBackgroundWorkActive(false);
                     const message = run?.error ? `I could not finish that: ${run.error}` : 'I could not finish that request.';
                     deliverRealtimeBackgroundResult(message, id);
                     return;
                 }
                 if (status === 'cancelled') {
+                    upsertBeanWorkItem(`run-${id}`, 'Finish background work', 'cancelled');
                     setRealtimeBackgroundWorkActive(false);
                     deliverRealtimeBackgroundResult('That request was cancelled.', id);
                 }
