@@ -236,7 +236,6 @@
 
 .hb-topbar {
     --hb-topbar-date-font-size: 24px;
-    --hb-topbar-control-font-size: 28px;
     position: sticky;
     top: 0;
     z-index: 20;
@@ -360,6 +359,7 @@
 
 .hb-topbar-current-time {
     color: var(--hb-text);
+    font-family: inherit;
     font-size: var(--hb-topbar-date-font-size, 24px);
     font-weight: 500;
     letter-spacing: 0;
@@ -384,7 +384,8 @@
 }
 
 .hb-header-pill {
-    font-size: var(--hb-topbar-control-font-size, var(--hb-topbar-date-font-size, 24px));
+    font-family: inherit;
+    font-size: var(--hb-topbar-date-font-size, 24px);
     font-weight: 500;
     letter-spacing: 0;
     line-height: 1;
@@ -2147,7 +2148,8 @@
     background: transparent;
     color: var(--hb-text);
     padding: 7px 6px;
-    font-size: var(--hb-topbar-control-font-size, var(--hb-topbar-date-font-size, 24px));
+    font-family: inherit;
+    font-size: var(--hb-topbar-date-font-size, 24px);
     font-weight: 500;
     letter-spacing: 0;
     line-height: 1;
@@ -5179,7 +5181,6 @@
 @media (max-width: 1120px) {
     .hb-topbar {
         --hb-topbar-date-font-size: 22px;
-        --hb-topbar-control-font-size: 26px;
     }
 
     .hb-top-nav,
@@ -5263,7 +5264,6 @@
 
     .hb-topbar {
         --hb-topbar-date-font-size: 20px;
-        --hb-topbar-control-font-size: 23px;
         padding-left: 12px;
         padding-right: 12px;
     }
