@@ -5299,7 +5299,7 @@
     }
 
     .hb-topbar {
-        --hb-topbar-date-font-size: 14px;
+        --hb-topbar-date-font-size: 12px;
         height: 58px;
         min-height: 58px;
         flex-wrap: nowrap;
@@ -5349,9 +5349,9 @@
     }
 
     .hb-header-pill svg {
-        width: 15px;
-        height: 15px;
-        flex-basis: 15px;
+        width: 13px;
+        height: 13px;
+        flex-basis: 13px;
     }
 
     .hb-topbar-current-time {
@@ -5392,7 +5392,7 @@
         border-radius: 0;
         background: transparent;
         padding: 4px 2px;
-        font-size: 13px;
+        font-size: 11px;
         font-weight: 500;
         text-decoration: underline;
         text-decoration-thickness: 1.5px;
@@ -5622,7 +5622,7 @@
 
 @media (max-width: 430px) {
     .hb-topbar {
-        --hb-topbar-date-font-size: 13px;
+        --hb-topbar-date-font-size: 11px;
         gap: 2px;
         padding-left: 5px;
         padding-right: 5px;
@@ -5648,7 +5648,7 @@
 
     .hb-month-current {
         max-width: 64px;
-        font-size: 12px;
+        font-size: 10px;
     }
 
     .hb-icon-button {
