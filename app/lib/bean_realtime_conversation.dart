@@ -47,6 +47,7 @@ class BeanRealtimeConversation {
   RTCPeerConnection? _peerConnection;
   RTCDataChannel? _dataChannel;
   Completer<void>? _dataChannelOpen;
+  Completer<void>? _transcriptionOnlyReleaseCompleter;
   MediaStream? _localStream;
   HermesRealtimeSession? _session;
   Timer? _responseDebounce;
@@ -70,6 +71,7 @@ class BeanRealtimeConversation {
   bool _conversationActive = false;
   bool _voiceCaptureActive = false;
   bool _voiceReleasePending = false;
+  bool _transcriptionOnlyReleasePending = false;
   bool _backgroundWorkActive = false;
   bool _suppressNextAssistantPersist = false;
   bool _voiceOnlyAssistant = false;
@@ -247,6 +249,7 @@ class BeanRealtimeConversation {
     if (!_voiceCaptureActive && !_voiceReleasePending) return;
     _voiceCaptureActive = false;
     _voiceReleasePending = true;
+    _transcriptionOnlyReleasePending = false;
     setMicrophoneEnabled(false);
     final content = _pendingUserContent?.trim() ?? '';
     if (content.isNotEmpty) {
@@ -269,6 +272,37 @@ class BeanRealtimeConversation {
         onStatus?.call(_conversationActive ? 'listening' : 'Bean voice ready');
       },
     );
+  }
+
+  Future<void> endVoiceCaptureForTranscriptionOnly() {
+    if (!_voiceCaptureActive && !_voiceReleasePending) {
+      return Future<void>.value();
+    }
+    _responseDebounce?.cancel();
+    _toolFallbackTimer?.cancel();
+    _voiceCaptureActive = false;
+    _voiceReleasePending = true;
+    _transcriptionOnlyReleasePending = true;
+    _transcriptionOnlyReleaseCompleter = Completer<void>();
+    setMicrophoneEnabled(false);
+    onStatus?.call('thinking');
+    _releaseTranscriptGraceTimer?.cancel();
+    _releaseTranscriptGraceTimer = Timer(const Duration(milliseconds: 900), () {
+      _releaseTranscriptGraceTimer = null;
+      if (!_transcriptionOnlyReleasePending) return;
+      _voiceReleasePending = false;
+      _transcriptionOnlyReleasePending = false;
+      _completeTranscriptionOnlyRelease();
+      onStatus?.call('Bean voice ready');
+    });
+    return _transcriptionOnlyReleaseCompleter!.future;
+  }
+
+  void _completeTranscriptionOnlyRelease() {
+    final completer = _transcriptionOnlyReleaseCompleter;
+    _transcriptionOnlyReleaseCompleter = null;
+    if (completer == null || completer.isCompleted) return;
+    completer.complete();
   }
 
   void setMicrophoneEnabled(bool enabled) {
@@ -299,6 +333,8 @@ class BeanRealtimeConversation {
     _backgroundWorkActive = false;
     _voiceCaptureActive = false;
     _voiceReleasePending = false;
+    _transcriptionOnlyReleasePending = false;
+    _completeTranscriptionOnlyRelease();
     _ignoreNextFunctionCalls = false;
     if (endConversation) _conversationActive = false;
     onStatus?.call(endConversation ? 'Bean voice ready' : 'Interrupted');
@@ -362,6 +398,8 @@ class BeanRealtimeConversation {
     _backgroundWorkActive = false;
     _voiceCaptureActive = false;
     _voiceReleasePending = false;
+    _transcriptionOnlyReleasePending = false;
+    _completeTranscriptionOnlyRelease();
     _suppressNextAssistantPersist = false;
     _voiceOnlyAssistant = false;
     _ignoreNextFunctionCalls = false;
@@ -486,6 +524,15 @@ class BeanRealtimeConversation {
     onTranscript?.call('user', _pendingUserContent!);
     if (_voiceCaptureActive) {
       onStatus?.call('listening');
+      return;
+    }
+    if (_transcriptionOnlyReleasePending) {
+      _releaseTranscriptGraceTimer?.cancel();
+      _releaseTranscriptGraceTimer = null;
+      _voiceReleasePending = false;
+      _transcriptionOnlyReleasePending = false;
+      _completeTranscriptionOnlyRelease();
+      onStatus?.call('Bean voice ready');
       return;
     }
     _scheduleResponseCreate(
@@ -1274,17 +1321,7 @@ class BeanRealtimeConversation {
     final channel = _dataChannel;
     if (channel?.state != RTCDataChannelState.RTCDataChannelOpen) return false;
     channel!.send(
-      RTCDataChannelMessage(
-        jsonEncode({
-          'type': 'response.create',
-          'response': {
-            'modalities': [
-              if (textResponse) 'text',
-              if (audioResponse) 'audio',
-            ],
-          },
-        }),
-      ),
+      RTCDataChannelMessage(jsonEncode({'type': 'response.create'})),
     );
     return true;
   }

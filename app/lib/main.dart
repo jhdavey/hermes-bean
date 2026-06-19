@@ -1922,12 +1922,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 }
                 _beanVoiceDraft = _beanVoiceListening ? trimmed : null;
                 _chatRunState = 'Heard: $trimmed';
-                if (_beanVoiceListening) {
-                  _upsertBeanWorkItem(
-                    'voice-dictation',
-                    'Send dictated request',
-                  );
-                }
+                if (_beanVoiceListening) return;
                 final alreadyDisplayed =
                     _messages.isNotEmpty &&
                     _messages.last.role == 'user' &&
@@ -2713,7 +2708,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _beanVoiceDraft = '';
       _error = null;
       _chatRunState = 'Connecting Bean voice';
-      _resetBeanWorkItems('Listening for your request');
     });
 
     try {
@@ -2728,11 +2722,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _session = realtimeSession;
         _chatRunState = 'listening';
-        _upsertBeanWorkItem(
-          'voice-dictation',
-          'Listening for your request',
-          status: 'running',
-        );
       });
     } catch (error) {
       if (!mounted) return;
@@ -2797,13 +2786,19 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _finishBeanVoiceDraft() async {
     if (!_beanVoiceListening) return;
-    _realtimeConversation.endVoiceCapture();
+    await _realtimeConversation.endVoiceCaptureForTranscriptionOnly();
+    final dictated = _beanVoiceDraft?.trim() ?? '';
+    await _realtimeConversation.stop();
+    if (!mounted) return;
     setState(() {
       _beanVoiceListening = false;
       _beanVoiceDraft = null;
-      _chatRunState = 'thinking';
-      _upsertBeanWorkItem('voice-dictation', 'Send dictated request');
+      _chatRunState = dictated.isEmpty ? 'Ready' : 'Bean is working...';
+      _beanWorkItems = const [];
     });
+    if (dictated.isNotEmpty) {
+      unawaited(_sendChat(dictated));
+    }
   }
 
   Future<void> _sendChat(String content) async {
@@ -2975,11 +2970,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (!mounted || runToken != _chatRunToken) return;
       setState(() {
         _chatRunState = 'Failed';
-        _upsertBeanWorkItem(
-          'failed-$runToken',
-          'Finish request',
-          status: 'failed',
-        );
+        _beanWorkItems = const [];
         _messages.add(
           HermesMessage(
             id: _messages.length + 1,
@@ -3138,15 +3129,17 @@ ${_truncateDiagnostic(stack, 2200)}
               'cancelled' => 'Stopped',
               _ => 'Failed',
             };
-            _upsertBeanWorkItem(
-              'run-$runId',
-              'Finish background work',
-              status: switch (run.status) {
-                'completed' => 'completed',
-                'cancelled' => 'cancelled',
-                _ => 'failed',
-              },
-            );
+            _beanWorkItems = [
+              _BeanWorkItem(
+                id: 'run-$runId',
+                label: 'Finish background work',
+                status: switch (run.status) {
+                  'completed' => 'completed',
+                  'cancelled' => 'cancelled',
+                  _ => 'failed',
+                },
+              ),
+            ];
             final message = run.assistantMessage;
             if (message != null &&
                 !_messages.any((candidate) => candidate.id == message.id)) {
@@ -5475,8 +5468,6 @@ ${_truncateDiagnostic(stack, 2200)}
                       beanWorkActive:
                           _beanVoiceListening ||
                           _busy ||
-                          (_chatRunState != 'Ready' &&
-                              _beanWorkItems.isNotEmpty) ||
                           _beanWorkItems.any((item) => !item.done),
                       onSelected: _selectDestination,
                       onBeanLongPressStart: () =>
@@ -7649,7 +7640,7 @@ class _HeroChatCardState extends State<_HeroChatCard> {
               Row(
                 key: const Key('chat-top-bar'),
                 children: [
-                  _ChatRunStatePill(label: widget.runState),
+                  Flexible(child: _ChatRunStatePill(label: widget.runState)),
                   const Spacer(),
                   _ChatActivityMenu(events: widget.events),
                   const SizedBox(width: 8),
@@ -8086,7 +8077,8 @@ class _ChatRunStatePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final normalized = label.toLowerCase();
+    final displayLabel = _compactBeanStatusLabel(label);
+    final normalized = displayLabel.toLowerCase();
     final color =
         normalized.contains('blocked') || normalized.contains('failed')
         ? HeyBeanTheme.warning
@@ -8111,18 +8103,39 @@ class _ChatRunStatePill extends StatelessWidget {
             decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 8),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
+          Flexible(
+            child: Text(
+              displayLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+String _compactBeanStatusLabel(String value) {
+  final raw = value.trim();
+  if (raw.isEmpty) return 'Ready';
+  final lower = raw.toLowerCase();
+  if (lower.contains("unknown parameter: 'response.modalities'") ||
+      lower.contains('unknown parameter: response.modalities')) {
+    return 'Bean voice issue';
+  }
+  return switch (lower) {
+    'failed' => 'Failed',
+    'blocked' => 'Blocked',
+    'stopped' => 'Stopped',
+    'updated' => 'Updated',
+    _ => raw.length > 44 ? '${raw.substring(0, 41)}...' : raw,
+  };
 }
 
 // ignore: unused_element
@@ -20782,7 +20795,6 @@ class _HeyBeanBottomMenu extends StatelessWidget {
               child: _BeanWorkStatusTag(
                 status: beanWorkStatus,
                 items: beanWorkItems,
-                listening: beanListening,
               ),
             ),
         ],
@@ -20792,33 +20804,15 @@ class _HeyBeanBottomMenu extends StatelessWidget {
 }
 
 class _BeanWorkStatusTag extends StatelessWidget {
-  const _BeanWorkStatusTag({
-    required this.status,
-    required this.items,
-    required this.listening,
-  });
+  const _BeanWorkStatusTag({required this.status, required this.items});
 
   final String status;
   final List<_BeanWorkItem> items;
-  final bool listening;
 
   @override
   Widget build(BuildContext context) {
-    final title = switch (status.toLowerCase()) {
-      'failed' => 'Bean failed',
-      'blocked' => 'Bean blocked',
-      'stopped' => 'Bean stopped',
-      'updated' => 'Bean updated',
-      _ => status,
-    };
-    final displayItems = items.isNotEmpty
-        ? items.take(6).toList()
-        : [
-            _BeanWorkItem(
-              id: 'status',
-              label: listening ? 'Listening for your request' : title,
-            ),
-          ];
+    final title = _compactBeanStatusLabel(status);
+    final displayItems = items.take(6).toList();
     final completed = displayItems.where((item) => item.done).length;
 
     return ConstrainedBox(
@@ -20881,7 +20875,7 @@ class _BeanWorkStatusTag extends StatelessWidget {
                   ],
                 ],
               ),
-              const SizedBox(height: 7),
+              if (displayItems.isNotEmpty) const SizedBox(height: 7),
               for (final item in displayItems)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),

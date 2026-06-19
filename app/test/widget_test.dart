@@ -8719,6 +8719,12 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   }
 
   @override
+  Future<void> endVoiceCaptureForTranscriptionOnly() async {
+    captureEnded = true;
+    microphoneEnabled = false;
+  }
+
+  @override
   Future<void> stop() async {
     stopped = true;
     microphoneEnabled = false;
