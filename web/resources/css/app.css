@@ -376,6 +376,14 @@
     white-space: nowrap;
 }
 
+.hb-topbar-date-line .hb-header-pill {
+    min-height: auto;
+    padding: 0 1px 2px;
+    font-size: var(--hb-topbar-date-font-size, 24px);
+    font-weight: 500;
+    line-height: 1;
+}
+
 .hb-header-pill,
 .hb-critical {
     min-height: 32px;

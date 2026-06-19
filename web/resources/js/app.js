@@ -1263,8 +1263,8 @@ if (mount) {
                     <span class="hb-spacer"></span>
                     <div class="hb-topbar-date-line">
                         <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTopbarTime(now))}</time>
-                        <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(`${topbarTodayLabel(now)}.`)}</span></button>
-                        <button class="hb-header-pill hb-month-pill" data-calendar-month type="button"><span>${escapeHtml(`${monthLabel(now)}.`)}</span></button>
+                        <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
+                        <button class="hb-header-pill hb-month-pill" data-calendar-month type="button"><span>${escapeHtml(monthLabel(now))}</span></button>
                     </div>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
                     ${topNavMarkup()}
