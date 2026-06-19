@@ -357,6 +357,14 @@
     border-radius: 8px;
 }
 
+.hb-topbar-date-line {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+}
+
 .hb-topbar-current-time {
     color: var(--hb-text);
     font-family: inherit;
@@ -5378,8 +5386,8 @@
 }
 
 @media (min-width: 900px) and (max-width: 1120px) {
-    .hb-topbar-current-time {
-        display: none;
+    .hb-topbar-date-line {
+        gap: 8px;
     }
 
     .hb-topbar-month-cluster {
@@ -5427,6 +5435,11 @@
 
     .hb-topbar {
         flex-wrap: nowrap;
+    }
+
+    .hb-topbar-date-line {
+        order: 1;
+        gap: 5px;
     }
 
     .hb-header-pill:not(.hb-month-pill) {
@@ -5569,8 +5582,9 @@
         flex-basis: 13px;
     }
 
-    .hb-topbar-current-time {
-        display: none;
+    .hb-topbar-date-line .hb-header-pill {
+        max-width: none;
+        flex: 0 0 auto;
     }
 
     .hb-month-pill {
@@ -5910,6 +5924,10 @@
 
     .hb-header-pill {
         max-width: 60px;
+    }
+
+    .hb-topbar-date-line .hb-header-pill {
+        max-width: none;
     }
 
     .hb-month-pill {

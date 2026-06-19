@@ -1261,9 +1261,11 @@ if (mount) {
                 <header class="hb-topbar">
                     ${topBeanControlsMarkup()}
                     <span class="hb-spacer"></span>
-                    <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTime(now))}</time>
-                    <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
-                    <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(now))}</span></button>
+                    <div class="hb-topbar-date-line">
+                        <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTopbarTime(now))}</time>
+                        <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(`${topbarTodayLabel(now)}.`)}</span></button>
+                        <button class="hb-header-pill hb-month-pill" data-calendar-month type="button"><span>${escapeHtml(`${monthLabel(now)}.`)}</span></button>
+                    </div>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
                     ${topNavMarkup()}
                     ${showAdd ? topCreateMenuMarkup() : ''}
@@ -10573,6 +10575,14 @@ if (mount) {
         return new Date(value).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
     }
 
+    function formatTopbarTime(value) {
+        if (!value) return '';
+        return new Date(value)
+            .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+            .replace(/\s/g, '')
+            .toLowerCase();
+    }
+
     function hourLabel(hour) {
         const normalized = ((hour % 24) + 24) % 24;
         const suffix = normalized >= 12 ? 'PM' : 'AM';
@@ -10875,7 +10885,7 @@ if (mount) {
         if (!time) return;
         const now = new Date();
         time.dateTime = now.toISOString();
-        time.textContent = formatTime(now);
+        time.textContent = formatTopbarTime(now);
     }
 
     function friendlyError(error, action) {
