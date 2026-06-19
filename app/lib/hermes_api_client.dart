@@ -2152,6 +2152,8 @@ class HermesTask {
     bool? isCritical,
     String? completedAt,
     Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<int>? linkedWorkspaceIds,
     bool clearDueAt = false,
     bool clearNotes = false,
     bool clearCategory = false,
@@ -2168,6 +2170,8 @@ class HermesTask {
     isCritical: isCritical ?? this.isCritical,
     completedAt: clearCompletedAt ? null : completedAt ?? this.completedAt,
     metadata: metadata ?? this.metadata,
+    workspaceId: workspaceId ?? this.workspaceId,
+    linkedWorkspaceIds: linkedWorkspaceIds ?? this.linkedWorkspaceIds,
   );
 }
 

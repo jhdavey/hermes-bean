@@ -2553,6 +2553,64 @@ void main() {
     expect(api.updatedReminder?.title, 'Updated reminder');
   });
 
+  testWidgets('task delete removes the row before the API call finishes', (
+    WidgetTester tester,
+  ) async {
+    final api = _TaskReminderCategoryFakeHermesApiClient()
+      ..deleteTaskCompleter = Completer<void>();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-edit-action-501')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('title-time-editor-delete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('destructive-confirm-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.deletedTaskId, isNull);
+    expect(find.byKey(const Key('title-time-editor-title')), findsNothing);
+    expect(find.text('Categorize proposal'), findsNothing);
+
+    api.deleteTaskCompleter!.complete();
+    await tester.pumpAndSettle();
+
+    expect(api.deletedTaskId, 501);
+  });
+
+  testWidgets('reminder delete removes the row before the API call finishes', (
+    WidgetTester tester,
+  ) async {
+    final api = _TaskReminderCategoryFakeHermesApiClient()
+      ..deleteReminderCompleter = Completer<void>();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-reminders')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reminder-edit-action-601')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('title-time-editor-delete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('destructive-confirm-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.deletedReminderId, isNull);
+    expect(find.byKey(const Key('title-time-editor-title')), findsNothing);
+    expect(find.text('Categorize reminder'), findsNothing);
+
+    api.deleteReminderCompleter!.complete();
+    await tester.pumpAndSettle();
+
+    expect(api.deletedReminderId, 601);
+  });
+
   testWidgets(
     'focused old HeyBean views render home calendar, tasks, reminders, chat, and settings',
     (WidgetTester tester) async {
@@ -3203,7 +3261,8 @@ void main() {
   testWidgets(
     'tasks can be checked from the day view and drop below open tasks',
     (WidgetTester tester) async {
-      final api = _ActiveTasksFakeHermesApiClient();
+      final api = _ActiveTasksFakeHermesApiClient()
+        ..completeTaskCompleter = Completer<void>();
       await tester.pumpWidget(
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
@@ -3230,9 +3289,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('task-complete-checkbox-101')));
-      await tester.pumpAndSettle();
+      await tester.pump();
 
-      expect(api.completedTaskIds, [101]);
+      expect(api.completedTaskIds, isEmpty);
       final completedTaskAfter = tester.getRect(find.text('Pack bags'));
       final stillOpenTaskAfter = tester.getRect(find.text('Call pharmacy'));
       expect(stillOpenTaskAfter.top, lessThan(completedTaskAfter.top));
@@ -3240,6 +3299,11 @@ void main() {
         find.byKey(const Key('task-complete-checkbox-101')),
         findsOneWidget,
       );
+
+      api.completeTaskCompleter!.complete();
+      await tester.pumpAndSettle();
+
+      expect(api.completedTaskIds, [101]);
     },
   );
 
@@ -4340,7 +4404,8 @@ void main() {
   testWidgets('calendar event detail page can delete an event', (
     WidgetTester tester,
   ) async {
-    final api = _EditableCalendarFakeHermesApiClient();
+    final api = _EditableCalendarFakeHermesApiClient()
+      ..deleteEventCompleter = Completer<void>();
     await tester.pumpWidget(
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
@@ -4374,12 +4439,17 @@ void main() {
     await tester.tap(find.byKey(const Key('destructive-confirm-action')));
     await tester.pumpAndSettle();
 
-    expect(api.deletedEventId, 3);
+    expect(api.deletedEventId, isNull);
     expect(find.byKey(const Key('calendar-event-detail-page')), findsNothing);
     expect(
       find.byKey(const Key('calendar-event-block-design-review')),
       findsNothing,
     );
+
+    api.deleteEventCompleter!.complete();
+    await tester.pumpAndSettle();
+
+    expect(api.deletedEventId, 3);
   });
 
   testWidgets('calendar event delete can target selected workspaces', (
@@ -5705,7 +5775,8 @@ void main() {
   testWidgets('reminders view can check off reminders from the list', (
     WidgetTester tester,
   ) async {
-    final api = _EditableReminderFakeHermesApiClient();
+    final api = _EditableReminderFakeHermesApiClient()
+      ..updateReminderCompleter = Completer<void>();
 
     await tester.pumpWidget(
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
@@ -5717,10 +5788,15 @@ void main() {
     expect(find.text('Refill dog food'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('reminder-complete-checkbox-401')));
+    await tester.pump();
+
+    expect(api.updatedReminder, isNull);
+    expect(find.text('Refill dog food'), findsNothing);
+
+    api.updateReminderCompleter!.complete();
     await tester.pumpAndSettle();
 
     expect(api.updatedReminder?.status, 'completed');
-    expect(find.text('Refill dog food'), findsNothing);
 
     await tester.tap(find.byKey(const Key('reminder-filter-completed')));
     await tester.pumpAndSettle();
@@ -7184,6 +7260,9 @@ class _CalendarTaskScopeFakeHermesApiClient
 class _EditableReminderFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   HermesReminder? updatedReminder;
+  int? deletedReminderId;
+  Completer<void>? updateReminderCompleter;
+  Completer<void>? deleteReminderCompleter;
   late List<HermesReminder> _reminders = [
     HermesReminder(
       id: 401,
@@ -7211,6 +7290,7 @@ class _EditableReminderFakeHermesApiClient
     bool clearCategory = false,
     bool clearColor = false,
   }) async {
+    await updateReminderCompleter?.future;
     final existing = _reminders.firstWhere((item) => item.id == reminderId);
     final updated = HermesReminder(
       id: existing.id,
@@ -7228,6 +7308,18 @@ class _EditableReminderFakeHermesApiClient
         .map((item) => item.id == reminderId ? updated : item)
         .toList();
     return updated;
+  }
+
+  @override
+  Future<void> deleteReminder(
+    int reminderId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
+    await deleteReminderCompleter?.future;
+    deletedReminderId = reminderId;
+    _reminders = _reminders
+        .where((item) => item.id != reminderId)
+        .toList(growable: false);
   }
 }
 
@@ -7255,12 +7347,16 @@ class _TaskReminderCategoryFakeHermesApiClient
   HermesEventCategory? savedCategory;
   int? createdTaskWorkspaceId;
   int? createdReminderWorkspaceId;
+  int? deletedTaskId;
+  int? deletedReminderId;
   List<Object> createdTaskSyncWorkspaceIds = const [];
   final bool includeWorkspaces;
   Completer<void>? createTaskCompleter;
   Completer<void>? updateTaskCompleter;
+  Completer<void>? deleteTaskCompleter;
   Completer<void>? createReminderCompleter;
   Completer<void>? updateReminderCompleter;
+  Completer<void>? deleteReminderCompleter;
 
   @override
   Future<HermesUser> me() async {
@@ -7292,27 +7388,33 @@ class _TaskReminderCategoryFakeHermesApiClient
   @override
   Future<List<HermesTask>> listTasks() async => [
     if (createdTask != null) createdTask!,
-    updatedTask ??
-        HermesTask(
-          id: 501,
-          title: 'Categorize proposal',
-          status: 'open',
-          dueAt: DateTime.now().add(const Duration(hours: 3)).toIso8601String(),
-        ),
+    if (deletedTaskId != 501)
+      updatedTask ??
+          HermesTask(
+            id: 501,
+            title: 'Categorize proposal',
+            status: 'open',
+            dueAt: DateTime.now()
+                .add(const Duration(hours: 3))
+                .toIso8601String(),
+          ),
   ];
 
   @override
   Future<List<HermesReminder>> listReminders() async => [
     if (createdReminder != null) createdReminder!,
-    updatedReminder ??
-        HermesReminder(
-          id: 601,
-          title: 'Categorize reminder',
-          status: 'pending',
-          category: 'Work',
-          color: '#007AFF',
-          dueAt: DateTime.now().add(const Duration(hours: 4)).toIso8601String(),
-        ),
+    if (deletedReminderId != 601)
+      updatedReminder ??
+          HermesReminder(
+            id: 601,
+            title: 'Categorize reminder',
+            status: 'pending',
+            category: 'Work',
+            color: '#007AFF',
+            dueAt: DateTime.now()
+                .add(const Duration(hours: 4))
+                .toIso8601String(),
+          ),
   ];
 
   @override
@@ -7412,6 +7514,15 @@ class _TaskReminderCategoryFakeHermesApiClient
   }
 
   @override
+  Future<void> deleteTask(
+    int taskId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
+    await deleteTaskCompleter?.future;
+    deletedTaskId = taskId;
+  }
+
+  @override
   Future<HermesReminder> updateReminder(
     int reminderId, {
     String? title,
@@ -7443,6 +7554,15 @@ class _TaskReminderCategoryFakeHermesApiClient
       metadata: metadata ?? existing.metadata,
     );
     return updatedReminder!;
+  }
+
+  @override
+  Future<void> deleteReminder(
+    int reminderId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
+    await deleteReminderCompleter?.future;
+    deletedReminderId = reminderId;
   }
 }
 
@@ -7607,7 +7727,11 @@ class _EarlyCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
 class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   final completedTaskIds = <int>[];
   final reopenedTaskIds = <int>[];
+  int? deletedTaskId;
   int pastTaskListCalls = 0;
+  Completer<void>? completeTaskCompleter;
+  Completer<void>? reopenTaskCompleter;
+  Completer<void>? deleteTaskCompleter;
   bool _pastTaskReopened = false;
   late List<HermesTask> _activeTasks = [
     HermesTask(
@@ -7672,6 +7796,7 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
 
   @override
   Future<HermesTask> completeTask(int taskId) async {
+    await completeTaskCompleter?.future;
     completedTaskIds.add(taskId);
     _activeTasks = _activeTasks
         .map(
@@ -7688,6 +7813,7 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
 
   @override
   Future<HermesTask> reopenTask(int taskId) async {
+    await reopenTaskCompleter?.future;
     reopenedTaskIds.add(taskId);
     if (taskId == 201) {
       _pastTaskReopened = true;
@@ -7705,6 +7831,21 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
         )
         .toList();
     return _activeTasks.singleWhere((task) => task.id == taskId);
+  }
+
+  @override
+  Future<void> deleteTask(
+    int taskId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+  }) async {
+    await deleteTaskCompleter?.future;
+    deletedTaskId = taskId;
+    _activeTasks = _activeTasks
+        .where((task) => task.id != taskId)
+        .toList(growable: false);
+    if (taskId == 201) {
+      _pastTaskReopened = true;
+    }
   }
 }
 
@@ -7841,6 +7982,7 @@ class _EditableCalendarFakeHermesApiClient
   HermesEventCategory? savedCategory;
   Completer<void>? createEventCompleter;
   Completer<void>? updateEventCompleter;
+  Completer<void>? deleteEventCompleter;
   int? deletedCategoryId;
   int? deletedEventId;
   List<Object> deletedEventWorkspaceIds = const [];
@@ -7978,6 +8120,7 @@ class _EditableCalendarFakeHermesApiClient
     String? recurringDeleteMode,
     String? recurringOccurrenceDate,
   }) async {
+    await deleteEventCompleter?.future;
     deletedEventId = eventId;
     deletedEventWorkspaceIds = deleteFromWorkspaceIds;
     deletedRecurringMode = recurringDeleteMode;

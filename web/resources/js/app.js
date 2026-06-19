@@ -196,6 +196,7 @@ if (mount) {
     let deferredDashboardRenderPending = false;
     let deferredDashboardRenderTimer = 0;
     let dashboardRefreshGeneration = 0;
+    let localResourceSequence = -1;
     let kioskRecognition = null;
     let kioskBargeRecognition = null;
     let kioskRecognitionActive = false;
@@ -4031,9 +4032,19 @@ if (mount) {
                 return;
             } else {
                 if (form.dataset.saving === 'true') return;
-                setItemModalSaving(form, true);
-                const saved = await saveItem(kind, state.modal?.item, data, form);
-                cacheSavedItem(kind, saved);
+                form.dataset.saving = 'true';
+                const item = state.modal?.item || null;
+                const request = itemSaveRequest(kind, item, data, form);
+                const mutationId = optimisticMutationId(kind);
+                const optimistic = optimisticItemFromSaveRequest(kind, item, request, mutationId);
+                const previousItem = item ? { ...item } : null;
+                cacheSavedItem(kind, optimistic);
+                state.modal = null;
+                state.notice = 'Saved.';
+                state.error = '';
+                render();
+                saveItemRequestInBackground(kind, request, optimistic, previousItem, mutationId);
+                return;
             }
             state.modal = null;
             state.notice = 'Saved.';
@@ -4047,23 +4058,6 @@ if (mount) {
             state.error = friendlyError(error, 'save that change');
             state.modal = null;
             render();
-        }
-    }
-
-    function setItemModalSaving(form, saving) {
-        form.dataset.saving = saving ? 'true' : 'false';
-        form.querySelectorAll('button').forEach((button) => {
-            button.disabled = saving;
-        });
-        const saveButton = form.querySelector('[data-modal-save-button]');
-        if (!saveButton) return;
-        if (saving) {
-            saveButton.dataset.originalLabel = saveButton.textContent || 'Save';
-            saveButton.innerHTML = '<span class="hb-spinner hb-spinner-tiny" aria-hidden="true"></span><span>Saving...</span>';
-            saveButton.setAttribute('aria-label', 'Saving');
-        } else {
-            saveButton.textContent = saveButton.dataset.originalLabel || 'Save';
-            saveButton.removeAttribute('aria-label');
         }
     }
 
@@ -4366,7 +4360,7 @@ if (mount) {
         loadAdminUsage(true);
     }
 
-    async function saveItem(kind, item, data, form) {
+    function itemSaveRequest(kind, item, data, form) {
         const color = data.color || themeAccentColor();
         if (kind === 'task') {
             const syncTo = selectedSyncWorkspaceIds(form);
@@ -4389,7 +4383,11 @@ if (mount) {
                 sync_to_workspace_ids: syncTo,
             };
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
-            return item ? await api(`/tasks/${item.id}`, { method: 'PATCH', body }) : await api('/tasks', { method: 'POST', body });
+            return {
+                body,
+                path: item ? `/tasks/${item.id}` : '/tasks',
+                options: { method: item ? 'PATCH' : 'POST', body },
+            };
         } else if (kind === 'reminder') {
             const syncTo = selectedSyncWorkspaceIds(form);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
@@ -4407,7 +4405,11 @@ if (mount) {
                 sync_to_workspace_ids: syncTo,
             };
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
-            return item ? await api(`/reminders/${item.id}`, { method: 'PATCH', body }) : await api('/reminders', { method: 'POST', body });
+            return {
+                body,
+                path: item ? `/reminders/${item.id}` : '/reminders',
+                options: { method: item ? 'PATCH' : 'POST', body },
+            };
         } else if (kind === 'event') {
             const syncTo = selectedSyncWorkspaceIds(form);
             const allDay = form.elements.allDay?.checked || false;
@@ -4433,15 +4435,190 @@ if (mount) {
                 },
             };
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
-            const saved = item ? await api(`/calendar-events/${item.id}`, { method: 'PATCH', body }) : await api('/calendar-events', { method: 'POST', body });
-            return saved ? {
-                ...saved,
-                linked_workspace_ids: normalizeList(saved.linked_workspace_ids || saved.linkedWorkspaceIds).length
-                    ? normalizeList(saved.linked_workspace_ids || saved.linkedWorkspaceIds)
-                    : [saved.workspace_id || saved.workspaceId, ...syncTo].filter(Boolean),
-            } : saved;
+            return {
+                body,
+                path: item ? `/calendar-events/${item.id}` : '/calendar-events',
+                options: { method: item ? 'PATCH' : 'POST', body },
+            };
         }
-        return null;
+        return { body: {}, path: '', options: {} };
+    }
+
+    async function saveItemRequest(kind, request) {
+        const saved = await api(request.path, request.options);
+        return normalizeSavedItem(kind, saved, request);
+    }
+
+    function saveItemRequestInBackground(kind, request, optimistic, previousItem, mutationId) {
+        saveItemRequest(kind, request)
+            .then((saved) => {
+                reconcileSavedOptimisticItem(kind, optimistic, saved, mutationId);
+                if (kind === 'event') {
+                    refreshCalendarAfterEventSave();
+                    return;
+                }
+                refreshOnlyInBackground({ skipCalendarSync: true });
+            })
+            .catch((error) => {
+                rollbackOptimisticSave(kind, optimistic, previousItem, mutationId);
+                state.error = friendlyError(error, `save that ${kind}`);
+                state.notice = '';
+                render();
+            });
+    }
+
+    function normalizeSavedItem(kind, saved, request = {}) {
+        if (!saved || kind !== 'event') return saved;
+        const linked = normalizeList(saved.linked_workspace_ids || saved.linkedWorkspaceIds);
+        return {
+            ...saved,
+            linked_workspace_ids: linked.length ? linked : optimisticLinkedWorkspaceIds(saved, request.body || {}),
+        };
+    }
+
+    function optimisticMutationId(kind) {
+        return `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    function nextLocalResourceId() {
+        const id = localResourceSequence;
+        localResourceSequence -= 1;
+        return id;
+    }
+
+    function optimisticItemFromSaveRequest(kind, item, request, mutationId) {
+        const body = request.body || request.options?.body || {};
+        const id = item?.id ?? nextLocalResourceId();
+        const workspaceId = body.workspace_id || item?.workspace_id || item?.workspaceId || currentWorkspaceId() || null;
+        const linkedWorkspaceIds = optimisticLinkedWorkspaceIds(item, body);
+        const base = {
+            ...(item || {}),
+            id,
+            workspace_id: workspaceId,
+            workspaceId,
+            linked_workspace_ids: linkedWorkspaceIds,
+            linkedWorkspaceIds: linkedWorkspaceIds,
+            metadata: body.metadata || item?.metadata || {},
+            category: body.category || null,
+            color: body.color || themeAccentColor(),
+            __optimisticMutationId: mutationId,
+        };
+        if (kind === 'task') {
+            return {
+                ...base,
+                title: body.title,
+                name: body.title,
+                type: body.type || item?.type || 'todo',
+                status: body.status || item?.status || 'open',
+                due_at: body.due_at,
+                dueAt: body.due_at,
+                notes: body.notes,
+                is_critical: body.is_critical === true,
+                isCritical: body.is_critical === true,
+            };
+        }
+        if (kind === 'reminder') {
+            return {
+                ...base,
+                title: body.title,
+                name: body.title,
+                status: body.status || item?.status || 'pending',
+                remind_at: body.remind_at,
+                remindAt: body.remind_at,
+                due_at: body.remind_at,
+                dueAt: body.remind_at,
+            };
+        }
+        if (kind === 'event') {
+            return {
+                ...base,
+                title: body.title,
+                description: body.description,
+                location: body.location,
+                starts_at: body.starts_at,
+                startsAt: body.starts_at,
+                ends_at: body.ends_at,
+                endsAt: body.ends_at,
+                recurrence: body.recurrence,
+                status: body.status || item?.status || 'confirmed',
+                is_critical: body.is_critical === true,
+                isCritical: body.is_critical === true,
+                all_day: body.metadata?.all_day === true,
+                allDay: body.metadata?.all_day === true,
+            };
+        }
+        return base;
+    }
+
+    function optimisticLinkedWorkspaceIds(item = null, body = {}) {
+        const existing = normalizeList(item?.linked_workspace_ids || item?.linkedWorkspaceIds);
+        const ids = [
+            body.workspace_id || item?.workspace_id || item?.workspaceId || currentWorkspaceId(),
+            ...normalizeList(body.sync_to_workspace_ids),
+            ...existing,
+        ].filter(Boolean).map(String);
+        return Array.from(new Set(ids));
+    }
+
+    function reconcileSavedOptimisticItem(kind, optimistic, saved, mutationId) {
+        if (!saved?.id || !optimisticSaveStillCurrent(kind, optimistic, mutationId)) return;
+        const optimisticId = String(optimistic?.id || '');
+        const savedId = String(saved.id);
+        if (optimisticId && optimisticId !== savedId) removeLocalItem(kind, optimisticId);
+        cacheSavedItem(kind, saved);
+        renderDashboardDataUpdate({ deferIfEditing: true });
+    }
+
+    function optimisticSaveStillCurrent(kind, optimistic, mutationId) {
+        const current = findById(listForKind(kind), optimistic?.id);
+        return Boolean(current && current.__optimisticMutationId === mutationId);
+    }
+
+    function rollbackOptimisticSave(kind, optimistic, previousItem, mutationId) {
+        const current = findById(listForKind(kind), optimistic?.id);
+        if (!current || current.__optimisticMutationId !== mutationId) return;
+        removeLocalItem(kind, optimistic?.id);
+        if (previousItem) setListForKind(kind, upsertById(listForKind(kind), previousItem));
+        clearPendingItem(kind, optimistic?.id);
+        if (previousItem?.id) clearPendingItem(kind, previousItem.id);
+        saveDashboardCache();
+    }
+
+    function listForKind(kind) {
+        if (kind === 'task') return state.tasks;
+        if (kind === 'reminder') return state.reminders;
+        if (kind === 'event') return state.calendar;
+        return [];
+    }
+
+    function setListForKind(kind, list) {
+        if (kind === 'task') state.tasks = list;
+        if (kind === 'reminder') state.reminders = list;
+        if (kind === 'event') state.calendar = list;
+    }
+
+    function clearPendingItem(kind, id) {
+        const key = String(id || '');
+        if (!key) return;
+        if (kind === 'task') {
+            state.pendingTaskUpserts.delete(key);
+            state.pendingTaskDeletes.delete(key);
+        }
+        if (kind === 'reminder') {
+            state.pendingReminderUpserts.delete(key);
+            state.pendingReminderDeletes.delete(key);
+        }
+        if (kind === 'event') {
+            state.pendingCalendarUpserts.delete(key);
+            state.pendingCalendarDeletes.delete(key);
+        }
+    }
+
+    function removeLocalItem(kind, id) {
+        const key = String(id || '');
+        if (!key) return;
+        setListForKind(kind, listForKind(kind).filter((item) => String(item.id) !== key));
+        clearPendingItem(kind, key);
     }
 
     function recurrenceFormData(form, data = {}) {

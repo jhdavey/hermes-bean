@@ -1155,6 +1155,7 @@ enum _HomeDestination { today, tasks, bean, reminders, settings }
 
 const _dashboardChangePollInterval = Duration(seconds: 15);
 const _pendingCalendarEventWriteTtl = Duration(minutes: 2);
+const _pendingDashboardWriteTtl = Duration(minutes: 2);
 const _onboardingTourSeenPreferencePrefix = 'heybean.onboarding_tour_seen';
 
 class _DashboardSnapshot {
@@ -1181,14 +1182,50 @@ class _DashboardSnapshot {
 
 class _PendingCalendarEventWrite {
   const _PendingCalendarEventWrite({
-    required this.event,
+    this.event,
     required this.expiresAt,
     required this.workspaceId,
+    required this.mutationVersion,
+    this.deleted = false,
   });
 
-  final HermesCalendarEvent event;
+  final HermesCalendarEvent? event;
   final DateTime expiresAt;
   final int? workspaceId;
+  final int mutationVersion;
+  final bool deleted;
+}
+
+class _PendingTaskWrite {
+  const _PendingTaskWrite({
+    this.task,
+    required this.expiresAt,
+    required this.workspaceId,
+    required this.mutationVersion,
+    this.deleted = false,
+  });
+
+  final HermesTask? task;
+  final DateTime expiresAt;
+  final int? workspaceId;
+  final int mutationVersion;
+  final bool deleted;
+}
+
+class _PendingReminderWrite {
+  const _PendingReminderWrite({
+    this.reminder,
+    required this.expiresAt,
+    required this.workspaceId,
+    required this.mutationVersion,
+    this.deleted = false,
+  });
+
+  final HermesReminder? reminder;
+  final DateTime expiresAt;
+  final int? workspaceId;
+  final int mutationVersion;
+  final bool deleted;
 }
 
 class CommandCenterShell extends StatefulWidget {
@@ -1278,7 +1315,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _authGeneration = 0;
   int? _lastScheduledAppIconBadgeCount;
   final Map<int, _DashboardSnapshot> _workspaceSnapshots = {};
+  final Map<int, _PendingTaskWrite> _pendingTaskWrites = {};
+  final Map<int, _PendingReminderWrite> _pendingReminderWrites = {};
   final Map<int, _PendingCalendarEventWrite> _pendingCalendarEventWrites = {};
+  final Map<int, int> _latestTaskWriteVersions = {};
+  final Map<int, int> _latestReminderWriteVersions = {};
+  final Map<int, int> _latestCalendarEventWriteVersions = {};
 
   void _applyUserTheme(HermesUser? user) {
     widget.onThemeChanged(user?.theme ?? 'green');
@@ -1292,7 +1334,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _canApplyBackgroundSave(int mutationVersion) =>
       mounted &&
       _phase == _AuthPhase.signedIn &&
-      mutationVersion == _dashboardDataVersion;
+      mutationVersion <= _dashboardDataVersion;
 
   bool _isCurrentAuthGeneration(int generation) =>
       mounted && generation == _authGeneration;
@@ -1310,6 +1352,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _events = const [];
     _messages.clear();
     _pendingTaskIds.clear();
+    _pendingTaskWrites.clear();
+    _pendingReminderWrites.clear();
+    _pendingCalendarEventWrites.clear();
+    _latestTaskWriteVersions.clear();
+    _latestReminderWriteVersions.clear();
+    _latestCalendarEventWriteVersions.clear();
     _dismissedReminderBannerIds.clear();
     _notifiedReminderIds.clear();
     _shownApprovalSheetId = null;
@@ -1322,16 +1370,248 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _onboardingTourStep = 0;
   }
 
-  void _rememberPendingCalendarEventWrite(HermesCalendarEvent event) {
+  void _rememberPendingTaskWrite(HermesTask task, int mutationVersion) {
+    _pendingTaskWrites[task.id] = _PendingTaskWrite(
+      task: task,
+      expiresAt: DateTime.now().add(_pendingDashboardWriteTtl),
+      workspaceId: _activeWorkspaceId(),
+      mutationVersion: mutationVersion,
+    );
+    _latestTaskWriteVersions[task.id] = mutationVersion;
+  }
+
+  void _rememberPendingTaskDelete(int taskId, int mutationVersion) {
+    _pendingTaskWrites[taskId] = _PendingTaskWrite(
+      expiresAt: DateTime.now().add(_pendingDashboardWriteTtl),
+      workspaceId: _activeWorkspaceId(),
+      mutationVersion: mutationVersion,
+      deleted: true,
+    );
+    _latestTaskWriteVersions[taskId] = mutationVersion;
+  }
+
+  void _forgetPendingTaskWrite(int taskId, {bool clearVersion = false}) {
+    _pendingTaskWrites.remove(taskId);
+    if (clearVersion) _latestTaskWriteVersions.remove(taskId);
+  }
+
+  List<HermesTask> _tasksWithPendingWrites(List<HermesTask> tasks) {
+    if (_pendingTaskWrites.isEmpty) return tasks;
+
+    final now = DateTime.now();
+    final activeWorkspaceId = _activeWorkspaceId();
+    final sourceIds = tasks.map((task) => task.id).toSet();
+    final merged = List<HermesTask>.from(tasks);
+
+    for (final entry in _pendingTaskWrites.entries.toList()) {
+      final pending = entry.value;
+      if (!pending.expiresAt.isAfter(now)) {
+        _pendingTaskWrites.remove(entry.key);
+        if (_latestTaskWriteVersions[entry.key] == pending.mutationVersion) {
+          _latestTaskWriteVersions.remove(entry.key);
+        }
+        continue;
+      }
+      if (pending.workspaceId != null &&
+          activeWorkspaceId != null &&
+          pending.workspaceId != activeWorkspaceId) {
+        continue;
+      }
+
+      if (pending.deleted) {
+        merged.removeWhere((task) => task.id == entry.key);
+        if (!sourceIds.contains(entry.key)) {
+          _pendingTaskWrites.remove(entry.key);
+        }
+        continue;
+      }
+
+      final pendingTask = pending.task;
+      if (pendingTask == null) continue;
+      final index = merged.indexWhere((task) => task.id == entry.key);
+      if (index < 0) {
+        merged.add(pendingTask);
+        continue;
+      }
+
+      if (_taskMatchesPendingWrite(merged[index], pendingTask)) {
+        _pendingTaskWrites.remove(entry.key);
+      } else {
+        merged[index] = pendingTask;
+      }
+    }
+
+    return merged;
+  }
+
+  bool _taskMatchesPendingWrite(HermesTask refreshed, HermesTask pending) =>
+      refreshed.title == pending.title &&
+      refreshed.status == pending.status &&
+      refreshed.dueAt == pending.dueAt &&
+      refreshed.notes == pending.notes &&
+      refreshed.category == pending.category &&
+      refreshed.color == pending.color &&
+      refreshed.isCritical == pending.isCritical &&
+      refreshed.completedAt == pending.completedAt;
+
+  bool _pendingTaskWriteIsCurrent(
+    int taskId,
+    HermesTask optimisticTask,
+    int mutationVersion,
+  ) {
+    final latestMutationVersion = _latestTaskWriteVersions[taskId];
+    if (latestMutationVersion != null &&
+        latestMutationVersion != mutationVersion) {
+      return false;
+    }
+    final pending = _pendingTaskWrites[taskId];
+    if (pending == null) return true;
+    if (pending.mutationVersion != mutationVersion) return false;
+    if (pending.deleted || pending.task == null) return false;
+    return _taskMatchesPendingWrite(pending.task!, optimisticTask);
+  }
+
+  void _rememberPendingReminderWrite(
+    HermesReminder reminder,
+    int mutationVersion,
+  ) {
+    _pendingReminderWrites[reminder.id] = _PendingReminderWrite(
+      reminder: reminder,
+      expiresAt: DateTime.now().add(_pendingDashboardWriteTtl),
+      workspaceId: _activeWorkspaceId(),
+      mutationVersion: mutationVersion,
+    );
+    _latestReminderWriteVersions[reminder.id] = mutationVersion;
+  }
+
+  void _rememberPendingReminderDelete(int reminderId, int mutationVersion) {
+    _pendingReminderWrites[reminderId] = _PendingReminderWrite(
+      expiresAt: DateTime.now().add(_pendingDashboardWriteTtl),
+      workspaceId: _activeWorkspaceId(),
+      mutationVersion: mutationVersion,
+      deleted: true,
+    );
+    _latestReminderWriteVersions[reminderId] = mutationVersion;
+  }
+
+  void _forgetPendingReminderWrite(
+    int reminderId, {
+    bool clearVersion = false,
+  }) {
+    _pendingReminderWrites.remove(reminderId);
+    if (clearVersion) _latestReminderWriteVersions.remove(reminderId);
+  }
+
+  List<HermesReminder> _remindersWithPendingWrites(
+    List<HermesReminder> reminders,
+  ) {
+    if (_pendingReminderWrites.isEmpty) return reminders;
+
+    final now = DateTime.now();
+    final activeWorkspaceId = _activeWorkspaceId();
+    final sourceIds = reminders.map((reminder) => reminder.id).toSet();
+    final merged = List<HermesReminder>.from(reminders);
+
+    for (final entry in _pendingReminderWrites.entries.toList()) {
+      final pending = entry.value;
+      if (!pending.expiresAt.isAfter(now)) {
+        _pendingReminderWrites.remove(entry.key);
+        if (_latestReminderWriteVersions[entry.key] ==
+            pending.mutationVersion) {
+          _latestReminderWriteVersions.remove(entry.key);
+        }
+        continue;
+      }
+      if (pending.workspaceId != null &&
+          activeWorkspaceId != null &&
+          pending.workspaceId != activeWorkspaceId) {
+        continue;
+      }
+
+      if (pending.deleted) {
+        merged.removeWhere((reminder) => reminder.id == entry.key);
+        if (!sourceIds.contains(entry.key)) {
+          _pendingReminderWrites.remove(entry.key);
+        }
+        continue;
+      }
+
+      final pendingReminder = pending.reminder;
+      if (pendingReminder == null) continue;
+      final index = merged.indexWhere((reminder) => reminder.id == entry.key);
+      if (index < 0) {
+        merged.add(pendingReminder);
+        continue;
+      }
+
+      if (_reminderMatchesPendingWrite(merged[index], pendingReminder)) {
+        _pendingReminderWrites.remove(entry.key);
+      } else {
+        merged[index] = pendingReminder;
+      }
+    }
+
+    return merged;
+  }
+
+  bool _reminderMatchesPendingWrite(
+    HermesReminder refreshed,
+    HermesReminder pending,
+  ) =>
+      refreshed.title == pending.title &&
+      refreshed.status == pending.status &&
+      refreshed.dueAt == pending.dueAt &&
+      refreshed.category == pending.category &&
+      refreshed.color == pending.color &&
+      refreshed.isCritical == pending.isCritical &&
+      refreshed.completedAt == pending.completedAt;
+
+  bool _pendingReminderWriteIsCurrent(
+    int reminderId,
+    HermesReminder optimisticReminder,
+    int mutationVersion,
+  ) {
+    final latestMutationVersion = _latestReminderWriteVersions[reminderId];
+    if (latestMutationVersion != null &&
+        latestMutationVersion != mutationVersion) {
+      return false;
+    }
+    final pending = _pendingReminderWrites[reminderId];
+    if (pending == null) return true;
+    if (pending.mutationVersion != mutationVersion) return false;
+    if (pending.deleted || pending.reminder == null) return false;
+    return _reminderMatchesPendingWrite(pending.reminder!, optimisticReminder);
+  }
+
+  void _rememberPendingCalendarEventWrite(
+    HermesCalendarEvent event,
+    int mutationVersion,
+  ) {
     _pendingCalendarEventWrites[event.id] = _PendingCalendarEventWrite(
       event: event,
       expiresAt: DateTime.now().add(_pendingCalendarEventWriteTtl),
       workspaceId: _activeWorkspaceId(),
+      mutationVersion: mutationVersion,
     );
+    _latestCalendarEventWriteVersions[event.id] = mutationVersion;
   }
 
-  void _forgetPendingCalendarEventWrite(int eventId) {
+  void _forgetPendingCalendarEventWrite(
+    int eventId, {
+    bool clearVersion = false,
+  }) {
     _pendingCalendarEventWrites.remove(eventId);
+    if (clearVersion) _latestCalendarEventWriteVersions.remove(eventId);
+  }
+
+  void _rememberPendingCalendarEventDelete(int eventId, int mutationVersion) {
+    _pendingCalendarEventWrites[eventId] = _PendingCalendarEventWrite(
+      expiresAt: DateTime.now().add(_pendingCalendarEventWriteTtl),
+      workspaceId: _activeWorkspaceId(),
+      mutationVersion: mutationVersion,
+      deleted: true,
+    );
+    _latestCalendarEventWriteVersions[eventId] = mutationVersion;
   }
 
   List<HermesCalendarEvent> _calendarEventsWithPendingWrites(
@@ -1341,16 +1621,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
     final now = DateTime.now();
     final activeWorkspaceId = _activeWorkspaceId();
+    final sourceIds = events.map((event) => event.id).toSet();
     final merged = List<HermesCalendarEvent>.from(events);
-    final indexById = <int, int>{
-      for (var index = 0; index < merged.length; index++)
-        merged[index].id: index,
-    };
 
     for (final entry in _pendingCalendarEventWrites.entries.toList()) {
       final pending = entry.value;
       if (!pending.expiresAt.isAfter(now)) {
         _pendingCalendarEventWrites.remove(entry.key);
+        if (_latestCalendarEventWriteVersions[entry.key] ==
+            pending.mutationVersion) {
+          _latestCalendarEventWriteVersions.remove(entry.key);
+        }
         continue;
       }
       if (pending.workspaceId != null &&
@@ -1359,16 +1640,26 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         continue;
       }
 
-      final index = indexById[entry.key];
-      if (index == null) {
-        merged.add(pending.event);
+      if (pending.deleted) {
+        merged.removeWhere((event) => event.id == entry.key);
+        if (!sourceIds.contains(entry.key)) {
+          _pendingCalendarEventWrites.remove(entry.key);
+        }
         continue;
       }
 
-      if (_calendarEventMatchesPendingWrite(merged[index], pending.event)) {
+      final pendingEvent = pending.event;
+      if (pendingEvent == null) continue;
+      final index = merged.indexWhere((event) => event.id == entry.key);
+      if (index < 0) {
+        merged.add(pendingEvent);
+        continue;
+      }
+
+      if (_calendarEventMatchesPendingWrite(merged[index], pendingEvent)) {
         _pendingCalendarEventWrites.remove(entry.key);
       } else {
-        merged[index] = pending.event;
+        merged[index] = pendingEvent;
       }
     }
 
@@ -1391,6 +1682,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       refreshed.color == pending.color &&
       refreshed.recurrence == pending.recurrence &&
       refreshed.isCritical == pending.isCritical;
+
+  bool _pendingCalendarEventWriteIsCurrent(
+    int eventId,
+    HermesCalendarEvent optimisticEvent,
+    int mutationVersion,
+  ) {
+    final latestMutationVersion = _latestCalendarEventWriteVersions[eventId];
+    if (latestMutationVersion != null &&
+        latestMutationVersion != mutationVersion) {
+      return false;
+    }
+    final pending = _pendingCalendarEventWrites[eventId];
+    if (pending == null) return true;
+    if (pending.mutationVersion != mutationVersion) return false;
+    if (pending.deleted || pending.event == null) return false;
+    return _calendarEventMatchesPendingWrite(pending.event!, optimisticEvent);
+  }
 
   bool _sameCalendarEventInstant(
     String? left,
@@ -1744,8 +2052,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               ),
       ]);
       final summary = results[0] as HermesTodaySummary;
-      final listedTasks = results[1] as List<HermesTask>;
-      final listedReminders = results[2] as List<HermesReminder>;
+      final listedTasks = _tasksWithPendingWrites(
+        results[1] as List<HermesTask>,
+      );
+      final summaryTasks = _tasksWithPendingWrites(summary.tasks);
+      final listedReminders = _remindersWithPendingWrites(
+        results[2] as List<HermesReminder>,
+      );
+      final summaryReminders = _remindersWithPendingWrites(summary.reminders);
       final listedCalendarEvents = _calendarEventsWithPendingWrites(
         results[3] as List<HermesCalendarEvent>,
       );
@@ -1755,12 +2069,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _user = user;
         _session = session;
         _replaceMessagesFromSession(sessionDetails);
-        _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
-        _pastTasks = results[4] as List<HermesTask>;
+        _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
+        _pastTasks = _tasksWithPendingWrites(results[4] as List<HermesTask>);
         _eventCategories = results[5] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
         _reminders = listedReminders.isEmpty
-            ? summary.reminders
+            ? summaryReminders
             : listedReminders;
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
@@ -2427,8 +2741,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           'cancelled' => 'Stopped',
           _ => 'Updated',
         };
-        _tasks = refreshedTasks;
-        _reminders = refreshedSummary.reminders;
+        _tasks = _tasksWithPendingWrites(refreshedTasks);
+        _reminders = _remindersWithPendingWrites(refreshedSummary.reminders);
         _calendar = refreshedCalendar;
         _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
@@ -2922,8 +3236,14 @@ ${_truncateDiagnostic(stack, 2200)}
         widget.apiClient.pollActivityEvents(session.id),
       ]);
       final summary = results[0] as HermesTodaySummary;
-      final listedTasks = results[1] as List<HermesTask>;
-      final listedReminders = results[2] as List<HermesReminder>;
+      final listedTasks = _tasksWithPendingWrites(
+        results[1] as List<HermesTask>,
+      );
+      final summaryTasks = _tasksWithPendingWrites(summary.tasks);
+      final listedReminders = _remindersWithPendingWrites(
+        results[2] as List<HermesReminder>,
+      );
+      final summaryReminders = _remindersWithPendingWrites(summary.reminders);
       final listedCalendarEvents = _calendarEventsWithPendingWrites(
         results[3] as List<HermesCalendarEvent>,
       );
@@ -2935,12 +3255,12 @@ ${_truncateDiagnostic(stack, 2200)}
         return;
       }
       setState(() {
-        _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
-        _pastTasks = results[4] as List<HermesTask>;
+        _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
+        _pastTasks = _tasksWithPendingWrites(results[4] as List<HermesTask>);
         _eventCategories = results[5] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
         _reminders = listedReminders.isEmpty
-            ? summary.reminders
+            ? summaryReminders
             : listedReminders;
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
@@ -3022,8 +3342,14 @@ ${_truncateDiagnostic(stack, 2200)}
                   .catchError((_) => const <HermesActivityEvent>[]),
       ]);
       final summary = results[0] as HermesTodaySummary;
-      final listedTasks = results[1] as List<HermesTask>;
-      final listedReminders = results[2] as List<HermesReminder>;
+      final listedTasks = _tasksWithPendingWrites(
+        results[1] as List<HermesTask>,
+      );
+      final summaryTasks = _tasksWithPendingWrites(summary.tasks);
+      final listedReminders = _remindersWithPendingWrites(
+        results[2] as List<HermesReminder>,
+      );
+      final summaryReminders = _remindersWithPendingWrites(summary.reminders);
       final listedCalendarEvents = _calendarEventsWithPendingWrites(
         results[3] as List<HermesCalendarEvent>,
       );
@@ -3040,12 +3366,12 @@ ${_truncateDiagnostic(stack, 2200)}
         _user = user;
         _session = session;
         _replaceMessagesFromSession(sessionDetails);
-        _tasks = listedTasks.isEmpty ? summary.tasks : listedTasks;
-        _pastTasks = results[4] as List<HermesTask>;
+        _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
+        _pastTasks = _tasksWithPendingWrites(results[4] as List<HermesTask>);
         _eventCategories = results[5] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
         _reminders = listedReminders.isEmpty
-            ? summary.reminders
+            ? summaryReminders
             : listedReminders;
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
@@ -3170,6 +3496,8 @@ ${_truncateDiagnostic(stack, 2200)}
             completedAt: DateTime.now().toIso8601String(),
           );
     _markDashboardDataMutated();
+    final mutationVersion = _dashboardDataVersion;
+    _rememberPendingTaskWrite(optimisticTask, mutationVersion);
     setState(() {
       if (_tasks.any((candidate) => candidate.id == task.id)) {
         _tasks = _replaceTask(_tasks, optimisticTask);
@@ -3181,12 +3509,42 @@ ${_truncateDiagnostic(stack, 2200)}
       }
       _error = null;
     });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _toggleTaskCompletionInBackground(
+        task,
+        wasCompleted: wasCompleted,
+        optimisticTask: optimisticTask,
+        previousTasks: previousTasks,
+        previousPastTasks: previousPastTasks,
+        mutationVersion: mutationVersion,
+      ),
+    );
+    return Future<void>.value();
+  }
 
+  Future<void> _toggleTaskCompletionInBackground(
+    HermesTask task, {
+    required bool wasCompleted,
+    required HermesTask optimisticTask,
+    required List<HermesTask> previousTasks,
+    required List<HermesTask> previousPastTasks,
+    required int mutationVersion,
+  }) async {
     try {
       final updatedTask = wasCompleted
           ? await widget.apiClient.reopenTask(task.id)
           : await widget.apiClient.completeTask(task.id);
-      if (!mounted) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingTaskWriteIsCurrent(
+            optimisticTask.id,
+            optimisticTask,
+            mutationVersion,
+          )) {
+        return;
+      }
+      _forgetPendingTaskWrite(optimisticTask.id);
+      _rememberPendingTaskWrite(updatedTask, mutationVersion);
       _markDashboardDataMutated();
       setState(() {
         if (_tasks.any((candidate) => candidate.id == updatedTask.id)) {
@@ -3197,10 +3555,18 @@ ${_truncateDiagnostic(stack, 2200)}
         }
       });
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (!mounted) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingTaskWriteIsCurrent(
+            optimisticTask.id,
+            optimisticTask,
+            mutationVersion,
+          )) {
+        return;
+      }
       _markDashboardDataMutated();
+      _forgetPendingTaskWrite(optimisticTask.id);
       setState(() {
         _tasks = previousTasks;
         _pastTasks = previousPastTasks;
@@ -3267,6 +3633,7 @@ ${_truncateDiagnostic(stack, 2200)}
           );
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
+    _rememberPendingTaskWrite(optimisticTask, mutationVersion);
     setState(() {
       if (task == null) {
         _tasks = [..._tasks, optimisticTask];
@@ -3346,7 +3713,16 @@ ${_truncateDiagnostic(stack, 2200)}
               clearNotes: notes == null,
               syncToWorkspaceIds: syncToWorkspaceIds,
             );
-      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingTaskWriteIsCurrent(
+            optimisticTask.id,
+            optimisticTask,
+            mutationVersion,
+          )) {
+        return;
+      }
+      _forgetPendingTaskWrite(optimisticTask.id, clearVersion: task == null);
+      _rememberPendingTaskWrite(saved, mutationVersion);
       setState(() {
         final replaceId = optimisticTask.id;
         if (_tasks.any((item) => item.id == replaceId)) {
@@ -3368,7 +3744,15 @@ ${_truncateDiagnostic(stack, 2200)}
       _cacheCurrentDashboardSnapshot();
       unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingTaskWriteIsCurrent(
+            optimisticTask.id,
+            optimisticTask,
+            mutationVersion,
+          )) {
+        return;
+      }
+      _forgetPendingTaskWrite(optimisticTask.id);
       _markDashboardDataMutated();
       setState(() {
         _tasks = previousTasks;
@@ -3490,20 +3874,51 @@ ${_truncateDiagnostic(stack, 2200)}
     List<Object> deleteFromWorkspaceIds = const [],
   }) async {
     final previousTasks = _tasks;
+    final previousPastTasks = _pastTasks;
     _markDashboardDataMutated();
-    setState(() => _tasks = _removeTask(_tasks, task.id));
+    final mutationVersion = _dashboardDataVersion;
+    _rememberPendingTaskDelete(task.id, mutationVersion);
+    setState(() {
+      _tasks = _removeTask(_tasks, task.id);
+      _pastTasks = _removeTask(_pastTasks, task.id);
+      _error = null;
+    });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _deleteTaskInBackground(
+        task,
+        deleteFromWorkspaceIds: deleteFromWorkspaceIds,
+        previousTasks: previousTasks,
+        previousPastTasks: previousPastTasks,
+        mutationVersion: mutationVersion,
+      ),
+    );
+    return Future<void>.value();
+  }
+
+  Future<void> _deleteTaskInBackground(
+    HermesTask task, {
+    required List<Object> deleteFromWorkspaceIds,
+    required List<HermesTask> previousTasks,
+    required List<HermesTask> previousPastTasks,
+    required int mutationVersion,
+  }) async {
     try {
       await widget.apiClient.deleteTask(
         task.id,
         deleteFromWorkspaceIds: deleteFromWorkspaceIds,
       );
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      _forgetPendingTaskWrite(task.id);
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (mounted) {
+      if (_canApplyBackgroundSave(mutationVersion)) {
         _markDashboardDataMutated();
+        _forgetPendingTaskWrite(task.id);
         setState(() {
           _tasks = previousTasks;
+          _pastTasks = previousPastTasks;
           _error = beanFriendlyErrorMessage(error, action: 'delete that task');
         });
       }
@@ -3558,6 +3973,7 @@ ${_truncateDiagnostic(stack, 2200)}
           );
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
+    _rememberPendingReminderWrite(optimisticReminder, mutationVersion);
     setState(() {
       final existingId = reminder?.id;
       if (existingId == null) {
@@ -3627,7 +4043,19 @@ ${_truncateDiagnostic(stack, 2200)}
               clearColor: false,
               syncToWorkspaceIds: syncToWorkspaceIds,
             );
-      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingReminderWriteIsCurrent(
+            optimisticReminder.id,
+            optimisticReminder,
+            mutationVersion,
+          )) {
+        return;
+      }
+      _forgetPendingReminderWrite(
+        optimisticReminder.id,
+        clearVersion: reminder == null,
+      );
+      _rememberPendingReminderWrite(saved, mutationVersion);
       setState(() {
         final replaceId = optimisticReminder.id;
         if (_reminders.any((item) => item.id == replaceId)) {
@@ -3644,7 +4072,15 @@ ${_truncateDiagnostic(stack, 2200)}
       _cacheCurrentDashboardSnapshot();
       unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingReminderWriteIsCurrent(
+            optimisticReminder.id,
+            optimisticReminder,
+            mutationVersion,
+          )) {
+        return;
+      }
+      _forgetPendingReminderWrite(optimisticReminder.id);
       _markDashboardDataMutated();
       setState(() {
         _reminders = previousReminders;
@@ -3659,18 +4095,51 @@ ${_truncateDiagnostic(stack, 2200)}
     final updatedStatus = completed ? 'pending' : 'completed';
     final optimisticReminder = reminder.copyWith(status: updatedStatus);
     _markDashboardDataMutated();
+    final mutationVersion = _dashboardDataVersion;
+    _rememberPendingReminderWrite(optimisticReminder, mutationVersion);
     setState(() {
       _reminders = _reminders
           .map((item) => item.id == reminder.id ? optimisticReminder : item)
           .toList();
       _error = null;
     });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _toggleReminderCompletionInBackground(
+        reminder,
+        updatedStatus: updatedStatus,
+        completed: completed,
+        optimisticReminder: optimisticReminder,
+        previousReminders: previousReminders,
+        mutationVersion: mutationVersion,
+      ),
+    );
+    return Future<void>.value();
+  }
+
+  Future<void> _toggleReminderCompletionInBackground(
+    HermesReminder reminder, {
+    required String updatedStatus,
+    required bool completed,
+    required HermesReminder optimisticReminder,
+    required List<HermesReminder> previousReminders,
+    required int mutationVersion,
+  }) async {
     try {
       final saved = await widget.apiClient.updateReminder(
         reminder.id,
         status: updatedStatus,
       );
-      if (!mounted) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingReminderWriteIsCurrent(
+            optimisticReminder.id,
+            optimisticReminder,
+            mutationVersion,
+          )) {
+        return;
+      }
+      _forgetPendingReminderWrite(optimisticReminder.id);
+      _rememberPendingReminderWrite(saved, mutationVersion);
       _markDashboardDataMutated();
       setState(() {
         _reminders = _reminders
@@ -3678,10 +4147,18 @@ ${_truncateDiagnostic(stack, 2200)}
             .toList();
       });
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (!mounted) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingReminderWriteIsCurrent(
+            optimisticReminder.id,
+            optimisticReminder,
+            mutationVersion,
+          )) {
+        return;
+      }
       _markDashboardDataMutated();
+      _forgetPendingReminderWrite(optimisticReminder.id);
       setState(() {
         _reminders = previousReminders;
         _error = completed
@@ -3697,21 +4174,43 @@ ${_truncateDiagnostic(stack, 2200)}
   }) async {
     final previousReminders = _reminders;
     _markDashboardDataMutated();
-    setState(
-      () => _reminders = _reminders
-          .where((item) => item.id != reminder.id)
-          .toList(),
+    final mutationVersion = _dashboardDataVersion;
+    _rememberPendingReminderDelete(reminder.id, mutationVersion);
+    setState(() {
+      _reminders = _reminders.where((item) => item.id != reminder.id).toList();
+      _error = null;
+    });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _deleteReminderInBackground(
+        reminder,
+        deleteFromWorkspaceIds: deleteFromWorkspaceIds,
+        previousReminders: previousReminders,
+        mutationVersion: mutationVersion,
+      ),
     );
+    return Future<void>.value();
+  }
+
+  Future<void> _deleteReminderInBackground(
+    HermesReminder reminder, {
+    required List<Object> deleteFromWorkspaceIds,
+    required List<HermesReminder> previousReminders,
+    required int mutationVersion,
+  }) async {
     try {
       await widget.apiClient.deleteReminder(
         reminder.id,
         deleteFromWorkspaceIds: deleteFromWorkspaceIds,
       );
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      _forgetPendingReminderWrite(reminder.id);
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (mounted) {
+      if (_canApplyBackgroundSave(mutationVersion)) {
         _markDashboardDataMutated();
+        _forgetPendingReminderWrite(reminder.id);
         setState(() {
           _reminders = previousReminders;
           _error = beanFriendlyErrorMessage(
@@ -3837,7 +4336,7 @@ ${_truncateDiagnostic(stack, 2200)}
     );
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
-    _rememberPendingCalendarEventWrite(optimisticEvent);
+    _rememberPendingCalendarEventWrite(optimisticEvent, mutationVersion);
     setState(() {
       _calendar = [..._calendar, optimisticEvent];
       _error = null;
@@ -3930,9 +4429,16 @@ ${_truncateDiagnostic(stack, 2200)}
           );
         }
       }
-      if (!_canApplyBackgroundSave(mutationVersion)) return;
-      _forgetPendingCalendarEventWrite(optimisticEvent.id);
-      _rememberPendingCalendarEventWrite(createdEvent);
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingCalendarEventWriteIsCurrent(
+            optimisticEvent.id,
+            optimisticEvent,
+            mutationVersion,
+          )) {
+        return;
+      }
+      _forgetPendingCalendarEventWrite(optimisticEvent.id, clearVersion: true);
+      _rememberPendingCalendarEventWrite(createdEvent, mutationVersion);
       setState(() {
         _calendar = _calendar
             .map(
@@ -3945,7 +4451,14 @@ ${_truncateDiagnostic(stack, 2200)}
       _cacheCurrentDashboardSnapshot();
       unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingCalendarEventWriteIsCurrent(
+            optimisticEvent.id,
+            optimisticEvent,
+            mutationVersion,
+          )) {
+        return;
+      }
       _markDashboardDataMutated();
       _forgetPendingCalendarEventWrite(optimisticEvent.id);
       setState(() {
@@ -4003,7 +4516,7 @@ ${_truncateDiagnostic(stack, 2200)}
     );
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
-    _rememberPendingCalendarEventWrite(optimisticEvent);
+    _rememberPendingCalendarEventWrite(optimisticEvent, mutationVersion);
     setState(() {
       _calendar = _calendar
           .map(
@@ -4034,6 +4547,7 @@ ${_truncateDiagnostic(stack, 2200)}
         reminderInterval: reminderInterval,
         reminderIntervalUnit: reminderIntervalUnit,
         syncToWorkspaceIds: syncToWorkspaceIds,
+        optimisticEvent: optimisticEvent,
         previousCalendar: previousCalendar,
         mutationVersion: mutationVersion,
       ),
@@ -4060,6 +4574,7 @@ ${_truncateDiagnostic(stack, 2200)}
     required int? reminderInterval,
     required String? reminderIntervalUnit,
     required List<Object> syncToWorkspaceIds,
+    required HermesCalendarEvent optimisticEvent,
     required List<HermesCalendarEvent> previousCalendar,
     required int mutationVersion,
   }) async {
@@ -4103,8 +4618,15 @@ ${_truncateDiagnostic(stack, 2200)}
           );
         }
       }
-      if (!_canApplyBackgroundSave(mutationVersion)) return;
-      _rememberPendingCalendarEventWrite(updatedEvent);
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingCalendarEventWriteIsCurrent(
+            event.id,
+            optimisticEvent,
+            mutationVersion,
+          )) {
+        return;
+      }
+      _rememberPendingCalendarEventWrite(updatedEvent, mutationVersion);
       setState(() {
         _calendar = _calendar
             .map(
@@ -4116,7 +4638,14 @@ ${_truncateDiagnostic(stack, 2200)}
       _cacheCurrentDashboardSnapshot();
       unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (!_canApplyBackgroundSave(mutationVersion)) return;
+      if (!_canApplyBackgroundSave(mutationVersion) ||
+          !_pendingCalendarEventWriteIsCurrent(
+            event.id,
+            optimisticEvent,
+            mutationVersion,
+          )) {
+        return;
+      }
       _markDashboardDataMutated();
       _forgetPendingCalendarEventWrite(event.id);
       setState(() {
@@ -4146,6 +4675,10 @@ ${_truncateDiagnostic(stack, 2200)}
         .map((id) => id.toString())
         .toSet();
     _markDashboardDataMutated();
+    final mutationVersion = _dashboardDataVersion;
+    if (!isRecurringOccurrenceDelete) {
+      _rememberPendingCalendarEventDelete(event.id, mutationVersion);
+    }
     setState(() {
       if (isRecurringOccurrenceDelete) {
         _calendar = _calendar
@@ -4175,6 +4708,28 @@ ${_truncateDiagnostic(stack, 2200)}
       }
       _error = null;
     });
+    _cacheCurrentDashboardSnapshot();
+    unawaited(
+      _deleteCalendarEventInBackground(
+        event,
+        deleteFromWorkspaceIds: deleteFromWorkspaceIds,
+        recurringDeleteMode: recurringDeleteMode,
+        recurringOccurrenceDate: recurringOccurrenceDate,
+        previousCalendar: previousCalendar,
+        mutationVersion: mutationVersion,
+      ),
+    );
+    return Future<void>.value();
+  }
+
+  Future<void> _deleteCalendarEventInBackground(
+    HermesCalendarEvent event, {
+    required List<Object> deleteFromWorkspaceIds,
+    required String? recurringDeleteMode,
+    required String? recurringOccurrenceDate,
+    required List<HermesCalendarEvent> previousCalendar,
+    required int mutationVersion,
+  }) async {
     try {
       await widget.apiClient.deleteCalendarEvent(
         event.id,
@@ -4182,12 +4737,14 @@ ${_truncateDiagnostic(stack, 2200)}
         recurringDeleteMode: recurringDeleteMode,
         recurringOccurrenceDate: recurringOccurrenceDate,
       );
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
       _forgetPendingCalendarEventWrite(event.id);
       _cacheCurrentDashboardSnapshot();
-      await _refreshSignedInViews();
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
-      if (!mounted) return;
+      if (!_canApplyBackgroundSave(mutationVersion)) return;
       _markDashboardDataMutated();
+      _forgetPendingCalendarEventWrite(event.id);
       setState(() {
         _calendar = previousCalendar;
         _error = beanFriendlyErrorMessage(
@@ -4874,7 +5431,7 @@ ${_truncateDiagnostic(stack, 2200)}
     beanVoiceDraft: _beanVoiceDraft,
     onBeanVoiceDraftChanged: _updateBeanVoiceDraft,
     onTaskCompleted: _toggleTaskCompletion,
-    pendingTaskIds: _pendingTaskIds,
+    pendingTaskIds: const <int>{},
     onTaskSaved: _createOrUpdateTask,
     onTaskDeleted: _deleteTask,
     onReminderSaved: _createOrUpdateReminder,
