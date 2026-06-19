@@ -1245,7 +1245,6 @@ if (mount) {
         const criticalReminders = criticalRemindersForToday();
         const criticalEvents = criticalEventsForToday();
         const showAdd = ['today', 'tasks', 'reminders'].includes(state.selected);
-        const showRefresh = ['today', 'tasks', 'reminders', 'admin'].includes(state.selected);
         const now = new Date();
         return `
             <div class="hb-app">
@@ -1257,14 +1256,10 @@ if (mount) {
                     <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
                     <button class="hb-header-pill hb-month-pill" data-calendar-month type="button">${icons.calendar}<span>${escapeHtml(monthLabel(now))}</span></button>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
-                    ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-mobile')}
                     ${topNavMarkup()}
-                    ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')}
                     ${showAdd ? topCreateMenuMarkup() : ''}
-                    ${showRefresh ? `<button class="hb-icon-button hb-topbar-action" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
-                    ${topOverflowMenuMarkup()}
                 </header>
                 <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
@@ -2229,39 +2224,6 @@ if (mount) {
             </div>`;
     }
 
-    function topWorkspaceSwitcherMarkup(extraClass = '') {
-        const workspaceItems = workspaces();
-        if (workspaceItems.length < 2) return '';
-        const activeWorkspaceId = String(currentWorkspaceId() || '');
-        const activeWorkspace = workspaceItems.find((workspace) => String(workspace.id) === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault) || workspaceItems[0];
-        return `
-            <label class="hb-top-workspace-switcher ${escapeAttr(extraClass)}" title="Switch workspace">
-                <span class="hb-top-workspace-icon" aria-hidden="true">${icons.spaces}</span>
-                <select data-top-workspace-select ${workspaceItems.length < 2 ? 'disabled' : ''} aria-label="Switch workspace">
-                    ${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}
-                </select>
-            </label>`;
-    }
-
-    function topOverflowMenuMarkup() {
-        const workspaceItems = workspaces();
-        const activeWorkspaceId = String(currentWorkspaceId() || '');
-        const activeWorkspace = workspaceItems.find((workspace) => String(workspace.id) === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault) || workspaceItems[0];
-        return `
-            <details class="hb-overflow-menu">
-                <summary class="hb-icon-button hb-overflow-trigger" aria-label="Open app menu" title="Menu">${icons.menu}</summary>
-                <div class="hb-overflow-popover">
-                    ${overflowMenuAction('today', 'Calendar', icons.calendar)}
-                    ${overflowMenuAction('tasks', 'Tasks', icons.tasks)}
-                    ${overflowMenuAction('reminders', 'Reminders', icons.reminders)}
-                    ${userIsAdmin() ? overflowMenuAction('admin', 'Admin', icons.activity) : ''}
-                    ${workspaceItems.length > 1 ? `<label class="hb-overflow-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
-                    <button class="hb-overflow-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
-                    ${overflowMenuAction('settings', 'Settings', icons.settings)}
-                </div>
-            </details>`;
-    }
-
     function topCreateMenuMarkup() {
         return `
             <details class="hb-create-menu" data-create-menu>
@@ -2274,22 +2236,23 @@ if (mount) {
             </details>`;
     }
 
-    function overflowMenuAction(key, label, icon) {
-        return `<button class="hb-overflow-action ${state.selected === key ? 'hb-overflow-action-active' : ''}" type="button" data-nav="${key}">${icon}<span>${label}</span></button>`;
-    }
-
     function topProfileMenuMarkup() {
         const user = state.user || {};
         const name = user.name || 'Account';
         const email = user.email || '';
+        const workspaceItems = workspaces();
+        const activeWorkspaceId = String(currentWorkspaceId() || '');
+        const activeWorkspace = workspaceItems.find((workspace) => String(workspace.id) === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault) || workspaceItems[0];
         return `
             <details class="hb-profile-menu">
                 <summary class="hb-profile-trigger" aria-label="${escapeAttr(`Account menu for ${name}`)}" title="Account menu">
                     <span class="hb-avatar" aria-hidden="true">${escapeHtml(userInitials(name, email))}</span>
                 </summary>
                 <div class="hb-profile-popover">
-                    ${userIsAdmin() ? `<button class="hb-profile-action" type="button" data-nav="admin">${icons.activity}<span>Admin monitor</span></button>` : ''}
-                    <button class="hb-profile-action" type="button" data-nav="settings">${icons.settings}<span>Settings</span></button>
+                    ${userIsAdmin() ? `<button class="hb-profile-action ${state.selected === 'admin' ? 'hb-profile-action-active' : ''}" type="button" data-nav="admin">${icons.activity}<span>Admin monitor</span></button>` : ''}
+                    ${workspaceItems.length > 1 ? `<label class="hb-profile-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
+                    <button class="hb-profile-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
+                    <button class="hb-profile-action ${state.selected === 'settings' ? 'hb-profile-action-active' : ''}" type="button" data-nav="settings">${icons.settings}<span>Settings</span></button>
                     <button class="hb-profile-action" type="button" data-logout>${icons.user}<span>Sign out</span></button>
                 </div>
             </details>`;
@@ -10094,6 +10057,7 @@ if (mount) {
     function timelineDayHeaderLabel(date) {
         const parsed = parseLocalDate(date);
         if (sameDate(parsed, new Date())) return `Today, ${weekdayShort(parsed)}`;
+        if (sameDate(parsed, addDays(new Date(), 1))) return `Tomorrow, ${weekdayShort(parsed)}`;
         return dayLabel(parsed);
     }
 
