@@ -384,7 +384,7 @@
 
 .hb-header-pill {
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 900;
+    font-weight: 500;
     letter-spacing: 0;
     line-height: 1;
     text-shadow: none;
@@ -796,6 +796,42 @@
     background: rgba(100, 116, 139, .08);
     border-color: transparent;
     color: var(--hb-text);
+}
+
+.hb-create-menu {
+    position: relative;
+    display: inline-flex;
+}
+
+.hb-create-menu summary {
+    list-style: none;
+}
+
+.hb-create-menu summary::-webkit-details-marker {
+    display: none;
+}
+
+.hb-create-trigger {
+    cursor: pointer;
+}
+
+.hb-create-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 32;
+    width: 190px;
+    display: none;
+    gap: 4px;
+    padding: 8px;
+    border: 1px solid var(--hb-border);
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: var(--hb-shadow);
+}
+
+.hb-create-menu[open] .hb-create-popover {
+    display: grid;
 }
 
 .hb-icon-button:disabled {
@@ -2111,7 +2147,7 @@
     color: var(--hb-text);
     padding: 7px 6px;
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 900;
+    font-weight: 500;
     letter-spacing: 0;
     line-height: 1;
     text-shadow: none;
@@ -5145,6 +5181,7 @@
     }
 
     .hb-top-nav,
+    .hb-create-menu,
     .hb-topbar-action,
     .hb-top-workspace-switcher-nav,
     .hb-top-workspace-switcher-mobile {

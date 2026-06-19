@@ -1238,7 +1238,6 @@ if (mount) {
         const criticalTasks = criticalTasksForToday();
         const criticalReminders = criticalRemindersForToday();
         const criticalEvents = criticalEventsForToday();
-        const addTitle = state.selected === 'tasks' ? 'Add task' : state.selected === 'reminders' ? 'Add reminder' : 'Create event';
         const showAdd = ['today', 'tasks', 'reminders'].includes(state.selected);
         const showRefresh = ['today', 'tasks', 'reminders', 'admin'].includes(state.selected);
         const now = new Date();
@@ -1255,7 +1254,7 @@ if (mount) {
                     ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-mobile')}
                     ${topNavMarkup()}
                     ${topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')}
-                    ${showAdd ? `<button class="hb-icon-button hb-topbar-action" type="button" data-open-create="${state.selected === 'today' ? 'event' : state.selected.slice(0, -1)}" aria-label="${escapeAttr(addTitle)}">${icons.add}</button>` : ''}
+                    ${showAdd ? topCreateMenuMarkup() : ''}
                     ${showRefresh ? `<button class="hb-icon-button hb-topbar-action" type="button" data-refresh-app aria-label="Refresh" title="Refresh" ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}</button>` : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
@@ -2257,6 +2256,18 @@ if (mount) {
             </details>`;
     }
 
+    function topCreateMenuMarkup() {
+        return `
+            <details class="hb-create-menu" data-create-menu>
+                <summary class="hb-icon-button hb-topbar-action hb-create-trigger" aria-label="Create new item" title="Create">${icons.add}</summary>
+                <div class="hb-create-popover">
+                    <button class="hb-overflow-action" type="button" data-open-create="event">${icons.calendar}<span>New event</span></button>
+                    <button class="hb-overflow-action" type="button" data-open-create="task">${icons.tasks}<span>New task</span></button>
+                    <button class="hb-overflow-action" type="button" data-open-create="reminder">${icons.reminders}<span>New reminder</span></button>
+                </div>
+            </details>`;
+    }
+
     function overflowMenuAction(key, label, icon) {
         return `<button class="hb-overflow-action ${state.selected === key ? 'hb-overflow-action-active' : ''}" type="button" data-nav="${key}">${icon}<span>${label}</span></button>`;
     }
@@ -2285,7 +2296,6 @@ if (mount) {
             <section class="hb-card hb-card-pad hb-today-tasks-card">
                 <div class="hb-section-action-row">
                     ${sectionTitle(icons.tasks, 'Tasks for today', `${tasks.length} tasks`)}
-                    <button class="hb-icon-button" type="button" data-open-create="task" aria-label="Create task" title="Create task">${icons.add}</button>
                 </div>
                 ${itemListMarkup(tasks, 'task', 'No tasks scheduled for today')}
             </section>`;
@@ -2298,7 +2308,6 @@ if (mount) {
             <section class="hb-card hb-card-pad hb-glance-card">
                 <div class="hb-section-action-row">
                     ${sectionTitle(icons.calendar, 'At a glance', `${eventCount} upcoming ${eventCount === 1 ? 'event' : 'events'}`)}
-                    <button class="hb-icon-button" type="button" data-open-create="event" aria-label="Create event" title="Create event">${icons.add}</button>
                 </div>
                 <div class="hb-glance-list">
                     ${days.map((day) => glanceDayMarkup(day)).join('')}
