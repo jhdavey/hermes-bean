@@ -127,6 +127,7 @@ if (mount) {
         reminders: [],
         calendar: [],
         categories: [],
+        settingsCategoryId: '',
         approvals: [],
         blockers: [],
         activity: [],
@@ -2072,6 +2073,7 @@ if (mount) {
                     </div>
                 </form>
                 ${themeSettingsMarkup()}
+                ${settingsCategoriesMarkup()}
                 <div class="hb-surface-soft hb-card-pad">
                     <strong>Notification preferences</strong>
                     <label class="hb-switch-row"><input type="checkbox" data-pref="reminder_push" ${prefs.reminder_push !== false ? 'checked' : ''}> Reminder push notifications</label>
@@ -2107,9 +2109,10 @@ if (mount) {
                 </div>
                 <div class="hb-surface-soft hb-card-pad">
                     <strong>Calendar preferences</strong>
-                    <div class="hb-field-row" style="margin-top:10px">
-                        ${labelInput('Start hour', 'startHour', 'number', localStorage.getItem('heybean.calendar.startHour') || '6', 'min="0" max="23" data-calendar-pref="startHour"')}
-                        ${labelInput('End hour', 'endHour', 'number', localStorage.getItem('heybean.calendar.endHour') || '22', 'min="1" max="24" data-calendar-pref="endHour"')}
+                    <div class="hb-settings-panel-subtitle">Day view visible hours</div>
+                    <div class="hb-field-row hb-settings-hour-row" style="margin-top:10px">
+                        ${settingsHourSelectMarkup('Start hour', 'startHour', Number(localStorage.getItem('heybean.calendar.startHour') || 6), 0, 23)}
+                        ${settingsHourSelectMarkup('End hour', 'endHour', Number(localStorage.getItem('heybean.calendar.endHour') || 22), 1, 24)}
                     </div>
                 </div>
                 ${billingSettingsMarkup()}
@@ -2127,6 +2130,55 @@ if (mount) {
                     <a href="/support">Support</a>
                 </div>
             </section>`;
+    }
+
+    function settingsCategoriesMarkup() {
+        const categories = categoryOptions();
+        const selected = selectedSettingsCategory(categories);
+        const selectedId = String(selected?.id || selected?.name || '');
+        return `
+            <div class="hb-surface-soft hb-card-pad hb-settings-categories" data-settings-category-panel>
+                <div class="hb-settings-panel-head">
+                    <span class="hb-compact-icon">${icons.tune}</span>
+                    <div>
+                        <strong>Categories</strong>
+                        <small>${categories.length ? `${categories.length} saved ${categories.length === 1 ? 'category' : 'categories'}` : 'Create categories for events, tasks, and reminders.'}</small>
+                    </div>
+                </div>
+                ${categories.length ? `
+                    <label class="hb-label hb-settings-category-picker">Category
+                        <select class="hb-select" data-settings-category-select>
+                            ${categories.map((category) => `<option value="${escapeAttr(category.id || category.name)}" ${String(category.id || category.name) === selectedId ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
+                        </select>
+                    </label>
+                    <form class="hb-settings-category-form" data-settings-category-form="${escapeAttr(selectedId)}">
+                        <span class="hb-color-swatch" style="background:${escapeAttr(safeColor(selected?.color || themeAccentColor()))}"></span>
+                        <input class="hb-input" name="name" value="${escapeAttr(selected?.name || '')}" aria-label="Category name" required>
+                        <input class="hb-input hb-color-input" type="color" name="color" value="${escapeAttr(safeColor(selected?.color || themeAccentColor()))}" aria-label="Category color">
+                        <button class="hb-button-secondary" type="submit">Save</button>
+                        <button class="hb-button-danger" type="button" data-settings-category-delete="${escapeAttr(selectedId)}">Delete</button>
+                    </form>
+                ` : '<div class="hb-empty">No categories yet.</div>'}
+                <div class="hb-account-actions">
+                    <button class="hb-button-secondary" type="button" data-open-settings-categories>Add category</button>
+                </div>
+            </div>`;
+    }
+
+    function selectedSettingsCategory(categories = categoryOptions()) {
+        if (!categories.length) return null;
+        const selectedId = String(state.settingsCategoryId || '');
+        return categories.find((category) => String(category.id || category.name) === selectedId) || categories[0];
+    }
+
+    function settingsHourSelectMarkup(label, key, value, min, max) {
+        const current = Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+        return `
+            <label class="hb-label">${escapeHtml(label)}
+                <select class="hb-select" data-calendar-pref="${escapeAttr(key)}">
+                    ${Array.from({ length: max - min + 1 }, (_, index) => min + index).map((hour) => `<option value="${hour}" ${hour === current ? 'selected' : ''}>${escapeHtml(hourLabel(hour))}</option>`).join('')}
+                </select>
+            </label>`;
     }
 
     function billingSettingsMarkup() {
@@ -3716,6 +3768,13 @@ if (mount) {
         mount.querySelectorAll('[data-recurring-delete-mode]').forEach((button) => button.addEventListener('click', confirmRecurringDelete));
         mount.querySelector('[data-modal-form]')?.addEventListener('submit', submitModal);
         mount.querySelector('[data-open-categories]')?.addEventListener('click', toggleInlineCategoryManager);
+        mount.querySelector('[data-open-settings-categories]')?.addEventListener('click', () => { state.modal = { type: 'categories' }; render(); });
+        mount.querySelector('[data-settings-category-select]')?.addEventListener('change', (event) => {
+            state.settingsCategoryId = event.currentTarget.value;
+            render();
+        });
+        mount.querySelector('[data-settings-category-form]')?.addEventListener('submit', saveSettingsCategory);
+        mount.querySelector('[data-settings-category-delete]')?.addEventListener('click', (event) => deleteSettingsCategory(event.currentTarget.dataset.settingsCategoryDelete));
         mount.querySelectorAll('[data-inline-category-create]').forEach((button) => button.addEventListener('click', createInlineCategory));
         mount.querySelectorAll('[data-inline-category-save]').forEach((button) => button.addEventListener('click', saveInlineCategory));
         mount.querySelectorAll('[data-inline-category-delete]').forEach((button) => button.addEventListener('click', deleteInlineCategory));
@@ -9290,6 +9349,36 @@ if (mount) {
         await api(`/event-categories/${form.dataset.categoryRow}`, { method: 'PATCH', body: { name: data.name, color: data.color } });
         await refreshOnly(false);
         state.modal = { type: 'categories' };
+        render();
+    }
+
+    async function saveSettingsCategory(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const categoryId = form.dataset.settingsCategoryForm;
+        if (!categoryId) return;
+        const data = Object.fromEntries(new FormData(form).entries());
+        try {
+            const category = await api(`/event-categories/${categoryId}`, { method: 'PATCH', body: { name: data.name, color: data.color } });
+            state.settingsCategoryId = String(category?.id || categoryId);
+            state.notice = 'Category saved.';
+            await refreshOnly(false);
+        } catch (error) {
+            state.error = friendlyError(error, 'save category');
+        }
+        render();
+    }
+
+    async function deleteSettingsCategory(id) {
+        if (!id || !confirm('Delete this category from items?')) return;
+        try {
+            await api(`/event-categories/${id}`, { method: 'DELETE' });
+            state.settingsCategoryId = '';
+            state.notice = 'Category deleted.';
+            await refreshOnly(false);
+        } catch (error) {
+            state.error = friendlyError(error, 'delete category');
+        }
         render();
     }
 

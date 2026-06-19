@@ -3901,6 +3901,59 @@
     gap: 10px;
 }
 
+.hb-settings-panel-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.hb-settings-panel-head > div {
+    min-width: 0;
+}
+
+.hb-settings-panel-head strong,
+.hb-settings-categories > strong {
+    display: block;
+    color: var(--hb-text);
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.hb-settings-panel-head small,
+.hb-settings-panel-subtitle {
+    display: block;
+    margin-top: 3px;
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.35;
+}
+
+.hb-settings-categories {
+    display: grid;
+    gap: 12px;
+}
+
+.hb-settings-category-picker {
+    margin-top: 0;
+}
+
+.hb-settings-category-form {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 58px auto auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.hb-settings-category-form .hb-color-swatch {
+    width: 24px;
+    height: 24px;
+}
+
+.hb-settings-hour-row {
+    align-items: end;
+}
+
 .hb-settings-legal-row {
     display: flex;
     justify-content: center;
@@ -5617,6 +5670,71 @@
     .hb-kiosk-voice-pill-standalone {
         right: 24px;
         max-width: calc(100vw - 48px);
+    }
+
+    .hb-settings-grid {
+        gap: 10px;
+        padding: 12px;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .hb-settings-grid > .hb-section-title {
+        padding: 2px 0 4px;
+    }
+
+    .hb-settings-grid > .hb-compact-item,
+    .hb-settings-grid > .hb-surface-soft,
+    .hb-settings-grid > .hb-card {
+        border-radius: 16px;
+        border: 1px solid var(--hb-border);
+        background: var(--hb-surface2);
+        box-shadow: none;
+    }
+
+    .hb-settings-grid > .hb-compact-item {
+        grid-template-columns: 34px minmax(0, 1fr) auto;
+    }
+
+    .hb-settings-grid .hb-card-pad,
+    .hb-settings-grid > .hb-card {
+        padding: 12px;
+    }
+
+    .hb-settings-panel-head {
+        align-items: center;
+    }
+
+    .hb-settings-category-form {
+        grid-template-columns: 24px minmax(0, 1fr) 54px;
+    }
+
+    .hb-settings-category-form .hb-button-secondary,
+    .hb-settings-category-form .hb-button-danger {
+        grid-column: span 3;
+        width: 100%;
+    }
+
+    .hb-settings-hour-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .hb-settings-grid .hb-workspace-switcher {
+        margin-top: 8px;
+    }
+
+    .hb-settings-grid .hb-workspace-block {
+        display: none;
+    }
+
+    .hb-settings-grid .hb-account-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+
+    .hb-settings-grid .hb-account-actions > button {
+        width: 100%;
     }
 }
 
