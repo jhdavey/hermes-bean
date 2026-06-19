@@ -272,6 +272,8 @@ if (mount) {
     let activeChatRequestId = 0;
     let beanWorkEventPollTimer = 0;
     let beanWorkEventPollToken = 0;
+    let beanWorkStatusClearTimer = 0;
+    let beanWorkStatusHoldUntil = 0;
     const cancelledChatRequestIds = new Set();
 
     boot();
@@ -1868,10 +1870,10 @@ if (mount) {
     }
 
     function beanWorkStatusActive() {
+        if (Date.now() < beanWorkStatusHoldUntil && state.beanWorkItems.length > 0) return true;
         return state.busy
             || state.voiceListening
             || realtimeBackgroundWorkPending()
-            || state.kioskVoicePhase === 'working'
             || (state.chatRunState !== 'Ready' && state.beanWorkItems.length > 0)
             || state.beanWorkItems.some((item) => !beanWorkItemDone(item));
     }
@@ -1890,6 +1892,8 @@ if (mount) {
 
     function beanWorkStatusLabel(items = beanWorkDisplayItems()) {
         if (state.voiceListening) return state.voiceDraft ? 'Ready to send' : 'Listening';
+        if (items.length && items.every((item) => beanWorkItemDone(item))) return 'Done';
+        if (items.some((item) => !beanWorkItemDone(item)) || realtimeBackgroundWorkPending()) return 'Working...';
         const current = items.find((item) => !beanWorkItemDone(item));
         if (current) return current.label;
         return state.chatRunState && state.chatRunState !== 'Ready' ? state.chatRunState : 'Bean is ready';
@@ -1900,19 +1904,26 @@ if (mount) {
     }
 
     function resetBeanWorkItems(label, status = 'running') {
+        cancelBeanWorkStatusClear();
         stopBeanWorkEventPolling();
         state.beanWorkItems = [{ id: `turn-${Date.now()}`, label, status }];
+        refreshBeanStatusTag();
     }
 
     function upsertBeanWorkItem(id, label, status = 'running') {
         if (!id || !label) return;
+        if (!beanWorkItemDone({ status })) cancelBeanWorkStatusClear();
         const existingIndex = state.beanWorkItems.findIndex((item) => item.id === id);
         const next = { id, label, status };
         if (existingIndex >= 0) {
             state.beanWorkItems = state.beanWorkItems.map((item, index) => index === existingIndex ? { ...item, ...next } : item);
+            if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
+            refreshBeanStatusTag();
             return;
         }
         state.beanWorkItems = [...state.beanWorkItems, next].slice(-8);
+        if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
+        refreshBeanStatusTag();
     }
 
     function completeBeanWorkItem(id, label = '') {
@@ -1920,9 +1931,85 @@ if (mount) {
         const existingIndex = state.beanWorkItems.findIndex((item) => item.id === id);
         if (existingIndex >= 0) {
             state.beanWorkItems = state.beanWorkItems.map((item, index) => index === existingIndex ? { ...item, status: 'completed' } : item);
+            if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
+            refreshBeanStatusTag();
             return;
         }
         if (label) upsertBeanWorkItem(id, label, 'completed');
+    }
+
+    function completeActiveBeanWorkItems() {
+        if (!state.beanWorkItems.length) return;
+        state.beanWorkItems = state.beanWorkItems.map((item) => beanWorkItemDone(item) ? item : { ...item, status: 'completed' });
+        scheduleBeanWorkStatusClear();
+        refreshBeanStatusTag();
+    }
+
+    function scheduleBeanWorkStatusClear(delayMs = 2600) {
+        if (state.busy || realtimeBackgroundWorkPending()) return;
+        window.clearTimeout(beanWorkStatusClearTimer);
+        beanWorkStatusHoldUntil = Date.now() + delayMs;
+        beanWorkStatusClearTimer = window.setTimeout(() => {
+            beanWorkStatusClearTimer = 0;
+            if (state.busy || realtimeBackgroundWorkPending()) {
+                scheduleBeanWorkStatusClear(delayMs);
+                return;
+            }
+            beanWorkStatusHoldUntil = 0;
+            state.beanWorkItems = [];
+            refreshBeanStatusTag();
+        }, delayMs);
+    }
+
+    function cancelBeanWorkStatusClear() {
+        window.clearTimeout(beanWorkStatusClearTimer);
+        beanWorkStatusClearTimer = 0;
+        beanWorkStatusHoldUntil = 0;
+    }
+
+    function refreshBeanStatusTag() {
+        if (state.phase !== 'signedIn') return;
+        updateKioskVoicePillsInPlace();
+    }
+
+    function ensureRealtimeRequestWorkItem(content, status = 'running') {
+        const label = beanWorkLabelForRequest(content);
+        if (!label) return;
+        upsertBeanWorkItem('realtime-request', label, status);
+    }
+
+    function beanWorkLabelForRequest(content) {
+        const command = normalizedVoiceCommand(content);
+        if (!command) return 'Working on request';
+        const targetsEvent = /\b(?:calendar|event|events|appointment|appointments|meeting|meetings)\b/.test(command);
+        const targetsTask = /\b(?:task|tasks|todo|to do)\b/.test(command);
+        const targetsReminder = /\b(?:reminder|reminders|remind)\b/.test(command);
+        if (/\b(?:delete|remove|cancel)\b/.test(command)) {
+            if (targetsEvent) return 'Deleting event';
+            if (targetsReminder) return 'Deleting reminder';
+            if (targetsTask) return 'Deleting task';
+            return 'Deleting item';
+        }
+        if (/\b(?:move|reschedule|update|change)\b/.test(command)) {
+            if (targetsEvent) return 'Updating event';
+            if (targetsReminder) return 'Updating reminder';
+            if (targetsTask) return 'Updating task';
+            return 'Updating item';
+        }
+        if (/\b(?:add|create|put|schedule)\b/.test(command)) {
+            if (targetsEvent) return 'Creating event';
+            if (targetsReminder) return 'Creating reminder';
+            if (targetsTask) return 'Creating task';
+            return 'Creating item';
+        }
+        if (/\b(?:complete|finish|mark)\b/.test(command)) {
+            if (targetsTask) return 'Updating task';
+            if (targetsReminder) return 'Updating reminder';
+            return 'Updating item';
+        }
+        if (/\b(?:remember|memory)\b/.test(command)) return 'Saving memory';
+        if (/\b(?:plan|organize|prioritize)\b/.test(command)) return 'Planning request';
+        return 'Working on request';
     }
 
     function applyBeanWorkEvents(events = []) {
@@ -2175,25 +2262,43 @@ if (mount) {
             </div>`;
     }
 
-    function kioskVoicePillMarkup(options = {}) {
+    function kioskVoiceStatusTagModel(options = {}) {
         const requested = state.kioskVoiceEnabled;
         const ready = kioskVoiceReady();
         const phase = ready ? (state.kioskVoicePhase === 'idle' ? 'armed' : state.kioskVoicePhase || 'armed') : 'disabled';
-        const workActive = options.workStatus && beanWorkStatusActive();
-        const workItems = workActive ? beanWorkDisplayItems() : [];
+        const workItems = options.workStatus ? beanWorkDisplayItems() : [];
+        const workActive = options.workStatus && (
+            workItems.length > 0
+            || realtimeBackgroundWorkPending()
+            || (Date.now() < beanWorkStatusHoldUntil && state.beanWorkItems.length > 0)
+        );
         const completedCount = workItems.filter((item) => beanWorkItemDone(item)).length;
         const voiceLabel = kioskVoicePillLabel({ requested, ready, phase });
         const label = workActive ? beanWorkStatusLabel(workItems) : voiceLabel;
         const cancelable = ready && kioskVoicePillIsCancelable(phase);
         const actionLabel = kioskVoicePillActionLabel({ ready, phase, label });
+        return {
+            actionLabel,
+            cancelable,
+            completedCount,
+            label,
+            phase: workActive ? 'working' : phase,
+            ready,
+            workActive,
+            workItems,
+        };
+    }
+
+    function kioskVoicePillMarkup(options = {}) {
+        const model = kioskVoiceStatusTagModel(options);
         return `
-            <div class="hb-kiosk-voice-status-shell ${workActive ? 'hb-kiosk-voice-status-shell-working' : ''}">
-                <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(phase)} ${cancelable ? 'hb-kiosk-voice-pill-cancelable' : ''} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''} ${options.topbar ? 'hb-kiosk-voice-pill-topbar' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}" aria-pressed="${ready}">
+            <div class="hb-kiosk-voice-status-shell ${model.workActive ? 'hb-kiosk-voice-status-shell-working' : ''}">
+                <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(model.phase)} ${model.cancelable ? 'hb-kiosk-voice-pill-cancelable' : ''} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''} ${options.topbar ? 'hb-kiosk-voice-pill-topbar' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(model.actionLabel)}" title="${escapeAttr(model.actionLabel)}" aria-pressed="${model.ready}">
                     <span class="hb-kiosk-voice-pill-icon" aria-hidden="true">${icons.mic}</span>
-                    <span class="hb-kiosk-voice-pill-label">${escapeHtml(label)}</span>
-                    ${workItems.length ? `<span class="hb-kiosk-voice-work-count">${escapeHtml(`${completedCount}/${workItems.length}`)}</span>` : ''}
+                    <span class="hb-kiosk-voice-pill-label">${escapeHtml(model.label)}</span>
+                    ${model.workItems.length ? `<span class="hb-kiosk-voice-work-count">${escapeHtml(`${model.completedCount}/${model.workItems.length}`)}</span>` : ''}
                 </button>
-                ${workItems.length ? beanWorkListMarkup(workItems, 'hb-bean-work-list hb-kiosk-voice-work-list') : ''}
+                ${model.workItems.length ? beanWorkListMarkup(model.workItems, 'hb-bean-work-list hb-kiosk-voice-work-list') : ''}
             </div>`;
     }
 
@@ -5555,6 +5660,9 @@ if (mount) {
                 state.busy = false;
                 stopBeanWorkEventPolling();
             }
+            if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
+                scheduleBeanWorkStatusClear();
+            }
             render();
             scrollChatToBottom();
             if (options.autoCloseChatMs) {
@@ -6404,6 +6512,8 @@ if (mount) {
         if (kioskRealtimeBackgroundWorkActive) {
             window.clearTimeout(kioskConversationTimer);
             kioskConversationTimer = 0;
+            const requestedWork = String(context?.userContent || kioskRealtimePendingUser?.content || '').trim();
+            if (requestedWork) ensureRealtimeRequestWorkItem(requestedWork);
             if (context) {
                 kioskRealtimeBackgroundProgressContext = {
                     userContent: String(context.userContent || '').trim(),
@@ -6425,6 +6535,7 @@ if (mount) {
         }
         clearRealtimeBackgroundProgressUpdates();
         kioskRealtimeBackgroundProgressContext = null;
+        completeActiveBeanWorkItems();
     }
 
     function realtimeBackgroundWorkPending() {
@@ -7271,7 +7382,7 @@ if (mount) {
                 call_id: callId || null,
                 arguments: args,
             });
-            resetBeanWorkItems(userContent ? `Queue: ${userContent.slice(0, 72)}` : 'Queue background work', 'queued');
+            ensureRealtimeRequestWorkItem(userContent);
             setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent });
         }
         showRealtimeWorkingInBackgroundWhenReady();
@@ -7297,7 +7408,7 @@ if (mount) {
             if (result?.run_id) {
                 kioskRealtimePendingUser = null;
                 kioskRealtimeCurrentUserTurn = null;
-                upsertBeanWorkItem(`run-${result.run_id}`, userContent ? `Work on: ${userContent.slice(0, 72)}` : 'Background work', 'running');
+                ensureRealtimeRequestWorkItem(userContent);
                 startBeanWorkEventPolling(kioskRealtime?.sessionId || state.session?.id);
                 watchRealtimeAssistantRun(result.run_id, { quickReplyText, userContent });
             } else if (name === 'queue_bean_work') {
@@ -7352,6 +7463,7 @@ if (mount) {
             finishRealtimeTurnStatus();
             return;
         }
+        ensureRealtimeRequestWorkItem(content);
         setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent: content });
         showRealtimeWorkingInBackgroundWhenReady();
         try {
@@ -7392,6 +7504,7 @@ if (mount) {
         kioskRealtimeResponseTimer = 0;
         kioskRealtimeCurrentUserTurn = kioskRealtimePendingUser ? { ...kioskRealtimePendingUser } : kioskRealtimeCurrentUserTurn;
         persistRealtimeConversationTurn().catch(() => {});
+        ensureRealtimeRequestWorkItem(content);
         setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent: content });
         setKioskVoiceStatus('working', 'working');
         recordRealtimeSpokenSegment(quickReplyText);
@@ -8377,28 +8490,45 @@ if (mount) {
     }
 
     function updateKioskVoicePillsInPlace() {
-        if (beanWorkStatusActive() || mount.querySelector('.hb-kiosk-voice-status-shell-working')) {
-            return false;
-        }
-        const pills = mount.querySelectorAll('[data-toggle-kiosk-voice]');
-        if (!pills.length) return false;
-        const requested = state.kioskVoiceEnabled;
-        const ready = kioskVoiceReady();
-        const phase = ready ? (state.kioskVoicePhase === 'idle' ? 'armed' : state.kioskVoicePhase || 'armed') : 'disabled';
-        const label = kioskVoicePillLabel({ requested, ready, phase });
-        const cancelable = ready && kioskVoicePillIsCancelable(phase);
-        const actionLabel = kioskVoicePillActionLabel({ ready, phase, label });
-        pills.forEach((pill) => {
+        const shells = mount.querySelectorAll('.hb-kiosk-voice-status-shell');
+        if (!shells.length) return false;
+        const model = kioskVoiceStatusTagModel({ topbar: true, workStatus: true });
+        shells.forEach((shell) => {
+            const pill = shell.querySelector('[data-toggle-kiosk-voice]');
+            if (!pill) return;
+            shell.classList.toggle('hb-kiosk-voice-status-shell-working', model.workActive);
             Array.from(pill.classList)
                 .filter((className) => className.startsWith('hb-kiosk-voice-pill-') && !['hb-kiosk-voice-pill-button', 'hb-kiosk-voice-pill-cancelable', 'hb-kiosk-voice-pill-standalone', 'hb-kiosk-voice-pill-topbar'].includes(className))
                 .forEach((className) => pill.classList.remove(className));
-            pill.classList.add(`hb-kiosk-voice-pill-${phase}`);
-            pill.classList.toggle('hb-kiosk-voice-pill-cancelable', cancelable);
-            pill.setAttribute('aria-label', actionLabel);
-            pill.setAttribute('title', actionLabel);
-            pill.setAttribute('aria-pressed', ready ? 'true' : 'false');
+            pill.classList.add(`hb-kiosk-voice-pill-${model.phase}`);
+            pill.classList.toggle('hb-kiosk-voice-pill-cancelable', model.cancelable);
+            pill.setAttribute('aria-label', model.actionLabel);
+            pill.setAttribute('title', model.actionLabel);
+            pill.setAttribute('aria-pressed', model.ready ? 'true' : 'false');
             const labelNode = pill.querySelector('.hb-kiosk-voice-pill-label');
-            if (labelNode) labelNode.textContent = label;
+            if (labelNode) labelNode.textContent = model.label;
+            const countNode = pill.querySelector('.hb-kiosk-voice-work-count');
+            if (model.workItems.length) {
+                const countText = `${model.completedCount}/${model.workItems.length}`;
+                if (countNode) {
+                    countNode.textContent = countText;
+                } else {
+                    pill.insertAdjacentHTML('beforeend', `<span class="hb-kiosk-voice-work-count">${escapeHtml(countText)}</span>`);
+                }
+            } else {
+                countNode?.remove();
+            }
+            const listNode = shell.querySelector('.hb-kiosk-voice-work-list');
+            if (model.workItems.length) {
+                const listMarkup = beanWorkListMarkup(model.workItems, 'hb-bean-work-list hb-kiosk-voice-work-list');
+                if (listNode) {
+                    listNode.outerHTML = listMarkup;
+                } else {
+                    pill.insertAdjacentHTML('afterend', listMarkup);
+                }
+            } else {
+                listNode?.remove();
+            }
         });
         return true;
     }
