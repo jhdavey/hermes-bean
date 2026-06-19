@@ -360,10 +360,10 @@
 .hb-topbar-current-time {
     color: var(--hb-text);
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 700;
+    font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
-    text-shadow: .35px 0 0 currentColor;
+    text-shadow: none;
     white-space: nowrap;
 }
 
@@ -374,11 +374,11 @@
     align-items: center;
     justify-content: center;
     gap: 7px;
-    border: 1px solid var(--hb-border);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, .72);
+    border: 1px solid transparent;
+    border-radius: 0;
+    background: transparent;
     color: var(--hb-text);
-    padding: 7px 10px;
+    padding: 7px 6px;
     white-space: nowrap;
 }
 
@@ -387,7 +387,10 @@
     font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
-    text-shadow: .55px 0 0 currentColor;
+    text-shadow: none;
+    text-decoration: underline;
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 5px;
 }
 
 .hb-header-pill span {
@@ -395,6 +398,9 @@
     font-weight: inherit;
     line-height: inherit;
     text-shadow: inherit;
+    text-decoration: inherit;
+    text-decoration-thickness: inherit;
+    text-underline-offset: inherit;
 }
 
 .hb-header-pill svg {
@@ -2084,9 +2090,9 @@
     width: 32px;
     height: 32px;
     flex: 0 0 32px;
-    border: 1px solid var(--hb-border);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, .72);
+    border: 1px solid transparent;
+    border-radius: 0;
+    background: transparent;
     color: var(--hb-text);
     box-shadow: none;
 }
@@ -2097,16 +2103,19 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--hb-border);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, .72);
+    border: 1px solid transparent;
+    border-radius: 0;
+    background: transparent;
     color: var(--hb-text);
-    padding: 7px 12px;
+    padding: 7px 6px;
     font-size: var(--hb-topbar-date-font-size, 24px);
     font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
-    text-shadow: .55px 0 0 currentColor;
+    text-shadow: none;
+    text-decoration: underline;
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 5px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
