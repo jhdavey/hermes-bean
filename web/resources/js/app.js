@@ -2256,9 +2256,6 @@ if (mount) {
                     ${overflowMenuAction('reminders', 'Reminders', icons.reminders)}
                     ${userIsAdmin() ? overflowMenuAction('admin', 'Admin', icons.activity) : ''}
                     ${workspaceItems.length > 1 ? `<label class="hb-overflow-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
-                    <button class="hb-overflow-action" type="button" data-open-create="event">${icons.add}<span>New event</span></button>
-                    <button class="hb-overflow-action" type="button" data-open-create="task">${icons.tasks}<span>New task</span></button>
-                    <button class="hb-overflow-action" type="button" data-open-create="reminder">${icons.reminders}<span>New reminder</span></button>
                     <button class="hb-overflow-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
                     ${overflowMenuAction('settings', 'Settings', icons.settings)}
                 </div>
