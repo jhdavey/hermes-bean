@@ -243,6 +243,8 @@ if (mount) {
     let kioskRealtimeInputActiveSince = 0;
     let kioskRealtimeInputQuietSince = 0;
     let kioskRealtimeInputLastActiveAt = 0;
+    let kioskRealtimeLastSpeechStartedAt = 0;
+    let kioskRealtimeLastSpeechStoppedAt = 0;
     const kioskRealtimeUserTranscriptDrafts = new Map();
     let kioskRealtimeResponseTimer = 0;
     let kioskRealtimeToolFallbackTimer = 0;
@@ -6444,6 +6446,8 @@ if (mount) {
         kioskRealtimeInputActiveSince = 0;
         kioskRealtimeInputQuietSince = 0;
         kioskRealtimeInputLastActiveAt = 0;
+        kioskRealtimeLastSpeechStartedAt = 0;
+        kioskRealtimeLastSpeechStoppedAt = 0;
         if (!options.keepContext && kioskRealtimeInputAudioContext) {
             kioskRealtimeInputAudioContext.close().catch(() => {});
             kioskRealtimeInputAudioContext = null;
@@ -6515,6 +6519,7 @@ if (mount) {
             }
         }
         if (type === 'input_audio_buffer.speech_started') {
+            kioskRealtimeLastSpeechStartedAt = Date.now();
             if (kioskConversationActive) {
                 window.clearTimeout(kioskConversationTimer);
                 kioskConversationTimer = 0;
@@ -6526,6 +6531,7 @@ if (mount) {
             return;
         }
         if (type === 'input_audio_buffer.speech_stopped') {
+            kioskRealtimeLastSpeechStoppedAt = Date.now();
             if (realtimeAssistantRecentlyOutput()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('listening', 'listening');
@@ -6850,6 +6856,39 @@ if (mount) {
             || /\b(?:calendar|calendars|event|events|task|tasks|todo|to do|reminder|reminders|agenda|workspace|workspaces|google calendar)\b/.test(command);
     }
 
+    function realtimeTranscriptLooksCompound(transcript) {
+        const normalized = normalizedVoiceCommand(transcript);
+        if (!normalized) return false;
+        return /\b(?:and then|then|also|plus|after that|next)\b/.test(normalized)
+            || /\b(?:another|second|third)\s+(?:event|task|reminder|appointment|meeting)\b/.test(normalized)
+            || (normalized.match(/\b(?:add|create|schedule|put|move|reschedule|update|delete|remove|cancel|remind)\b/g) || []).length > 1
+            || (normalized.match(/\b(?:event|events|task|tasks|reminder|reminders|appointment|appointments|meeting|meetings)\b/g) || []).length > 1;
+    }
+
+    function realtimeTurnDebounceForContent(content = '', options = {}) {
+        let delay = kioskRealtimeTurnDebounceMs;
+        if (realtimeTranscriptLooksCompound(content)) delay = Math.max(delay, 4300);
+        if (options.partial) delay = Math.max(delay, 3600);
+        if (realtimeInputRecentlyActive(2200)) delay = Math.max(delay, 3600);
+        return delay;
+    }
+
+    function realtimeInputRecentlyActive(windowMs = 1800) {
+        const now = Date.now();
+        return Boolean(
+            (kioskRealtimeInputLastActiveAt && now - kioskRealtimeInputLastActiveAt < windowMs)
+            || (kioskRealtimeLastSpeechStoppedAt && now - kioskRealtimeLastSpeechStoppedAt < windowMs)
+            || (kioskRealtimeInputQuietSince && now - kioskRealtimeInputQuietSince < windowMs)
+        );
+    }
+
+    function extendRealtimeResponseForTranscript(transcript) {
+        if (!kioskRealtimeResponseTimer || !kioskRealtimePendingUser || kioskRealtimePendingUser.persisted) return;
+        const combined = `${kioskRealtimePendingUser.content || ''} ${transcript || ''}`.replace(/\s+/g, ' ').trim();
+        kioskRealtimeWakeContinuationUntil = Date.now() + realtimeTurnDebounceForContent(combined, { partial: true }) + 500;
+        scheduleRealtimeResponseCreate({ delayMs: realtimeTurnDebounceForContent(combined, { partial: true }) });
+    }
+
     function realtimeTranscriptCanContinueWithoutWake(transcript) {
         const normalized = normalizedRealtimeTranscript(transcript);
         if (!normalized) return false;
@@ -6865,6 +6904,8 @@ if (mount) {
     function realtimeCommandShouldQueueImmediately(transcript) {
         const command = normalizedVoiceCommand(transcript);
         if (!command || !voiceCommandRequiresBackgroundWork(command)) return false;
+        if (realtimeTranscriptLooksCompound(command)) return false;
+        if (realtimeInputRecentlyActive(2200)) return false;
         return /\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b/.test(command)
             && /\b(?:calendar|event|events|task|tasks|todo|to do|reminder|reminders|agenda|workspace|workspaces|memory|remember)\b/.test(command);
     }
@@ -6998,7 +7039,7 @@ if (mount) {
                 persisted: false,
             };
         }
-        kioskRealtimeWakeContinuationUntil = Date.now() + kioskRealtimeTurnDebounceMs + 500;
+        kioskRealtimeWakeContinuationUntil = Date.now() + realtimeTurnDebounceForContent(kioskRealtimePendingUser.content) + 500;
         kioskRealtimeCurrentUserTurn = { ...kioskRealtimePendingUser };
         upsertRealtimeLocalMessage({
             id: `rt-user-${kioskRealtimePendingUser.itemId}`,
@@ -7021,7 +7062,7 @@ if (mount) {
             queueImmediateRealtimeBackgroundWork(content);
             return;
         }
-        scheduleRealtimeResponseCreate();
+        scheduleRealtimeResponseCreate({ delayMs: realtimeTurnDebounceForContent(kioskRealtimePendingUser.content) });
     }
 
     function handleRealtimeUserTranscriptDelta(payload) {
@@ -7039,6 +7080,7 @@ if (mount) {
             window.clearTimeout(kioskConversationTimer);
             kioskConversationTimer = 0;
         }
+        extendRealtimeResponseForTranscript(draft);
         showRealtimeHeardTranscript(draft);
     }
 
@@ -7058,6 +7100,7 @@ if (mount) {
             window.clearTimeout(kioskConversationTimer);
             kioskConversationTimer = 0;
         }
+        extendRealtimeResponseForTranscript(text);
         showRealtimeHeardTranscript(text);
     }
 
@@ -7126,12 +7169,13 @@ if (mount) {
         return false;
     }
 
-    function scheduleRealtimeResponseCreate() {
+    function scheduleRealtimeResponseCreate(options = {}) {
         window.clearTimeout(kioskRealtimeResponseTimer);
         clearRealtimeToolFallback();
         if (state.kioskVoicePhase !== 'heard') {
             setKioskVoiceStatus('listening', 'listening');
         }
+        const delayMs = Math.max(900, Number(options.delayMs || kioskRealtimeTurnDebounceMs));
         kioskRealtimeResponseTimer = window.setTimeout(() => {
             kioskRealtimeResponseTimer = 0;
             if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
@@ -7153,7 +7197,7 @@ if (mount) {
                 kioskRealtimeAwaitingFirstAudio = false;
                 recoverKioskRealtimeAfterSendFailure('response_create_unavailable');
             }
-        }, kioskRealtimeTurnDebounceMs);
+        }, delayMs);
     }
 
     function appendRealtimeAssistantDelta(payload) {
