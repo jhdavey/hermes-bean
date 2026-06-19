@@ -1847,12 +1847,15 @@ if (mount) {
                     <span class="hb-bean-work-status-title">${escapeHtml(label)}</span>
                     ${items.length ? `<span class="hb-bean-work-status-count">${escapeHtml(`${completedCount}/${items.length}`)}</span>` : ''}
                 </div>
-                ${expanded ? `
-                    <ul class="hb-bean-work-list" aria-label="Bean work queue">
-                        ${items.map(beanWorkItemMarkup).join('')}
-                    </ul>
-                ` : ''}
+                ${expanded ? beanWorkListMarkup(items) : ''}
             </section>`;
+    }
+
+    function beanWorkListMarkup(items, className = 'hb-bean-work-list') {
+        return `
+            <ul class="${escapeAttr(className)}" aria-label="Bean work queue">
+                ${items.map(beanWorkItemMarkup).join('')}
+            </ul>`;
     }
 
     function beanWorkItemMarkup(item) {
@@ -2008,7 +2011,6 @@ if (mount) {
         return `
             <section class="hb-chat">
                 <div class="hb-chat-top">
-                    ${beanWorkStatusMarkup()}
                     <strong class="hb-chat-session-title">${escapeHtml(title)}</strong>
                     <span class="hb-spacer"></span>
                     <button class="hb-button-ghost hb-chat-history-toggle ${state.chatHistoryOpen ? 'hb-chat-history-toggle-active' : ''}" type="button" data-toggle-chat-history aria-expanded="${state.chatHistoryOpen ? 'true' : 'false'}">${icons.history}<span>History</span></button>
@@ -2169,7 +2171,7 @@ if (mount) {
                 <button class="hb-bean-button hb-topbar-bean-button ${state.chatExpanded || state.selected === 'bean' ? 'hb-bean-button-active' : ''}" type="button" data-toggle-chat-expand aria-label="${state.chatExpanded ? 'Close Bean chat' : 'Open Bean chat'}" title="Bean chat">
                     <img src="${escapeAttr(logoUrl)}" alt="">
                 </button>
-                ${kioskVoicePillMarkup({ topbar: true })}
+                ${kioskVoicePillMarkup({ topbar: true, workStatus: true })}
             </div>`;
     }
 
@@ -2177,14 +2179,22 @@ if (mount) {
         const requested = state.kioskVoiceEnabled;
         const ready = kioskVoiceReady();
         const phase = ready ? (state.kioskVoicePhase === 'idle' ? 'armed' : state.kioskVoicePhase || 'armed') : 'disabled';
-        const label = kioskVoicePillLabel({ requested, ready, phase });
+        const workActive = options.workStatus && beanWorkStatusActive();
+        const workItems = workActive ? beanWorkDisplayItems() : [];
+        const completedCount = workItems.filter((item) => beanWorkItemDone(item)).length;
+        const voiceLabel = kioskVoicePillLabel({ requested, ready, phase });
+        const label = workActive ? beanWorkStatusLabel(workItems) : voiceLabel;
         const cancelable = ready && kioskVoicePillIsCancelable(phase);
         const actionLabel = kioskVoicePillActionLabel({ ready, phase, label });
         return `
-            <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(phase)} ${cancelable ? 'hb-kiosk-voice-pill-cancelable' : ''} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''} ${options.topbar ? 'hb-kiosk-voice-pill-topbar' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}" aria-pressed="${ready}">
-                <span class="hb-kiosk-voice-pill-icon" aria-hidden="true">${icons.mic}</span>
-                <span>${escapeHtml(label)}</span>
-            </button>`;
+            <div class="hb-kiosk-voice-status-shell ${workActive ? 'hb-kiosk-voice-status-shell-working' : ''}">
+                <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(phase)} ${cancelable ? 'hb-kiosk-voice-pill-cancelable' : ''} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''} ${options.topbar ? 'hb-kiosk-voice-pill-topbar' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}" aria-pressed="${ready}">
+                    <span class="hb-kiosk-voice-pill-icon" aria-hidden="true">${icons.mic}</span>
+                    <span class="hb-kiosk-voice-pill-label">${escapeHtml(label)}</span>
+                    ${workItems.length ? `<span class="hb-kiosk-voice-work-count">${escapeHtml(`${completedCount}/${workItems.length}`)}</span>` : ''}
+                </button>
+                ${workItems.length ? beanWorkListMarkup(workItems, 'hb-bean-work-list hb-kiosk-voice-work-list') : ''}
+            </div>`;
     }
 
     function kioskVoicePillLabel({ requested, ready, phase }) {
@@ -8053,19 +8063,8 @@ if (mount) {
     }
 
     function showKioskHeardTranscript(transcript, options = {}) {
-        if (!transcript || state.kioskVoicePhase === 'responding' || (state.kioskVoicePhase === 'working' && !options.force)) return;
-        if (!kioskConversationActive && !options.allowArmed) return;
-        const preview = transcript.length > 44 ? `${transcript.slice(0, 41)}...` : transcript;
-        const phase = options.phase || (kioskConversationActive ? 'heard' : 'armed');
-        setKioskVoiceStatus(phase, `Heard: "${preview}"`);
         window.clearTimeout(kioskHeardTimer);
-        kioskHeardTimer = window.setTimeout(() => {
-            kioskHeardTimer = 0;
-            if (kioskRealtimeResponseTimer) return;
-            if (state.kioskVoiceEnabled && ['armed', 'heard'].includes(state.kioskVoicePhase)) {
-                setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'listening' : 'Say hey bean');
-            }
-        }, options.holdMs || 2200);
+        kioskHeardTimer = 0;
     }
 
     function armKioskCommandSubmit() {
@@ -8378,6 +8377,9 @@ if (mount) {
     }
 
     function updateKioskVoicePillsInPlace() {
+        if (beanWorkStatusActive() || mount.querySelector('.hb-kiosk-voice-status-shell-working')) {
+            return false;
+        }
         const pills = mount.querySelectorAll('[data-toggle-kiosk-voice]');
         if (!pills.length) return false;
         const requested = state.kioskVoiceEnabled;
@@ -8395,7 +8397,7 @@ if (mount) {
             pill.setAttribute('aria-label', actionLabel);
             pill.setAttribute('title', actionLabel);
             pill.setAttribute('aria-pressed', ready ? 'true' : 'false');
-            const labelNode = pill.querySelector('span:last-child');
+            const labelNode = pill.querySelector('.hb-kiosk-voice-pill-label');
             if (labelNode) labelNode.textContent = label;
         });
         return true;
