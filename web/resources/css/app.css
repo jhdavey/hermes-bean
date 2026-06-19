@@ -4011,7 +4011,17 @@
     box-shadow: 0 18px 42px rgba(15, 23, 42, .16);
     backdrop-filter: blur(14px);
     transform-origin: top left;
-    animation: hb-work-list-drop .18s ease-out;
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+    transition: opacity .18s ease, transform .18s ease, visibility .18s ease;
+}
+
+.hb-kiosk-voice-work-list-empty {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-4px) scale(.98);
 }
 
 .hb-kiosk-voice-work-list .hb-bean-work-checkbox {
@@ -4022,14 +4032,15 @@
     animation: hb-status-dot-pulse 1.2s ease-in-out infinite;
 }
 
-@keyframes hb-work-list-drop {
-    from {
-        opacity: 0;
-        transform: translateY(-4px) scale(.98);
+@media (prefers-reduced-motion: reduce) {
+    .hb-kiosk-voice-status-shell,
+    .hb-kiosk-voice-work-list,
+    .hb-kiosk-voice-work-list .hb-bean-work-checkbox {
+        transition: none;
     }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
+
+    .hb-kiosk-voice-work-list .hb-bean-work-item:not(.hb-bean-work-item-done) .hb-bean-work-checkbox {
+        animation: none;
     }
 }
 

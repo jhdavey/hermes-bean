@@ -274,6 +274,7 @@ if (mount) {
     let beanWorkEventPollToken = 0;
     let beanWorkStatusClearTimer = 0;
     let beanWorkStatusHoldUntil = 0;
+    let beanWorkStatusMinUntil = 0;
     const cancelledChatRequestIds = new Set();
 
     boot();
@@ -1857,7 +1858,7 @@ if (mount) {
 
     function beanWorkListMarkup(items, className = 'hb-bean-work-list') {
         return `
-            <ul class="${escapeAttr(className)}" aria-label="Bean work queue">
+            <ul class="${escapeAttr(className)}" aria-label="Bean work queue" ${items.length ? '' : 'aria-hidden="true"'}>
                 ${items.map(beanWorkItemMarkup).join('')}
             </ul>`;
     }
@@ -1865,9 +1866,9 @@ if (mount) {
     function beanWorkItemMarkup(item) {
         const done = beanWorkItemDone(item);
         return `
-            <li class="hb-bean-work-item ${done ? 'hb-bean-work-item-done' : ''}">
-                <span class="hb-bean-work-checkbox" aria-hidden="true">${done ? icons.checkCircle : ''}</span>
-                <span>${escapeHtml(item.label || 'Bean work item')}</span>
+            <li class="hb-bean-work-item ${done ? 'hb-bean-work-item-done' : ''}" data-bean-work-id="${escapeAttr(item.id || '')}">
+                <span class="hb-bean-work-checkbox" data-bean-work-checkbox aria-hidden="true">${done ? icons.checkCircle : ''}</span>
+                <span data-bean-work-label>${escapeHtml(item.label || 'Bean work item')}</span>
             </li>`;
     }
 
@@ -1883,12 +1884,6 @@ if (mount) {
     function beanWorkDisplayItems() {
         const items = state.beanWorkItems.filter((item) => item?.label);
         if (items.length) return items.slice(-6);
-        if (state.voiceListening) {
-            return [{ id: 'voice-dictation', label: state.voiceDraft ? 'Send dictated request' : 'Listening for your request', status: 'running' }];
-        }
-        if (state.busy && state.chatRunState !== 'Ready') {
-            return [{ id: 'active-turn', label: state.chatRunState || 'Bean is working', status: 'running' }];
-        }
         return [];
     }
 
@@ -1912,14 +1907,43 @@ if (mount) {
         refreshBeanStatusTag();
     }
 
-    function upsertBeanWorkItem(id, label, status = 'running') {
+    function upsertBeanWorkItem(id, label, status = 'running', options = {}) {
         if (!id || !label) return;
-        if (!beanWorkItemDone({ status })) cancelBeanWorkStatusClear();
+        const normalizedStatus = String(status || 'running').toLowerCase();
+        if (!beanWorkItemDone({ status: normalizedStatus })) {
+            cancelBeanWorkStatusClear();
+            beanWorkStatusMinUntil = Math.max(beanWorkStatusMinUntil, Date.now() + 700);
+        }
         const existingIndex = state.beanWorkItems.findIndex((item) => item.id === id);
-        const next = { id, label, status };
+        const next = {
+            id,
+            label,
+            status: normalizedStatus,
+            ...(options.source ? { source: options.source } : {}),
+            ...(options.resolvedByEvent ? { resolvedByEvent: true } : {}),
+        };
         if (existingIndex >= 0) {
-            state.beanWorkItems = state.beanWorkItems.map((item, index) => index === existingIndex ? { ...item, ...next } : item);
+            state.beanWorkItems = state.beanWorkItems.map((item, index) => {
+                if (index !== existingIndex) return item;
+                if (item.resolvedByEvent && id === 'realtime-request' && options.source !== 'event' && !beanWorkItemDone(item)) {
+                    return { ...item, status: beanWorkItemDone(item) ? item.status : normalizedStatus };
+                }
+                return { ...item, ...next, resolvedByEvent: Boolean(options.resolvedByEvent) };
+            });
             if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
+            refreshBeanStatusTag();
+            return;
+        }
+        const placeholderIndex = beanWorkPlaceholderIndex(label);
+        if (placeholderIndex >= 0 && options.source === 'event') {
+            state.beanWorkItems = state.beanWorkItems.map((item, index) => index === placeholderIndex
+                ? { ...item, label, status: normalizedStatus, resolvedByEvent: true, source: 'event' }
+                : item);
+            if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
+            refreshBeanStatusTag();
+            return;
+        }
+        if (isGenericBeanWorkLabel(label)) {
             refreshBeanStatusTag();
             return;
         }
@@ -1937,6 +1961,10 @@ if (mount) {
             refreshBeanStatusTag();
             return;
         }
+        if (isGenericBeanWorkLabel(label)) {
+            completeActiveBeanWorkItems();
+            return;
+        }
         if (label) upsertBeanWorkItem(id, label, 'completed');
     }
 
@@ -1947,10 +1975,18 @@ if (mount) {
         refreshBeanStatusTag();
     }
 
-    function scheduleBeanWorkStatusClear(delayMs = 2600) {
+    function markActiveBeanWorkItems(status) {
+        if (!state.beanWorkItems.length) return;
+        state.beanWorkItems = state.beanWorkItems.map((item) => beanWorkItemDone(item) ? item : { ...item, status });
+        if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
+        refreshBeanStatusTag();
+    }
+
+    function scheduleBeanWorkStatusClear(delayMs = 1900) {
         if (state.busy || realtimeBackgroundWorkPending()) return;
         window.clearTimeout(beanWorkStatusClearTimer);
-        beanWorkStatusHoldUntil = Date.now() + delayMs;
+        const delay = Math.max(delayMs, beanWorkStatusMinUntil - Date.now(), 0);
+        beanWorkStatusHoldUntil = Date.now() + delay;
         beanWorkStatusClearTimer = window.setTimeout(() => {
             beanWorkStatusClearTimer = 0;
             if (state.busy || realtimeBackgroundWorkPending()) {
@@ -1958,9 +1994,10 @@ if (mount) {
                 return;
             }
             beanWorkStatusHoldUntil = 0;
+            beanWorkStatusMinUntil = 0;
             state.beanWorkItems = [];
             refreshBeanStatusTag();
-        }, delayMs);
+        }, delay);
     }
 
     function cancelBeanWorkStatusClear() {
@@ -1977,7 +2014,41 @@ if (mount) {
     function ensureRealtimeRequestWorkItem(content, status = 'running') {
         const label = beanWorkLabelForRequest(content);
         if (!label) return;
+        const existing = state.beanWorkItems.find((item) => item.id === 'realtime-request');
+        if (existing?.resolvedByEvent && !beanWorkItemDone(existing)) {
+            refreshBeanStatusTag();
+            return;
+        }
         upsertBeanWorkItem('realtime-request', label, status);
+    }
+
+    function beanWorkPlaceholderIndex(label) {
+        const eventCategory = beanWorkCategoryForLabel(label);
+        return state.beanWorkItems.findIndex((item) => {
+            if (item.id !== 'realtime-request' || item.resolvedByEvent || beanWorkItemDone(item)) return false;
+            const placeholderCategory = beanWorkCategoryForLabel(item.label);
+            return !eventCategory || !placeholderCategory || eventCategory === placeholderCategory;
+        });
+    }
+
+    function beanWorkCategoryForLabel(label) {
+        const text = String(label || '').toLowerCase();
+        if (!text) return '';
+        const action = /\b(?:delete|deleting|remove|removing|cancel|canceling|cancelled)\b/.test(text) ? 'delete'
+            : /\b(?:create|creating|add|adding|schedule|scheduling)\b/.test(text) ? 'create'
+            : /\b(?:update|updating|change|changing|move|moving|reschedule|rescheduling)\b/.test(text) ? 'update'
+            : /\b(?:save|saving|remember|memory)\b/.test(text) ? 'save'
+            : '';
+        const target = /\b(?:calendar event|event|calendar|appointment|meeting)\b/.test(text) ? 'event'
+            : /\b(?:reminder)\b/.test(text) ? 'reminder'
+            : /\b(?:task|todo)\b/.test(text) ? 'task'
+            : /\b(?:memory)\b/.test(text) ? 'memory'
+            : '';
+        return action || target ? `${action}:${target}` : '';
+    }
+
+    function isGenericBeanWorkLabel(label) {
+        return /^(?:finish|finished|background work|finish background work|bean started working|read request|follow up on voice request|working on request)$/i.test(String(label || '').trim());
     }
 
     function beanWorkLabelForRequest(content) {
@@ -2018,7 +2089,7 @@ if (mount) {
         normalizeList(events).forEach((event) => {
             const item = beanWorkItemFromEvent(event);
             if (!item) return;
-            upsertBeanWorkItem(item.id, item.label, item.status);
+            upsertBeanWorkItem(item.id, item.label, item.status, { source: 'event', resolvedByEvent: true });
         });
     }
 
@@ -2028,12 +2099,7 @@ if (mount) {
         const payload = event?.payload || {};
         const id = event?.id ? `event-${event.id}` : `${type}-${JSON.stringify(payload).slice(0, 80)}`;
         if (!type || type === 'runtime.run_queued') return null;
-        if (type === 'runtime.run_started') {
-            return { id: `run-${payload.run_id || payload.runId || id}`, label: 'Bean started working', status: 'completed' };
-        }
-        if (type === 'runtime.run_completed') {
-            return { id: `run-completed-${payload.run_id || payload.runId || id}`, label: 'Finish request', status: status || 'completed' };
-        }
+        if (type === 'runtime.run_started' || type === 'runtime.run_completed') return null;
         if (type === 'runtime.run_failed') return { id, label: 'Finish request', status: 'failed' };
         if (!type.startsWith('assistant.')) return null;
         const label = beanWorkEventLabel(type, payload);
@@ -2293,6 +2359,7 @@ if (mount) {
 
     function kioskVoicePillMarkup(options = {}) {
         const model = kioskVoiceStatusTagModel(options);
+        const workListClass = `hb-bean-work-list hb-kiosk-voice-work-list ${model.workItems.length ? '' : 'hb-kiosk-voice-work-list-empty'}`.trim();
         return `
             <div class="hb-kiosk-voice-status-shell ${model.workActive ? 'hb-kiosk-voice-status-shell-working' : ''}">
                 <button class="hb-kiosk-voice-pill hb-kiosk-voice-pill-button hb-kiosk-voice-pill-${escapeAttr(model.phase)} ${model.cancelable ? 'hb-kiosk-voice-pill-cancelable' : ''} ${options.standalone ? 'hb-kiosk-voice-pill-standalone' : ''} ${options.topbar ? 'hb-kiosk-voice-pill-topbar' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-label="${escapeAttr(model.actionLabel)}" title="${escapeAttr(model.actionLabel)}" aria-pressed="${model.ready}">
@@ -2300,7 +2367,7 @@ if (mount) {
                     <span class="hb-kiosk-voice-pill-label">${escapeHtml(model.label)}</span>
                     ${model.workItems.length ? `<span class="hb-kiosk-voice-work-count">${escapeHtml(`${model.completedCount}/${model.workItems.length}`)}</span>` : ''}
                 </button>
-                ${model.workItems.length ? beanWorkListMarkup(model.workItems, 'hb-bean-work-list hb-kiosk-voice-work-list') : ''}
+                ${beanWorkListMarkup(model.workItems, workListClass)}
             </div>`;
     }
 
@@ -7609,19 +7676,19 @@ if (mount) {
                     return;
                 }
                 if (status === 'completed') {
-                    completeBeanWorkItem(`run-${id}`, 'Finish background work');
+                    completeActiveBeanWorkItems();
                     handleRealtimeAssistantRunCompleted(run, context);
                     return;
                 }
                 if (status === 'failed') {
-                    upsertBeanWorkItem(`run-${id}`, 'Finish background work', 'failed');
+                    markActiveBeanWorkItems('failed');
                     setRealtimeBackgroundWorkActive(false);
                     const message = run?.error ? `I could not finish that: ${run.error}` : 'I could not finish that request.';
                     deliverRealtimeBackgroundResult(message, id);
                     return;
                 }
                 if (status === 'cancelled') {
-                    upsertBeanWorkItem(`run-${id}`, 'Finish background work', 'cancelled');
+                    markActiveBeanWorkItems('cancelled');
                     setRealtimeBackgroundWorkActive(false);
                     deliverRealtimeBackgroundResult('That request was cancelled.', id);
                 }
@@ -8520,19 +8587,56 @@ if (mount) {
             } else {
                 countNode?.remove();
             }
-            const listNode = shell.querySelector('.hb-kiosk-voice-work-list');
-            if (model.workItems.length) {
-                const listMarkup = beanWorkListMarkup(model.workItems, 'hb-bean-work-list hb-kiosk-voice-work-list');
-                if (listNode) {
-                    listNode.outerHTML = listMarkup;
-                } else {
-                    pill.insertAdjacentHTML('afterend', listMarkup);
-                }
-            } else {
-                listNode?.remove();
-            }
+            updateBeanWorkListInPlace(shell, model.workItems);
         });
         return true;
+    }
+
+    function updateBeanWorkListInPlace(shell, items) {
+        const pill = shell.querySelector('[data-toggle-kiosk-voice]');
+        let list = shell.querySelector('.hb-kiosk-voice-work-list');
+        if (!list) {
+            pill?.insertAdjacentHTML('afterend', beanWorkListMarkup([], 'hb-bean-work-list hb-kiosk-voice-work-list hb-kiosk-voice-work-list-empty'));
+            list = shell.querySelector('.hb-kiosk-voice-work-list');
+        }
+        if (!list) return;
+        list.classList.toggle('hb-kiosk-voice-work-list-empty', items.length === 0);
+        if (items.length) {
+            list.removeAttribute('aria-hidden');
+        } else {
+            list.setAttribute('aria-hidden', 'true');
+        }
+        const existing = new Map(Array.from(list.querySelectorAll('[data-bean-work-id]')).map((node) => [node.dataset.beanWorkId || '', node]));
+        items.forEach((item, index) => {
+            const id = String(item.id || `work-${index}`);
+            let row = existing.get(id);
+            if (!row) {
+                row = createBeanWorkItemNode(item);
+            }
+            updateBeanWorkItemNode(row, item);
+            const current = list.children[index] || null;
+            if (row !== current) list.insertBefore(row, current);
+            existing.delete(id);
+        });
+        existing.forEach((row) => row.remove());
+    }
+
+    function createBeanWorkItemNode(item) {
+        const template = document.createElement('template');
+        template.innerHTML = beanWorkItemMarkup(item).trim();
+        return template.content.firstElementChild;
+    }
+
+    function updateBeanWorkItemNode(row, item) {
+        const done = beanWorkItemDone(item);
+        row.dataset.beanWorkId = String(item.id || '');
+        row.classList.toggle('hb-bean-work-item-done', done);
+        const checkbox = row.querySelector('[data-bean-work-checkbox]');
+        if (checkbox) checkbox.innerHTML = done ? icons.checkCircle : '';
+        const label = row.querySelector('[data-bean-work-label]');
+        if (label && label.textContent !== String(item.label || 'Bean work item')) {
+            label.textContent = String(item.label || 'Bean work item');
+        }
     }
 
     function openKioskChat() {
