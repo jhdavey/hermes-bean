@@ -2254,6 +2254,7 @@ if (mount) {
                     ${overflowMenuAction('today', 'Calendar', icons.calendar)}
                     ${overflowMenuAction('tasks', 'Tasks', icons.tasks)}
                     ${overflowMenuAction('reminders', 'Reminders', icons.reminders)}
+                    ${userIsAdmin() ? overflowMenuAction('admin', 'Admin', icons.activity) : ''}
                     ${workspaceItems.length > 1 ? `<label class="hb-overflow-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
                     <button class="hb-overflow-action" type="button" data-open-create="event">${icons.add}<span>New event</span></button>
                     <button class="hb-overflow-action" type="button" data-open-create="task">${icons.tasks}<span>New task</span></button>
@@ -2399,7 +2400,6 @@ if (mount) {
             ['reminders', 'Reminders', icons.reminders],
             ['settings', 'Settings', icons.settings],
         ];
-        if (userIsAdmin()) nav.splice(3, 0, ['admin', 'Admin', icons.activity]);
         return `
             <nav class="hb-bottom-menu" aria-label="App navigation">
                 <div class="hb-bottom-bar">
