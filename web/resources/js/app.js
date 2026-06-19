@@ -236,6 +236,13 @@ if (mount) {
     let kioskRealtimeSuppressNextAssistantPersist = false;
     let kioskRealtimeVoiceOnlyAssistant = false;
     let kioskRealtimeIgnoreNextFunctionCalls = false;
+    let kioskRealtimeInputAudioContext = null;
+    let kioskRealtimeInputAudioSource = null;
+    let kioskRealtimeInputAnalyser = null;
+    let kioskRealtimeInputMonitorFrame = 0;
+    let kioskRealtimeInputActiveSince = 0;
+    let kioskRealtimeInputQuietSince = 0;
+    let kioskRealtimeInputLastActiveAt = 0;
     const kioskRealtimeUserTranscriptDrafts = new Map();
     let kioskRealtimeResponseTimer = 0;
     let kioskRealtimeToolFallbackTimer = 0;
@@ -6124,6 +6131,7 @@ if (mount) {
             stream = await navigator.mediaDevices.getUserMedia({ audio: await kioskAudioConstraints() });
             await rememberKioskMicrophoneFromStream(stream);
             kioskMicrophoneReady = true;
+            startKioskRealtimeInputActivityMonitor(stream);
             await ensureRealtimeChatSession();
 
             peerConnection = new RTCPeerConnection();
@@ -6398,10 +6406,98 @@ if (mount) {
                 realtime.remoteAudio.srcObject = null;
             } catch (_) {}
         }
+        stopKioskRealtimeInputActivityMonitor();
         if (!options.preserveStatus) {
             state.kioskVoicePhase = 'idle';
             state.kioskVoiceMessage = '';
         }
+    }
+
+    function startKioskRealtimeInputActivityMonitor(stream) {
+        stopKioskRealtimeInputActivityMonitor({ keepContext: true });
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass || !stream?.getAudioTracks?.().length) return;
+        try {
+            kioskRealtimeInputAudioContext ??= new AudioContextClass();
+            if (kioskRealtimeInputAudioContext.state === 'suspended') {
+                kioskRealtimeInputAudioContext.resume().catch(() => {});
+            }
+            kioskRealtimeInputAudioSource = kioskRealtimeInputAudioContext.createMediaStreamSource(stream);
+            kioskRealtimeInputAnalyser = kioskRealtimeInputAudioContext.createAnalyser();
+            kioskRealtimeInputAnalyser.fftSize = 512;
+            kioskRealtimeInputAnalyser.smoothingTimeConstant = 0.55;
+            kioskRealtimeInputAudioSource.connect(kioskRealtimeInputAnalyser);
+            kioskRealtimeInputQuietSince = Date.now();
+            monitorKioskRealtimeInputActivity();
+        } catch (_) {
+            stopKioskRealtimeInputActivityMonitor({ keepContext: true });
+        }
+    }
+
+    function stopKioskRealtimeInputActivityMonitor(options = {}) {
+        window.cancelAnimationFrame(kioskRealtimeInputMonitorFrame);
+        kioskRealtimeInputMonitorFrame = 0;
+        try { kioskRealtimeInputAudioSource?.disconnect(); } catch (_) {}
+        try { kioskRealtimeInputAnalyser?.disconnect(); } catch (_) {}
+        kioskRealtimeInputAudioSource = null;
+        kioskRealtimeInputAnalyser = null;
+        kioskRealtimeInputActiveSince = 0;
+        kioskRealtimeInputQuietSince = 0;
+        kioskRealtimeInputLastActiveAt = 0;
+        if (!options.keepContext && kioskRealtimeInputAudioContext) {
+            kioskRealtimeInputAudioContext.close().catch(() => {});
+            kioskRealtimeInputAudioContext = null;
+        }
+    }
+
+    function monitorKioskRealtimeInputActivity() {
+        const analyser = kioskRealtimeInputAnalyser;
+        if (!analyser || !state.kioskVoiceEnabled) return;
+        const samples = new Uint8Array(analyser.fftSize);
+        const read = () => {
+            if (!kioskRealtimeInputAnalyser || !state.kioskVoiceEnabled) return;
+            kioskRealtimeInputAnalyser.getByteTimeDomainData(samples);
+            let sum = 0;
+            for (let index = 0; index < samples.length; index += 1) {
+                const centered = (samples[index] - 128) / 128;
+                sum += centered * centered;
+            }
+            const level = Math.sqrt(sum / samples.length);
+            const now = Date.now();
+            const active = level > 0.026;
+            if (active) {
+                kioskRealtimeInputQuietSince = 0;
+                kioskRealtimeInputActiveSince ||= now;
+                kioskRealtimeInputLastActiveAt = now;
+                if (now - kioskRealtimeInputActiveSince > 70) {
+                    showOptimisticKioskListening();
+                }
+            } else {
+                kioskRealtimeInputActiveSince = 0;
+                kioskRealtimeInputQuietSince ||= now;
+                if (now - kioskRealtimeInputQuietSince > 1800) {
+                    clearOptimisticKioskListening();
+                }
+            }
+            kioskRealtimeInputMonitorFrame = window.requestAnimationFrame(read);
+        };
+        kioskRealtimeInputMonitorFrame = window.requestAnimationFrame(read);
+    }
+
+    function showOptimisticKioskListening() {
+        if (!kioskRealtimeConnected()) return;
+        if (realtimeAssistantOutputActive() || realtimeAssistantRecentlyOutput()) return;
+        if (realtimeBackgroundWorkPending() && !kioskConversationActive) return;
+        if (!['idle', 'armed', 'listening'].includes(state.kioskVoicePhase)) return;
+        setKioskVoiceStatus('listening', 'listening');
+    }
+
+    function clearOptimisticKioskListening() {
+        if (!kioskRealtimeConnected()) return;
+        if (kioskConversationActive || kioskRealtimePendingUser || kioskRealtimeResponseTimer || realtimeAssistantOutputActive()) return;
+        if (Date.now() - kioskRealtimeInputLastActiveAt < 1800) return;
+        if (state.kioskVoicePhase !== 'listening') return;
+        setKioskVoiceStatus('armed', 'Say hey bean');
     }
 
     function handleKioskRealtimeEvent(event) {
@@ -6424,7 +6520,7 @@ if (mount) {
                 kioskConversationTimer = 0;
             }
             if (realtimeAssistantRecentlyOutput()) return;
-            if (kioskConversationActive) {
+            if (kioskConversationActive || ['idle', 'armed'].includes(state.kioskVoicePhase)) {
                 setKioskVoiceStatus('listening', 'listening');
             }
             return;
