@@ -4899,6 +4899,10 @@
     margin-top: 12px;
 }
 
+.hb-topbar-month-cluster .hb-month-current {
+    margin-top: 0;
+}
+
 @media (max-width: 640px) {
     .hb-billing-plan-row {
         grid-template-columns: 1fr;
@@ -5178,9 +5182,7 @@
         --hb-topbar-date-font-size: 22px;
     }
 
-    .hb-top-nav,
-    .hb-create-menu,
-    .hb-topbar-action {
+    .hb-top-nav {
         display: none;
     }
 }
@@ -5205,6 +5207,44 @@
 @media (max-width: 899px) {
     .hb-topbar-bean-controls {
         display: none;
+    }
+
+    .hb-topbar {
+        flex-wrap: nowrap;
+    }
+
+    .hb-header-pill:not(.hb-month-pill) {
+        order: 1;
+    }
+
+    .hb-month-pill {
+        order: 2;
+    }
+
+    .hb-topbar-month-cluster {
+        order: 3;
+    }
+
+    .hb-spacer {
+        order: 10;
+        display: block;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .hb-create-menu {
+        order: 11;
+        flex: 0 0 auto;
+    }
+
+    .hb-critical-menu {
+        order: 12;
+        flex: 0 0 auto;
+    }
+
+    .hb-profile-menu {
+        order: 13;
+        flex: 0 0 auto;
     }
 }
 
@@ -5258,17 +5298,13 @@
     }
 
     .hb-topbar {
-        --hb-topbar-date-font-size: 20px;
-        height: auto;
+        --hb-topbar-date-font-size: 16px;
+        height: 58px;
         min-height: 58px;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         align-content: center;
-        gap: 6px;
-        padding: 8px 10px;
-    }
-
-    .hb-spacer {
-        display: none;
+        gap: 4px;
+        padding: 8px;
     }
 
     .hb-main {
@@ -5286,15 +5322,17 @@
     }
 
     .hb-header-pill {
-        min-height: 32px;
-        max-width: 35vw;
+        min-height: 30px;
+        flex: 0 1 auto;
+        max-width: 72px;
         border-color: transparent;
         border-radius: 0;
         background: transparent;
-        padding: 5px 4px;
+        gap: 4px;
+        padding: 4px 2px;
         text-decoration: underline;
         text-decoration-thickness: 1.5px;
-        text-underline-offset: 5px;
+        text-underline-offset: 4px;
         overflow: hidden;
         text-overflow: ellipsis;
     }
@@ -5306,9 +5344,9 @@
     }
 
     .hb-header-pill svg {
-        width: 18px;
-        height: 18px;
-        flex-basis: 18px;
+        width: 16px;
+        height: 16px;
+        flex-basis: 16px;
     }
 
     .hb-topbar-current-time {
@@ -5316,42 +5354,45 @@
     }
 
     .hb-month-pill {
-        max-width: 34vw;
+        max-width: 88px;
     }
 
     .hb-topbar-month-cluster {
-        order: 3;
-        flex: 0 1 auto;
-        max-width: calc(100vw - 20px);
+        flex: 1 1 106px;
+        min-width: 0;
+        max-width: 116px;
         justify-content: flex-start;
+        gap: 2px;
     }
 
     .hb-month-nav {
         justify-content: flex-start;
-        gap: 4px;
+        gap: 2px;
     }
 
     .hb-month-arrow {
-        width: 32px;
-        height: 32px;
-        flex-basis: 32px;
+        width: 24px;
+        height: 30px;
+        flex-basis: 24px;
         border-color: transparent;
         border-radius: 0;
         background: transparent;
     }
 
     .hb-month-current {
-        min-height: 32px;
-        max-width: 112px;
+        min-height: 30px;
+        flex: 1 1 0;
+        max-width: 58px;
         border-color: transparent;
         border-radius: 0;
         background: transparent;
-        padding: 5px 4px;
-        font-size: 20px;
+        padding: 4px 2px;
+        font-size: 15px;
         font-weight: 500;
         text-decoration: underline;
         text-decoration-thickness: 1.5px;
-        text-underline-offset: 5px;
+        text-underline-offset: 4px;
+        margin-top: 0;
     }
 
     .hb-create-menu {
@@ -5360,6 +5401,28 @@
 
     .hb-create-menu .hb-topbar-action {
         display: inline-grid;
+    }
+
+    .hb-icon-button {
+        width: 32px;
+        height: 32px;
+    }
+
+    .hb-critical {
+        min-width: 22px;
+        font-size: 24px;
+    }
+
+    .hb-profile-trigger {
+        width: 34px;
+        height: 34px;
+        min-height: 34px;
+    }
+
+    .hb-avatar {
+        width: 30px;
+        height: 30px;
+        flex-basis: 30px;
     }
 
     .hb-profile-popover {
