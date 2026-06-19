@@ -3654,6 +3654,7 @@
 .hb-mobile-bean-button::before {
     inset: -12px;
     background: radial-gradient(circle, rgba(var(--hb-accent-rgb), .24), rgba(var(--hb-accent-rgb), .10) 50%, transparent 72%);
+    display: none;
     opacity: .72;
     filter: blur(5px);
 }
@@ -3678,12 +3679,12 @@
 }
 
 .hb-mobile-bean-button.hb-bean-button-listening {
-    border-color: rgba(22, 163, 74, .64);
-    box-shadow: 0 16px 40px rgba(22, 163, 74, .48), 0 0 0 6px rgba(34, 197, 94, .12);
+    border-color: rgba(var(--hb-accent-rgb), .76);
+    box-shadow: 0 14px 28px rgba(15, 23, 42, .12), inset 0 1px 0 rgba(255, 255, 255, .92);
 }
 
 .hb-mobile-bean-button.hb-bean-button-listening::before {
-    animation: hb-mobile-bean-listening-pulse 1.15s ease-in-out infinite;
+    animation: none;
 }
 
 .hb-kiosk-voice-pill {
@@ -5298,13 +5299,13 @@
     }
 
     .hb-topbar {
-        --hb-topbar-date-font-size: 16px;
+        --hb-topbar-date-font-size: 14px;
         height: 58px;
         min-height: 58px;
         flex-wrap: nowrap;
         align-content: center;
-        gap: 4px;
-        padding: 8px;
+        gap: 3px;
+        padding: 8px 6px;
     }
 
     .hb-main {
@@ -5324,11 +5325,11 @@
     .hb-header-pill {
         min-height: 30px;
         flex: 0 1 auto;
-        max-width: 72px;
+        max-width: 64px;
         border-color: transparent;
         border-radius: 0;
         background: transparent;
-        gap: 4px;
+        gap: 3px;
         padding: 4px 2px;
         text-decoration: underline;
         text-decoration-thickness: 1.5px;
@@ -5338,15 +5339,19 @@
     }
 
     .hb-header-pill span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         text-decoration: inherit;
         text-decoration-thickness: inherit;
         text-underline-offset: inherit;
     }
 
     .hb-header-pill svg {
-        width: 16px;
-        height: 16px;
-        flex-basis: 16px;
+        width: 15px;
+        height: 15px;
+        flex-basis: 15px;
     }
 
     .hb-topbar-current-time {
@@ -5354,13 +5359,13 @@
     }
 
     .hb-month-pill {
-        max-width: 88px;
+        max-width: 82px;
     }
 
     .hb-topbar-month-cluster {
-        flex: 1 1 106px;
+        flex: 0 1 112px;
         min-width: 0;
-        max-width: 116px;
+        max-width: 112px;
         justify-content: flex-start;
         gap: 2px;
     }
@@ -5371,9 +5376,9 @@
     }
 
     .hb-month-arrow {
-        width: 24px;
+        width: 20px;
         height: 30px;
-        flex-basis: 24px;
+        flex-basis: 20px;
         border-color: transparent;
         border-radius: 0;
         background: transparent;
@@ -5382,12 +5387,12 @@
     .hb-month-current {
         min-height: 30px;
         flex: 1 1 0;
-        max-width: 58px;
+        max-width: 68px;
         border-color: transparent;
         border-radius: 0;
         background: transparent;
         padding: 4px 2px;
-        font-size: 15px;
+        font-size: 13px;
         font-weight: 500;
         text-decoration: underline;
         text-decoration-thickness: 1.5px;
@@ -5404,7 +5409,7 @@
     }
 
     .hb-icon-button {
-        width: 32px;
+        width: 30px;
         height: 32px;
     }
 
@@ -5414,15 +5419,15 @@
     }
 
     .hb-profile-trigger {
-        width: 34px;
+        width: 32px;
         height: 34px;
         min-height: 34px;
     }
 
     .hb-avatar {
-        width: 30px;
-        height: 30px;
-        flex-basis: 30px;
+        width: 29px;
+        height: 29px;
+        flex-basis: 29px;
     }
 
     .hb-profile-popover {
@@ -5612,5 +5617,56 @@
     .hb-kiosk-voice-pill-standalone {
         right: 24px;
         max-width: calc(100vw - 48px);
+    }
+}
+
+@media (max-width: 430px) {
+    .hb-topbar {
+        --hb-topbar-date-font-size: 13px;
+        gap: 2px;
+        padding-left: 5px;
+        padding-right: 5px;
+    }
+
+    .hb-header-pill {
+        max-width: 60px;
+    }
+
+    .hb-month-pill {
+        max-width: 76px;
+    }
+
+    .hb-topbar-month-cluster {
+        flex-basis: 104px;
+        max-width: 104px;
+    }
+
+    .hb-month-arrow {
+        width: 18px;
+        flex-basis: 18px;
+    }
+
+    .hb-month-current {
+        max-width: 64px;
+        font-size: 12px;
+    }
+
+    .hb-icon-button {
+        width: 28px;
+    }
+
+    .hb-critical {
+        min-width: 20px;
+        font-size: 22px;
+    }
+
+    .hb-profile-trigger {
+        width: 30px;
+    }
+
+    .hb-avatar {
+        width: 28px;
+        height: 28px;
+        flex-basis: 28px;
     }
 }
