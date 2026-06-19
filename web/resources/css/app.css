@@ -360,7 +360,7 @@
 .hb-topbar-current-time {
     color: var(--hb-text);
     font-size: var(--hb-topbar-date-font-size, 24px);
-    font-weight: 500;
+    font-weight: 900;
     letter-spacing: 0;
     line-height: 1;
     text-shadow: none;
@@ -410,16 +410,14 @@
 }
 
 .hb-critical {
-    width: auto;
-    height: auto;
-    min-width: 28px;
-    padding: 0 3px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
     border: 0;
-    background: transparent;
-    color: var(--hb-accent-strong);
-    font-size: 28px;
+    background: var(--hb-critical-star);
+    color: #422006;
+    font-size: 13px;
     font-weight: 900;
-    line-height: 1;
 }
 
 .hb-critical-menu {
@@ -438,7 +436,7 @@
 .hb-critical-menu[open] .hb-critical,
 .hb-critical-menu:hover .hb-critical {
     transform: translateY(-1px);
-    box-shadow: none;
+    box-shadow: 0 9px 20px rgba(245, 158, 11, .28);
 }
 
 .hb-critical-popover {
