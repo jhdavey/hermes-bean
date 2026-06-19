@@ -2405,6 +2405,10 @@
     white-space: nowrap;
 }
 
+.hb-month-event-title .hb-critical-star {
+    font-size: 11px;
+}
+
 .hb-agenda {
     display: grid;
     gap: 8px;

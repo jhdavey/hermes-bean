@@ -2631,15 +2631,19 @@ if (mount) {
     }
 
     function dayBoardMarkup(items, kind, emptyText) {
-        const days = itemBoardDays(items, kind);
-        const allLabel = kind === 'task' ? 'All tasks' : 'All reminders';
-        const allItems = items.slice().sort(itemSortFunction(kind));
+        const days = itemBoardDays();
+        const visibleDaySet = new Set(days);
+        const futureLabel = kind === 'task' ? 'Future tasks' : 'Future reminders';
+        const futureEmptyText = kind === 'task' ? 'No future tasks' : 'No future reminders';
+        const futureItems = items
+            .filter((item) => !visibleDaySet.has(itemBoardDateOnly(item, kind)))
+            .sort(itemSortFunction(kind));
         return `
             <div class="hb-day-board-shell">
                 <div class="hb-day-board" aria-label="${escapeAttr(kind === 'task' ? 'Tasks by day' : 'Reminders by day')}">
                     ${days.map((day) => dayBoardColumnMarkup(day, itemsForItemDay(items, kind, day), kind, emptyText)).join('')}
                 </div>
-                ${dayBoardColumnMarkup(null, allItems, kind, emptyText, allLabel, 'hb-day-board-column-all')}
+                ${dayBoardColumnMarkup(null, futureItems, kind, futureEmptyText, futureLabel, 'hb-day-board-column-all')}
             </div>`;
     }
 
