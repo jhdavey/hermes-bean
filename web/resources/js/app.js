@@ -1080,10 +1080,11 @@ if (mount) {
         const forgot = state.authMode === 'forgot';
         return `
             <div class="hb-app">
-                <main class="hb-auth-wrap">
-                    <section class="hb-card hb-auth-card">
+                <main class="hb-auth-wrap ${register ? 'hb-auth-wrap-register' : ''}">
+                    ${register ? `<img class="hb-auth-register-logo" src="${escapeAttr(logoUrl)}" alt="HeyBean logo">` : ''}
+                    <section class="hb-card hb-auth-card ${register ? 'hb-auth-card-register' : ''}">
                         <div class="hb-auth-title">
-                            ${register ? `<span class="hb-section-icon">${icons.user}</span>` : `<img src="${escapeAttr(logoUrl)}" alt="">`}
+                            ${register ? '' : `<img src="${escapeAttr(logoUrl)}" alt="">`}
                             <div>
                                 <h1>${forgot ? 'Reset password' : register ? 'We are currently onboarding beta users.' : 'Login'}</h1>
                                 ${register ? "<p class=\"hb-register-intro\">Sign up for early access and we'll let you know as soon as we are ready to onboard you!</p>" : ''}

@@ -923,9 +923,27 @@
     padding: 16px 20px 28px;
 }
 
+.hb-auth-wrap-register {
+    align-content: center;
+    justify-items: center;
+    gap: 14px;
+}
+
+.hb-auth-register-logo {
+    width: 58px;
+    height: 58px;
+    display: block;
+    border-radius: 16px;
+    box-shadow: 0 10px 28px rgba(16, 24, 40, .08);
+}
+
 .hb-auth-card {
     width: min(440px, 100%);
     padding: 18px;
+}
+
+.hb-auth-card-register {
+    padding: 24px;
 }
 
 .hb-auth-title {
@@ -945,9 +963,11 @@
 
 .hb-auth-title h1 {
     margin: 0;
-    font-size: 18px;
-    line-height: 1.24;
-    font-weight: 900;
+    color: var(--hb-text);
+    font-size: 24px;
+    line-height: 1.12;
+    font-weight: 800;
+    letter-spacing: -.02em;
 }
 
 .hb-auth-card .hb-label {
@@ -978,9 +998,11 @@
 
 .hb-auth-title p.hb-register-intro {
     max-width: 360px;
-    margin: 8px auto 0;
-    font-size: 13px;
-    line-height: 1.45;
+    margin: 10px auto 0;
+    color: var(--hb-muted);
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.55;
 }
 
 .hb-form {
