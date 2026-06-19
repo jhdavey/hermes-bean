@@ -1118,7 +1118,7 @@ if (mount) {
                 `}
                 <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? (register ? 'Signing up…' : 'Signing in…') : (register ? 'Sign up for early access' : 'Sign in')}</button>
                 <div class="hb-link-row">
-                    <button class="hb-button-ghost" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? 'Already have an account? Sign in' : 'Join the waitlist'}</button>
+                    <button class="hb-button-ghost ${register ? 'hb-auth-switch-action' : ''}" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? '<span class="hb-auth-link-prompt">Already have an account?</span><span class="hb-auth-link-action">Sign In</span>' : 'Join the waitlist'}</button>
                     <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
                 </div>
             </form>`;
