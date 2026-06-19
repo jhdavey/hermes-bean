@@ -187,6 +187,11 @@ if (mount) {
     let voiceStartPending = false;
     let voiceSubmitOnEnd = false;
     let suppressNextSendClick = false;
+    let mobileBeanHoldTimer = 0;
+    let mobileBeanPointerId = null;
+    let mobileBeanPressing = false;
+    let mobileBeanHoldStarted = false;
+    let mobileBeanClickSuppressed = false;
     let timelineDrag = null;
     let timelineSuppressClick = false;
     let dashboardChangeAbort = null;
@@ -2251,6 +2256,8 @@ if (mount) {
                     ${overflowMenuAction('reminders', 'Reminders', icons.reminders)}
                     ${workspaceItems.length > 1 ? `<label class="hb-overflow-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
                     <button class="hb-overflow-action" type="button" data-open-create="event">${icons.add}<span>New event</span></button>
+                    <button class="hb-overflow-action" type="button" data-open-create="task">${icons.tasks}<span>New task</span></button>
+                    <button class="hb-overflow-action" type="button" data-open-create="reminder">${icons.reminders}<span>New reminder</span></button>
                     <button class="hb-overflow-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
                     ${overflowMenuAction('settings', 'Settings', icons.settings)}
                 </div>
@@ -2397,10 +2404,20 @@ if (mount) {
             <nav class="hb-bottom-menu" aria-label="App navigation">
                 <div class="hb-bottom-bar">
                     ${nav.slice(0, 2).map(navButton).join('')}
-                    <span></span>
+                    <span class="hb-bottom-bar-center-spacer" aria-hidden="true"></span>
                     ${nav.slice(2).map(navButton).join('')}
                 </div>
+                ${mobileBeanButtonMarkup()}
             </nav>`;
+    }
+
+    function mobileBeanButtonMarkup() {
+        const active = state.selected === 'bean' || state.chatExpanded;
+        const listening = state.voiceListening;
+        return `
+            <button class="hb-bean-button hb-mobile-bean-button ${active ? 'hb-bean-button-active' : ''} ${listening ? 'hb-bean-button-listening' : ''}" type="button" data-mobile-bean-button aria-label="Bean chat. Hold to dictate, tap to type." title="Bean">
+                <img src="${escapeAttr(logoUrl)}" alt="">
+            </button>`;
     }
 
     function topNavMarkup() {
@@ -2453,9 +2470,10 @@ if (mount) {
         const endHour = Number(localStorage.getItem('heybean.calendar.endHour') || 22);
         const hours = Array.from({ length: Math.max(1, endHour - startHour + 1) }, (_, index) => startHour + index);
         const minDayWidth = timelineDayMinWidth();
+        const gutterWidth = timelineGutterWidth();
         const currentTimeMarker = currentTimeMarkerMarkup(days, startHour, endHour);
         return `
-            <div class="hb-timeline hb-timeline-multi-day" data-timeline-start-hour="${startHour}" data-timeline-end-hour="${endHour}" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${74 + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
+            <div class="hb-timeline hb-timeline-multi-day" data-timeline-start-hour="${startHour}" data-timeline-end-hour="${endHour}" style="--hb-hour-count:${hours.length};--hb-day-count:${days.length};--hb-day-min-width:${minDayWidth}px;--hb-timeline-min-width:${gutterWidth + (days.length * minDayWidth)}px" aria-label="${escapeAttr(calendarRangeLabel(days))} timeline">
                 <div class="hb-timeline-head">
                     <div class="hb-timeline-hour"></div>
                     ${days.map((day) => `<button class="hb-timeline-day-head ${sameDate(day, parseLocalDate(state.selectedDay)) ? 'hb-timeline-day-head-active' : ''}" type="button" data-select-day="${dateOnly(day)}" aria-pressed="${sameDate(day, parseLocalDate(state.selectedDay))}"><strong>${escapeHtml(timelineDayHeaderLabel(day))}</strong><span>${escapeHtml(monthDayLabel(day))}</span></button>`).join('')}
@@ -2492,7 +2510,7 @@ if (mount) {
         if (now < timelineStart || now > timelineEnd) return '';
 
         const minutesFromStart = (now - timelineStart) / 60000;
-        const top = Math.max(0, minutesFromStart / 60 * 64);
+        const top = Math.max(0, minutesFromStart / 60 * timelineHourHeight());
         const dayColumn = todayIndex + 2;
 
         return `
@@ -3537,7 +3555,12 @@ if (mount) {
             render();
             scrollChatToBottom();
         }));
-        mount.querySelector('[data-toggle-kiosk-voice]')?.addEventListener('click', toggleKioskVoiceMode);
+        mount.querySelectorAll('[data-toggle-kiosk-voice]').forEach((button) => button.addEventListener('click', toggleKioskVoiceMode));
+        mount.querySelectorAll('[data-mobile-bean-button]').forEach((button) => {
+            button.addEventListener('pointerdown', handleMobileBeanPointerDown);
+            button.addEventListener('click', handleMobileBeanClick);
+            button.addEventListener('contextmenu', handleMobileBeanContextMenu);
+        });
         mount.querySelector('[data-onboarding-dashboard]')?.addEventListener('click', () => {
             state.selected = 'today';
             state.chatExpanded = false;
@@ -5059,6 +5082,110 @@ if (mount) {
     function handleVoiceContextMenu(event) {
         event.preventDefault();
         event.stopPropagation();
+    }
+
+    function handleMobileBeanPointerDown(event) {
+        if (typeof event.button === 'number' && event.button !== 0) return;
+        mobileBeanPressing = true;
+        mobileBeanHoldStarted = false;
+        mobileBeanPointerId = event.pointerId;
+        mobileBeanClickSuppressed = true;
+        window.clearTimeout(mobileBeanHoldTimer);
+        mobileBeanHoldTimer = window.setTimeout(beginMobileBeanVoiceHold, 520);
+        window.addEventListener('pointerup', handleMobileBeanPointerEnd, true);
+        window.addEventListener('pointercancel', handleMobileBeanPointerCancel, true);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+    }
+
+    function handleMobileBeanPointerEnd(event) {
+        if (mobileBeanPointerId !== null && event.pointerId !== mobileBeanPointerId) return;
+        event.preventDefault();
+        finishMobileBeanPress(true);
+    }
+
+    function handleMobileBeanPointerCancel(event) {
+        if (mobileBeanPointerId !== null && event.pointerId !== mobileBeanPointerId) return;
+        event.preventDefault();
+        finishMobileBeanPress(false);
+    }
+
+    function finishMobileBeanPress(released) {
+        window.clearTimeout(mobileBeanHoldTimer);
+        mobileBeanHoldTimer = 0;
+        window.removeEventListener('pointerup', handleMobileBeanPointerEnd, true);
+        window.removeEventListener('pointercancel', handleMobileBeanPointerCancel, true);
+        window.setTimeout(() => {
+            mobileBeanClickSuppressed = false;
+        }, 350);
+
+        const wasHolding = mobileBeanHoldStarted;
+        mobileBeanPressing = false;
+        mobileBeanHoldStarted = false;
+        mobileBeanPointerId = null;
+
+        if (!released) {
+            if (wasHolding || state.voiceListening) finishVoiceHoldInput(false);
+            return;
+        }
+
+        if (!wasHolding) {
+            openBeanTextChat();
+            return;
+        }
+
+        voiceHoldPressed = false;
+        if (voiceStartPending && !state.voiceListening) return;
+        if (!voiceHoldActive && !state.voiceListening) return;
+        sendVoiceDraftImmediately();
+    }
+
+    function beginMobileBeanVoiceHold() {
+        mobileBeanHoldTimer = 0;
+        if (!mobileBeanPressing || state.busy) return;
+        mobileBeanHoldStarted = true;
+        openBeanTextChat();
+        voiceHoldPressed = true;
+        voiceStartPending = true;
+        startVoiceHoldInput().then((started) => {
+            voiceStartPending = false;
+            voiceHoldActive = started;
+            if (started && !voiceHoldPressed) {
+                finishVoiceHoldInput(false);
+            }
+        }).catch(() => {
+            voiceStartPending = false;
+            voiceHoldActive = false;
+            voiceHoldPressed = false;
+            state.voiceStatus = 'Chrome could not start voice input. Check microphone permissions and try again.';
+            state.voiceStatusTone = 'error';
+            render();
+            restartKioskVoiceListeningSoon(900);
+        });
+    }
+
+    function handleMobileBeanClick(event) {
+        if (mobileBeanClickSuppressed) {
+            event.preventDefault();
+            event.stopPropagation();
+            mobileBeanClickSuppressed = false;
+            return;
+        }
+        openBeanTextChat();
+    }
+
+    function handleMobileBeanContextMenu(event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    function openBeanTextChat() {
+        state.selected = 'bean';
+        state.chatExpanded = false;
+        state.error = '';
+        state.notice = '';
+        render();
+        scrollChatToBottom();
     }
 
     async function submitChat(event) {
@@ -9685,11 +9812,19 @@ if (mount) {
         if (visibleEnd <= dayStart || visibleStart >= dayEnd || visibleEnd <= visibleStart) return null;
         const minutesFromStart = Math.max(0, (visibleStart - dayStart) / 60000);
         const durationMinutes = Math.max(15, (visibleEnd - visibleStart) / 60000);
-        const hourHeight = 88;
+        const hourHeight = timelineHourHeight();
         return {
             minutes: Math.round(durationMinutes),
             css: `top:${(minutesFromStart / 60) * hourHeight}px;height:${(durationMinutes / 60) * hourHeight}px`,
         };
+    }
+
+    function timelineHourHeight() {
+        return window.matchMedia?.('(max-width: 700px)').matches ? 64 : 88;
+    }
+
+    function timelineGutterWidth() {
+        return window.matchMedia?.('(max-width: 700px)').matches ? 56 : 74;
     }
 
     function eventAllDay(event = null) {
@@ -9840,7 +9975,7 @@ if (mount) {
         const visibleDayCount = Math.max(1, state.calendarVisibleDayCount || calendarVisibleDayCount());
         const reservedWidth = width >= 900 ? 340 : 32;
         const estimatedTimelineWidth = Math.max(360, width - reservedWidth);
-        return Math.max(150, Math.floor((estimatedTimelineWidth - 74) / visibleDayCount));
+        return Math.max(150, Math.floor((estimatedTimelineWidth - timelineGutterWidth()) / visibleDayCount));
     }
 
     function defaultEventStart() {
@@ -10142,7 +10277,7 @@ if (mount) {
                 return;
             }
             if (!selected) return;
-            timeline.scrollLeft = Math.max(0, selected.offsetLeft - 74);
+            timeline.scrollLeft = Math.max(0, selected.offsetLeft - timelineGutterWidth());
             scrollTimelineToCurrentTime(timeline);
             updateMultiDayRowVisibility(timeline);
         });
@@ -10297,7 +10432,7 @@ if (mount) {
 
         const firstDayHead = timeline.querySelector('.hb-timeline-day-head');
         const dayWidth = firstDayHead?.getBoundingClientRect().width || timelineDayWidth(timeline);
-        const firstDayOffset = Number.isFinite(firstDayHead?.offsetLeft) ? firstDayHead.offsetLeft : 74;
+        const firstDayOffset = Number.isFinite(firstDayHead?.offsetLeft) ? firstDayHead.offsetLeft : timelineGutterWidth();
         const visibleStart = timeline.scrollLeft + firstDayOffset;
         const visibleEnd = timeline.scrollLeft + timeline.clientWidth;
         const hasVisibleMultiDayEvent = cells.some((cell, index) => {
@@ -10323,11 +10458,16 @@ if (mount) {
         const timelineEnd = new Date(now);
         timelineEnd.setHours(endHour + 1, 0, 0, 0);
         if (now < timelineStart || now > timelineEnd) return;
-        const top = ((now - timelineStart) / 60000) / 60 * 64;
+        const top = ((now - timelineStart) / 60000) / 60 * currentTimelineHourHeight(timeline);
         const label = marker.querySelector('.hb-now-label');
         marker.style.setProperty('--hb-now-top', `${top.toFixed(2)}px`);
         marker.setAttribute('aria-label', `Current time ${formatTime(now)}`);
         if (label) label.textContent = formatTime(now);
+    }
+
+    function currentTimelineHourHeight(timeline) {
+        const value = Number.parseFloat(getComputedStyle(timeline).getPropertyValue('--hb-hour-height'));
+        return Number.isFinite(value) && value > 0 ? value : timelineHourHeight();
     }
 
     function updateTopbarCurrentTime() {
