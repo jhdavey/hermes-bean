@@ -5144,6 +5144,7 @@
 
 .hb-topbar-month-cluster .hb-month-current {
     margin-top: 0;
+    text-decoration: none;
 }
 
 @media (max-width: 640px) {
@@ -5160,6 +5161,7 @@
     .hb-topbar-month-cluster {
         flex: 0 1 244px;
         max-width: min(244px, 22vw);
+        justify-content: flex-end;
     }
 
     .hb-top-nav {
