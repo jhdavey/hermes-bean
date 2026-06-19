@@ -6552,8 +6552,16 @@ if (mount) {
     function realtimeTranscriptLooksLikeFollowup(transcript) {
         const normalized = normalizedRealtimeTranscript(transcript);
         if (!normalized) return false;
-        return /^(?:what else|anything else|anything more|and\b|also\b|plus\b|what about\b|how about\b|then\b|next\b|for tomorrow\b|tomorrow\b|today\b|tonight\b|this week\b|do that\b|go ahead\b|sounds good\b)\b/.test(normalized)
-            || /^(?:can you|could you|would you)\s+(?:also|check|show|tell|add|create|move|update|remind|schedule)\b/.test(normalized);
+        return /^(?:what else|anything else|anything more|and\b|also\b|plus\b|what about\b|how about\b|then\b|next\b|do that\b|go ahead\b|sounds good\b)\b/.test(normalized)
+            || /^(?:can you|could you|would you)\s+(?:also|check|show|tell|add|create|move|update|delete|remove|cancel|remind|schedule)\b/.test(normalized)
+            || realtimeTranscriptLooksLikeAppWorkRequest(normalized);
+    }
+
+    function realtimeTranscriptLooksLikeAppWorkRequest(transcript) {
+        const command = normalizedVoiceCommand(transcript);
+        if (!command || !voiceCommandNeedsAgentWork(command)) return false;
+        return /\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember|plan|organize|prioritize)\b/.test(command)
+            || /\b(?:calendar|calendars|event|events|task|tasks|todo|to do|reminder|reminders|agenda|workspace|workspaces|google calendar)\b/.test(command);
     }
 
     function realtimeTranscriptCanContinueWithoutWake(transcript) {
@@ -6618,9 +6626,10 @@ if (mount) {
     }
 
     function handleRealtimeUserTranscript(payload) {
-        const raw = String(payload.transcript || '').trim();
-        if (!raw) return;
         const key = realtimeTranscriptDraftKey(payload);
+        const draft = key ? (kioskRealtimeUserTranscriptDrafts.get(key) || '') : '';
+        const raw = bestRealtimeTranscript(String(payload.transcript || '').trim(), draft);
+        if (!raw) return;
         if (key) kioskRealtimeUserTranscriptDrafts.delete(key);
         if (realtimeTranscriptLooksSynthetic(raw)) {
             if (realtimeAssistantOutputActive()) return;
@@ -6732,6 +6741,10 @@ if (mount) {
     function handleRealtimeUserTranscriptDelta(payload) {
         const delta = String(payload.delta || '').trim();
         if (!delta) return;
+        const key = realtimeTranscriptDraftKey(payload);
+        const previous = key ? (kioskRealtimeUserTranscriptDrafts.get(key) || '') : '';
+        const draft = mergeRealtimeTranscriptDelta(previous, delta);
+        if (key) kioskRealtimeUserTranscriptDrafts.set(key, draft);
         if (realtimeUserTranscriptLooksLikeEcho(delta)) return;
         if (realtimeAssistantOutputActive()) return;
         const hasWakePhrase = commandAfterWakePhrase(delta) !== null;
@@ -6740,16 +6753,17 @@ if (mount) {
             window.clearTimeout(kioskConversationTimer);
             kioskConversationTimer = 0;
         }
-        const key = realtimeTranscriptDraftKey(payload);
-        const previous = key ? (kioskRealtimeUserTranscriptDrafts.get(key) || '') : '';
-        const draft = mergeRealtimeTranscriptDelta(previous, delta);
-        if (key) kioskRealtimeUserTranscriptDrafts.set(key, draft);
         showRealtimeHeardTranscript(draft);
     }
 
     function handleRealtimeUserTranscriptSegment(payload) {
         const text = String(payload.text || '').trim();
         if (!text) return;
+        const key = realtimeTranscriptDraftKey(payload);
+        if (key) {
+            const previous = kioskRealtimeUserTranscriptDrafts.get(key) || '';
+            kioskRealtimeUserTranscriptDrafts.set(key, mergeRealtimeTranscriptDelta(previous, text));
+        }
         if (realtimeUserTranscriptLooksLikeEcho(text)) return;
         if (realtimeAssistantOutputActive()) return;
         const hasWakePhrase = commandAfterWakePhrase(text) !== null;
@@ -6766,6 +6780,23 @@ if (mount) {
         if (!itemId) return '';
         const contentIndex = Number.isFinite(Number(payload?.content_index)) ? Number(payload.content_index) : 0;
         return `${itemId}:${contentIndex}`;
+    }
+
+    function bestRealtimeTranscript(primary, fallback) {
+        const first = String(primary || '').replace(/\s+/g, ' ').trim();
+        const second = String(fallback || '').replace(/\s+/g, ' ').trim();
+        if (!first) return second;
+        if (!second) return first;
+        const normalizedFirst = normalizedRealtimeTranscript(first);
+        const normalizedSecond = normalizedRealtimeTranscript(second);
+        if (normalizedFirst === normalizedSecond) return first.length >= second.length ? first : second;
+        if (normalizedFirst.includes(normalizedSecond)) return first;
+        if (normalizedSecond.includes(normalizedFirst)) return second;
+        const firstWords = normalizedFirst.split(/\s+/).filter(Boolean).length;
+        const secondWords = normalizedSecond.split(/\s+/).filter(Boolean).length;
+        if (secondWords >= firstWords + 2 && voiceCommandNeedsAgentWork(second)) return second;
+        if (firstWords >= secondWords + 2 && voiceCommandNeedsAgentWork(first)) return first;
+        return first.length >= second.length ? first : second;
     }
 
     function mergeRealtimeTranscriptDelta(previous, delta) {
