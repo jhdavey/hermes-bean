@@ -8,7 +8,8 @@ import 'hermes_api_client.dart';
 
 typedef RealtimeTranscriptCallback = void Function(String role, String text);
 typedef RealtimeStatusCallback = void Function(String status);
-typedef RealtimeRunQueuedCallback = void Function(int runId);
+typedef RealtimeRunQueuedCallback =
+    void Function(int runId, String userContent);
 
 class _RealtimeFunctionCall {
   const _RealtimeFunctionCall({
@@ -562,8 +563,7 @@ class BeanRealtimeConversation {
     if (raw.isEmpty || _transcriptLooksSynthetic(raw)) return;
     final command = _commandAfterWakePhrase(raw);
     if (!_conversationActive && command == null) return;
-    final preview = raw.length > 44 ? '${raw.substring(0, 41)}...' : raw;
-    onStatus?.call('Heard: "$preview"');
+    onStatus?.call('listening');
   }
 
   void _scheduleResponseCreate({
@@ -906,7 +906,7 @@ class BeanRealtimeConversation {
         _pendingUserContent = null;
         _pendingUserItemId = null;
         _currentUserContent = null;
-        onRunQueued?.call(runId);
+        onRunQueued?.call(runId, activeUserContent);
         unawaited(
           _watchRun(
             runId,
@@ -984,7 +984,7 @@ class BeanRealtimeConversation {
       );
       final runId = result['run_id'];
       if (runId is int) {
-        onRunQueued?.call(runId);
+        onRunQueued?.call(runId, content);
         unawaited(
           _watchRun(
             runId,

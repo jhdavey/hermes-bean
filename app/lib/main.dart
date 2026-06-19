@@ -77,11 +77,13 @@ class _BeanWorkItem {
     required this.id,
     required this.label,
     this.status = 'running',
+    this.resolvedByEvent = false,
   });
 
   final String id;
   final String label;
   final String status;
+  final bool resolvedByEvent;
 
   bool get done => const {
     'completed',
@@ -92,10 +94,15 @@ class _BeanWorkItem {
     'skipped',
   }.contains(status.toLowerCase());
 
-  _BeanWorkItem copyWith({String? label, String? status}) => _BeanWorkItem(
+  _BeanWorkItem copyWith({
+    String? label,
+    String? status,
+    bool? resolvedByEvent,
+  }) => _BeanWorkItem(
     id: id,
     label: label ?? this.label,
     status: status ?? this.status,
+    resolvedByEvent: resolvedByEvent ?? this.resolvedByEvent,
   );
 }
 
@@ -1309,6 +1316,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String _chatRunState = 'Ready';
   int _chatRunToken = 0;
   List<_BeanWorkItem> _beanWorkItems = const [];
+  Timer? _beanWorkStatusClearTimer;
+  DateTime? _beanWorkStatusHoldUntil;
+  DateTime? _beanWorkStatusMinUntil;
   _HomeDestination _selectedDestination = _HomeDestination.today;
   bool _showCalendarMonth = false;
   DateTime _selectedCalendarDay = _dateOnly(DateTime.now());
@@ -1750,63 +1760,252 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         RegExp(r'(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S').hasMatch(raw);
   }
 
-  void _resetBeanWorkItems(String label, {String status = 'running'}) {
-    _beanWorkItems = [
-      _BeanWorkItem(
-        id: 'turn-${DateTime.now().microsecondsSinceEpoch}',
-        label: label,
-        status: status,
-      ),
-    ];
-  }
-
   void _upsertBeanWorkItem(
     String id,
     String label, {
     String status = 'running',
+    bool resolvedByEvent = false,
   }) {
     if (id.isEmpty || label.trim().isEmpty) return;
+    final cleanLabel = label.trim();
+    final cleanStatus = status.toLowerCase();
+    if (!_beanWorkStatusDone(cleanStatus)) {
+      _cancelBeanWorkStatusClear();
+      final minimum = DateTime.now().add(const Duration(milliseconds: 700));
+      if (_beanWorkStatusMinUntil == null ||
+          minimum.isAfter(_beanWorkStatusMinUntil!)) {
+        _beanWorkStatusMinUntil = minimum;
+      }
+    }
     final existingIndex = _beanWorkItems.indexWhere((item) => item.id == id);
-    final next = _BeanWorkItem(id: id, label: label.trim(), status: status);
+    final next = _BeanWorkItem(
+      id: id,
+      label: cleanLabel,
+      status: cleanStatus,
+      resolvedByEvent: resolvedByEvent,
+    );
     if (existingIndex >= 0) {
       _beanWorkItems = [
         for (var i = 0; i < _beanWorkItems.length; i++)
           if (i == existingIndex)
-            _beanWorkItems[i].copyWith(label: next.label, status: next.status)
+            _beanWorkItems[i].resolvedByEvent &&
+                    id == 'realtime-request' &&
+                    !resolvedByEvent &&
+                    !_beanWorkItems[i].done
+                ? _beanWorkItems[i].copyWith(status: next.status)
+                : _beanWorkItems[i].copyWith(
+                    label: next.label,
+                    status: next.status,
+                    resolvedByEvent: resolvedByEvent,
+                  )
           else
             _beanWorkItems[i],
       ];
+      _scheduleBeanWorkStatusClearIfDone();
       return;
     }
+    final placeholderIndex = _beanWorkPlaceholderIndex(cleanLabel);
+    if (placeholderIndex >= 0 && resolvedByEvent) {
+      _beanWorkItems = [
+        for (var i = 0; i < _beanWorkItems.length; i++)
+          if (i == placeholderIndex)
+            _beanWorkItems[i].copyWith(
+              label: cleanLabel,
+              status: cleanStatus,
+              resolvedByEvent: true,
+            )
+          else
+            _beanWorkItems[i],
+      ];
+      _scheduleBeanWorkStatusClearIfDone();
+      return;
+    }
+    if (_isGenericBeanWorkLabel(cleanLabel)) return;
     _beanWorkItems = [..._beanWorkItems, next];
     if (_beanWorkItems.length > 8) {
       _beanWorkItems = _beanWorkItems.sublist(_beanWorkItems.length - 8);
     }
+    _scheduleBeanWorkStatusClearIfDone();
   }
 
-  void _completeBeanWorkItem(String id, {String? label}) {
-    if (id.isEmpty) return;
-    final existingIndex = _beanWorkItems.indexWhere((item) => item.id == id);
-    if (existingIndex >= 0) {
-      _beanWorkItems = [
-        for (var i = 0; i < _beanWorkItems.length; i++)
-          if (i == existingIndex)
-            _beanWorkItems[i].copyWith(status: 'completed')
-          else
-            _beanWorkItems[i],
-      ];
+  void _completeActiveBeanWorkItems([String status = 'completed']) {
+    if (_beanWorkItems.isEmpty) return;
+    _beanWorkItems = [
+      for (final item in _beanWorkItems)
+        item.done ? item : item.copyWith(status: status),
+    ];
+    _scheduleBeanWorkStatusClearIfDone();
+  }
+
+  void _scheduleBeanWorkStatusClearIfDone() {
+    if (_beanWorkItems.isEmpty || _beanWorkItems.any((item) => !item.done)) {
       return;
     }
-    if (label != null && label.trim().isNotEmpty) {
-      _upsertBeanWorkItem(id, label, status: 'completed');
+    _scheduleBeanWorkStatusClear();
+  }
+
+  void _scheduleBeanWorkStatusClear([
+    Duration delay = const Duration(milliseconds: 1900),
+  ]) {
+    if (_busy) return;
+    _beanWorkStatusClearTimer?.cancel();
+    final now = DateTime.now();
+    var clearDelay = delay;
+    final minimum = _beanWorkStatusMinUntil;
+    if (minimum != null && minimum.isAfter(now)) {
+      final minDelay = minimum.difference(now);
+      if (minDelay > clearDelay) clearDelay = minDelay;
     }
+    _beanWorkStatusHoldUntil = now.add(clearDelay);
+    _beanWorkStatusClearTimer = Timer(clearDelay, () {
+      if (!mounted) return;
+      if (_busy) {
+        _scheduleBeanWorkStatusClear(delay);
+        return;
+      }
+      setState(() {
+        _beanWorkStatusHoldUntil = null;
+        _beanWorkStatusMinUntil = null;
+        _beanWorkItems = const [];
+      });
+    });
+  }
+
+  void _cancelBeanWorkStatusClear() {
+    _beanWorkStatusClearTimer?.cancel();
+    _beanWorkStatusClearTimer = null;
+    _beanWorkStatusHoldUntil = null;
+  }
+
+  bool _beanWorkStatusDone(String status) => const {
+    'completed',
+    'succeeded',
+    'recorded',
+    'cancelled',
+    'failed',
+    'skipped',
+  }.contains(status.toLowerCase());
+
+  int _beanWorkPlaceholderIndex(String label) {
+    final eventCategory = _beanWorkCategoryForLabel(label);
+    return _beanWorkItems.indexWhere((item) {
+      if (item.id != 'realtime-request' || item.resolvedByEvent || item.done) {
+        return false;
+      }
+      final placeholderCategory = _beanWorkCategoryForLabel(item.label);
+      return eventCategory.isEmpty ||
+          placeholderCategory.isEmpty ||
+          eventCategory == placeholderCategory;
+    });
+  }
+
+  String _beanWorkCategoryForLabel(String label) {
+    final text = label.toLowerCase();
+    if (text.trim().isEmpty) return '';
+    final action =
+        RegExp(
+          r'\b(delete|deleting|remove|removing|cancel|canceling|cancelled)\b',
+        ).hasMatch(text)
+        ? 'delete'
+        : RegExp(
+            r'\b(create|creating|add|adding|schedule|scheduling)\b',
+          ).hasMatch(text)
+        ? 'create'
+        : RegExp(
+            r'\b(update|updating|change|changing|move|moving|reschedule|rescheduling)\b',
+          ).hasMatch(text)
+        ? 'update'
+        : RegExp(r'\b(save|saving|remember|memory)\b').hasMatch(text)
+        ? 'save'
+        : '';
+    final target =
+        RegExp(
+          r'\b(calendar event|event|calendar|appointment|meeting)\b',
+        ).hasMatch(text)
+        ? 'event'
+        : RegExp(r'\breminder\b').hasMatch(text)
+        ? 'reminder'
+        : RegExp(r'\b(task|todo)\b').hasMatch(text)
+        ? 'task'
+        : RegExp(r'\bmemory\b').hasMatch(text)
+        ? 'memory'
+        : '';
+    return action.isNotEmpty || target.isNotEmpty ? '$action:$target' : '';
+  }
+
+  bool _isGenericBeanWorkLabel(String label) => RegExp(
+    r'^(finish|finished|background work|finish background work|bean started working|read request|follow up on voice request|working on request|work on request)$',
+    caseSensitive: false,
+  ).hasMatch(label.trim());
+
+  void _ensureBeanRequestWorkItem(String content, {String status = 'running'}) {
+    final label = _beanWorkLabelForRequest(content);
+    if (label == null) return;
+    _BeanWorkItem? existing;
+    for (final item in _beanWorkItems) {
+      if (item.id == 'realtime-request') {
+        existing = item;
+        break;
+      }
+    }
+    if (existing != null && existing.resolvedByEvent && !existing.done) return;
+    _upsertBeanWorkItem('realtime-request', label, status: status);
+  }
+
+  String? _beanWorkLabelForRequest(String content) {
+    final command = _normalizedVoiceCommand(content);
+    if (command.isEmpty) return null;
+    final targetsEvent = RegExp(
+      r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
+    ).hasMatch(command);
+    final targetsTask = RegExp(
+      r'\b(task|tasks|todo|to do)\b',
+    ).hasMatch(command);
+    final targetsReminder = RegExp(
+      r'\b(reminder|reminders|remind)\b',
+    ).hasMatch(command);
+    if (RegExp(r'\b(delete|remove|cancel)\b').hasMatch(command)) {
+      if (targetsEvent) return 'Deleting event';
+      if (targetsReminder) return 'Deleting reminder';
+      if (targetsTask) return 'Deleting task';
+      return 'Deleting item';
+    }
+    if (RegExp(r'\b(move|reschedule|update|change)\b').hasMatch(command)) {
+      if (targetsEvent) return 'Updating event';
+      if (targetsReminder) return 'Updating reminder';
+      if (targetsTask) return 'Updating task';
+      return 'Updating item';
+    }
+    if (RegExp(r'\b(add|create|put|schedule)\b').hasMatch(command)) {
+      if (targetsEvent) return 'Creating event';
+      if (targetsReminder) return 'Creating reminder';
+      if (targetsTask) return 'Creating task';
+      return 'Creating item';
+    }
+    if (RegExp(r'\b(complete|finish|mark)\b').hasMatch(command)) {
+      if (targetsTask) return 'Updating task';
+      if (targetsReminder) return 'Updating reminder';
+      return 'Updating item';
+    }
+    if (RegExp(r'\b(remember|memory)\b').hasMatch(command)) {
+      return 'Saving memory';
+    }
+    if (RegExp(r'\b(plan|organize|prioritize)\b').hasMatch(command)) {
+      return 'Planning request';
+    }
+    return 'Working on request';
   }
 
   void _applyBeanWorkEvents(List<HermesActivityEvent> events) {
     for (final event in events) {
       final item = _beanWorkItemFromEvent(event);
       if (item == null) continue;
-      _upsertBeanWorkItem(item.id, item.label, status: item.status);
+      _upsertBeanWorkItem(
+        item.id,
+        item.label,
+        status: item.status,
+        resolvedByEvent: true,
+      );
     }
   }
 
@@ -1815,21 +2014,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final payload = event.payload;
     final status = (event.status ?? '').toLowerCase();
     if (type.isEmpty || type == 'runtime.run_queued') return null;
-    if (type == 'runtime.run_started') {
-      final runId = payload['run_id'] ?? payload['runId'] ?? event.id;
-      return _BeanWorkItem(
-        id: 'run-$runId',
-        label: 'Bean started working',
-        status: 'completed',
-      );
-    }
-    if (type == 'runtime.run_completed') {
-      final runId = payload['run_id'] ?? payload['runId'] ?? event.id;
-      return _BeanWorkItem(
-        id: 'run-completed-$runId',
-        label: 'Finish request',
-        status: status.isEmpty ? 'completed' : status,
-      );
+    if (type == 'runtime.run_started' || type == 'runtime.run_completed') {
+      return null;
     }
     if (type == 'runtime.run_failed') {
       return _BeanWorkItem(
@@ -1921,7 +2107,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                   return;
                 }
                 _beanVoiceDraft = _beanVoiceListening ? trimmed : null;
-                _chatRunState = 'Heard: $trimmed';
+                _chatRunState = _beanVoiceListening ? 'Listening' : 'Ready';
                 if (_beanVoiceListening) return;
                 final alreadyDisplayed =
                     _messages.isNotEmpty &&
@@ -1959,15 +2145,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                   : (_beanVoiceListening ? 'listening' : 'Ready');
             });
           },
-          onRunQueued: (runId) {
+          onRunQueued: (runId, userContent) {
             if (!mounted) return;
             setState(() {
               _chatRunState = 'working...';
-              _upsertBeanWorkItem(
-                'run-$runId',
-                'Background work',
-                status: 'running',
-              );
+              _ensureBeanRequestWorkItem(userContent);
             });
             unawaited(_pollQueuedRun(runId, _chatRunToken));
             unawaited(_pollDashboardChanges());
@@ -1984,6 +2166,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _beanWorkStatusClearTimer?.cancel();
     _reminderDueTimer?.cancel();
     _stopDashboardChangePolling();
     unawaited(_pushNotifications.dispose());
@@ -2004,6 +2187,37 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return _criticalTasksForToday(_tasks).length +
         _criticalRemindersForToday(_reminders).length +
         _criticalEventsForToday(_calendar).length;
+  }
+
+  bool get _beanWorkStatusHolding {
+    final holdUntil = _beanWorkStatusHoldUntil;
+    return holdUntil != null && DateTime.now().isBefore(holdUntil);
+  }
+
+  List<_BeanWorkItem> get _beanVisibleWorkItems {
+    final items = _beanWorkItems
+        .where((item) => item.label.trim().isNotEmpty)
+        .toList();
+    return items.length <= 6 ? items : items.sublist(items.length - 6);
+  }
+
+  bool get _beanStatusTagVisible =>
+      _beanVoiceListening ||
+      _busy ||
+      _beanWorkItems.isNotEmpty ||
+      _beanWorkStatusHolding;
+
+  String get _beanStatusTagLabel {
+    final items = _beanVisibleWorkItems;
+    if (items.isNotEmpty && items.every((item) => item.done)) return 'Done';
+    if (items.any((item) => !item.done) || _busy) return 'Working...';
+    if (_beanVoiceListening) {
+      return _beanVoiceDraft?.trim().isNotEmpty == true
+          ? 'Ready to send'
+          : 'Listening';
+    }
+    final compact = _compactBeanStatusLabel(_chatRunState);
+    return compact == 'Ready' ? 'Bean is ready' : compact;
   }
 
   void _scheduleAppIconBadgeSync(int count) {
@@ -2810,7 +3024,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _busy = true;
       _chatRunState = 'Bean is working…';
-      _resetBeanWorkItems('Read request');
+      _ensureBeanRequestWorkItem(trimmed);
       _messages.add(
         HermesMessage(id: _messages.length + 1, role: 'user', content: trimmed),
       );
@@ -2866,11 +3080,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         final run = result.run;
         if (run != null) {
           setState(() {
-            _upsertBeanWorkItem(
-              'run-${run.id}',
-              'Work on request',
-              status: 'running',
-            );
+            _ensureBeanRequestWorkItem(trimmed);
           });
           unawaited(_pollQueuedRun(run.id, runToken));
         }
@@ -2947,10 +3157,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
         _applyBeanWorkEvents(_events);
-        _completeBeanWorkItem(
-          _beanWorkItems.isNotEmpty ? _beanWorkItems.first.id : 'turn',
-          label: 'Finish request',
-        );
+        _completeActiveBeanWorkItems();
       });
       if (completedBeanIntroduction) {
         unawaited(_startOnboardingTourAfterBeanIntroduction());
@@ -3129,17 +3336,11 @@ ${_truncateDiagnostic(stack, 2200)}
               'cancelled' => 'Stopped',
               _ => 'Failed',
             };
-            _beanWorkItems = [
-              _BeanWorkItem(
-                id: 'run-$runId',
-                label: 'Finish background work',
-                status: switch (run.status) {
-                  'completed' => 'completed',
-                  'cancelled' => 'cancelled',
-                  _ => 'failed',
-                },
-              ),
-            ];
+            _completeActiveBeanWorkItems(switch (run.status) {
+              'completed' => 'completed',
+              'cancelled' => 'cancelled',
+              _ => 'failed',
+            });
             final message = run.assistantMessage;
             if (message != null &&
                 !_messages.any((candidate) => candidate.id == message.id)) {
@@ -5459,16 +5660,9 @@ ${_truncateDiagnostic(stack, 2200)}
                   ? _HeyBeanBottomMenu(
                       selected: _selectedDestination,
                       beanListening: _beanVoiceListening,
-                      beanWorkItems: _beanWorkItems,
-                      beanWorkStatus: _beanVoiceListening
-                          ? (_beanVoiceDraft?.trim().isNotEmpty == true
-                                ? 'Ready to send'
-                                : 'Listening')
-                          : _chatRunState,
-                      beanWorkActive:
-                          _beanVoiceListening ||
-                          _busy ||
-                          _beanWorkItems.any((item) => !item.done),
+                      beanWorkItems: _beanVisibleWorkItems,
+                      beanWorkStatus: _beanStatusTagLabel,
+                      beanWorkActive: _beanStatusTagVisible,
                       onSelected: _selectDestination,
                       onBeanLongPressStart: () =>
                           unawaited(_startBeanVoiceDraft()),
@@ -20789,14 +20983,35 @@ class _HeyBeanBottomMenu extends StatelessWidget {
               onLongPressEnd: onBeanLongPressEnd,
             ),
           ),
-          if (beanWorkActive)
-            Positioned(
-              bottom: 86 + dockBottomPadding,
-              child: _BeanWorkStatusTag(
-                status: beanWorkStatus,
-                items: beanWorkItems,
+          Positioned(
+            bottom: 86 + dockBottomPadding,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeOut,
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, .08),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
               ),
+              child: beanWorkActive
+                  ? _BeanWorkStatusTag(
+                      key: const Key('bean-work-status-tag'),
+                      status: beanWorkStatus,
+                      items: beanWorkItems,
+                    )
+                  : const SizedBox(
+                      key: Key('bean-work-status-tag-empty'),
+                      width: 1,
+                      height: 1,
+                    ),
             ),
+          ),
         ],
       ),
     );
@@ -20804,7 +21019,11 @@ class _HeyBeanBottomMenu extends StatelessWidget {
 }
 
 class _BeanWorkStatusTag extends StatelessWidget {
-  const _BeanWorkStatusTag({required this.status, required this.items});
+  const _BeanWorkStatusTag({
+    super.key,
+    required this.status,
+    required this.items,
+  });
 
   final String status;
   final List<_BeanWorkItem> items;
@@ -21064,14 +21283,14 @@ class _BeanFabState extends State<_BeanFab>
                   height: 82 + (pulse * 18),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: HeyBeanTheme.success.withValues(
-                      alpha: .14 + (pulse * .10),
-                    ),
+                    color: const Color(
+                      0xFF020617,
+                    ).withValues(alpha: .06 + (pulse * .06)),
                     boxShadow: [
                       BoxShadow(
-                        color: HeyBeanTheme.success.withValues(
-                          alpha: .42 + (pulse * .24),
-                        ),
+                        color: const Color(
+                          0xFF020617,
+                        ).withValues(alpha: .12 + (pulse * .08)),
                         blurRadius: 24 + (pulse * 18),
                         spreadRadius: 5 + (pulse * 8),
                       ),
@@ -21090,40 +21309,32 @@ class _BeanFabState extends State<_BeanFab>
                 height: 72,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      HeyBeanTheme.success,
-                      HeyBeanTheme.accent,
-                      HeyBeanTheme.accentStrong,
-                    ],
-                  ),
+                  color: HeyBeanTheme.surface,
                   border: Border.all(
                     color: widget.listening
-                        ? const Color(0xFFBBF7D0)
+                        ? const Color(0xFF020617)
                         : (widget.selected
-                              ? Colors.white
+                              ? const Color(0xFF020617)
                               : const Color(0xFFE2E8F0)),
-                    width: widget.listening ? 7 : 4,
+                    width: widget.listening ? 5 : 3,
                   ),
                   boxShadow: [
                     BoxShadow(
                       color: widget.listening
-                          ? HeyBeanTheme.success.withValues(alpha: .56)
-                          : HeyBeanTheme.accent.withValues(alpha: .24),
-                      blurRadius: widget.listening ? 36 : 24,
-                      spreadRadius: widget.listening ? 5 : 0,
+                          ? const Color(0xFF020617).withValues(alpha: .18)
+                          : Colors.black.withValues(alpha: .14),
+                      blurRadius: widget.listening ? 32 : 22,
+                      spreadRadius: widget.listening ? 3 : 0,
                       offset: const Offset(0, 10),
                     ),
                   ],
                 ),
                 child: Center(
                   child: Image.asset(
-                    'assets/images/bean/bean-logo-white-overlay.png',
+                    'assets/images/bean/bean-logo.png',
                     key: const Key('heybean-center-bean-logo'),
-                    width: 38,
-                    height: 38,
+                    width: 42,
+                    height: 42,
                     fit: BoxFit.contain,
                     semanticLabel: 'Bean chat',
                   ),

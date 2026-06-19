@@ -3998,12 +3998,12 @@ void main() {
     expect(beanLogo.image, isA<AssetImage>());
     expect(
       (beanLogo.image as AssetImage).assetName,
-      'assets/images/bean/bean-logo-white-overlay.png',
+      'assets/images/bean/bean-logo.png',
     );
     expect(beanLogo.color, isNull);
     expect(beanLogo.colorBlendMode, isNull);
-    expect(beanLogo.width, 38);
-    expect(beanLogo.height, 38);
+    expect(beanLogo.width, 42);
+    expect(beanLogo.height, 42);
     expect(
       find.byKey(const Key('heybean-center-bean-logo-badge')),
       findsNothing,
