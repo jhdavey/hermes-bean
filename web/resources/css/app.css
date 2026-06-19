@@ -5406,6 +5406,16 @@
     }
 }
 
+@media (min-width: 1121px) {
+    .hb-topbar-date-line {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        z-index: 1;
+        transform: translate(-50%, -50%);
+    }
+}
+
 @media (min-width: 900px) and (max-width: 1120px) {
     .hb-topbar-date-line {
         gap: 8px;
