@@ -500,28 +500,31 @@ if (mount) {
 
     function themeSettingsMarkup() {
         const selectedTheme = currentThemeKey();
+        const selected = themeForKey(selectedTheme);
         return `
-            <div class="hb-surface-soft hb-card-pad">
-                <strong>Appearance</strong>
-                <small>Choose the accent color used across HeyBean.</small>
-                <div class="hb-theme-grid">
-                    ${appThemes.map((theme) => {
-                        const active = theme.key === selectedTheme;
-                        return `
-                            <button
-                                class="hb-theme-option ${active ? 'hb-theme-option-active' : ''}"
-                                type="button"
-                                data-theme-option="${escapeAttr(theme.key)}"
-                                aria-pressed="${active ? 'true' : 'false'}"
-                            >
-                                <span class="hb-theme-swatch" style="--hb-theme-swatch: ${escapeAttr(theme.accent)}"></span>
-                                <span>${escapeHtml(theme.label)}</span>
-                            </button>
-                        `;
-                    }).join('')}
+            <div class="hb-surface-soft hb-card-pad hb-settings-section hb-theme-settings">
+                ${settingsSectionHeader(icons.palette, 'Appearance', `${selected.label} accent`)}
+                <div class="hb-theme-select-row">
+                    <span class="hb-theme-swatch" style="--hb-theme-swatch: ${escapeAttr(selected.accent)}" aria-hidden="true"></span>
+                    <label class="hb-label">Accent color
+                        <select class="hb-select" data-theme-select aria-label="Accent color">
+                            ${appThemes.map((theme) => `<option value="${escapeAttr(theme.key)}" ${theme.key === selectedTheme ? 'selected' : ''}>${escapeHtml(theme.label)}</option>`).join('')}
+                        </select>
+                    </label>
                 </div>
             </div>
         `;
+    }
+
+    function settingsSectionHeader(icon, title, subtitle = '') {
+        return `
+            <div class="hb-settings-panel-head">
+                <span class="hb-compact-icon">${icon}</span>
+                <div>
+                    <strong>${escapeHtml(title)}</strong>
+                    ${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ''}
+                </div>
+            </div>`;
     }
 
     async function loadSignedIn() {
@@ -2230,8 +2233,8 @@ if (mount) {
                     <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')}${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
                     <button class="hb-button-ghost" type="button" data-open-agent>Update</button>
                 </div>
-                <form class="hb-surface-soft hb-card-pad hb-home-city-settings" data-home-city-form>
-                    <strong>Home city</strong>
+                <form class="hb-surface-soft hb-card-pad hb-settings-section hb-home-city-settings" data-home-city-form>
+                    ${settingsSectionHeader(icons.spaces, 'Home city', homeCity || 'Used for weather and local context.')}
                     <div class="hb-field-row" style="margin-top:10px">
                         ${labelInput('Home city', 'homeCity', 'text', homeCity, 'autocomplete="address-level2" maxlength="120"')}
                     </div>
@@ -2242,13 +2245,13 @@ if (mount) {
                 </form>
                 ${themeSettingsMarkup()}
                 ${settingsCategoriesMarkup()}
-                <div class="hb-surface-soft hb-card-pad">
-                    <strong>Notification preferences</strong>
+                <div class="hb-surface-soft hb-card-pad hb-settings-section">
+                    ${settingsSectionHeader(icons.bell, 'Notifications', 'Choose how reminders can reach you.')}
                     <label class="hb-switch-row"><input type="checkbox" data-pref="reminder_push" ${prefs.reminder_push !== false ? 'checked' : ''}> Reminder push notifications</label>
                     <label class="hb-switch-row"><input type="checkbox" data-pref="reminder_email" ${prefs.reminder_email === true ? 'checked' : ''}> Reminder emails</label>
                 </div>
-                <div class="hb-surface-soft hb-card-pad">
-                    <strong>Workspaces</strong>
+                <div class="hb-surface-soft hb-card-pad hb-settings-section">
+                    ${settingsSectionHeader(icons.spaces, 'Workspaces', 'Switch the space Bean uses for calendar, tasks, and reminders.')}
                     ${workspaceSwitcherMarkup(workspaceItems, activeWorkspaceId)}
                     <div class="hb-list" style="margin-top:10px">${workspaceItems.map((workspace) => {
                         const workspaceId = String(workspace.id || '');
@@ -2272,20 +2275,19 @@ if (mount) {
                         <button class="hb-button-secondary" type="button" data-accept-workspace>Accept invite</button>
                     </div>
                 </div>
-                <div class="hb-surface-soft hb-card-pad">
+                <div class="hb-surface-soft hb-card-pad hb-settings-section">
                     ${googleCalendarMarkup()}
                 </div>
-                <div class="hb-surface-soft hb-card-pad">
-                    <strong>Calendar preferences</strong>
-                    <div class="hb-settings-panel-subtitle">Day view visible hours</div>
+                <div class="hb-surface-soft hb-card-pad hb-settings-section">
+                    ${settingsSectionHeader(icons.calendar, 'Calendar preferences', 'Day view visible hours.')}
                     <div class="hb-field-row hb-settings-hour-row" style="margin-top:10px">
                         ${settingsHourSelectMarkup('Start hour', 'startHour', Number(localStorage.getItem('heybean.calendar.startHour') || 6), 0, 23)}
                         ${settingsHourSelectMarkup('End hour', 'endHour', Number(localStorage.getItem('heybean.calendar.endHour') || 22), 1, 24)}
                     </div>
                 </div>
                 ${billingSettingsMarkup()}
-                <div class="hb-card hb-card-pad">
-                    <strong>Account controls</strong>
+                <div class="hb-card hb-card-pad hb-settings-section">
+                    ${settingsSectionHeader(icons.user, 'Account controls', 'Export, sign out, or permanently delete your account.')}
                     <div class="hb-account-actions">
                         <button class="hb-button-secondary" type="button" data-export-account>Export data</button>
                         <button class="hb-button-secondary" type="button" data-logout>Sign out</button>
@@ -2305,7 +2307,7 @@ if (mount) {
         const selected = selectedSettingsCategory(categories);
         const selectedId = String(selected?.id || selected?.name || '');
         return `
-            <div class="hb-surface-soft hb-card-pad hb-settings-categories" data-settings-category-panel>
+            <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-categories" data-settings-category-panel>
                 <div class="hb-settings-panel-head">
                     <span class="hb-compact-icon">${icons.tune}</span>
                     <div>
@@ -2366,7 +2368,7 @@ if (mount) {
             || (cancelAtPeriodEnd && accessEndsAt && new Date(accessEndsAt) > new Date());
         const cancelDisabled = state.billingBusy || !canCancel;
         return `
-            <div class="hb-surface-soft hb-card-pad hb-billing-settings" data-billing-settings>
+            <div class="hb-surface-soft hb-card-pad hb-settings-section hb-billing-settings" data-billing-settings>
                 <div class="hb-billing-header">
                     <span class="hb-compact-icon">${icons.activity}</span>
                     <div>
@@ -3858,7 +3860,7 @@ if (mount) {
         mount.querySelector('[data-workspace-select]')?.addEventListener('change', (event) => setWorkspace(event.currentTarget.value));
         mount.querySelectorAll('[data-top-workspace-select]').forEach((select) => select.addEventListener('change', (event) => setWorkspace(event.currentTarget.value)));
         mount.querySelectorAll('[data-pref]').forEach((input) => input.addEventListener('change', updateNotificationPrefs));
-        mount.querySelectorAll('[data-theme-option]').forEach((button) => button.addEventListener('click', updateThemePreference));
+        mount.querySelector('[data-theme-select]')?.addEventListener('change', updateThemePreference);
         mount.querySelector('[data-home-city-form]')?.addEventListener('submit', updateHomeCityPreference);
         mount.querySelector('[data-clear-home-city]')?.addEventListener('click', clearHomeCityPreference);
         mount.querySelector('[data-billing-change-plan]')?.addEventListener('click', changeBillingPlan);
@@ -9257,7 +9259,7 @@ if (mount) {
     }
 
     async function updateThemePreference(event) {
-        const theme = normalizeThemeKey(event.currentTarget.dataset.themeOption);
+        const theme = normalizeThemeKey(event.currentTarget.dataset.themeOption || event.currentTarget.value);
         if (theme === currentThemeKey()) return;
         const previousUser = state.user;
         state.user = { ...(state.user || {}), theme };
