@@ -7,6 +7,7 @@ use App\Models\AgentProfile;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
@@ -404,6 +405,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'create_calendar_event' => 'calendar_event.create',
             'update_calendar_event' => 'calendar_event.update',
             'delete_calendar_event' => 'calendar_event.delete',
+            'create_note' => 'note.create',
+            'update_note' => 'note.update',
+            'delete_note' => 'note.delete',
+            'create_note_folder' => 'note_folder.create',
+            'update_note_folder' => 'note_folder.update',
+            'delete_note_folder' => 'note_folder.delete',
             'create_event_category' => 'event_category.create',
             'update_event_category' => 'event_category.update',
             'delete_event_category' => 'event_category.delete',
@@ -420,7 +427,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     private function isNativeReadTool(string $name): bool
     {
-        return in_array($name, ['search_tasks', 'search_reminders', 'search_calendar_events', 'get_day_context', 'external_lookup'], true);
+        return in_array($name, ['search_tasks', 'search_reminders', 'search_calendar_events', 'search_notes', 'get_day_context', 'external_lookup'], true);
     }
 
     private function executeNativeReadTool(ConversationSession $session, string $name, array $arguments): array
@@ -430,6 +437,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'search_tasks' => $this->searchTasksForTool($session, $arguments),
                 'search_reminders' => $this->searchRemindersForTool($session, $arguments),
                 'search_calendar_events' => $this->searchCalendarEventsForTool($session, $arguments),
+                'search_notes' => $this->searchNotesForTool($session, $arguments),
                 'get_day_context' => $this->dayContextForTool($session, $arguments),
                 'external_lookup' => $this->externalLookupForTool($session, $arguments),
                 default => ['ok' => false, 'tool' => $name, 'error_code' => 'unsupported_read_tool'],
@@ -581,6 +589,37 @@ class HermesToolRuntimeService implements HermesRuntimeService
             ])->values()->all();
 
         return $this->readToolResult('search_calendar_events', $items, $workspaceId, $timezone);
+    }
+
+    private function searchNotesForTool(ConversationSession $session, array $arguments): array
+    {
+        $workspaceId = $this->toolWorkspaceId($session, $arguments);
+        $query = Note::query()->where('user_id', $session->user_id)->where('workspace_id', $workspaceId)->with('folder');
+        if (filled($arguments['query'] ?? null)) {
+            $this->whereLooseNote($query, (string) $arguments['query']);
+        }
+        if (filled($arguments['folder_id'] ?? null)) {
+            $query->where('note_folder_id', (int) $arguments['folder_id']);
+        }
+        if (array_key_exists('pinned', $arguments)) {
+            $query->where('is_pinned', (bool) $arguments['pinned']);
+        }
+
+        $items = $query->orderByDesc('is_pinned')
+            ->latest('updated_at')
+            ->limit($this->toolLimit($arguments))
+            ->get(['id', 'note_folder_id', 'title', 'plain_text', 'is_pinned', 'updated_at'])
+            ->map(fn (Note $note): array => [
+                'id' => $note->id,
+                'folder_id' => $note->note_folder_id,
+                'folder' => $note->folder?->name,
+                'title' => $note->title,
+                'plain_text' => str((string) $note->plain_text)->squish()->limit(1600, '')->toString(),
+                'is_pinned' => (bool) $note->is_pinned,
+                'updated_at' => $note->updated_at?->toIso8601String(),
+            ])->values()->all();
+
+        return $this->readToolResult('search_notes', $items, $workspaceId);
     }
 
     private function dayContextForTool(ConversationSession $session, array $arguments): array
@@ -1089,6 +1128,27 @@ class HermesToolRuntimeService implements HermesRuntimeService
         });
     }
 
+    private function whereLooseNote(mixed $query, string $text): void
+    {
+        $terms = collect(preg_split('/\s+/u', mb_strtolower($text)) ?: [])
+            ->map(fn (string $term): string => trim($term, " \t\n\r\0\x0B'\".,!?-"))
+            ->filter(fn (string $term): bool => mb_strlen($term) >= 2)
+            ->unique()
+            ->take(8)
+            ->values();
+
+        $query->where(function ($query) use ($terms, $text): void {
+            $query->where('title', 'like', '%'.addcslashes($text, '%_\\').'%')
+                ->orWhere('plain_text', 'like', '%'.addcslashes($text, '%_\\').'%')
+                ->orWhereHas('folder', fn ($folderQuery) => $folderQuery->where('name', 'like', '%'.addcslashes($text, '%_\\').'%'));
+            foreach ($terms as $term) {
+                $escaped = addcslashes($term, '%_\\');
+                $query->orWhere('title', 'like', '%'.$escaped.'%')
+                    ->orWhere('plain_text', 'like', '%'.$escaped.'%');
+            }
+        });
+    }
+
     private function providerApiKey(): string
     {
         return (string) config('services.hermes_runtime.api_key', '');
@@ -1207,7 +1267,7 @@ You are Bean, a capable human-like assistant inside the Hey Bean app.
 You own intent and conversation. Interpret the user's message naturally, including messy wording, typos, shorthand, and voice transcription errors. Decide whether to answer directly, call read tools, call write tools, or ask one concise follow-up.
 
 Use recent conversation turns to resolve follow-ups, corrections, and pronouns. If the user corrects the entity type, such as "task, not reminder", apply that correction to the prior request and search/use the corrected tool type.
-When a user asks what/when/where about an item and the type is ambiguous, search the relevant app records before saying it is not found. For task-like words or chores, search tasks; for reminder-like alarms, search reminders; if unclear, search both.
+When a user asks what/when/where about an item and the type is ambiguous, search the relevant app records before saying it is not found. For task-like words or chores, search tasks; for reminder-like alarms, search reminders; for note, list, idea, writing, or saved text requests, search notes; if unclear, search the likely record types.
 
 Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded.
 
@@ -1215,7 +1275,7 @@ Laravel owns app mechanics: workspace access, database writes, validation, synci
 Timed read-tool *_at timestamps are formatted in the tool result timezone and match the user-visible app. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date.
 Use external_lookup for live information outside HeyBean, including current store hours, flights, hotel prices, weather, traffic, news, prices, availability, sports scores, or other current web facts. Do not invent current external facts. When external_lookup returns sources or citations, use them to answer concisely, include a brief source title or URL when useful, and mention uncertainty when results are incomplete.
 
-Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no notes unless the user says otherwise. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
+Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no extra notes unless the user says otherwise. For note requests, create/update/delete Notes records with note tools rather than workspace memory unless the user explicitly asks Bean to remember a preference. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
 When setting recurrence, always use recurrence as one of: none, daily, weekly, monthly, yearly, specific_days, or interval. For custom intervals like "every 3 days", set recurrence to interval and put interval plus interval_unit in metadata. Never put an object in recurrence.
 
 Use the current workspace unless the user clearly names another accessible workspace. Adapt tone to agent_profile settings and memory. If onboarding is incomplete, run a quick onboarding interview and use update_agent_profile when enough preferences are provided.
@@ -1245,6 +1305,7 @@ PROMPT;
             $this->nativeTool('search_tasks', 'Search tasks in the current or specified workspace. Use this before updating a task when the matching item is not already known.', $this->searchTaskProperties()),
             $this->nativeTool('search_reminders', 'Search reminders in the current or specified workspace.', $this->searchReminderProperties()),
             $this->nativeTool('search_calendar_events', 'Search calendar events in the current or specified workspace.', $this->searchCalendarEventProperties()),
+            $this->nativeTool('search_notes', 'Search notes by title, folder, or body text in the current or specified workspace.', $this->searchNoteProperties()),
             $this->nativeTool('get_day_context', 'Get tasks, reminders, and calendar events for a specific local date.', $this->dayContextProperties(), ['date']),
             $this->nativeTool('external_lookup', 'Look up current external information outside HeyBean, such as live web facts, store hours, travel, weather, prices, traffic, news, sports, or current availability. Use this instead of guessing when the answer depends on current outside data.', $this->externalLookupProperties(), ['query']),
             $this->nativeTool('create_task', 'Create a visible task in Hey Bean.', $this->taskProperties(), ['title']),
@@ -1256,6 +1317,12 @@ PROMPT;
             $this->nativeTool('create_calendar_event', 'Create a visible calendar event in Hey Bean.', $this->calendarEventProperties(), ['title', 'starts_at']),
             $this->nativeTool('update_calendar_event', 'Update one existing calendar event. Prefer id; use match_title and from_date only when needed.', $this->calendarEventProperties(requireId: false)),
             $this->nativeTool('delete_calendar_event', 'Delete one existing calendar event by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('create_note', 'Create a note in Hey Bean Notes.', $this->noteProperties(), ['title']),
+            $this->nativeTool('update_note', 'Update one existing note. Prefer id from search_notes; otherwise use match_title and Laravel will require a unique match.', $this->noteProperties(requireId: false)),
+            $this->nativeTool('delete_note', 'Delete one existing note by id.', $this->idProperties(), ['id']),
+            $this->nativeTool('create_note_folder', 'Create a Notes folder.', $this->noteFolderProperties(), ['name']),
+            $this->nativeTool('update_note_folder', 'Update a Notes folder by id.', $this->noteFolderProperties(requireId: true), ['id']),
+            $this->nativeTool('delete_note_folder', 'Delete a Notes folder by id. Notes inside it are kept and moved to All Notes.', $this->idProperties(), ['id']),
             $this->nativeTool('create_event_category', 'Create or save an event category.', $this->categoryProperties(), ['name']),
             $this->nativeTool('update_event_category', 'Update one event category by id.', $this->categoryProperties(requireId: true), ['id']),
             $this->nativeTool('delete_event_category', 'Delete one event category by id.', $this->idProperties(), ['id']),
@@ -1346,6 +1413,17 @@ PROMPT;
         ];
     }
 
+    private function searchNoteProperties(): array
+    {
+        return [
+            'query' => ['type' => 'string', 'description' => 'Title, folder, or body words to search for.'],
+            'folder_id' => ['type' => 'integer'],
+            'pinned' => ['type' => 'boolean'],
+            'workspace_id' => ['type' => 'integer'],
+            'limit' => ['type' => 'integer'],
+        ];
+    }
+
     private function dayContextProperties(): array
     {
         return [
@@ -1408,6 +1486,34 @@ PROMPT;
             'starts_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp.'],
             'ends_at' => ['type' => 'string', 'description' => 'ISO-8601 local timestamp.'],
             'status' => ['type' => 'string'],
+            'metadata' => ['type' => 'object', 'additionalProperties' => true],
+            'workspace_id' => ['type' => 'integer'],
+            'target_workspace_id' => ['type' => 'integer'],
+        ]);
+    }
+
+    private function noteProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer'], 'match_title' => ['type' => 'string']], [
+            'title' => ['type' => 'string'],
+            'body_html' => ['type' => 'string'],
+            'plain_text' => ['type' => 'string'],
+            'folder_name' => ['type' => 'string'],
+            'note_folder_id' => ['type' => 'integer'],
+            'is_pinned' => ['type' => 'boolean'],
+            'pinned' => ['type' => 'boolean'],
+            'body_delta' => ['type' => 'object', 'additionalProperties' => true],
+            'metadata' => ['type' => 'object', 'additionalProperties' => true],
+            'workspace_id' => ['type' => 'integer'],
+            'target_workspace_id' => ['type' => 'integer'],
+        ]);
+    }
+
+    private function noteFolderProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer']], [
+            'name' => ['type' => 'string'],
+            'sort_order' => ['type' => 'integer'],
             'metadata' => ['type' => 'object', 'additionalProperties' => true],
             'workspace_id' => ['type' => 'integer'],
             'target_workspace_id' => ['type' => 'integer'],
@@ -1617,6 +1723,8 @@ PROMPT;
             'task.create' => $title !== '' ? "I added {$title} to your tasks." : 'I added that to your tasks.',
             'task.update' => $title !== '' ? "I updated {$title}." : 'I updated that task.',
             'reminder.create' => $title !== '' ? "I set the reminder: {$title}." : 'I set that reminder.',
+            'note.create' => $title !== '' ? "I created the note {$title}." : 'I created that note.',
+            'note.update' => $title !== '' ? "I updated {$title}." : 'I updated that note.',
             'event_category.create' => $name !== '' ? "I created {$name}." : 'I created that.',
             default => 'Done.',
         };

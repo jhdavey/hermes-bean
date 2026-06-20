@@ -416,6 +416,77 @@ class HermesApiClient {
     ).map((json) => HermesTask.fromJson(_expectMap(json))).toList();
   }
 
+  Future<List<HermesNoteFolder>> listNoteFolders() async {
+    final data = await _sendJson('GET', '/note-folders');
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesNoteFolder.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<HermesNoteFolder> createNoteFolder({required String name}) async {
+    final data = await _sendJson('POST', '/note-folders', body: {'name': name});
+    return HermesNoteFolder.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> deleteNoteFolder(int folderId) async {
+    await _sendJson('DELETE', '/note-folders/$folderId');
+  }
+
+  Future<List<HermesNote>> listNotes() async {
+    final data = await _sendJson('GET', '/notes');
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesNote.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<HermesNote> createNote({
+    String title = 'New Note',
+    String bodyHtml = '',
+    String plainText = '',
+    int? folderId,
+    bool isPinned = false,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/notes',
+      body: {
+        'title': title,
+        'body_html': bodyHtml,
+        'plain_text': plainText,
+        'note_folder_id': folderId,
+        'is_pinned': isPinned,
+      },
+    );
+    return HermesNote.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesNote> updateNote(
+    int noteId, {
+    String? title,
+    String? bodyHtml,
+    String? plainText,
+    int? folderId,
+    bool clearFolder = false,
+    bool? isPinned,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/notes/$noteId',
+      body: {
+        if (title != null) 'title': title,
+        if (bodyHtml != null) 'body_html': bodyHtml,
+        if (plainText != null) 'plain_text': plainText,
+        if (folderId != null || clearFolder) 'note_folder_id': folderId,
+        if (isPinned != null) 'is_pinned': isPinned,
+      },
+    );
+    return HermesNote.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> deleteNote(int noteId) async {
+    await _sendJson('DELETE', '/notes/$noteId');
+  }
+
   Future<List<HermesTask>> listPastTasks() async {
     final data = await _sendJson('GET', '/tasks/past');
     return _expectList(
@@ -2072,6 +2143,78 @@ class HermesTodaySummary {
       );
 }
 
+class HermesNoteFolder {
+  const HermesNoteFolder({
+    required this.id,
+    required this.name,
+    this.sortOrder,
+  });
+
+  final int id;
+  final String name;
+  final int? sortOrder;
+
+  factory HermesNoteFolder.fromJson(Map<String, Object?> json) =>
+      HermesNoteFolder(
+        id: _readIntOrNull(json['id']) ?? 0,
+        name: _readString(json['name']) ?? 'Notes',
+        sortOrder: _readIntOrNull(json['sort_order'] ?? json['sortOrder']),
+      );
+}
+
+class HermesNote {
+  const HermesNote({
+    required this.id,
+    required this.title,
+    this.bodyHtml,
+    this.plainText,
+    this.folderId,
+    this.isPinned = false,
+    this.updatedAt,
+  });
+
+  final int id;
+  final String title;
+  final String? bodyHtml;
+  final String? plainText;
+  final int? folderId;
+  final bool isPinned;
+  final String? updatedAt;
+
+  factory HermesNote.fromJson(Map<String, Object?> json) => HermesNote(
+    id: _readIntOrNull(json['id']) ?? 0,
+    title: _readString(json['title']) ?? 'New Note',
+    bodyHtml: _readString(json['body_html'] ?? json['bodyHtml']),
+    plainText: _readString(json['plain_text'] ?? json['plainText']),
+    folderId: _readIntOrNull(
+      json['note_folder_id'] ?? json['noteFolderId'] ?? json['folder_id'],
+    ),
+    isPinned:
+        json['is_pinned'] == true ||
+        json['isPinned'] == true ||
+        json['pinned'] == true,
+    updatedAt: _readString(json['updated_at'] ?? json['updatedAt']),
+  );
+
+  HermesNote copyWith({
+    String? title,
+    String? bodyHtml,
+    String? plainText,
+    int? folderId,
+    bool clearFolder = false,
+    bool? isPinned,
+    String? updatedAt,
+  }) => HermesNote(
+    id: id,
+    title: title ?? this.title,
+    bodyHtml: bodyHtml ?? this.bodyHtml,
+    plainText: plainText ?? this.plainText,
+    folderId: clearFolder ? null : folderId ?? this.folderId,
+    isPinned: isPinned ?? this.isPinned,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+}
+
 class HermesTask {
   const HermesTask({
     required this.id,
@@ -2782,6 +2925,12 @@ String _expectString(Object? value) {
 String _readStringOrDefault(Object? value, String fallback) {
   if (value is String && value.trim().isNotEmpty) return value;
   return fallback;
+}
+
+String? _readString(Object? value) {
+  if (value == null) return null;
+  if (value is String) return value;
+  return value.toString();
 }
 
 bool _readBool(Object? value) {

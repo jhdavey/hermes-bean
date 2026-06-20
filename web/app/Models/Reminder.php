@@ -18,4 +18,9 @@ class Reminder extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function workspace(): BelongsTo
+    {
+        return $this->belongsTo(Workspace::class);
+    }
 }

@@ -81,6 +81,8 @@ if (mount) {
         calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="3"/></svg>',
         tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 2 2 4-5"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>',
         reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
+        notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.8A2.8 2.8 0 0 1 6.8 2H17a3 3 0 0 1 3 3v14.2A2.8 2.8 0 0 1 17.2 22H7a3 3 0 0 1-3-3Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>',
+        pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.8 4.6 15.2a1 1 0 0 0 .7 1.8h13.4a1 1 0 0 0 .7-1.8L15 10.8V5l1.2-1.2A1 1 0 0 0 15.5 2h-7a1 1 0 0 0-.7 1.8L9 5Z"/></svg>',
         settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.8l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.7.6 1 .3.25.68.4 1.1.4H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.6Z"/></svg>',
         spaces: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>',
         checkCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.5 11 14.5 15.5 9.5"/><circle cx="12" cy="12" r="9"/></svg>',
@@ -126,6 +128,12 @@ if (mount) {
         tasks: [],
         reminders: [],
         calendar: [],
+        noteFolders: [],
+        notes: [],
+        selectedNoteId: '',
+        selectedNoteFolderId: 'all',
+        notesSearch: '',
+        notesSaving: false,
         categories: [],
         settingsCategoryId: '',
         approvals: [],
@@ -563,12 +571,14 @@ if (mount) {
                 render();
             }
 
-            const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus, subscription, billingPayment] = await Promise.all([
+            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, categories, googleStatus, subscription, billingPayment] = await Promise.all([
                 recover(api(workspaceScopedPath('/today')), state.summary || {}),
                 recover(api(workspaceScopedPath('/tasks')), state.tasks),
                 recover(api(workspaceScopedPath('/tasks/past')), []),
                 recover(api(workspaceScopedPath('/reminders')), state.reminders),
                 recover(api(workspaceScopedPath('/calendar-events?skip_google_sync=1')), state.calendar),
+                recover(api(workspaceScopedPath('/note-folders')), state.noteFolders),
+                recover(api(workspaceScopedPath('/notes')), state.notes),
                 recover(api(workspaceScopedPath('/event-categories')), state.categories),
                 api('/google-calendar/status?cached=1').catch(() => null),
                 api('/billing/subscription').catch(() => state.subscriptionSummary),
@@ -582,6 +592,9 @@ if (mount) {
             state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
             state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
             state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
+            state.noteFolders = normalizeList(noteFolders);
+            state.notes = normalizeNotes(notes);
+            ensureSelectedNote();
             state.categories = normalizeList(categories);
             state.approvals = normalizeList(summary?.approvals);
             state.blockers = normalizeList(summary?.blockers);
@@ -681,6 +694,8 @@ if (mount) {
                 tasks: state.tasks,
                 reminders: state.reminders,
                 calendar: state.calendar,
+                noteFolders: state.noteFolders,
+                notes: state.notes,
                 categories: state.categories,
                 approvals: state.approvals,
                 blockers: state.blockers,
@@ -701,6 +716,9 @@ if (mount) {
             state.tasks = normalizeList(cached.tasks);
             state.reminders = normalizeList(cached.reminders);
             state.calendar = reconcileCalendarRefresh(cached.calendar);
+            state.noteFolders = normalizeList(cached.noteFolders);
+            state.notes = normalizeNotes(cached.notes);
+            ensureSelectedNote();
             state.categories = normalizeList(cached.categories);
             state.approvals = normalizeList(cached.approvals);
             state.blockers = normalizeList(cached.blockers);
@@ -719,6 +737,7 @@ if (mount) {
             tasks: [],
             reminders: [],
             calendar_events: [],
+            notes_recent: [],
             approvals: [],
             blockers: [],
             activity_events: [],
@@ -726,6 +745,10 @@ if (mount) {
         state.tasks = [];
         state.reminders = [];
         state.calendar = [];
+        state.noteFolders = [];
+        state.notes = [];
+        state.selectedNoteId = '';
+        state.selectedNoteFolderId = 'all';
         state.categories = [];
         state.approvals = [];
         state.blockers = [];
@@ -739,6 +762,8 @@ if (mount) {
             tasks: state.tasks,
             reminders: state.reminders,
             calendar: state.calendar,
+            noteFolders: state.noteFolders,
+            notes: state.notes,
             categories: state.categories,
             approvals: state.approvals,
             blockers: state.blockers,
@@ -759,6 +784,8 @@ if (mount) {
         state.tasks = snapshot.tasks;
         state.reminders = snapshot.reminders;
         state.calendar = snapshot.calendar;
+        state.noteFolders = snapshot.noteFolders;
+        state.notes = snapshot.notes;
         state.categories = snapshot.categories;
         state.approvals = snapshot.approvals;
         state.blockers = snapshot.blockers;
@@ -928,6 +955,62 @@ if (mount) {
 
     function normalizeList(value) {
         return Array.isArray(value) ? value : [];
+    }
+
+    function normalizeNotes(value) {
+        return normalizeList(value).map((note) => ({
+            ...note,
+            is_pinned: Boolean(note.is_pinned ?? note.isPinned),
+            note_folder_id: note.note_folder_id ?? note.noteFolderId ?? note.folder_id ?? note.folderId ?? null,
+        })).sort(compareNotes);
+    }
+
+    function compareNotes(a, b) {
+        const pinned = Number(Boolean(b?.is_pinned ?? b?.isPinned)) - Number(Boolean(a?.is_pinned ?? a?.isPinned));
+        if (pinned) return pinned;
+        return new Date(b?.updated_at || b?.updatedAt || 0) - new Date(a?.updated_at || a?.updatedAt || 0);
+    }
+
+    function ensureSelectedNote() {
+        const notes = filteredNotes();
+        if (notes.some((note) => String(note.id) === String(state.selectedNoteId))) return;
+        state.selectedNoteId = notes[0]?.id ? String(notes[0].id) : '';
+    }
+
+    function selectedNote() {
+        return state.notes.find((note) => String(note.id) === String(state.selectedNoteId)) || null;
+    }
+
+    function filteredNotes() {
+        const folderId = String(state.selectedNoteFolderId || 'all');
+        const search = String(state.notesSearch || '').trim().toLowerCase();
+        return normalizeNotes(state.notes).filter((note) => {
+            const noteFolderId = String(note.note_folder_id || note.noteFolderId || '');
+            const folderMatch = folderId === 'all'
+                || (folderId === 'pinned' && Boolean(note.is_pinned ?? note.isPinned))
+                || (folderId === 'unfiled' && !noteFolderId)
+                || noteFolderId === folderId;
+            if (!folderMatch) return false;
+            if (!search) return true;
+            const folder = noteFolder(note);
+            return [
+                note.title,
+                note.plain_text,
+                note.plainText,
+                folder?.name,
+            ].some((value) => String(value || '').toLowerCase().includes(search));
+        });
+    }
+
+    function noteFolder(note) {
+        const id = String(note?.note_folder_id || note?.noteFolderId || note?.folder_id || note?.folderId || '');
+        return state.noteFolders.find((folder) => String(folder.id) === id) || null;
+    }
+
+    function notePlainTextFromHtml(html) {
+        const div = document.createElement('div');
+        div.innerHTML = String(html || '').replace(/<br\s*\/?>/gi, '\n');
+        return (div.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
     }
 
     function mergeById(...lists) {
@@ -1264,7 +1347,7 @@ if (mount) {
         const criticalTasks = criticalTasksForToday();
         const criticalReminders = criticalRemindersForToday();
         const criticalEvents = criticalEventsForToday();
-        const showAdd = ['today', 'tasks', 'reminders'].includes(state.selected);
+        const showAdd = ['today', 'tasks', 'reminders', 'notes'].includes(state.selected);
         const now = new Date();
         return `
             <div class="hb-app">
@@ -1283,7 +1366,7 @@ if (mount) {
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
                 </header>
-                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
+                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'notes' ? 'hb-main-notes' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
@@ -1302,6 +1385,10 @@ if (mount) {
     function appPanelMarkup() {
         if (state.selected === 'settings') {
             return `<div class="hb-shell">${settingsMarkup()}</div>`;
+        }
+        if (state.selected === 'notes') {
+            ensureSelectedNote();
+            return notesMarkup();
         }
         if (state.selected === 'admin' && !userIsAdmin()) {
             return `<div class="hb-shell"><section class="hb-card hb-card-pad hb-admin-access-card">
@@ -1372,6 +1459,97 @@ if (mount) {
                 </div>
                 ${dayBoardMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No pending reminders')}
             </section>`;
+    }
+
+    function notesMarkup() {
+        const folders = normalizeList(state.noteFolders);
+        const notes = filteredNotes();
+        const selected = selectedNote();
+        return `
+            <section class="hb-notes-app" aria-label="Notes">
+                <aside class="hb-notes-folders">
+                    <div class="hb-notes-sidebar-title">
+                        <strong>Folders</strong>
+                        <button class="hb-icon-button" type="button" data-create-note-folder aria-label="New folder" title="New folder">${icons.add}</button>
+                    </div>
+                    ${noteFolderButtonMarkup('all', 'All Notes', state.notes.length, icons.notes)}
+                    ${noteFolderButtonMarkup('pinned', 'Pinned', state.notes.filter((note) => note.is_pinned || note.isPinned).length, icons.pin)}
+                    ${folders.map((folder) => noteFolderButtonMarkup(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length, icons.notes, folder)).join('')}
+                    ${noteFolderButtonMarkup('unfiled', 'Unfiled', state.notes.filter((note) => !(note.note_folder_id || note.noteFolderId)).length, icons.notes)}
+                </aside>
+                <aside class="hb-notes-list-pane">
+                    <div class="hb-notes-search-row">
+                        <input class="hb-notes-search" type="search" data-notes-search placeholder="Search" value="${escapeAttr(state.notesSearch)}">
+                        <button class="hb-button-secondary hb-notes-new-button" type="button" data-create-note>New</button>
+                    </div>
+                    <div class="hb-notes-list" role="listbox" aria-label="Notes list">
+                        ${notes.length ? notes.map(noteListItemMarkup).join('') : `<div class="hb-notes-empty">No notes</div>`}
+                    </div>
+                </aside>
+                <article class="hb-notes-editor-pane">
+                    ${selected ? noteEditorMarkup(selected) : notesEmptyEditorMarkup()}
+                </article>
+            </section>`;
+    }
+
+    function noteFolderButtonMarkup(id, label, count, icon, folder = null) {
+        const active = String(state.selectedNoteFolderId || 'all') === String(id);
+        return `
+            <button class="hb-note-folder ${active ? 'hb-note-folder-active' : ''}" type="button" data-note-folder="${escapeAttr(id)}">
+                <span>${icon}<strong>${escapeHtml(label || 'Folder')}</strong></span>
+                <em>${count}</em>
+            </button>
+            ${folder ? `<button class="hb-note-folder-delete" type="button" data-delete-note-folder="${escapeAttr(folder.id)}" aria-label="${escapeAttr(`Delete ${folder.name}`)}">Delete</button>` : ''}`;
+    }
+
+    function noteListItemMarkup(note) {
+        const active = String(state.selectedNoteId) === String(note.id);
+        const text = String(note.plain_text || note.plainText || '').trim();
+        const updated = note.updated_at || note.updatedAt;
+        return `
+            <button class="hb-note-list-item ${active ? 'hb-note-list-item-active' : ''}" type="button" data-select-note="${escapeAttr(note.id)}" role="option" aria-selected="${active}">
+                <strong>${escapeHtml(note.title || 'New Note')}</strong>
+                <span>${escapeHtml(text || 'No additional text')}</span>
+                <small>${note.is_pinned || note.isPinned ? 'Pinned - ' : ''}${escapeHtml(updated ? formatDateOnly(updated) : '')}</small>
+            </button>`;
+    }
+
+    function noteEditorMarkup(note) {
+        const folderId = note.note_folder_id || note.noteFolderId || '';
+        return `
+            <form class="hb-note-editor" data-note-editor="${escapeAttr(note.id)}">
+                <div class="hb-note-editor-toolbar">
+                    <select class="hb-select hb-note-folder-select" name="note_folder_id" aria-label="Folder">
+                        <option value="">All Notes</option>
+                        ${state.noteFolders.map((folder) => `<option value="${escapeAttr(folder.id)}" ${String(folder.id) === String(folderId) ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join('')}
+                    </select>
+                    <button class="hb-icon-button ${note.is_pinned || note.isPinned ? 'hb-note-pin-active' : ''}" type="button" data-toggle-note-pin="${escapeAttr(note.id)}" aria-label="Pin note" title="Pin note">${icons.pin}</button>
+                    <span class="hb-note-toolbar-divider"></span>
+                    ${noteCommandButton('formatBlock', 'h1', 'H1')}
+                    ${noteCommandButton('formatBlock', 'h2', 'H2')}
+                    ${noteCommandButton('bold', '', 'B')}
+                    ${noteCommandButton('italic', '', 'I')}
+                    ${noteCommandButton('insertUnorderedList', '', '-')}
+                    ${noteCommandButton('insertOrderedList', '', '1.')}
+                    ${noteCommandButton('insertHorizontalRule', '', '---')}
+                    <button class="hb-button-secondary" type="submit" ${state.notesSaving ? 'disabled' : ''}>${state.notesSaving ? 'Saving...' : 'Save'}</button>
+                    <button class="hb-button-danger" type="button" data-delete-note="${escapeAttr(note.id)}">Delete</button>
+                </div>
+                <input class="hb-note-title-input" name="title" value="${escapeAttr(note.title || '')}" placeholder="New Note" autocomplete="off">
+                <div class="hb-note-body" contenteditable="true" data-note-body spellcheck="true">${note.body_html || note.bodyHtml || ''}</div>
+            </form>`;
+    }
+
+    function noteCommandButton(command, value, label) {
+        return `<button class="hb-note-format-button" type="button" data-note-command="${escapeAttr(command)}" data-note-command-value="${escapeAttr(value)}">${escapeHtml(label)}</button>`;
+    }
+
+    function notesEmptyEditorMarkup() {
+        return `
+            <div class="hb-notes-empty-editor">
+                ${icons.notes}
+                <strong>Select or create a note</strong>
+            </div>`;
     }
 
     function adminMarkup() {
@@ -2052,6 +2230,7 @@ if (mount) {
         const target = /\b(?:calendar event|event|calendar|appointment|meeting)\b/.test(text) ? 'event'
             : /\b(?:reminder)\b/.test(text) ? 'reminder'
             : /\b(?:task|todo)\b/.test(text) ? 'task'
+            : /\b(?:note|notes|folder)\b/.test(text) ? 'note'
             : /\b(?:memory)\b/.test(text) ? 'memory'
             : '';
         return action || target ? `${action}:${target}` : '';
@@ -2067,22 +2246,26 @@ if (mount) {
         const targetsEvent = /\b(?:calendar|event|events|appointment|appointments|meeting|meetings)\b/.test(command);
         const targetsTask = /\b(?:task|tasks|todo|to do)\b/.test(command);
         const targetsReminder = /\b(?:reminder|reminders|remind)\b/.test(command);
+        const targetsNote = /\b(?:note|notes|folder|folders|list|lists)\b/.test(command);
         if (/\b(?:delete|remove|cancel)\b/.test(command)) {
             if (targetsEvent) return 'Deleting event';
             if (targetsReminder) return 'Deleting reminder';
             if (targetsTask) return 'Deleting task';
+            if (targetsNote) return 'Deleting note';
             return 'Deleting item';
         }
         if (/\b(?:move|reschedule|update|change)\b/.test(command)) {
             if (targetsEvent) return 'Updating event';
             if (targetsReminder) return 'Updating reminder';
             if (targetsTask) return 'Updating task';
+            if (targetsNote) return 'Updating note';
             return 'Updating item';
         }
-        if (/\b(?:add|create|put|schedule)\b/.test(command)) {
+        if (/\b(?:add|create|put|schedule|write|save)\b/.test(command)) {
             if (targetsEvent) return 'Creating event';
             if (targetsReminder) return 'Creating reminder';
             if (targetsTask) return 'Creating task';
+            if (targetsNote) return 'Creating note';
             return 'Creating item';
         }
         if (/\b(?:complete|finish|mark)\b/.test(command)) {
@@ -2134,6 +2317,12 @@ if (mount) {
         if (type.includes('.calendar_event.created')) return `Create calendar event${readable}`;
         if (type.includes('.calendar_event.updated')) return `Update calendar event${readable}`;
         if (type.includes('.calendar_event.deleted')) return `Delete calendar event${readable}`;
+        if (type.includes('.note.created')) return `Create note${readable}`;
+        if (type.includes('.note.updated')) return `Update note${readable}`;
+        if (type.includes('.note.deleted')) return `Delete note${readable}`;
+        if (type.includes('.note_folder.created')) return `Create folder${readable}`;
+        if (type.includes('.note_folder.updated')) return `Update folder${readable}`;
+        if (type.includes('.note_folder.deleted')) return `Delete folder${readable}`;
         if (type.includes('.approval.created')) return `Prepare approval${readable}`;
         if (type.includes('.blocker.created')) return `Flag blocker${readable}`;
         if (type.includes('.workspace_memory.noted')) return 'Save memory';
@@ -2648,6 +2837,7 @@ if (mount) {
                     <button class="hb-overflow-action" type="button" data-open-create="event">${icons.calendar}<span>New event</span></button>
                     <button class="hb-overflow-action" type="button" data-open-create="task">${icons.tasks}<span>New task</span></button>
                     <button class="hb-overflow-action" type="button" data-open-create="reminder">${icons.reminders}<span>New reminder</span></button>
+                    <button class="hb-overflow-action" type="button" data-create-note>${icons.notes}<span>New note</span></button>
                 </div>
             </details>`;
     }
@@ -2668,6 +2858,7 @@ if (mount) {
                     ${userIsAdmin() ? `<button class="hb-profile-action ${state.selected === 'admin' ? 'hb-profile-action-active' : ''}" type="button" data-nav="admin">${icons.activity}<span>Admin monitor</span></button>` : ''}
                     ${workspaceItems.length > 1 ? `<label class="hb-profile-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
                     <button class="hb-profile-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
+                    <button class="hb-profile-action ${state.selected === 'notes' ? 'hb-profile-action-active' : ''}" type="button" data-nav="notes">${icons.notes}<span>Notes</span></button>
                     <button class="hb-profile-action ${state.selected === 'settings' ? 'hb-profile-action-active' : ''}" type="button" data-nav="settings">${icons.settings}<span>Settings</span></button>
                     <button class="hb-profile-action" type="button" data-logout>${icons.user}<span>Sign out</span></button>
                 </div>
@@ -2774,7 +2965,7 @@ if (mount) {
             ['today', 'Calendar', icons.calendar],
             ['tasks', 'Tasks', icons.tasks],
             ['reminders', 'Reminders', icons.reminders],
-            ['settings', 'Settings', icons.settings],
+            ['notes', 'Notes', icons.notes],
         ];
         return `
             <nav class="hb-bottom-menu" aria-label="App navigation">
@@ -2801,6 +2992,7 @@ if (mount) {
         const nav = [
             ['today', 'Calendar', icons.calendar],
             ['tasks', 'Tasks', icons.tasks],
+            ['notes', 'Notes', icons.notes],
             ['reminders', 'Reminders', icons.reminders],
         ];
         if (userIsAdmin()) nav.push(['admin', 'Admin', icons.activity]);
@@ -3588,6 +3780,7 @@ if (mount) {
                 </label>
                 ${editing ? `<input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}"><p class="hb-item-meta">Saved in ${escapeHtml(sourceWorkspace?.name || 'this workspace')}.</p>` : ''}
                 <div data-sync-workspace-options>${workspaceSyncOptionsMarkup(sourceWorkspaceId, linked)}</div>
+                ${kind === 'reminder' ? `<div data-reminder-recipient-options>${reminderRecipientOptionsMarkup(sourceWorkspaceId, linked, item)}</div>` : ''}
                 ${kind === 'event' ? `<div data-google-export-options>${googleEventConnectionMarkup(item, sourceWorkspace)}</div>` : ''}
                 </div>
             </section>`;
@@ -3600,6 +3793,62 @@ if (mount) {
                 ${otherWorkspaces.map((workspace) => `<label class="hb-switch-row"><input type="checkbox" name="syncWorkspaceIds" value="${escapeAttr(workspace.id)}" ${linked.has(String(workspace.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(workspace.name || 'Workspace')}</strong><small>${escapeHtml(workspace.type || workspace.kind || 'workspace')}</small></span></label>`).join('')}
             </div>
         </div>` : '<p class="hb-item-meta">No other workspaces connected to this account.</p>';
+    }
+
+    function reminderRecipientOptionsMarkup(sourceWorkspaceId, syncWorkspaceIds = new Set(), item = null, selectedByWorkspace = null) {
+        const workspaceIds = Array.from(new Set([
+            String(sourceWorkspaceId || currentWorkspaceId() || ''),
+            ...Array.from(syncWorkspaceIds || []).map(String),
+        ].filter(Boolean)));
+        const savedSelections = selectedByWorkspace || reminderRecipientsByWorkspace(item);
+        const hasSavedSelections = Boolean(item && Object.keys(savedSelections).length);
+        const currentUserId = String(state.user?.id || '');
+        const groups = workspaceIds.map((workspaceId) => {
+            const workspace = findWorkspace(workspaceId);
+            const members = workspaceMembers(workspace);
+            if (!workspace || !members.length) return '';
+            const selected = new Set((savedSelections[workspaceId] || []).map(String));
+            return `
+                <div class="hb-reminder-recipient-group" data-reminder-recipient-workspace="${escapeAttr(workspaceId)}">
+                    <div class="hb-reminder-recipient-group-head">
+                        <strong>${escapeHtml(workspaceDisplayName(workspace))}</strong>
+                        <small>${escapeHtml(workspaceTypeLabel(workspace))}</small>
+                    </div>
+                    ${members.map((member) => {
+                        const user = member.user || member;
+                        const userId = String(user.id || member.user_id || member.userId || '');
+                        const checked = hasSavedSelections ? selected.has(userId) : userId === currentUserId;
+                        return `<label class="hb-switch-row"><input type="checkbox" name="notificationRecipients" value="${escapeAttr(userId)}" data-recipient-workspace-id="${escapeAttr(workspaceId)}" ${checked ? 'checked' : ''}> <span><strong>${escapeHtml(user.name || user.email || 'Workspace member')}</strong><small>${escapeHtml(user.email || member.role || 'member')}</small></span></label>`;
+                    }).join('')}
+                </div>`;
+        }).filter(Boolean);
+
+        return groups.length ? `<div class="hb-label">Notify
+            <div class="hb-option-list hb-reminder-recipient-list">${groups.join('')}</div>
+        </div>` : '<p class="hb-item-meta">Add workspace members before assigning reminder notifications.</p>';
+    }
+
+    function reminderRecipientsByWorkspace(item = null) {
+        const metadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
+        const source = metadata.notification_recipients_by_workspace || metadata.notificationRecipientsByWorkspace || {};
+        const map = {};
+        if (source && typeof source === 'object' && !Array.isArray(source)) {
+            Object.entries(source).forEach(([workspaceId, ids]) => {
+                map[String(workspaceId)] = normalizeList(ids).map(String);
+            });
+        }
+        if (!Object.keys(map).length) {
+            const workspaceId = String(item?.workspace_id || item?.workspaceId || currentWorkspaceId() || '');
+            const flat = normalizeList(metadata.notification_recipient_user_ids || metadata.notificationRecipientUserIds).map(String);
+            if (workspaceId && flat.length) map[workspaceId] = flat;
+        }
+        return map;
+    }
+
+    function workspaceMembers(workspace = {}) {
+        return normalizeList(workspace?.memberships || workspace?.members || [])
+            .filter((member) => String(member.status || 'active').toLowerCase() === 'active')
+            .filter((member) => member.user || member.id || member.user_id || member.userId);
     }
 
     function googleEventConnectionMarkup(item, workspace) {
@@ -4014,6 +4263,27 @@ if (mount) {
         mount.querySelectorAll('[data-issue-status]').forEach((button) => button.addEventListener('click', () => updateIssueReportStatus(button.dataset.issueStatus, button.dataset.status)));
         mount.querySelectorAll('[data-admin-log-id]').forEach((button) => button.addEventListener('click', () => openAdminUsageLog(button.dataset.adminLogId)));
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
+        mount.querySelectorAll('[data-create-note]').forEach((button) => button.addEventListener('click', createNote));
+        mount.querySelector('[data-create-note-folder]')?.addEventListener('click', createNoteFolder);
+        mount.querySelectorAll('[data-note-folder]').forEach((button) => button.addEventListener('click', () => {
+            state.selectedNoteFolderId = button.dataset.noteFolder || 'all';
+            ensureSelectedNote();
+            render();
+        }));
+        mount.querySelector('[data-notes-search]')?.addEventListener('input', (event) => {
+            state.notesSearch = event.currentTarget.value;
+            ensureSelectedNote();
+            render();
+        });
+        mount.querySelectorAll('[data-select-note]').forEach((button) => button.addEventListener('click', () => {
+            state.selectedNoteId = button.dataset.selectNote || '';
+            render();
+        }));
+        mount.querySelectorAll('[data-toggle-note-pin]').forEach((button) => button.addEventListener('click', () => toggleNotePin(button.dataset.toggleNotePin)));
+        mount.querySelectorAll('[data-delete-note]').forEach((button) => button.addEventListener('click', () => deleteNote(button.dataset.deleteNote)));
+        mount.querySelectorAll('[data-delete-note-folder]').forEach((button) => button.addEventListener('click', () => deleteNoteFolder(button.dataset.deleteNoteFolder)));
+        mount.querySelectorAll('[data-note-command]').forEach((button) => button.addEventListener('click', () => execNoteCommand(button.dataset.noteCommand, button.dataset.noteCommandValue)));
+        mount.querySelector('[data-note-editor]')?.addEventListener('submit', saveNoteEditor);
         mount.querySelector('[data-open-issue-report]')?.addEventListener('click', () => openModal('issue-report'));
         mount.querySelectorAll('[data-edit-task]').forEach((button) => button.addEventListener('click', () => openModal('task', findById(state.tasks, button.dataset.editTask))));
         mount.querySelectorAll('[data-edit-reminder]').forEach((button) => button.addEventListener('click', () => openModal('reminder', findById(state.reminders, button.dataset.editReminder))));
@@ -4104,6 +4374,128 @@ if (mount) {
         render();
     }
 
+    async function createNote() {
+        state.error = '';
+        try {
+            const body = {
+                title: 'New Note',
+                body_html: '',
+                plain_text: '',
+                note_folder_id: /^\d+$/.test(String(state.selectedNoteFolderId || '')) ? Number(state.selectedNoteFolderId) : null,
+            };
+            const note = await api(workspaceScopedPath('/notes'), { method: 'POST', body });
+            state.notes = normalizeNotes(upsertById(state.notes, note));
+            state.selectedNoteId = String(note.id);
+            state.selected = 'notes';
+            saveDashboardCache();
+            render();
+        } catch (error) {
+            state.error = friendlyError(error, 'create that note');
+            render();
+        }
+    }
+
+    async function createNoteFolder() {
+        const name = window.prompt('Folder name');
+        if (!name || !name.trim()) return;
+        try {
+            const folder = await api(workspaceScopedPath('/note-folders'), { method: 'POST', body: { name: name.trim() } });
+            state.noteFolders = normalizeList([...state.noteFolders, folder]).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+            state.selectedNoteFolderId = String(folder.id);
+            saveDashboardCache();
+            render();
+        } catch (error) {
+            state.error = friendlyError(error, 'create that folder');
+            render();
+        }
+    }
+
+    async function saveNoteEditor(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const id = form.dataset.noteEditor;
+        const bodyNode = form.querySelector('[data-note-body]');
+        const bodyHtml = bodyNode?.innerHTML || '';
+        const body = {
+            title: String(form.elements.title?.value || '').trim() || 'New Note',
+            body_html: bodyHtml,
+            plain_text: notePlainTextFromHtml(bodyHtml),
+            note_folder_id: form.elements.note_folder_id?.value ? Number(form.elements.note_folder_id.value) : null,
+        };
+        state.notesSaving = true;
+        state.error = '';
+        render();
+        try {
+            const note = await api(`/notes/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+            state.notes = normalizeNotes(upsertById(state.notes, note));
+            state.selectedNoteId = String(note.id);
+            saveDashboardCache();
+        } catch (error) {
+            state.error = friendlyError(error, 'save that note');
+        } finally {
+            state.notesSaving = false;
+            render();
+        }
+    }
+
+    async function toggleNotePin(id) {
+        const note = findById(state.notes, id);
+        if (!note) return;
+        const next = !(note.is_pinned || note.isPinned);
+        state.notes = normalizeNotes(upsertById(state.notes, { ...note, is_pinned: next, isPinned: next }));
+        render();
+        try {
+            const saved = await api(`/notes/${encodeURIComponent(id)}`, { method: 'PATCH', body: { is_pinned: next } });
+            state.notes = normalizeNotes(upsertById(state.notes, saved));
+            saveDashboardCache();
+            render();
+        } catch (error) {
+            state.notes = normalizeNotes(upsertById(state.notes, note));
+            state.error = friendlyError(error, 'pin that note');
+            render();
+        }
+    }
+
+    async function deleteNote(id) {
+        if (!id || !window.confirm('Delete this note?')) return;
+        const previous = state.notes;
+        state.notes = state.notes.filter((note) => String(note.id) !== String(id));
+        ensureSelectedNote();
+        render();
+        try {
+            await api(`/notes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            saveDashboardCache();
+        } catch (error) {
+            state.notes = previous;
+            state.error = friendlyError(error, 'delete that note');
+            render();
+        }
+    }
+
+    async function deleteNoteFolder(id) {
+        if (!id || !window.confirm('Delete this folder? Notes inside it will stay in All Notes.')) return;
+        try {
+            await api(`/note-folders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            state.noteFolders = state.noteFolders.filter((folder) => String(folder.id) !== String(id));
+            state.notes = state.notes.map((note) => String(note.note_folder_id || note.noteFolderId || '') === String(id)
+                ? { ...note, note_folder_id: null, noteFolderId: null }
+                : note);
+            if (String(state.selectedNoteFolderId) === String(id)) state.selectedNoteFolderId = 'all';
+            ensureSelectedNote();
+            saveDashboardCache();
+            render();
+        } catch (error) {
+            state.error = friendlyError(error, 'delete that folder');
+            render();
+        }
+    }
+
+    function execNoteCommand(command, value = '') {
+        const body = mount.querySelector('[data-note-body]');
+        body?.focus();
+        document.execCommand(command, false, value || null);
+    }
+
     function toggleTaskDetails(id) {
         if (!id) return;
         const key = String(id);
@@ -4149,6 +4541,7 @@ if (mount) {
         mount.querySelector('[data-preview-tts-voice]')?.addEventListener('click', previewSelectedTtsVoice);
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventTimeInputs);
         mount.querySelectorAll('[data-primary-workspace-select]').forEach((select) => select.addEventListener('change', handlePrimaryWorkspaceChange));
+        mount.querySelectorAll('input[name="syncWorkspaceIds"]').forEach((input) => input.addEventListener('change', handleSyncWorkspaceChange));
         mount.querySelectorAll('[data-recurrence-select]').forEach((select) => {
             select.addEventListener('change', () => toggleRecurrenceFields(select.closest('form')));
             toggleRecurrenceFields(select.closest('form'));
@@ -4237,6 +4630,22 @@ if (mount) {
         const workspace = findWorkspace(sourceWorkspaceId);
         const googleContainer = picker.querySelector('[data-google-export-options]');
         if (googleContainer) googleContainer.innerHTML = googleEventConnectionMarkup(null, workspace);
+        refreshReminderRecipientOptions(select.closest('form'));
+        syncContainer?.querySelectorAll('input[name="syncWorkspaceIds"]').forEach((input) => input.addEventListener('change', handleSyncWorkspaceChange));
+    }
+
+    function handleSyncWorkspaceChange(event) {
+        refreshReminderRecipientOptions(event.currentTarget.closest('form'));
+    }
+
+    function refreshReminderRecipientOptions(form) {
+        if (!form || form.dataset.modalForm !== 'reminder') return;
+        const container = form.querySelector('[data-reminder-recipient-options]');
+        const picker = form.querySelector('[data-workspace-picker]');
+        if (!container || !picker) return;
+        const sourceWorkspaceId = String(form.querySelector('[data-primary-workspace-select]')?.value || form.elements.workspaceId?.value || currentWorkspaceId() || '');
+        const checkedSyncIds = new Set(Array.from(picker.querySelectorAll('input[name="syncWorkspaceIds"]:checked')).map((input) => String(input.value)).filter((id) => id !== sourceWorkspaceId));
+        container.innerHTML = reminderRecipientOptionsMarkup(sourceWorkspaceId, checkedSyncIds, state.modal?.item, selectedReminderRecipientsByWorkspace(form));
     }
 
     function toggleRecurrenceFields(form) {
@@ -4803,6 +5212,8 @@ if (mount) {
             const syncTo = selectedSyncWorkspaceIds(form);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const recurrence = recurrenceFormData(form, data);
+            const recipientsByWorkspace = selectedReminderRecipientsByWorkspace(form);
+            const recipientUserIds = uniqueReminderRecipientUserIds(recipientsByWorkspace);
             const body = {
                 title: data.title,
                 remind_at: fromDatetimeLocal(data.time),
@@ -4812,6 +5223,8 @@ if (mount) {
                 metadata: {
                     ...existingMetadata,
                     ...recurrence.metadata,
+                    notification_recipients_by_workspace: recipientsByWorkspace,
+                    notification_recipient_user_ids: recipientUserIds,
                 },
                 sync_to_workspace_ids: syncTo,
             };
@@ -5055,6 +5468,25 @@ if (mount) {
         return Array.from(form.querySelectorAll('input[name="syncWorkspaceIds"]:checked'))
             .map((input) => Number(input.value))
             .filter(Boolean);
+    }
+
+    function selectedReminderRecipientsByWorkspace(form) {
+        const map = {};
+        form?.querySelectorAll('input[name="notificationRecipients"]:checked').forEach((input) => {
+            const workspaceId = String(input.dataset.recipientWorkspaceId || '');
+            const userId = Number(input.value);
+            if (!workspaceId || !userId) return;
+            map[workspaceId] ??= [];
+            map[workspaceId].push(userId);
+        });
+        Object.keys(map).forEach((workspaceId) => {
+            map[workspaceId] = Array.from(new Set(map[workspaceId]));
+        });
+        return map;
+    }
+
+    function uniqueReminderRecipientUserIds(recipientsByWorkspace = {}) {
+        return Array.from(new Set(Object.values(recipientsByWorkspace).flat().map(Number).filter(Boolean)));
     }
 
     function selectedGoogleCalendarIds(form) {
@@ -9393,12 +9825,14 @@ if (mount) {
         try {
             const calendarPath = options.skipCalendarSync === false ? '/calendar-events' : '/calendar-events?skip_google_sync=1';
             const workspaceId = currentWorkspaceId();
-            const [summary, tasks, pastTasks, reminders, calendar, categories, googleStatus] = await Promise.all([
+            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, categories, googleStatus] = await Promise.all([
                 api(workspaceScopedPath('/today', workspaceId)),
                 api(workspaceScopedPath('/tasks', workspaceId)),
                 api(workspaceScopedPath('/tasks/past', workspaceId)),
                 api(workspaceScopedPath('/reminders', workspaceId)),
                 api(workspaceScopedPath(calendarPath, workspaceId)),
+                api(workspaceScopedPath('/note-folders', workspaceId)),
+                api(workspaceScopedPath('/notes', workspaceId)),
                 api(workspaceScopedPath('/event-categories', workspaceId)),
                 api('/google-calendar/status?cached=1').catch(() => state.googleStatus),
             ]);
@@ -9407,6 +9841,9 @@ if (mount) {
             state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
             state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
             state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
+            state.noteFolders = normalizeList(noteFolders);
+            state.notes = normalizeNotes(notes);
+            ensureSelectedNote();
             state.categories = normalizeList(categories);
             state.approvals = normalizeList(summary?.approvals);
             state.blockers = normalizeList(summary?.blockers);

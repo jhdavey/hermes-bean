@@ -12,12 +12,9 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
         $appCss = file_get_contents(resource_path('css/app.css'));
 
         $this->assertStringContainsString('data-top-workspace-select', $appJs);
-        $this->assertStringContainsString('function topWorkspaceSwitcherMarkup', $appJs);
-        $this->assertStringContainsString('if (workspaceItems.length < 2) return \'\';', $appJs);
-        $this->assertStringContainsString("topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-mobile')", $appJs);
-        $this->assertStringContainsString("topWorkspaceSwitcherMarkup('hb-top-workspace-switcher-nav')", $appJs);
-        $this->assertStringContainsString('workspaceItems.length > 1 ? `<label class="hb-overflow-workspace"', $appJs);
-        $this->assertStringContainsString('.hb-top-workspace-switcher', $appCss);
+        $this->assertStringContainsString('workspaceItems.length > 1 ? `<label class="hb-profile-workspace"', $appJs);
+        $this->assertStringContainsString('setWorkspace(event.currentTarget.value)', $appJs);
+        $this->assertStringContainsString('.hb-profile-workspace', $appCss);
     }
 
     public function test_web_resource_editors_include_workspace_picker_for_tasks_reminders_and_events(): void
@@ -27,8 +24,11 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
         $this->assertStringContainsString('workspaceConnectionsMarkup(kind, item, workspaceId, editing)', $appJs);
         $this->assertStringContainsString('sync_to_workspace_ids: syncTo', $appJs);
         $this->assertStringContainsString("if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);", $appJs);
-        $this->assertStringContainsString("name=\"syncWorkspaceIds\"", $appJs);
+        $this->assertStringContainsString('name="syncWorkspaceIds"', $appJs);
         $this->assertStringContainsString('Also assign to', $appJs);
+        $this->assertStringContainsString('reminderRecipientOptionsMarkup(sourceWorkspaceId, linked, item)', $appJs);
+        $this->assertStringContainsString('name="notificationRecipients"', $appJs);
+        $this->assertStringContainsString('notification_recipients_by_workspace: recipientsByWorkspace', $appJs);
     }
 
     public function test_web_resource_time_inputs_use_five_minute_steps(): void

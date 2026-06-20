@@ -8,6 +8,7 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\WorkspaceItemLink;
+use App\Models\WorkspaceMembership;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -558,6 +559,54 @@ class WorkspaceSchemaTest extends TestCase
         $this->withToken($token)->getJson('/api/reminders?workspace_id='.$personalWorkspaceId)
             ->assertOk()
             ->assertJsonPath('data.0.linked_workspace_ids', [$personalWorkspaceId, $work->id]);
+    }
+
+    public function test_shared_workspace_reminder_can_store_notification_recipients_for_synced_workspaces(): void
+    {
+        $token = $this->apiToken('shared-reminder-owner@example.com');
+        $owner = User::where('email', 'shared-reminder-owner@example.com')->firstOrFail();
+        $member = User::factory()->create(['email' => 'shared-reminder-member@example.com']);
+        $outsider = User::factory()->create(['email' => 'shared-reminder-outsider@example.com']);
+        $family = app(WorkspaceService::class)->createHousehold($owner, 'Family');
+        $work = app(WorkspaceService::class)->createHousehold($owner, 'Work');
+        WorkspaceMembership::create([
+            'workspace_id' => $family->id,
+            'user_id' => $member->id,
+            'role' => 'member',
+            'status' => 'active',
+            'accepted_at' => now(),
+        ]);
+
+        $reminderId = $this->withToken($token)->postJson('/api/reminders', [
+            'workspace_id' => $family->id,
+            'title' => 'Bring snacks',
+            'remind_at' => '2026-05-21T14:00:00Z',
+            'sync_to_workspace_ids' => [$work->id],
+            'metadata' => [
+                'notification_recipients_by_workspace' => [
+                    (string) $family->id => [$owner->id, $member->id],
+                    (string) $work->id => [$owner->id],
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.metadata.notification_recipients_by_workspace.'.$family->id, [$owner->id, $member->id])
+            ->json('data.id');
+
+        $workCopy = Reminder::where('workspace_id', $work->id)->firstOrFail();
+        $this->assertSame([$owner->id], $workCopy->metadata['notification_recipients_by_workspace'][$work->id]);
+        $familyRecipients = Reminder::findOrFail($reminderId)->metadata['notification_recipients_by_workspace'][$family->id];
+        sort($familyRecipients);
+        $expectedFamilyRecipients = [$owner->id, $member->id];
+        sort($expectedFamilyRecipients);
+        $this->assertSame($expectedFamilyRecipients, $familyRecipients);
+
+        $this->withToken($token)->patchJson('/api/reminders/'.$reminderId, [
+            'metadata' => [
+                'notification_recipients_by_workspace' => [
+                    (string) $family->id => [$outsider->id],
+                ],
+            ],
+        ])->assertUnprocessable();
     }
 
     public function test_completing_linked_reminder_copy_applies_to_all_linked_workspaces(): void

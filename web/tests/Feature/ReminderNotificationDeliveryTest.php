@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Models\PushNotificationDeviceToken;
 use App\Models\Reminder;
 use App\Models\User;
+use App\Models\WorkspaceMembership;
 use App\Notifications\ReminderDueNotification;
+use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -107,6 +109,59 @@ class ReminderNotificationDeliveryTest extends TestCase
         Artisan::call('reminders:send-due-notifications');
 
         Notification::assertNothingSent();
+    }
+
+    public function test_due_shared_workspace_reminder_email_is_sent_to_selected_recipients(): void
+    {
+        Notification::fake();
+        Carbon::setTestNow('2026-05-18 13:45:00');
+        $owner = User::factory()->create([
+            'email' => 'shared-reminder-owner@example.com',
+            'subscription_tier' => 'premium',
+            'notification_preferences' => [
+                'reminder_push' => false,
+                'reminder_email' => true,
+            ],
+        ]);
+        $member = User::factory()->create([
+            'email' => 'shared-reminder-member@example.com',
+            'subscription_tier' => 'premium',
+            'notification_preferences' => [
+                'reminder_push' => false,
+                'reminder_email' => true,
+            ],
+        ]);
+        app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($owner);
+        $workspace = app(WorkspaceService::class)->createHousehold($owner, 'Shared House');
+        WorkspaceMembership::create([
+            'workspace_id' => $workspace->id,
+            'user_id' => $member->id,
+            'role' => 'member',
+            'status' => 'active',
+            'accepted_at' => now(),
+        ]);
+
+        $reminder = Reminder::create([
+            'user_id' => $owner->id,
+            'workspace_id' => $workspace->id,
+            'title' => 'Shared dinner reminder',
+            'remind_at' => now()->subMinute(),
+            'status' => 'pending',
+            'metadata' => [
+                'notification_recipients_by_workspace' => [
+                    (string) $workspace->id => [$owner->id, $member->id],
+                ],
+            ],
+        ]);
+
+        Artisan::call('reminders:send-due-notifications');
+        Artisan::call('reminders:send-due-notifications');
+
+        Notification::assertSentToTimes($owner, ReminderDueNotification::class, 1);
+        Notification::assertSentToTimes($member, ReminderDueNotification::class, 1);
+        $delivery = $reminder->refresh()->metadata['notification_delivery']['email_sent_at_by_user'];
+        $this->assertSame('2026-05-18T13:45:00+00:00', $delivery[(string) $owner->id]);
+        $this->assertSame('2026-05-18T13:45:00+00:00', $delivery[(string) $member->id]);
     }
 
     public function test_authenticated_user_can_register_and_disable_push_notification_token(): void

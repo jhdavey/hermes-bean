@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\CalendarEvent;
+use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
@@ -80,6 +81,15 @@ class DashboardContextSnapshotService
             ->reject(fn (CalendarEvent $event): bool => (bool) (($event->metadata ?? [])['recurrence_source_hidden'] ?? false))
             ->values();
 
+        $notesQuery = Note::query()
+            ->whereIn('workspace_id', $workspaceIds)
+            ->with('folder');
+        $notes = (clone $notesQuery)
+            ->orderByDesc('is_pinned')
+            ->latest('updated_at')
+            ->limit(30)
+            ->get();
+
         $weatherLocation = $this->defaultWeatherLocation($user, $workspace, $clientContext);
         $weatherCurrent = $weatherLocation !== null && (bool) config('services.hermes_runtime.weather_lookup_enabled', true)
             ? $this->weather->currentWeather($weatherLocation, [
@@ -108,6 +118,7 @@ class DashboardContextSnapshotService
                 'open_tasks' => (clone $tasksQuery)->count(),
                 'calendar_events_next_7_days' => $calendarEventsCount,
                 'reminders_next_7_days' => (clone $remindersQuery)->count(),
+                'notes' => (clone $notesQuery)->count(),
                 'workspaces' => count($workspaceIds),
             ],
             'weather_current' => $weatherCurrent,
@@ -152,6 +163,10 @@ class DashboardContextSnapshotService
                 ->map(fn (Reminder $reminder): array => $this->reminderPayload($reminder, $timezone, $workspacesById))
                 ->values()
                 ->all(),
+            'notes_recent' => $notes
+                ->map(fn (Note $note): array => $this->notePayload($note, $workspacesById))
+                ->values()
+                ->all(),
         ];
     }
 
@@ -166,7 +181,7 @@ class DashboardContextSnapshotService
 
         return <<<TEXT
 Dashboard context snapshot for fast read-only answers.
-Use this cross-workspace snapshot to answer simple questions about today's calendar, upcoming events, current tasks, and reminders without calling tools. It includes the user's accessible workspaces and only warms app data through window.ends_on, up to 7 days in the future. If the user asks for anything outside this snapshot, needs a write/change, or needs fresh external data, call queue_bean_work. Treat this snapshot as current as of generated_at.
+Use this cross-workspace snapshot to answer simple questions about today's calendar, upcoming events, current tasks, reminders, and recent notes without calling tools. It includes the user's accessible workspaces and only warms app data through window.ends_on, up to 7 days in the future, plus recent notes. If the user asks for anything outside this snapshot, needs a write/change, or needs fresh external data, call queue_bean_work. Treat this snapshot as current as of generated_at.
 If weather_current.ok is true and the user asks for current weather without naming a location, use weather_current as the default location and answer immediately without tools. Also answer immediately when they name the same place as weather_current.location. If they ask for a different location or a forecast not covered by weather_current, call queue_bean_work.
 When the snapshot contains the answer, the turn is complete: answer once from the snapshot and do not queue background work, bridge updates, or a second final answer.
 Timed *_at timestamps in this snapshot are formatted in the snapshot timezone and match the user-visible dashboard. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date. When multiple workspaces are relevant, mention the workspace names only when needed to avoid ambiguity.
@@ -310,6 +325,21 @@ TEXT;
             'category' => $event->category,
             'critical' => (bool) $event->is_critical,
             'source' => data_get($event->metadata, 'source'),
+        ];
+    }
+
+    private function notePayload(Note $note, Collection $workspacesById): array
+    {
+        return [
+            'id' => $note->id,
+            'workspace_id' => $note->workspace_id,
+            'workspace' => $this->workspaceReference($workspacesById->get((int) $note->workspace_id), (int) $note->workspace_id),
+            'folder_id' => $note->note_folder_id,
+            'folder' => $note->folder?->name,
+            'title' => $note->title,
+            'plain_text' => str((string) $note->plain_text)->squish()->limit(1200, '')->toString(),
+            'is_pinned' => (bool) $note->is_pinned,
+            'updated_at' => $note->updated_at?->toIso8601String(),
         ];
     }
 

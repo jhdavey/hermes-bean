@@ -1185,7 +1185,7 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
 
 enum _AuthPhase { loading, signedOut, planSelection, signedIn }
 
-enum _HomeDestination { today, tasks, bean, reminders, settings }
+enum _HomeDestination { today, tasks, bean, reminders, notes, settings }
 
 const _dashboardChangePollInterval = Duration(seconds: 15);
 const _pendingCalendarEventWriteTtl = Duration(minutes: 2);
@@ -1198,6 +1198,8 @@ class _DashboardSnapshot {
     required this.pastTasks,
     required this.reminders,
     required this.calendar,
+    required this.noteFolders,
+    required this.notes,
     required this.eventCategories,
     required this.approvals,
     required this.events,
@@ -1208,6 +1210,8 @@ class _DashboardSnapshot {
   final List<HermesTask> pastTasks;
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
+  final List<HermesNoteFolder> noteFolders;
+  final List<HermesNote> notes;
   final List<HermesEventCategory> eventCategories;
   final List<HermesApproval> approvals;
   final List<HermesActivityEvent> events;
@@ -1295,6 +1299,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   List<HermesTask> _pastTasks = const [];
   List<HermesReminder> _reminders = const [];
   List<HermesCalendarEvent> _calendar = const [];
+  List<HermesNoteFolder> _noteFolders = const [];
+  List<HermesNote> _notes = const [];
   List<HermesEventCategory> _eventCategories = const [];
   GoogleCalendarSyncStatus? _googleCalendarStatus;
   List<HermesApproval> _approvals = const [];
@@ -1927,6 +1933,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ? 'reminder'
         : RegExp(r'\b(task|todo)\b').hasMatch(text)
         ? 'task'
+        : RegExp(r'\b(note|notes|folder|folders)\b').hasMatch(text)
+        ? 'note'
         : RegExp(r'\bmemory\b').hasMatch(text)
         ? 'memory'
         : '';
@@ -1964,22 +1972,28 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final targetsReminder = RegExp(
       r'\b(reminder|reminders|remind)\b',
     ).hasMatch(command);
+    final targetsNote = RegExp(
+      r'\b(note|notes|folder|folders|list|lists)\b',
+    ).hasMatch(command);
     if (RegExp(r'\b(delete|remove|cancel)\b').hasMatch(command)) {
       if (targetsEvent) return 'Deleting event';
       if (targetsReminder) return 'Deleting reminder';
       if (targetsTask) return 'Deleting task';
+      if (targetsNote) return 'Deleting note';
       return 'Deleting item';
     }
     if (RegExp(r'\b(move|reschedule|update|change)\b').hasMatch(command)) {
       if (targetsEvent) return 'Updating event';
       if (targetsReminder) return 'Updating reminder';
       if (targetsTask) return 'Updating task';
+      if (targetsNote) return 'Updating note';
       return 'Updating item';
     }
-    if (RegExp(r'\b(add|create|put|schedule)\b').hasMatch(command)) {
+    if (RegExp(r'\b(add|create|put|schedule|write|save)\b').hasMatch(command)) {
       if (targetsEvent) return 'Creating event';
       if (targetsReminder) return 'Creating reminder';
       if (targetsTask) return 'Creating task';
+      if (targetsNote) return 'Creating note';
       return 'Creating item';
     }
     if (RegExp(r'\b(complete|finish|mark)\b').hasMatch(command)) {
@@ -2075,6 +2089,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (type.contains('.calendar_event.deleted')) {
       return 'Delete calendar event$readable';
     }
+    if (type.contains('.note.created')) return 'Create note$readable';
+    if (type.contains('.note.updated')) return 'Update note$readable';
+    if (type.contains('.note.deleted')) return 'Delete note$readable';
+    if (type.contains('.note_folder.created')) return 'Create folder$readable';
+    if (type.contains('.note_folder.updated')) return 'Update folder$readable';
+    if (type.contains('.note_folder.deleted')) return 'Delete folder$readable';
     if (type.contains('.approval.created')) return 'Prepare approval$readable';
     if (type.contains('.blocker.created')) return 'Flag blocker$readable';
     if (type.contains('.workspace_memory.noted')) return 'Save memory';
@@ -2383,6 +2403,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _pastTasks = const [];
         _reminders = const [];
         _calendar = const [];
+        _noteFolders = const [];
+        _notes = const [];
         _eventCategories = const [];
         _approvals = const [];
         _events = const [];
@@ -2430,6 +2452,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           widget.apiClient.listCalendarEvents(),
           const <HermesCalendarEvent>[],
         ),
+        recover<List<HermesNoteFolder>>(
+          widget.apiClient.listNoteFolders(),
+          const <HermesNoteFolder>[],
+        ),
+        recover<List<HermesNote>>(
+          widget.apiClient.listNotes(),
+          const <HermesNote>[],
+        ),
         recover<List<HermesTask>>(
           widget.apiClient.listPastTasks(),
           const <HermesTask>[],
@@ -2464,15 +2494,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _session = session;
         _replaceMessagesFromSession(sessionDetails);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _pastTasks = _tasksWithPendingWrites(results[4] as List<HermesTask>);
-        _eventCategories = results[5] as List<HermesEventCategory>;
+        _noteFolders = results[4] as List<HermesNoteFolder>;
+        _notes = _sortedNotes(results[5] as List<HermesNote>);
+        _pastTasks = _tasksWithPendingWrites(results[6] as List<HermesTask>);
+        _eventCategories = results[7] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
         _reminders = listedReminders.isEmpty
             ? summaryReminders
             : listedReminders;
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
-        _events = results[6] as List<HermesActivityEvent>;
+        _events = results[8] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
         _dashboardLoading = false;
         _loadingStatusText = null;
@@ -3539,6 +3571,8 @@ ${_truncateDiagnostic(stack, 2200)}
       pastTasks: List<HermesTask>.unmodifiable(_pastTasks),
       reminders: List<HermesReminder>.unmodifiable(_reminders),
       calendar: List<HermesCalendarEvent>.unmodifiable(_calendar),
+      noteFolders: List<HermesNoteFolder>.unmodifiable(_noteFolders),
+      notes: List<HermesNote>.unmodifiable(_notes),
       eventCategories: List<HermesEventCategory>.unmodifiable(_eventCategories),
       approvals: List<HermesApproval>.unmodifiable(_approvals),
       events: List<HermesActivityEvent>.unmodifiable(_events),
@@ -3551,6 +3585,8 @@ ${_truncateDiagnostic(stack, 2200)}
     _pastTasks = snapshot.pastTasks;
     _reminders = snapshot.reminders;
     _calendar = snapshot.calendar;
+    _noteFolders = snapshot.noteFolders;
+    _notes = snapshot.notes;
     _eventCategories = snapshot.eventCategories;
     _approvals = snapshot.approvals;
     _events = snapshot.events;
@@ -3658,6 +3694,10 @@ ${_truncateDiagnostic(stack, 2200)}
         widget.apiClient.listCalendarEvents().catchError(
           (_) => const <HermesCalendarEvent>[],
         ),
+        widget.apiClient.listNoteFolders().catchError(
+          (_) => const <HermesNoteFolder>[],
+        ),
+        widget.apiClient.listNotes().catchError((_) => const <HermesNote>[]),
         widget.apiClient.listPastTasks().catchError(
           (_) => const <HermesTask>[],
         ),
@@ -3687,15 +3727,17 @@ ${_truncateDiagnostic(stack, 2200)}
       }
       setState(() {
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _pastTasks = _tasksWithPendingWrites(results[4] as List<HermesTask>);
-        _eventCategories = results[5] as List<HermesEventCategory>;
+        _noteFolders = results[4] as List<HermesNoteFolder>;
+        _notes = _sortedNotes(results[5] as List<HermesNote>);
+        _pastTasks = _tasksWithPendingWrites(results[6] as List<HermesTask>);
+        _eventCategories = results[7] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
         _reminders = listedReminders.isEmpty
             ? summaryReminders
             : listedReminders;
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
-        _events = results[6] as List<HermesActivityEvent>;
+        _events = results[8] as List<HermesActivityEvent>;
         if (showLoading) _dashboardLoading = false;
         _error = null;
       });
@@ -3760,6 +3802,10 @@ ${_truncateDiagnostic(stack, 2200)}
         widget.apiClient.listCalendarEvents().catchError(
           (_) => const <HermesCalendarEvent>[],
         ),
+        widget.apiClient.listNoteFolders().catchError(
+          (_) => const <HermesNoteFolder>[],
+        ),
+        widget.apiClient.listNotes().catchError((_) => const <HermesNote>[]),
         widget.apiClient.listPastTasks().catchError(
           (_) => const <HermesTask>[],
         ),
@@ -3798,15 +3844,17 @@ ${_truncateDiagnostic(stack, 2200)}
         _session = session;
         _replaceMessagesFromSession(sessionDetails);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _pastTasks = _tasksWithPendingWrites(results[4] as List<HermesTask>);
-        _eventCategories = results[5] as List<HermesEventCategory>;
+        _noteFolders = results[4] as List<HermesNoteFolder>;
+        _notes = _sortedNotes(results[5] as List<HermesNote>);
+        _pastTasks = _tasksWithPendingWrites(results[6] as List<HermesTask>);
+        _eventCategories = results[7] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
         _reminders = listedReminders.isEmpty
             ? summaryReminders
             : listedReminders;
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
-        _events = results[6] as List<HermesActivityEvent>;
+        _events = results[8] as List<HermesActivityEvent>;
         _dashboardLoading = false;
         _error = null;
       });
@@ -4651,6 +4699,69 @@ ${_truncateDiagnostic(stack, 2200)}
         });
       }
     }
+  }
+
+  Future<HermesNoteFolder> _createNoteFolder(String name) async {
+    final folder = await widget.apiClient.createNoteFolder(name: name);
+    if (!mounted) return folder;
+    setState(() => _noteFolders = [..._noteFolders, folder]);
+    return folder;
+  }
+
+  Future<void> _deleteNoteFolder(HermesNoteFolder folder) async {
+    await widget.apiClient.deleteNoteFolder(folder.id);
+    if (!mounted) return;
+    setState(() {
+      _noteFolders = _noteFolders
+          .where((candidate) => candidate.id != folder.id)
+          .toList();
+      _notes = _notes
+          .map(
+            (note) => note.folderId == folder.id
+                ? note.copyWith(clearFolder: true)
+                : note,
+          )
+          .toList();
+    });
+  }
+
+  Future<HermesNote> _saveNote(
+    HermesNote? note, {
+    required String title,
+    required String bodyHtml,
+    required String plainText,
+    int? folderId,
+    bool clearFolder = false,
+    bool? isPinned,
+  }) async {
+    final saved = note == null
+        ? await widget.apiClient.createNote(
+            title: title,
+            bodyHtml: bodyHtml,
+            plainText: plainText,
+            folderId: folderId,
+            isPinned: isPinned ?? false,
+          )
+        : await widget.apiClient.updateNote(
+            note.id,
+            title: title,
+            bodyHtml: bodyHtml,
+            plainText: plainText,
+            folderId: folderId,
+            clearFolder: clearFolder,
+            isPinned: isPinned,
+          );
+    if (!mounted) return saved;
+    setState(() => _notes = _upsertNote(_notes, saved));
+    return saved;
+  }
+
+  Future<void> _deleteNote(HermesNote note) async {
+    await widget.apiClient.deleteNote(note.id);
+    if (!mounted) return;
+    setState(
+      () => _notes = _notes.where((item) => item.id != note.id).toList(),
+    );
   }
 
   Future<HermesEventCategory> _saveEventCategory({
@@ -5664,6 +5775,7 @@ ${_truncateDiagnostic(stack, 2200)}
                       beanWorkStatus: _beanStatusTagLabel,
                       beanWorkActive: _beanStatusTagVisible,
                       onSelected: _selectDestination,
+                      onMorePressed: _openMoreMenu,
                       onBeanLongPressStart: () =>
                           unawaited(_startBeanVoiceDraft()),
                       onBeanLongPressEnd: () =>
@@ -5836,6 +5948,8 @@ ${_truncateDiagnostic(stack, 2200)}
     pastTasks: _pastTasks,
     reminders: _reminders,
     calendar: _calendar,
+    noteFolders: _noteFolders,
+    notes: _notes,
     eventCategories: _eventCategories,
     googleCalendarStatus: _googleCalendarStatus,
     events: _events,
@@ -5874,6 +5988,10 @@ ${_truncateDiagnostic(stack, 2200)}
     onCalendarEventCreated: _createCalendarEvent,
     onCalendarEventEdited: _editCalendarEvent,
     onCalendarEventDeleted: _deleteCalendarEvent,
+    onNoteFolderCreated: _createNoteFolder,
+    onNoteFolderDeleted: _deleteNoteFolder,
+    onNoteSaved: _saveNote,
+    onNoteDeleted: _deleteNote,
     onEventCategorySaved: _saveEventCategory,
     onEventCategoryDeleted: _deleteEventCategory,
     onDeleteAccount: _deleteAccount,
@@ -5893,6 +6011,39 @@ ${_truncateDiagnostic(stack, 2200)}
     },
     onWorkspacesChanged: _reloadSignedInViewsFromSettings,
   );
+
+  void _openMoreMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.note_rounded),
+                title: const Text('Notes'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _selectDestination(_HomeDestination.notes);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings_rounded),
+                title: const Text('Settings'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _selectDestination(_HomeDestination.settings);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 enum _CreateItemAction { event, task, reminder }
@@ -7373,6 +7524,8 @@ class _CommandCenterContent extends StatelessWidget {
     required this.pastTasks,
     required this.reminders,
     required this.calendar,
+    required this.noteFolders,
+    required this.notes,
     required this.eventCategories,
     required this.googleCalendarStatus,
     required this.events,
@@ -7408,6 +7561,10 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onCalendarEventCreated,
     required this.onCalendarEventEdited,
     required this.onCalendarEventDeleted,
+    required this.onNoteFolderCreated,
+    required this.onNoteFolderDeleted,
+    required this.onNoteSaved,
+    required this.onNoteDeleted,
     required this.onEventCategorySaved,
     required this.onEventCategoryDeleted,
     required this.onDeleteAccount,
@@ -7429,6 +7586,8 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesTask> pastTasks;
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
+  final List<HermesNoteFolder> noteFolders;
+  final List<HermesNote> notes;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
   final List<HermesActivityEvent> events;
@@ -7541,6 +7700,19 @@ class _CommandCenterContent extends StatelessWidget {
     List<Object> deleteFromWorkspaceIds,
   })
   onCalendarEventDeleted;
+  final Future<HermesNoteFolder> Function(String name) onNoteFolderCreated;
+  final Future<void> Function(HermesNoteFolder folder) onNoteFolderDeleted;
+  final Future<HermesNote> Function(
+    HermesNote? note, {
+    required String title,
+    required String bodyHtml,
+    required String plainText,
+    int? folderId,
+    bool clearFolder,
+    bool? isPinned,
+  })
+  onNoteSaved;
+  final Future<void> Function(HermesNote note) onNoteDeleted;
   final Future<HermesEventCategory> Function({
     HermesEventCategory? category,
     required String name,
@@ -7632,6 +7804,14 @@ class _CommandCenterContent extends StatelessWidget {
             onEventCategorySaved: onEventCategorySaved,
             workspaces: user.workspaces,
             activeWorkspaceId: user.activeWorkspace?.id,
+          ),
+          _HomeDestination.notes => _NotesView(
+            folders: noteFolders,
+            notes: notes,
+            onFolderCreated: onNoteFolderCreated,
+            onFolderDeleted: onNoteFolderDeleted,
+            onNoteSaved: onNoteSaved,
+            onNoteDeleted: onNoteDeleted,
           ),
           _HomeDestination.settings => _SettingsView(
             apiClient: apiClient,
@@ -16434,6 +16614,447 @@ String _agentPreferencesSummary(HermesAgentProfile? profile) {
   return '${personality.label} • $prioritySummary';
 }
 
+class _NotesView extends StatefulWidget {
+  const _NotesView({
+    required this.folders,
+    required this.notes,
+    required this.onFolderCreated,
+    required this.onFolderDeleted,
+    required this.onNoteSaved,
+    required this.onNoteDeleted,
+  });
+
+  final List<HermesNoteFolder> folders;
+  final List<HermesNote> notes;
+  final Future<HermesNoteFolder> Function(String name) onFolderCreated;
+  final Future<void> Function(HermesNoteFolder folder) onFolderDeleted;
+  final Future<HermesNote> Function(
+    HermesNote? note, {
+    required String title,
+    required String bodyHtml,
+    required String plainText,
+    int? folderId,
+    bool clearFolder,
+    bool? isPinned,
+  })
+  onNoteSaved;
+  final Future<void> Function(HermesNote note) onNoteDeleted;
+
+  @override
+  State<_NotesView> createState() => _NotesViewState();
+}
+
+class _NotesViewState extends State<_NotesView> {
+  final _titleController = TextEditingController();
+  final _bodyController = TextEditingController();
+  final _searchController = TextEditingController();
+  String _folderFilter = 'all';
+  int? _selectedId;
+  int? _editingFolderId;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectInitial();
+  }
+
+  @override
+  void didUpdateWidget(covariant _NotesView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.notes.any((note) => note.id == _selectedId)) _selectInitial();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _bodyController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<HermesNote> get _filteredNotes {
+    final search = _searchController.text.trim().toLowerCase();
+    return _sortedNotes(widget.notes).where((note) {
+      final folderMatches =
+          _folderFilter == 'all' ||
+          (_folderFilter == 'pinned' && note.isPinned) ||
+          (_folderFilter == 'unfiled' && note.folderId == null) ||
+          note.folderId?.toString() == _folderFilter;
+      if (!folderMatches) return false;
+      if (search.isEmpty) return true;
+      final folder = _folderFor(note.folderId);
+      return [note.title, note.plainText, folder?.name].whereType<String>().any(
+        (value) => value.toLowerCase().contains(search),
+      );
+    }).toList();
+  }
+
+  HermesNote? get _selectedNote => widget.notes
+      .where((note) => note.id == _selectedId)
+      .cast<HermesNote?>()
+      .firstOrNull;
+
+  void _selectInitial() {
+    final first = _filteredNotes.firstOrNull ?? widget.notes.firstOrNull;
+    _selectNote(first);
+  }
+
+  void _selectNote(HermesNote? note) {
+    _selectedId = note?.id;
+    _editingFolderId = note?.folderId;
+    _titleController.text = note?.title ?? '';
+    _bodyController.text =
+        note?.plainText ?? _plainTextFromHtml(note?.bodyHtml);
+  }
+
+  HermesNoteFolder? _folderFor(int? id) =>
+      widget.folders.where((folder) => folder.id == id).firstOrNull;
+
+  Future<void> _newNote() async {
+    final saved = await widget.onNoteSaved(
+      null,
+      title: 'New Note',
+      bodyHtml: '',
+      plainText: '',
+      folderId: int.tryParse(_folderFilter),
+      clearFolder: int.tryParse(_folderFilter) == null,
+    );
+    if (!mounted) return;
+    setState(() => _selectNote(saved));
+  }
+
+  Future<void> _save() async {
+    final note = _selectedNote;
+    setState(() => _saving = true);
+    final title = _titleController.text.trim().isEmpty
+        ? 'New Note'
+        : _titleController.text.trim();
+    final plain = _bodyController.text.trim();
+    try {
+      final saved = await widget.onNoteSaved(
+        note,
+        title: title,
+        bodyHtml: _htmlFromPlainText(plain),
+        plainText: plain,
+        folderId: _editingFolderId,
+        clearFolder: _editingFolderId == null,
+        isPinned: note?.isPinned,
+      );
+      if (mounted) setState(() => _selectNote(saved));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _togglePin() async {
+    final note = _selectedNote;
+    if (note == null) return;
+    final saved = await widget.onNoteSaved(
+      note,
+      title: _titleController.text.trim().isEmpty
+          ? note.title
+          : _titleController.text.trim(),
+      bodyHtml: _htmlFromPlainText(_bodyController.text),
+      plainText: _bodyController.text,
+      folderId: _editingFolderId,
+      clearFolder: _editingFolderId == null,
+      isPinned: !note.isPinned,
+    );
+    if (mounted) setState(() => _selectNote(saved));
+  }
+
+  Future<void> _deleteNote() async {
+    final note = _selectedNote;
+    if (note == null) return;
+    await widget.onNoteDeleted(note);
+    if (mounted) setState(_selectInitial);
+  }
+
+  Future<void> _newFolder() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New folder'),
+        content: TextField(controller: controller, autofocus: true),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.isEmpty) return;
+    final folder = await widget.onFolderCreated(name);
+    if (mounted) setState(() => _folderFilter = folder.id.toString());
+  }
+
+  void _insertToken(String token) {
+    final selection = _bodyController.selection;
+    final text = _bodyController.text;
+    final start = selection.start < 0 ? text.length : selection.start;
+    final end = selection.end < 0 ? text.length : selection.end;
+    _bodyController.text = text.replaceRange(start, end, token);
+    _bodyController.selection = TextSelection.collapsed(
+      offset: start + token.length,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _selectedNote;
+    final notes = _filteredNotes;
+    return Container(
+      color: const Color(0xFFFFFDF8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 154,
+            child: _NotesFolderRail(
+              folders: widget.folders,
+              notes: widget.notes,
+              selected: _folderFilter,
+              onSelected: (value) => setState(() {
+                _folderFilter = value;
+                _selectInitial();
+              }),
+              onCreate: _newFolder,
+            ),
+          ),
+          SizedBox(
+            width: 230,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Search',
+                    ),
+                    onChanged: (_) => setState(_selectInitial),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: notes.length,
+                    itemBuilder: (context, index) {
+                      final note = notes[index];
+                      return ListTile(
+                        selected: note.id == _selectedId,
+                        title: Text(
+                          note.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          note.plainText ?? '',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: note.isPinned
+                            ? const Icon(Icons.push_pin_rounded, size: 16)
+                            : null,
+                        onTap: () => setState(() => _selectNote(note)),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: selected == null
+                ? Center(
+                    child: FilledButton.icon(
+                      onPressed: _newNote,
+                      icon: const Icon(Icons.note_add_rounded),
+                      label: const Text('New note'),
+                    ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            DropdownButton<int?>(
+                              value: _editingFolderId,
+                              hint: const Text('All Notes'),
+                              items: [
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text('All Notes'),
+                                ),
+                                ...widget.folders.map(
+                                  (folder) => DropdownMenuItem<int?>(
+                                    value: folder.id,
+                                    child: Text(folder.name),
+                                  ),
+                                ),
+                              ],
+                              onChanged: (value) =>
+                                  setState(() => _editingFolderId = value),
+                            ),
+                            IconButton(
+                              onPressed: _togglePin,
+                              icon: Icon(
+                                selected.isPinned
+                                    ? Icons.push_pin
+                                    : Icons.push_pin_outlined,
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => _insertToken('# '),
+                              icon: const Icon(Icons.title_rounded),
+                            ),
+                            IconButton(
+                              onPressed: () => _insertToken('- [ ] '),
+                              icon: const Icon(Icons.check_box_outlined),
+                            ),
+                            IconButton(
+                              onPressed: () => _insertToken('- '),
+                              icon: const Icon(
+                                Icons.format_list_bulleted_rounded,
+                              ),
+                            ),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: _deleteNote,
+                              child: const Text('Delete'),
+                            ),
+                            FilledButton(
+                              onPressed: _saving ? null : _save,
+                              child: Text(_saving ? 'Saving...' : 'Save'),
+                            ),
+                          ],
+                        ),
+                        TextField(
+                          controller: _titleController,
+                          style: const TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                          ),
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'New Note',
+                          ),
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _bodyController,
+                            expands: true,
+                            maxLines: null,
+                            minLines: null,
+                            textAlignVertical: TextAlignVertical.top,
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              hintText: 'Start writing',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NotesFolderRail extends StatelessWidget {
+  const _NotesFolderRail({
+    required this.folders,
+    required this.notes,
+    required this.selected,
+    required this.onSelected,
+    required this.onCreate,
+  });
+
+  final List<HermesNoteFolder> folders;
+  final List<HermesNote> notes;
+  final String selected;
+  final ValueChanged<String> onSelected;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    color: const Color(0xFFF2F1ED),
+    child: ListView(
+      padding: const EdgeInsets.all(10),
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Folders',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            IconButton(
+              onPressed: onCreate,
+              icon: const Icon(Icons.create_new_folder_rounded),
+            ),
+          ],
+        ),
+        _folderTile('all', 'All Notes', notes.length, Icons.note_rounded),
+        _folderTile(
+          'pinned',
+          'Pinned',
+          notes.where((note) => note.isPinned).length,
+          Icons.push_pin_rounded,
+        ),
+        ...folders.map(
+          (folder) => _folderTile(
+            folder.id.toString(),
+            folder.name,
+            notes.where((note) => note.folderId == folder.id).length,
+            Icons.folder_rounded,
+          ),
+        ),
+        _folderTile(
+          'unfiled',
+          'Unfiled',
+          notes.where((note) => note.folderId == null).length,
+          Icons.folder_open_rounded,
+        ),
+      ],
+    ),
+  );
+
+  Widget _folderTile(String id, String label, int count, IconData icon) =>
+      ListTile(
+        dense: true,
+        selected: selected == id,
+        leading: Icon(icon, color: const Color(0xFFF3A51B)),
+        title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: Text('$count'),
+        onTap: () => onSelected(id),
+      );
+}
+
+String _plainTextFromHtml(String? html) => (html ?? '')
+    .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+    .replaceAll(RegExp(r'<[^>]+>'), '')
+    .trim();
+
+String _htmlFromPlainText(String plain) => plain
+    .split('\n')
+    .map(
+      (line) =>
+          '<div>${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</div>',
+    )
+    .join();
+
 class _SettingsView extends StatelessWidget {
   const _SettingsView({
     required this.apiClient,
@@ -19168,6 +19789,28 @@ List<HermesTask> _mergeTaskLists(
   return byId.values.toList(growable: false);
 }
 
+List<HermesNote> _sortedNotes(List<HermesNote> notes) {
+  final sorted = [...notes];
+  sorted.sort((a, b) {
+    if (a.isPinned != b.isPinned) return a.isPinned ? -1 : 1;
+    final aTime = DateTime.tryParse(a.updatedAt ?? '') ?? DateTime(1970);
+    final bTime = DateTime.tryParse(b.updatedAt ?? '') ?? DateTime(1970);
+    return bTime.compareTo(aTime);
+  });
+  return sorted;
+}
+
+List<HermesNote> _upsertNote(List<HermesNote> notes, HermesNote note) {
+  final next = [...notes];
+  final index = next.indexWhere((item) => item.id == note.id);
+  if (index == -1) {
+    next.add(note);
+  } else {
+    next[index] = note;
+  }
+  return _sortedNotes(next);
+}
+
 bool _taskIsSubtask(HermesTask task) => task.parentTaskId != null;
 
 List<HermesTask> _subtasksFor(HermesTask task, List<HermesTask> tasks) {
@@ -20886,6 +21529,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.beanWorkItems,
     required this.beanWorkStatus,
     required this.beanWorkActive,
+    required this.onMorePressed,
     required this.onBeanLongPressStart,
     required this.onBeanLongPressEnd,
   });
@@ -20896,6 +21540,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   final List<_BeanWorkItem> beanWorkItems;
   final String beanWorkStatus;
   final bool beanWorkActive;
+  final VoidCallback onMorePressed;
   final VoidCallback onBeanLongPressStart;
   final VoidCallback onBeanLongPressEnd;
 
@@ -20961,11 +21606,13 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                     ),
                     Expanded(
                       child: _MenuIconButton(
-                        key: const Key('nav-settings'),
-                        icon: Icons.settings_rounded,
-                        label: 'Settings',
-                        selected: selected == _HomeDestination.settings,
-                        onPressed: () => onSelected(_HomeDestination.settings),
+                        key: const Key('nav-more'),
+                        icon: Icons.more_horiz_rounded,
+                        label: 'More',
+                        selected:
+                            selected == _HomeDestination.settings ||
+                            selected == _HomeDestination.notes,
+                        onPressed: onMorePressed,
                       ),
                     ),
                   ],

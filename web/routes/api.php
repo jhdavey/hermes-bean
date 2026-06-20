@@ -93,6 +93,14 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::patch('/google-calendar/calendars', [GoogleCalendarController::class, 'calendars']);
         Route::delete('/google-calendar', [GoogleCalendarController::class, 'disconnect']);
 
+        Route::get('/note-folders', [DomainResourceController::class, 'listNoteFolders']);
+        Route::post('/note-folders', [DomainResourceController::class, 'storeNoteFolder']);
+        Route::patch('/note-folders/{noteFolder}', [DomainResourceController::class, 'updateNoteFolder']);
+        Route::delete('/note-folders/{noteFolder}', [DomainResourceController::class, 'destroyNoteFolder']);
+        Route::get('/notes', [DomainResourceController::class, 'listNotes']);
+        Route::post('/notes', [DomainResourceController::class, 'storeNote']);
+        Route::patch('/notes/{note}', [DomainResourceController::class, 'updateNote']);
+        Route::delete('/notes/{note}', [DomainResourceController::class, 'destroyNote']);
         Route::get('/tasks', [DomainResourceController::class, 'listTasks']);
         Route::get('/tasks/past', [DomainResourceController::class, 'listPastTasks']);
         Route::post('/tasks', [DomainResourceController::class, 'storeTask']);

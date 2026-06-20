@@ -7,10 +7,13 @@ use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\EventCategory;
+use App\Models\Note;
+use App\Models\NoteFolder;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
+use App\Models\WorkspaceMembership;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
@@ -24,6 +27,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Throwable;
 
@@ -38,6 +42,136 @@ class DomainResourceController extends Controller
         private readonly PlanLimitService $planLimits,
         private readonly PlanHistoryService $history,
     ) {}
+
+    public function listNoteFolders(Request $request): JsonResponse
+    {
+        return $this->listed(
+            $this->scoped(NoteFolder::query(), $request)
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->orderBy('id')
+                ->get()
+        );
+    }
+
+    public function storeNoteFolder(Request $request): JsonResponse
+    {
+        return $this->created(NoteFolder::create($this->owned($request, $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'sort_order' => ['nullable', 'integer', 'min:0'],
+            'metadata' => ['nullable', 'array'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+        ]))));
+    }
+
+    public function updateNoteFolder(Request $request, string $noteFolder): JsonResponse
+    {
+        $model = $this->scoped(NoteFolder::query(), $request, false)->findOrFail($noteFolder);
+        $model->update($request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:120'],
+            'sort_order' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+        ]));
+
+        return response()->json(['data' => $model->refresh()]);
+    }
+
+    public function destroyNoteFolder(Request $request, string $noteFolder): JsonResponse
+    {
+        $model = $this->scoped(NoteFolder::query(), $request, false)->findOrFail($noteFolder);
+        Note::query()
+            ->where('user_id', $request->user()->id)
+            ->where('note_folder_id', $model->id)
+            ->update(['note_folder_id' => null]);
+
+        return $this->destroyed($model);
+    }
+
+    public function listNotes(Request $request): JsonResponse
+    {
+        $query = $this->scoped(Note::query()->with('folder'), $request);
+        if ($request->filled('folder_id')) {
+            $query->where('note_folder_id', $request->integer('folder_id'));
+        }
+        if ($request->boolean('pinned')) {
+            $query->where('is_pinned', true);
+        }
+        if ($request->filled('query')) {
+            $this->scopeNoteSearch($query, (string) $request->input('query'));
+        }
+
+        $notes = $query
+            ->orderByDesc('is_pinned')
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->limit(min(max((int) $request->input('limit', 200), 1), 500))
+            ->get();
+
+        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
+        $notes->each(function (Note $note) use ($accessibleWorkspaceIds): void {
+            $note->setAttribute('linked_workspace_ids', $this->linkedItemWorkspaceIds($note, 'notes', $accessibleWorkspaceIds));
+        });
+
+        return $this->listed($notes);
+    }
+
+    public function storeNote(Request $request): JsonResponse
+    {
+        $workspace = $this->workspace($request);
+        $validated = $request->validate([
+            'title' => ['nullable', 'string', 'max:255'],
+            'body_html' => ['nullable', 'string'],
+            'plain_text' => ['nullable', 'string'],
+            'body_delta' => ['nullable', 'array'],
+            'note_folder_id' => ['nullable', Rule::exists('note_folders', 'id')->where('workspace_id', $workspace->id)],
+            'is_pinned' => ['nullable', 'boolean'],
+            'sort_order' => ['nullable', 'integer', 'min:0'],
+            'metadata' => ['nullable', 'array'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'sync_to_workspace_ids' => ['nullable', 'array'],
+            'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $validated = $this->normalizedNoteAttributes($validated);
+        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        unset($validated['sync_to_workspace_ids']);
+        $note = Note::create($this->owned($request, $validated));
+        $this->syncTo($request, $note, $syncTo);
+
+        return $this->created($note->refresh()->load('folder'));
+    }
+
+    public function updateNote(Request $request, string $note): JsonResponse
+    {
+        $model = $this->scoped(Note::query(), $request, false)->findOrFail($note);
+        $validated = $request->validate([
+            'title' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'body_html' => ['sometimes', 'nullable', 'string'],
+            'plain_text' => ['sometimes', 'nullable', 'string'],
+            'body_delta' => ['sometimes', 'nullable', 'array'],
+            'note_folder_id' => ['sometimes', 'nullable', Rule::exists('note_folders', 'id')->where('workspace_id', $model->workspace_id)],
+            'is_pinned' => ['sometimes', 'boolean'],
+            'sort_order' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+            'sync_to_workspace_ids' => ['nullable', 'array'],
+            'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
+        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        unset($validated['sync_to_workspace_ids']);
+        $model->update($this->normalizedNoteAttributes($validated, $model));
+        if ($syncToProvided) {
+            $this->replaceSyncTo($request, $model->refresh(), 'notes', $syncTo);
+        }
+
+        return response()->json(['data' => $model->refresh()->load('folder')]);
+    }
+
+    public function destroyNote(Request $request, string $note): JsonResponse
+    {
+        $model = $this->scoped(Note::query(), $request, false)->findOrFail($note);
+
+        return $this->destroyLinkedItems($request, $model, 'notes');
+    }
 
     public function listTasks(Request $request): JsonResponse
     {
@@ -277,6 +411,7 @@ class DomainResourceController extends Controller
         }
 
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        $validated = $this->normalizeReminderNotificationRecipients($request, $validated, null, $syncTo);
         unset($validated['sync_to_workspace_ids']);
         $reminder = Reminder::create($this->owned($request, $validated));
         $this->syncTo($request, $reminder, $syncTo);
@@ -308,6 +443,7 @@ class DomainResourceController extends Controller
 
         $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
+        $validated = $this->normalizeReminderNotificationRecipients($request, $validated, $model, $syncTo);
         unset($validated['sync_to_workspace_ids']);
         $model->update($validated);
         if (array_key_exists('status', $validated)) {
@@ -743,6 +879,8 @@ class DomainResourceController extends Controller
     private function tableForStoreCaller(string $caller): string
     {
         return match ($caller) {
+            'storeNoteFolder' => 'note_folders',
+            'storeNote' => 'notes',
             'storeTask' => 'tasks',
             'storeReminder' => 'reminders',
             'storeCalendarEvent' => 'calendar_events',
@@ -751,6 +889,53 @@ class DomainResourceController extends Controller
             'storeBlocker' => 'blockers',
             default => 'tasks',
         };
+    }
+
+    private function scopeNoteSearch($query, string $text): void
+    {
+        $terms = collect(preg_split('/\s+/u', mb_strtolower($text)) ?: [])
+            ->map(fn (string $term): string => trim($term, " \t\n\r\0\x0B'\".,!?-"))
+            ->filter(fn (string $term): bool => mb_strlen($term) >= 2)
+            ->unique()
+            ->take(8)
+            ->values();
+
+        $escapedText = addcslashes($text, '%_\\');
+        $query->where(function ($query) use ($terms, $escapedText): void {
+            $query->where('title', 'like', '%'.$escapedText.'%')
+                ->orWhere('plain_text', 'like', '%'.$escapedText.'%')
+                ->orWhereHas('folder', fn ($folderQuery) => $folderQuery->where('name', 'like', '%'.$escapedText.'%'));
+            foreach ($terms as $term) {
+                $escapedTerm = addcslashes($term, '%_\\');
+                $query->orWhere('title', 'like', '%'.$escapedTerm.'%')
+                    ->orWhere('plain_text', 'like', '%'.$escapedTerm.'%');
+            }
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function normalizedNoteAttributes(array $attributes, ?Note $existing = null): array
+    {
+        $hasBodyHtml = array_key_exists('body_html', $attributes);
+        $hasPlainText = array_key_exists('plain_text', $attributes);
+        $bodyHtml = $hasBodyHtml ? (string) ($attributes['body_html'] ?? '') : (string) ($existing?->body_html ?? '');
+        $plainText = $hasPlainText ? (string) ($attributes['plain_text'] ?? '') : '';
+        if ($plainText === '' && $bodyHtml !== '') {
+            $plainText = trim(html_entity_decode(strip_tags(str_replace(['</div>', '</p>', '<br>', '<br/>', '<br />'], "\n", $bodyHtml)), ENT_QUOTES | ENT_HTML5));
+        }
+        if ($hasBodyHtml && ! $hasPlainText) {
+            $attributes['plain_text'] = preg_replace("/\n{3,}/", "\n\n", $plainText) ?: '';
+        }
+        if (! array_key_exists('title', $attributes) || blank($attributes['title'])) {
+            $source = trim((string) ($attributes['plain_text'] ?? $plainText));
+            $firstLine = trim((string) strtok($source, "\n"));
+            $attributes['title'] = $firstLine !== '' ? str($firstLine)->limit(80, '')->toString() : ($existing?->title ?? 'New Note');
+        }
+
+        return $attributes;
     }
 
     private function scoped($query, Request $request, bool $useRequestWorkspace = true)
@@ -1123,6 +1308,123 @@ class DomainResourceController extends Controller
         $recurrence = $this->taskRecurrenceValue((array) ($attributes['metadata'] ?? []));
 
         return $recurrence !== null && $recurrence !== 'none';
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @param  array<int, mixed>  $syncToWorkspaceIds
+     * @return array<string, mixed>
+     *
+     * @throws ValidationException
+     */
+    private function normalizeReminderNotificationRecipients(Request $request, array $attributes, ?Reminder $reminder = null, array $syncToWorkspaceIds = []): array
+    {
+        $metadata = $attributes['metadata'] ?? null;
+        if (! is_array($metadata)) {
+            return $attributes;
+        }
+
+        $hasWorkspaceRecipients = array_key_exists('notification_recipients_by_workspace', $metadata)
+            || array_key_exists('notificationRecipientsByWorkspace', $metadata);
+        $hasFlatRecipients = array_key_exists('notification_recipient_user_ids', $metadata)
+            || array_key_exists('notificationRecipientUserIds', $metadata);
+
+        if (! $hasWorkspaceRecipients && ! $hasFlatRecipients) {
+            return $attributes;
+        }
+
+        $primaryWorkspace = $reminder?->workspace_id
+            ? Workspace::findOrFail((int) $reminder->workspace_id)
+            : app(WorkspaceService::class)->resolveWorkspace($request->user(), $attributes['workspace_id'] ?? $request->input('workspace_id'));
+        $allowedWorkspaceIds = collect([(int) $primaryWorkspace->id])
+            ->merge($syncToWorkspaceIds)
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $rawByWorkspace = $metadata['notification_recipients_by_workspace']
+            ?? $metadata['notificationRecipientsByWorkspace']
+            ?? null;
+        $recipientsByWorkspace = [];
+        if (is_array($rawByWorkspace)) {
+            foreach ($rawByWorkspace as $workspaceId => $recipientIds) {
+                $workspaceId = (int) $workspaceId;
+                if ($workspaceId <= 0) {
+                    continue;
+                }
+                $recipientsByWorkspace[$workspaceId] = $this->normalizeReminderRecipientIds($recipientIds);
+            }
+        } elseif ($hasFlatRecipients) {
+            $recipientsByWorkspace[(int) $primaryWorkspace->id] = $this->normalizeReminderRecipientIds(
+                $metadata['notification_recipient_user_ids'] ?? $metadata['notificationRecipientUserIds'] ?? []
+            );
+        }
+
+        $invalidWorkspaceIds = array_values(array_diff(array_keys($recipientsByWorkspace), $allowedWorkspaceIds));
+        if ($invalidWorkspaceIds !== []) {
+            throw ValidationException::withMessages([
+                'metadata.notification_recipients_by_workspace' => 'Reminder notification recipients must belong to the reminder workspace or a synced workspace.',
+            ]);
+        }
+
+        $memberships = WorkspaceMembership::query()
+            ->whereIn('workspace_id', array_keys($recipientsByWorkspace) ?: $allowedWorkspaceIds)
+            ->where('status', 'active')
+            ->whereNotNull('user_id')
+            ->get(['workspace_id', 'user_id'])
+            ->groupBy(fn (WorkspaceMembership $membership): int => (int) $membership->workspace_id)
+            ->map(fn ($items) => $items->pluck('user_id')->map(fn ($id): int => (int) $id)->all());
+
+        foreach ($recipientsByWorkspace as $workspaceId => $recipientIds) {
+            $allowedUserIds = $memberships->get($workspaceId, []);
+            if (array_diff($recipientIds, $allowedUserIds) !== []) {
+                throw ValidationException::withMessages([
+                    'metadata.notification_recipients_by_workspace' => 'Reminder notification recipients must be active members of the selected workspace.',
+                ]);
+            }
+        }
+
+        $recipientsByWorkspace = collect($recipientsByWorkspace)
+            ->map(fn (array $ids): array => array_values(array_unique($ids)))
+            ->all();
+
+        $metadata['notification_recipients_by_workspace'] = $recipientsByWorkspace;
+        $metadata['notification_recipient_user_ids'] = collect($recipientsByWorkspace)->flatten()->unique()->values()->all();
+        unset($metadata['notificationRecipientsByWorkspace'], $metadata['notificationRecipientUserIds']);
+
+        $attributes['metadata'] = $this->resetReminderNotificationDeliveryMetadata($metadata);
+
+        return $attributes;
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function normalizeReminderRecipientIds(mixed $recipientIds): array
+    {
+        return collect(is_array($recipientIds) ? $recipientIds : [])
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    private function resetReminderNotificationDeliveryMetadata(array $metadata): array
+    {
+        unset($metadata['email_notification_sent_at'], $metadata['push_notification_sent_at']);
+        $delivery = is_array($metadata['notification_delivery'] ?? null) ? $metadata['notification_delivery'] : [];
+        $delivery['email_sent_at_by_user'] = [];
+        $delivery['push_sent_at_by_user'] = [];
+        $metadata['notification_delivery'] = $delivery;
+
+        return $metadata;
     }
 
     private function calendarRecurrenceRequested(mixed $recurrence): bool

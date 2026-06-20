@@ -12,6 +12,13 @@ import 'package:hermes_bean_app/bean_realtime_conversation.dart';
 import 'package:hermes_bean_app/hermes_api_client.dart';
 import 'package:hermes_bean_app/main.dart';
 
+Future<void> openSettingsFromBottomNav(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('nav-more')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Settings').last);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -385,8 +392,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('chat-activity-menu')), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       expect(find.byKey(const Key('open-bean-preferences')), findsOneWidget);
       expect(find.text('Bean preferences'), findsOneWidget);
       expect(find.byKey(const Key('delete-account-action')), findsOneWidget);
@@ -497,8 +503,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       await tester.ensureVisible(
         find.byKey(const Key('workspace-create-household-action')),
       );
@@ -533,8 +538,7 @@ void main() {
 
     expect(find.byKey(const Key('top-workspace-switcher')), findsNothing);
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
 
     expect(
       find.byKey(const Key('workspace-create-household-action')),
@@ -560,8 +564,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     await tester.ensureVisible(
       find.byKey(const Key('workspace-create-household-action')),
     );
@@ -661,8 +664,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       await tester.ensureVisible(
         find.byKey(const Key('workspace-accept-invitation-action')),
       );
@@ -769,8 +771,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     await tester.ensureVisible(find.byKey(const Key('workspace-invite-2')));
     await tester.tap(find.byKey(const Key('workspace-invite-2')));
     await tester.pumpAndSettle();
@@ -827,8 +828,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
 
       expect(find.text('Displayed connected calendars'), findsNothing);
       expect(
@@ -912,8 +912,7 @@ void main() {
       await tester.pumpAndSettle();
       api.nextMeCompleter = reloadUser;
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       await tester.ensureVisible(find.byKey(const Key('workspace-switch-2')));
       await tester.tap(find.byKey(const Key('workspace-switch-2')));
       await tester.pump();
@@ -965,8 +964,7 @@ void main() {
     await tester.pumpAndSettle();
     api.nextMeCompleter = reloadUser;
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     await tester.ensureVisible(find.byKey(const Key('workspace-switch-2')));
     await tester.tap(find.byKey(const Key('workspace-switch-2')));
     await tester.pump();
@@ -1009,8 +1007,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       await tester.ensureVisible(find.byKey(const Key('workspace-leave-2')));
       await tester.pumpAndSettle();
 
@@ -1083,8 +1080,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     await tester.ensureVisible(
       find.byKey(const Key('workspace-member-actions-2-77')),
     );
@@ -1128,8 +1124,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
 
       expect(find.byKey(const Key('workspace-sync-all-action')), findsNothing);
       await tester.ensureVisible(
@@ -1183,8 +1178,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
 
     expect(find.textContaining('Coach'), findsOneWidget);
     expect(find.textContaining('Family, Focus'), findsOneWidget);
@@ -1261,8 +1255,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
 
     expect(find.byKey(const Key('theme-preferences-card')), findsOneWidget);
     expect(find.text('Appearance'), findsOneWidget);
@@ -1297,8 +1290,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
 
     expect(
       find.byKey(const Key('notification-preferences-card')),
@@ -1387,8 +1379,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     await tester.ensureVisible(find.byKey(const Key('open-bean-preferences')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-bean-preferences')));
@@ -1437,8 +1428,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
 
     await tester.tap(find.byKey(const Key('settings-info')));
     await tester.pumpAndSettle();
@@ -1475,8 +1465,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     await tester.ensureVisible(find.byKey(const Key('sign-out-action')));
     await tester.pumpAndSettle();
 
@@ -1556,8 +1545,7 @@ void main() {
       await tester.tap(find.byKey(const Key('auth-submit')));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       await tester.ensureVisible(
         find.byKey(const Key('open-bean-preferences')),
       );
@@ -1582,8 +1570,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       expect(find.textContaining('Coach'), findsOneWidget);
       expect(find.textContaining('Family'), findsOneWidget);
 
@@ -1698,12 +1685,7 @@ void main() {
       expect(find.text('Pending approvals'), findsNothing);
       expect(find.byKey(const Key('chat-approval-bottom-dock')), findsNothing);
 
-      for (final label in <String>[
-        'Calendar',
-        'Tasks',
-        'Reminders',
-        'Settings',
-      ]) {
+      for (final label in <String>['Calendar', 'Tasks', 'Reminders', 'More']) {
         expect(find.text(label), findsWidgets);
       }
     },
@@ -2001,7 +1983,7 @@ void main() {
     for (final navKey in const [
       Key('nav-tasks'),
       Key('nav-reminders'),
-      Key('nav-settings'),
+      Key('nav-more'),
       Key('nav-bean'),
       Key('nav-today'),
     ]) {
@@ -2803,8 +2785,7 @@ void main() {
       expect(api.sentMessages, ['Help me plan today']);
       expect(find.text('Done — I updated your day.'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
       expect(find.text('Settings'), findsWidgets);
       expect(find.text('Bean preferences'), findsOneWidget);
@@ -3228,8 +3209,7 @@ void main() {
 
       expect(find.text('7 AM'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       await tester.ensureVisible(
         find.byKey(const Key('calendar-start-hour-setting')),
       );
@@ -3435,8 +3415,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
 
     expect(
       find.byKey(const Key('google-calendar-sync-settings')),
@@ -3502,8 +3481,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     await tester.ensureVisible(
       find.byKey(const Key('settings-upgrade-plan-action')),
     );
@@ -3621,8 +3599,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-settings')));
-      await tester.pumpAndSettle();
+      await openSettingsFromBottomNav(tester);
       await tester.ensureVisible(
         find.byKey(const Key('google-calendar-connect-action')),
       );
@@ -3675,9 +3652,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await openSettingsFromBottomNav(tester);
     await tester.ensureVisible(
       find.byKey(const Key('google-calendar-connect-action')),
     );
@@ -3779,8 +3754,7 @@ void main() {
 
     expect(find.text('Archived oil change'), findsNothing);
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
 
     expect(api.pastTaskListCalls, 1);
     expect(find.byKey(const Key('past-tasks-settings')), findsNothing);
@@ -3797,8 +3771,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
     expect(find.byKey(const Key('open-bean-preferences')), findsOneWidget);
 
@@ -3830,8 +3803,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await openSettingsFromBottomNav(tester);
     expect(find.byKey(const Key('settings-view')), findsOneWidget);
 
     await tester.drag(

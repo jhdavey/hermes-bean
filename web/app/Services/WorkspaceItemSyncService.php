@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\CalendarEvent;
+use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
@@ -110,12 +111,13 @@ class WorkspaceItemSyncService
 
     public function syncAll(Workspace $source, Workspace $target, User $actor, array $resourceTypes): array
     {
-        $summary = ['tasks' => 0, 'reminders' => 0, 'calendar_events' => 0];
+        $summary = ['tasks' => 0, 'reminders' => 0, 'calendar_events' => 0, 'notes' => 0];
         foreach ($resourceTypes as $resourceType) {
             $class = match ($resourceType) {
                 'tasks' => Task::class,
                 'reminders' => Reminder::class,
                 'calendar_events' => CalendarEvent::class,
+                'notes' => Note::class,
                 default => null,
             };
             if (! $class) {
@@ -228,6 +230,7 @@ class WorkspaceItemSyncService
             $model instanceof Task => 'tasks',
             $model instanceof Reminder => 'reminders',
             $model instanceof CalendarEvent => 'calendar_events',
+            $model instanceof Note => 'notes',
             default => $model->getTable(),
         };
     }

@@ -9,6 +9,8 @@ use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
 use App\Models\EventCategory;
+use App\Models\Note;
+use App\Models\NoteFolder;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
@@ -200,6 +202,8 @@ class StructuredHermesActionService
 
         match ($type) {
             'task.create' => $this->requireActionFields($type, $parameters, ['title']),
+            'note.create' => $this->requireActionFields($type, $parameters, ['title']),
+            'note_folder.create' => $this->requireActionFields($type, $parameters, ['name']),
             'reminder.create' => $this->requireActionFields($type, $parameters, ['title', 'remind_at']),
             'calendar_event.create', 'calendar.create' => $this->requireCalendarCreateFields($type, $parameters),
             default => null,
@@ -242,6 +246,20 @@ class StructuredHermesActionService
             }
             if (isset($parameters['status']) && is_scalar($parameters['status'])) {
                 $parameters['status'] = $this->normalizeTaskStatus((string) $parameters['status']);
+            }
+        }
+
+        if (in_array($type, ['note.create', 'note.update', 'note.delete'], true)) {
+            $this->copyFirstParameter($parameters, 'id', ['note_id', 'noteId']);
+            $this->copyFirstParameter($parameters, 'match_title', ['note_title', 'noteTitle', 'lookup_title', 'lookupTitle', 'name']);
+            if (! $this->hasParameterValue($parameters, 'body_html')) {
+                $this->copyFirstParameter($parameters, 'body_html', ['content_html', 'html']);
+            }
+            if (! $this->hasParameterValue($parameters, 'plain_text')) {
+                $this->copyFirstParameter($parameters, 'plain_text', ['body', 'content', 'text', 'note']);
+            }
+            if (! $this->hasParameterValue($parameters, 'note_folder_id')) {
+                $this->copyFirstParameter($parameters, 'folder_name', ['folder', 'folderName']);
             }
         }
 
@@ -430,6 +448,8 @@ class StructuredHermesActionService
             'reminder.create', 'reminder.update', 'reminder.delete',
             'calendar_event.create', 'calendar_event.update', 'calendar_event.delete', 'calendar.create', 'calendar.update', 'calendar.delete',
             'event_category.create', 'event_category.update', 'event_category.delete',
+            'note.create', 'note.update', 'note.delete',
+            'note_folder.create', 'note_folder.update', 'note_folder.delete',
             'approval.create', 'approval.update', 'approval.approve', 'approval.deny', 'approval.delete',
             'blocker.create', 'blocker.update', 'blocker.resolve', 'blocker.delete',
             'agent_profile.update',
@@ -481,6 +501,12 @@ class StructuredHermesActionService
             'calendar_event.create', 'calendar.create' => collect([$this->createCalendarEvent($session, $parameters)]),
             'calendar_event.update', 'calendar.update' => collect([$this->updateCalendarEvent($session, $parameters)]),
             'calendar_event.delete', 'calendar.delete' => collect([$this->deleteOwned(CalendarEvent::class, $session, $parameters, 'assistant.calendar_event.deleted', 'calendar.delete', 'calendar_event_id')]),
+            'note.create' => collect([$this->createNote($session, $parameters)]),
+            'note.update' => collect([$this->updateNote($session, $parameters)]),
+            'note.delete' => collect([$this->deleteNote($session, $parameters)]),
+            'note_folder.create' => collect([$this->createNoteFolder($session, $parameters)]),
+            'note_folder.update' => collect([$this->updateNoteFolder($session, $parameters)]),
+            'note_folder.delete' => collect([$this->deleteOwned(NoteFolder::class, $session, $parameters, 'assistant.note_folder.deleted', 'note_folders.delete', 'note_folder_id')]),
             'event_category.create' => collect([$this->createEventCategory($session, $parameters)]),
             'event_category.update' => collect([$this->updateEventCategory($session, $parameters)]),
             'event_category.delete' => collect([$this->deleteEventCategory($session, $parameters)]),
@@ -729,6 +755,101 @@ class StructuredHermesActionService
                 'exception' => $exception->getMessage(),
             ], 'google_calendar.export', 'failed');
         }
+    }
+
+    private function createNote(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $bodyHtml = $this->stringParameter($parameters, 'body_html', '');
+        $plainText = $this->notePlainText($parameters, $bodyHtml);
+        $note = Note::create([
+            'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
+            'note_folder_id' => $this->noteFolderId($session, $parameters),
+            'title' => $this->stringParameter($parameters, 'title', $this->noteTitleFromText($plainText)),
+            'body_html' => $bodyHtml !== '' ? $bodyHtml : nl2br(e($plainText)),
+            'plain_text' => $plainText,
+            'body_delta' => is_array($parameters['body_delta'] ?? null) ? $parameters['body_delta'] : null,
+            'is_pinned' => (bool) ($parameters['is_pinned'] ?? $parameters['pinned'] ?? false),
+            'metadata' => array_merge(
+                ['created_by' => 'structured_hermes_action'],
+                is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : []
+            ),
+        ]);
+
+        return $this->recordEvent($session, 'assistant.note.created', [
+            'note_id' => $note->id,
+            'title' => $note->title,
+        ], 'notes.create', 'succeeded');
+    }
+
+    private function updateNote(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $note = $this->noteForUpdate($session, $parameters);
+        $updates = $this->onlyPresent($parameters, ['title', 'body_html', 'plain_text', 'body_delta', 'metadata']);
+        if (array_key_exists('is_pinned', $parameters) || array_key_exists('pinned', $parameters)) {
+            $updates['is_pinned'] = (bool) ($parameters['is_pinned'] ?? $parameters['pinned']);
+        }
+        if (array_key_exists('note_folder_id', $parameters) || array_key_exists('folder_name', $parameters)) {
+            $updates['note_folder_id'] = $this->noteFolderId($session, $parameters);
+        }
+        if (array_key_exists('body_html', $updates) && ! array_key_exists('plain_text', $updates)) {
+            $updates['plain_text'] = $this->notePlainText([], (string) ($updates['body_html'] ?? ''));
+        }
+        if ((! array_key_exists('title', $updates) || blank($updates['title'])) && array_key_exists('plain_text', $updates)) {
+            $updates['title'] = $this->noteTitleFromText((string) $updates['plain_text']);
+        }
+        $note->update($updates);
+
+        return $this->recordEvent($session, 'assistant.note.updated', [
+            'note_id' => $note->id,
+            'title' => $note->title,
+        ], 'notes.update', 'succeeded');
+    }
+
+    private function deleteNote(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $note = $this->noteForUpdate($session, $parameters);
+        $id = $note->id;
+        $title = $note->title;
+        $note->delete();
+
+        return $this->recordEvent($session, 'assistant.note.deleted', [
+            'note_id' => $id,
+            'title' => $title,
+        ], 'notes.delete', 'succeeded');
+    }
+
+    private function createNoteFolder(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $folder = NoteFolder::firstOrCreate(
+            [
+                'user_id' => $session->user_id,
+                'workspace_id' => $session->workspace_id,
+                'name' => $this->stringParameter($parameters, 'name', 'Notes'),
+            ],
+            [
+                'created_by_user_id' => $session->created_by_user_id ?: $session->user_id,
+                'sort_order' => (int) ($parameters['sort_order'] ?? 0),
+                'metadata' => is_array($parameters['metadata'] ?? null) ? $parameters['metadata'] : null,
+            ]
+        );
+
+        return $this->recordEvent($session, 'assistant.note_folder.created', [
+            'note_folder_id' => $folder->id,
+            'name' => $folder->name,
+        ], 'note_folders.create', 'succeeded');
+    }
+
+    private function updateNoteFolder(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $folder = $this->ownedModel(NoteFolder::class, $session, $parameters);
+        $folder->update($this->onlyPresent($parameters, ['name', 'sort_order', 'metadata']));
+
+        return $this->recordEvent($session, 'assistant.note_folder.updated', [
+            'note_folder_id' => $folder->id,
+            'name' => $folder->name,
+        ], 'note_folders.update', 'succeeded');
     }
 
     private function createEventCategory(ConversationSession $session, array $parameters): ActivityEvent
@@ -1123,6 +1244,92 @@ class StructuredHermesActionService
         }
 
         return null;
+    }
+
+    private function noteForUpdate(ConversationSession $session, array $parameters): Note
+    {
+        if (! empty($parameters['id'])) {
+            return $this->ownedModel(Note::class, $session, $parameters);
+        }
+
+        $title = trim((string) ($parameters['match_title'] ?? $parameters['title'] ?? ''));
+        $queryText = trim((string) ($parameters['query'] ?? $parameters['plain_text'] ?? $parameters['content'] ?? ''));
+        $needle = $title !== '' ? $title : $queryText;
+        if ($needle === '') {
+            throw new InvalidArgumentException('Structured note action is missing required resource id or title.');
+        }
+
+        $query = Note::query()->where('user_id', $session->user_id);
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+        $escaped = addcslashes($needle, '%_\\');
+        $query->where(function ($query) use ($escaped): void {
+            $query->where('title', 'like', '%'.$escaped.'%')
+                ->orWhere('plain_text', 'like', '%'.$escaped.'%');
+        });
+
+        $matches = $query
+            ->orderByRaw('case when lower(title) = ? then 0 else 1 end', [mb_strtolower($needle)])
+            ->latest('updated_at')
+            ->limit(5)
+            ->get();
+
+        if ($matches->count() === 1) {
+            return $matches->first();
+        }
+
+        $exactMatches = $matches
+            ->filter(fn (Note $note): bool => mb_strtolower($note->title) === mb_strtolower($needle))
+            ->values();
+        if ($exactMatches->count() === 1) {
+            return $exactMatches->first();
+        }
+
+        throw new InvalidArgumentException($matches->isEmpty()
+            ? 'Bean could not find a matching note.'
+            : 'Bean found multiple matching notes. Please include the exact note title.'
+        );
+    }
+
+    private function noteFolderId(ConversationSession $session, array $parameters): ?int
+    {
+        $folderId = $parameters['note_folder_id'] ?? $parameters['folder_id'] ?? null;
+        if ($folderId) {
+            $folder = NoteFolder::query()
+                ->where('user_id', $session->user_id)
+                ->where('workspace_id', $session->workspace_id)
+                ->findOrFail((int) $folderId);
+
+            return (int) $folder->id;
+        }
+
+        $folderName = trim((string) ($parameters['folder_name'] ?? ''));
+        if ($folderName === '') {
+            return null;
+        }
+
+        return (int) NoteFolder::firstOrCreate(
+            ['user_id' => $session->user_id, 'workspace_id' => $session->workspace_id, 'name' => $folderName],
+            ['created_by_user_id' => $session->created_by_user_id ?: $session->user_id]
+        )->id;
+    }
+
+    private function notePlainText(array $parameters, string $bodyHtml): string
+    {
+        $plainText = trim((string) ($parameters['plain_text'] ?? $parameters['body'] ?? $parameters['content'] ?? $parameters['text'] ?? ''));
+        if ($plainText !== '') {
+            return $plainText;
+        }
+
+        return trim(html_entity_decode(strip_tags(str_replace(['</div>', '</p>', '<br>', '<br/>', '<br />'], "\n", $bodyHtml)), ENT_QUOTES | ENT_HTML5));
+    }
+
+    private function noteTitleFromText(string $plainText): string
+    {
+        $firstLine = trim((string) strtok($plainText, "\n"));
+
+        return $firstLine !== '' ? str($firstLine)->limit(80, '')->toString() : 'New Note';
     }
 
     private function clientNow(ConversationSession $session): Carbon
