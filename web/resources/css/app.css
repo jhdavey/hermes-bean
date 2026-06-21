@@ -2733,6 +2733,10 @@
     cursor: pointer;
 }
 
+.heybean-app-body .hb-timeline-day-head {
+    border-radius: 0;
+}
+
 .hb-timeline-day-head:hover,
 .hb-timeline-day-head-active {
     background: rgba(var(--hb-accent-rgb), .10);
@@ -2797,6 +2801,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
+}
+
+.heybean-app-body .hb-multi-day-event,
+.heybean-app-body .hb-all-day-event {
+    border-radius: 10px;
 }
 
 .hb-multi-day-event {
@@ -2892,6 +2901,10 @@
     pointer-events: auto;
 }
 
+.heybean-app-body .hb-timed-event {
+    border-radius: 12px;
+}
+
 .hb-timed-event-short {
     grid-template-columns: auto minmax(0, 1fr);
     align-content: center;
@@ -2899,6 +2912,10 @@
     gap: 5px;
     min-height: 0;
     padding: 1px 6px;
+    border-radius: 8px;
+}
+
+.heybean-app-body .hb-timed-event-short {
     border-radius: 8px;
 }
 
@@ -6590,6 +6607,10 @@
     text-align: left;
 }
 
+.heybean-app-body .hb-note-list-item:not(.hb-note-list-item-active) {
+    border-radius: 0;
+}
+
 .hb-note-list-item strong,
 .hb-note-list-item span {
     overflow: hidden;
@@ -6605,6 +6626,10 @@
 
 .hb-note-list-item-active {
     background: rgba(var(--hb-accent-rgb), .18);
+    border-radius: 16px;
+}
+
+.heybean-app-body .hb-note-list-item-active {
     border-radius: 16px;
 }
 
@@ -6783,6 +6808,10 @@
     letter-spacing: 0;
     border-bottom: 1px solid var(--hb-border);
     padding-bottom: 14px;
+}
+
+.heybean-app-body .hb-note-title-input {
+    border-radius: 0;
 }
 
 .hb-note-body {
