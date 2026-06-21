@@ -6369,8 +6369,45 @@
     font-size: 13px;
 }
 
-.hb-note-folder,
-.hb-note-folder-delete {
+.hb-notes-sidebar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.hb-note-sidebar-action {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: var(--hb-control-radius);
+    background: transparent;
+    color: var(--hb-muted);
+    cursor: pointer;
+    transition: background .16s ease, color .16s ease, transform .16s ease;
+}
+
+.hb-note-sidebar-action:hover,
+.hb-note-sidebar-action[aria-pressed="true"] {
+    background: rgba(var(--hb-accent-rgb), .12);
+    color: var(--hb-accent-strong);
+}
+
+.hb-note-sidebar-action:hover {
+    transform: translateY(-1px);
+}
+
+.hb-note-sidebar-action svg {
+    width: 17px;
+    height: 17px;
+}
+
+.hb-note-sidebar-add {
+    color: var(--hb-accent-strong);
+}
+
+.hb-note-folder {
     width: 100%;
     border: 0;
     background: transparent;
@@ -6419,14 +6456,62 @@
     background: rgba(var(--hb-accent-rgb), .18);
 }
 
-.hb-note-folder-delete {
-    display: block;
-    margin: -2px 0 6px 35px;
-    width: auto;
+.hb-note-user-folders {
+    display: grid;
+    gap: 1px;
+}
+
+.hb-note-folder-edit-row {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr) 30px;
+    align-items: center;
+    gap: 2px;
+    border-radius: var(--hb-control-radius);
+}
+
+.hb-note-folder-edit-row-dragging {
+    opacity: .5;
+}
+
+.hb-note-folder-edit-row-drop-target {
+    background: rgba(var(--hb-accent-rgb), .10);
+    outline: 1px dashed rgba(var(--hb-accent-rgb), .34);
+    outline-offset: 2px;
+}
+
+.hb-note-folder-drag,
+.hb-note-folder-delete-icon {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 32px;
+    border: 0;
+    border-radius: var(--hb-control-radius);
+    background: transparent;
     color: var(--hb-muted);
-    font-size: 12px;
-    line-height: 1.2;
-    text-align: left;
+}
+
+.hb-note-folder-drag {
+    cursor: grab;
+}
+
+.hb-note-folder-drag:active {
+    cursor: grabbing;
+}
+
+.hb-note-folder-drag svg,
+.hb-note-folder-delete-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.hb-note-folder-delete-icon {
+    color: var(--hb-destructive);
+    cursor: pointer;
+}
+
+.hb-note-folder-delete-icon:hover {
+    background: color-mix(in srgb, var(--hb-destructive) 10%, transparent);
 }
 
 .hb-notes-list-pane {
@@ -6568,8 +6653,7 @@
     background: rgba(var(--hb-accent-rgb), .14);
 }
 
-.hb-note-list-option:focus-visible,
-.hb-note-list-option-delete:focus-visible {
+.hb-note-list-option:focus-visible {
     outline: 2px solid rgba(var(--hb-accent-rgb), .38);
     outline-offset: 2px;
 }
@@ -6603,27 +6687,6 @@
 
 .hb-note-list-option-create {
     margin-top: 4px;
-}
-
-.hb-note-list-option-delete {
-    width: calc(100% - 44px);
-    min-height: 28px;
-    margin: -2px 0 4px 44px;
-    border: 0;
-    border-radius: 0;
-    padding: 3px 0 5px;
-    background: transparent;
-    color: var(--hb-destructive);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 750;
-    line-height: 1.25;
-    text-align: left;
-}
-
-.hb-note-list-option-delete:hover {
-    color: color-mix(in srgb, var(--hb-destructive) 84%, #000);
-    text-decoration: underline;
 }
 
 .hb-note-list-section {

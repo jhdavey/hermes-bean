@@ -2632,7 +2632,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _session = session;
         _replaceMessagesFromSession(sessionDetails, user: user);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _noteFolders = results[4] as List<HermesNoteFolder>;
+        _noteFolders = _sortedNoteFolders(
+          results[4] as List<HermesNoteFolder>,
+        );
         _notes = _sortedNotes(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
         _memorySummaries = results[7] as List<HermesMemorySummary>;
@@ -3917,7 +3919,9 @@ ${_truncateDiagnostic(stack, 2200)}
       }
       setState(() {
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _noteFolders = results[4] as List<HermesNoteFolder>;
+        _noteFolders = _sortedNoteFolders(
+          results[4] as List<HermesNoteFolder>,
+        );
         _notes = _sortedNotes(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
         _memorySummaries = results[7] as List<HermesMemorySummary>;
@@ -4046,7 +4050,9 @@ ${_truncateDiagnostic(stack, 2200)}
         _session = session;
         _replaceMessagesFromSession(sessionDetails, user: user);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _noteFolders = results[4] as List<HermesNoteFolder>;
+        _noteFolders = _sortedNoteFolders(
+          results[4] as List<HermesNoteFolder>,
+        );
         _notes = _sortedNotes(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
         _memorySummaries = results[7] as List<HermesMemorySummary>;
@@ -4909,7 +4915,9 @@ ${_truncateDiagnostic(stack, 2200)}
   Future<HermesNoteFolder> _createNoteFolder(String name) async {
     final folder = await widget.apiClient.createNoteFolder(name: name);
     if (!mounted) return folder;
-    setState(() => _noteFolders = [..._noteFolders, folder]);
+    setState(
+      () => _noteFolders = _sortedNoteFolders([..._noteFolders, folder]),
+    );
     return folder;
   }
 
@@ -4917,9 +4925,11 @@ ${_truncateDiagnostic(stack, 2200)}
     await widget.apiClient.deleteNoteFolder(folder.id);
     if (!mounted) return;
     setState(() {
-      _noteFolders = _noteFolders
-          .where((candidate) => candidate.id != folder.id)
-          .toList();
+      _noteFolders = _sortedNoteFolders(
+        _noteFolders
+            .where((candidate) => candidate.id != folder.id)
+            .toList(),
+      );
       _notes = _notes
           .map(
             (note) => note.folderId == folder.id
@@ -22823,6 +22833,18 @@ List<HermesNote> _sortedNotes(List<HermesNote> notes) {
     final aTime = DateTime.tryParse(a.updatedAt ?? '') ?? DateTime(1970);
     final bTime = DateTime.tryParse(b.updatedAt ?? '') ?? DateTime(1970);
     return bTime.compareTo(aTime);
+  });
+  return sorted;
+}
+
+List<HermesNoteFolder> _sortedNoteFolders(List<HermesNoteFolder> folders) {
+  final sorted = [...folders];
+  sorted.sort((a, b) {
+    final order = (a.sortOrder ?? 0).compareTo(b.sortOrder ?? 0);
+    if (order != 0) return order;
+    final name = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    if (name != 0) return name;
+    return a.id.compareTo(b.id);
   });
   return sorted;
 }

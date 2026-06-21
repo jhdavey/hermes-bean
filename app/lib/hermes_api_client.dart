@@ -428,6 +428,23 @@ class HermesApiClient {
     return HermesNoteFolder.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesNoteFolder> updateNoteFolder({
+    required int folderId,
+    String? name,
+    int? sortOrder,
+  }) async {
+    final body = <String, Object?>{
+      if (name != null) 'name': name,
+      if (sortOrder != null) 'sort_order': sortOrder,
+    };
+    final data = await _sendJson(
+      'PATCH',
+      '/note-folders/$folderId',
+      body: body,
+    );
+    return HermesNoteFolder.fromJson(_expectMap(data['data']));
+  }
+
   Future<void> deleteNoteFolder(int folderId) async {
     await _sendJson('DELETE', '/note-folders/$folderId');
   }

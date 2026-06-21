@@ -172,12 +172,21 @@ class DomainResourceController extends Controller
 
     public function storeNoteFolder(Request $request): JsonResponse
     {
-        return $this->created(NoteFolder::create($this->owned($request, $request->validate([
+        $attributes = $this->owned($request, $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'metadata' => ['nullable', 'array'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-        ]))));
+        ]));
+
+        if (($attributes['sort_order'] ?? null) === null) {
+            $attributes['sort_order'] = ((int) NoteFolder::query()
+                ->where('user_id', $attributes['user_id'])
+                ->where('workspace_id', $attributes['workspace_id'])
+                ->max('sort_order')) + 1;
+        }
+
+        return $this->created(NoteFolder::create($attributes));
     }
 
     public function updateNoteFolder(Request $request, string $noteFolder): JsonResponse

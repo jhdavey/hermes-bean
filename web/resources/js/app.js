@@ -97,6 +97,7 @@ if (mount) {
         bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
         mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
         menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+        trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>',
         moreVertical: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
         lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
         unlock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M16 10V7a4 4 0 0 0-7.6-1.8"/></svg>',
@@ -144,6 +145,8 @@ if (mount) {
         memorySaving: false,
         selectedNoteId: '',
         selectedNoteFolderId: 'all',
+        noteFoldersEditing: false,
+        noteFolderDragId: '',
         notesSearch: '',
         notesDetailOpen: false,
         notesSort: 'recent',
@@ -611,7 +614,7 @@ if (mount) {
             state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
             state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
             state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
-            state.noteFolders = normalizeList(noteFolders);
+            state.noteFolders = normalizeNoteFolders(noteFolders);
             state.notes = normalizeNotes(notes);
             ensureSelectedNote();
             state.memoryItems = normalizeList(memoryItems);
@@ -741,7 +744,7 @@ if (mount) {
             state.tasks = normalizeList(cached.tasks);
             state.reminders = normalizeList(cached.reminders);
             state.calendar = reconcileCalendarRefresh(cached.calendar);
-            state.noteFolders = normalizeList(cached.noteFolders);
+            state.noteFolders = normalizeNoteFolders(cached.noteFolders);
             state.notes = normalizeNotes(cached.notes);
             ensureSelectedNote();
             state.memoryItems = normalizeList(cached.memoryItems);
@@ -992,6 +995,21 @@ if (mount) {
 
     function normalizeList(value) {
         return Array.isArray(value) ? value : [];
+    }
+
+    function normalizeNoteFolders(value) {
+        return normalizeList(value).map((folder) => ({
+            ...folder,
+            sort_order: Number(folder?.sort_order ?? folder?.sortOrder ?? 0),
+        })).sort(compareNoteFolders);
+    }
+
+    function compareNoteFolders(a, b) {
+        const order = Number(a?.sort_order ?? a?.sortOrder ?? 0) - Number(b?.sort_order ?? b?.sortOrder ?? 0);
+        if (order) return order;
+        const name = String(a?.name || '').localeCompare(String(b?.name || ''));
+        if (name) return name;
+        return Number(a?.id || 0) - Number(b?.id || 0);
     }
 
     function normalizeNotes(value) {
@@ -1674,7 +1692,7 @@ if (mount) {
     }
 
     function notesMarkup() {
-        const folders = normalizeList(state.noteFolders);
+        const folders = normalizeNoteFolders(state.noteFolders);
         const notes = filteredNotes();
         const selected = selectedNote();
         const sections = noteListSections(notes);
@@ -1684,11 +1702,16 @@ if (mount) {
                 <aside class="hb-notes-folders">
                     <div class="hb-notes-sidebar-title">
                         <strong>Folders</strong>
-                        <button class="hb-icon-button" type="button" data-create-note-folder aria-label="New folder" title="New folder">${icons.add}</button>
+                        <div class="hb-notes-sidebar-actions">
+                            <button class="hb-note-sidebar-action" type="button" data-toggle-note-folder-edit aria-pressed="${state.noteFoldersEditing}" aria-label="${state.noteFoldersEditing ? 'Done editing folders' : 'Edit folders'}" title="${state.noteFoldersEditing ? 'Done' : 'Edit folders'}">${state.noteFoldersEditing ? icons.checkCircle : icons.edit}</button>
+                            <button class="hb-note-sidebar-action hb-note-sidebar-add" type="button" data-create-note-folder aria-label="New folder" title="New folder">${icons.add}</button>
+                        </div>
                     </div>
                     ${noteFolderButtonMarkup('all', 'All Notes', state.notes.length, icons.notes)}
                     ${noteFolderButtonMarkup('pinned', 'Pinned', state.notes.filter((note) => note.is_pinned || note.isPinned).length, icons.pin)}
-                    ${folders.map((folder) => noteFolderButtonMarkup(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length, icons.notes, folder)).join('')}
+                    <div class="hb-note-user-folders ${state.noteFoldersEditing ? 'hb-note-user-folders-editing' : ''}" data-note-folder-list>
+                        ${folders.map((folder) => noteFolderButtonMarkup(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length, icons.notes, folder)).join('')}
+                    </div>
                     ${noteFolderButtonMarkup('unfiled', 'Unfiled', state.notes.filter((note) => !(note.note_folder_id || note.noteFolderId)).length, icons.notes)}
                 </aside>
                 <aside class="hb-notes-list-pane">
@@ -1699,7 +1722,7 @@ if (mount) {
                                 <strong>Folders</strong>
                                 ${noteListOptionButton('all', 'All Notes', state.notes.length)}
                                 ${noteListOptionButton('pinned', 'Pinned', state.notes.filter((note) => note.is_pinned || note.isPinned).length)}
-                                ${folders.map((folder) => noteListOptionButton(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length, folder)).join('')}
+                                ${folders.map((folder) => noteListOptionButton(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length)).join('')}
                                 ${noteListOptionButton('unfiled', 'Unfiled', state.notes.filter((note) => !(note.note_folder_id || note.noteFolderId)).length)}
                                 <span class="hb-note-list-options-break" aria-hidden="true"></span>
                                 <strong>Sort</strong>
@@ -1729,21 +1752,30 @@ if (mount) {
 
     function noteFolderButtonMarkup(id, label, count, icon, folder = null) {
         const active = String(state.selectedNoteFolderId || 'all') === String(id);
+        if (folder && state.noteFoldersEditing) {
+            return `
+                <div class="hb-note-folder-edit-row" data-note-folder-row="${escapeAttr(id)}" draggable="true">
+                    <button class="hb-note-folder-drag" type="button" aria-label="${escapeAttr(`Drag ${label || 'folder'}`)}" title="Drag to reorder">${icons.menu}</button>
+                    <button class="hb-note-folder ${active ? 'hb-note-folder-active' : ''}" type="button" data-note-folder="${escapeAttr(id)}">
+                        <span>${icon}<strong>${escapeHtml(label || 'Folder')}</strong></span>
+                        <em>${count}</em>
+                    </button>
+                    <button class="hb-note-folder-delete-icon" type="button" data-delete-note-folder="${escapeAttr(folder.id)}" aria-label="${escapeAttr(`Delete ${folder.name}`)}" title="${escapeAttr(`Delete ${folder.name}`)}">${icons.trash}</button>
+                </div>`;
+        }
         return `
             <button class="hb-note-folder ${active ? 'hb-note-folder-active' : ''}" type="button" data-note-folder="${escapeAttr(id)}">
                 <span>${icon}<strong>${escapeHtml(label || 'Folder')}</strong></span>
                 <em>${count}</em>
-            </button>
-            ${folder ? `<button class="hb-note-folder-delete" type="button" data-delete-note-folder="${escapeAttr(folder.id)}" aria-label="${escapeAttr(`Delete ${folder.name}`)}">Delete folder</button>` : ''}`;
+            </button>`;
     }
 
-    function noteListOptionButton(id, label, count, folder = null) {
+    function noteListOptionButton(id, label, count) {
         const active = String(state.selectedNoteFolderId || 'all') === String(id);
         return `
             <button class="hb-note-list-option" type="button" data-note-folder="${escapeAttr(id)}" aria-pressed="${active}">
                 ${icons.notes}<span>${escapeHtml(label || 'Folder')}</span><em>${count}</em>
-            </button>
-            ${folder ? `<button class="hb-note-list-option-delete" type="button" data-delete-note-folder="${escapeAttr(folder.id)}">Delete ${escapeHtml(folder.name)}</button>` : ''}`;
+            </button>`;
     }
 
     function noteListSectionMarkup(section) {
@@ -4670,6 +4702,12 @@ if (mount) {
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
         mount.querySelectorAll('[data-create-note]').forEach((button) => button.addEventListener('click', createNote));
         mount.querySelectorAll('[data-create-note-folder]').forEach((button) => button.addEventListener('click', createNoteFolder));
+        mount.querySelector('[data-toggle-note-folder-edit]')?.addEventListener('click', () => {
+            state.noteFoldersEditing = !state.noteFoldersEditing;
+            state.noteFolderDragId = '';
+            render();
+        });
+        bindNoteFolderDragOrdering();
         mount.querySelectorAll('[data-note-sort]').forEach((button) => button.addEventListener('click', () => {
             state.notesSort = button.dataset.noteSort || 'recent';
             render();
@@ -4830,12 +4868,79 @@ if (mount) {
         }
     }
 
+    function bindNoteFolderDragOrdering() {
+        if (!state.noteFoldersEditing) return;
+        mount.querySelectorAll('[data-note-folder-row]').forEach((row) => {
+            row.addEventListener('dragstart', (event) => {
+                const id = row.dataset.noteFolderRow || '';
+                state.noteFolderDragId = id;
+                row.classList.add('hb-note-folder-edit-row-dragging');
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', id);
+            });
+            row.addEventListener('dragend', () => {
+                state.noteFolderDragId = '';
+                row.classList.remove('hb-note-folder-edit-row-dragging');
+            });
+            row.addEventListener('dragover', (event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                row.classList.add('hb-note-folder-edit-row-drop-target');
+            });
+            row.addEventListener('dragleave', () => {
+                row.classList.remove('hb-note-folder-edit-row-drop-target');
+            });
+            row.addEventListener('drop', (event) => {
+                event.preventDefault();
+                row.classList.remove('hb-note-folder-edit-row-drop-target');
+                const draggedId = event.dataTransfer.getData('text/plain') || state.noteFolderDragId;
+                reorderNoteFolder(draggedId, row.dataset.noteFolderRow || '');
+            });
+        });
+    }
+
+    function reorderNoteFolder(draggedId, targetId) {
+        if (!draggedId || !targetId || String(draggedId) === String(targetId)) return;
+        const previous = normalizeNoteFolders(state.noteFolders);
+        const from = previous.findIndex((folder) => String(folder.id) === String(draggedId));
+        const to = previous.findIndex((folder) => String(folder.id) === String(targetId));
+        if (from < 0 || to < 0) return;
+        const next = [...previous];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        const ordered = next.map((folder, index) => ({
+            ...folder,
+            sort_order: index,
+            sortOrder: index,
+        }));
+        state.noteFolders = ordered;
+        saveDashboardCache();
+        render();
+        persistNoteFolderOrder(ordered, previous);
+    }
+
+    async function persistNoteFolderOrder(folders, previous) {
+        try {
+            await Promise.all(folders.map((folder, index) => api(`/note-folders/${encodeURIComponent(folder.id)}`, {
+                method: 'PATCH',
+                body: { sort_order: index },
+            })));
+            state.noteFolders = normalizeNoteFolders(folders);
+            saveDashboardCache();
+        } catch (error) {
+            state.noteFolders = previous;
+            state.error = friendlyError(error, 'save that folder order');
+            saveDashboardCache();
+            render();
+        }
+    }
+
     async function createNoteFolder() {
         const name = window.prompt('Folder name');
         if (!name || !name.trim()) return;
         try {
             const folder = await api(workspaceScopedPath('/note-folders'), { method: 'POST', body: { name: name.trim() } });
-            state.noteFolders = normalizeList([...state.noteFolders, folder]).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+            state.noteFolders = normalizeNoteFolders([...state.noteFolders, folder]);
             state.selectedNoteFolderId = String(folder.id);
             saveDashboardCache();
             render();
@@ -5015,7 +5120,7 @@ if (mount) {
         if (!id || !window.confirm('Delete this folder? Notes inside it will stay in All Notes.')) return;
         try {
             await api(`/note-folders/${encodeURIComponent(id)}`, { method: 'DELETE' });
-            state.noteFolders = state.noteFolders.filter((folder) => String(folder.id) !== String(id));
+            state.noteFolders = normalizeNoteFolders(state.noteFolders.filter((folder) => String(folder.id) !== String(id)));
             state.notes = state.notes.map((note) => String(note.note_folder_id || note.noteFolderId || '') === String(id)
                 ? { ...note, note_folder_id: null, noteFolderId: null }
                 : note);
@@ -10573,7 +10678,7 @@ if (mount) {
             state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
             state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
             state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
-            state.noteFolders = normalizeList(noteFolders);
+            state.noteFolders = normalizeNoteFolders(noteFolders);
             state.notes = normalizeNotes(notes);
             ensureSelectedNote();
             state.memoryItems = normalizeList(memoryItems);
