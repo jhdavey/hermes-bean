@@ -34,8 +34,8 @@
             <span class="hero-icon" aria-label="Tasks">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12.5 11 14.5 15.5 9.5"/><circle cx="12" cy="12" r="9"/></svg>
             </span>
-            <span class="hero-icon" aria-label="Bean AI">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.5l-1.9-5.7-5.6-1.9L10.1 9 12 3.5Z"/><path d="M19 3v4M21 5h-4M5 17v3M6.5 18.5h-3"/></svg>
+            <span class="hero-icon" aria-label="Notes">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6Z"/><path d="M15 3v4h4"/><path d="M9 11h6M9 15h6M9 19h4"/></svg>
             </span>
             <span class="hero-icon" aria-label="Reminders">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>

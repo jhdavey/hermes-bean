@@ -32,6 +32,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Easy calendar, task, and reminder management with Bean', false)
             ->assertSee('aria-label="Calendar"', false)
             ->assertSee('aria-label="Tasks"', false)
+            ->assertSee('aria-label="Notes"', false)
             ->assertSee('aria-label="Reminders"', false)
             ->assertSee('Used by <strong>1,122</strong> busy households and operators', false)
             ->assertSee('Try it for free', false)
