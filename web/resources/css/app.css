@@ -6421,10 +6421,11 @@
 
 .hb-note-folder-delete {
     display: block;
-    margin: -3px 0 5px 34px;
+    margin: -2px 0 6px 35px;
     width: auto;
     color: var(--hb-muted);
-    font-size: 11px;
+    font-size: 12px;
+    line-height: 1.2;
     text-align: left;
 }
 
@@ -6530,55 +6531,99 @@
     box-shadow: var(--hb-shadow);
 }
 
+.hb-note-list-options-break {
+    height: 1px;
+    margin: 8px 2px 4px;
+    background: var(--hb-border);
+}
+
 .hb-notes-list-options-popover strong {
-    padding: 8px 10px 4px;
+    display: block;
+    padding: 8px 12px 4px;
     color: var(--hb-muted);
     font-size: 12px;
     font-weight: 900;
+    line-height: 1.2;
 }
 
-.hb-notes-list-options-popover button {
+.hb-note-list-option {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
     min-height: 38px;
     border: 0;
     border-radius: var(--hb-control-radius);
-    padding: 8px 10px;
+    padding: 8px 12px;
     background: transparent;
     color: var(--hb-text);
     font: inherit;
+    line-height: 1.22;
     text-align: left;
 }
 
-.hb-notes-list-options-popover button:hover,
-.hb-notes-list-options-popover button[aria-pressed="true"] {
+.hb-note-list-option:hover,
+.hb-note-list-option[aria-pressed="true"] {
     background: rgba(var(--hb-accent-rgb), .14);
 }
 
-.hb-notes-list-options-popover button svg {
+.hb-note-list-option:focus-visible,
+.hb-note-list-option-delete:focus-visible {
+    outline: 2px solid rgba(var(--hb-accent-rgb), .38);
+    outline-offset: 2px;
+}
+
+.hb-note-list-option svg {
     width: 16px;
     height: 16px;
     color: var(--hb-accent-strong);
 }
 
-.hb-notes-list-options-popover button span {
+.hb-note-list-option span {
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
     font-weight: 800;
 }
 
-.hb-notes-list-options-popover button em {
+.hb-note-list-option[data-note-sort] {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.hb-note-list-option[data-note-sort] span {
+    white-space: nowrap;
+}
+
+.hb-note-list-option em {
     color: var(--hb-muted);
     font-size: 12px;
     font-style: normal;
 }
 
-.hb-note-list-option-danger {
-    color: var(--hb-destructive) !important;
+.hb-note-list-option-create {
+    margin-top: 4px;
+}
+
+.hb-note-list-option-delete {
+    width: calc(100% - 44px);
+    min-height: 28px;
+    margin: -2px 0 4px 44px;
+    border: 0;
+    border-radius: 0;
+    padding: 3px 0 5px;
+    background: transparent;
+    color: var(--hb-destructive);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 750;
+    line-height: 1.25;
+    text-align: left;
+}
+
+.hb-note-list-option-delete:hover {
+    color: color-mix(in srgb, var(--hb-destructive) 84%, #000);
+    text-decoration: underline;
 }
 
 .hb-note-list-section {
@@ -6806,18 +6851,27 @@
 .hb-note-title-input {
     width: 100%;
     border: 0;
+    border-radius: 0 !important;
     outline: 0;
     background: transparent;
     color: var(--hb-text);
     font-size: clamp(28px, 5vw, 44px);
     font-weight: 800;
+    line-height: 1.16;
     letter-spacing: 0;
     border-bottom: 1px solid var(--hb-border);
-    padding-bottom: 14px;
+    padding: 0 0 14px;
+    box-shadow: none;
+    appearance: none;
 }
 
 .heybean-app-body .hb-note-title-input {
-    border-radius: 0;
+    border-radius: 0 !important;
+}
+
+.hb-note-title-input::placeholder {
+    color: var(--hb-text);
+    opacity: .94;
 }
 
 .hb-note-body {

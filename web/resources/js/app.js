@@ -1701,11 +1701,11 @@ if (mount) {
                                 ${noteListOptionButton('pinned', 'Pinned', state.notes.filter((note) => note.is_pinned || note.isPinned).length)}
                                 ${folders.map((folder) => noteListOptionButton(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length, folder)).join('')}
                                 ${noteListOptionButton('unfiled', 'Unfiled', state.notes.filter((note) => !(note.note_folder_id || note.noteFolderId)).length)}
-                                <span></span>
+                                <span class="hb-note-list-options-break" aria-hidden="true"></span>
                                 <strong>Sort</strong>
-                                <button type="button" data-note-sort="recent" aria-pressed="${state.notesSort !== 'title'}">Most recently edited</button>
-                                <button type="button" data-note-sort="title" aria-pressed="${state.notesSort === 'title'}">Title</button>
-                                <button type="button" data-create-note-folder>${icons.add}<span>New folder</span></button>
+                                <button class="hb-note-list-option" type="button" data-note-sort="recent" aria-pressed="${state.notesSort !== 'title'}"><span>Most recently edited</span></button>
+                                <button class="hb-note-list-option" type="button" data-note-sort="title" aria-pressed="${state.notesSort === 'title'}"><span>Title</span></button>
+                                <button class="hb-note-list-option hb-note-list-option-create" type="button" data-create-note-folder>${icons.add}<span>New folder</span></button>
                             </div>
                         </details>
                         <div>
@@ -1734,16 +1734,16 @@ if (mount) {
                 <span>${icon}<strong>${escapeHtml(label || 'Folder')}</strong></span>
                 <em>${count}</em>
             </button>
-            ${folder ? `<button class="hb-note-folder-delete" type="button" data-delete-note-folder="${escapeAttr(folder.id)}" aria-label="${escapeAttr(`Delete ${folder.name}`)}">Delete</button>` : ''}`;
+            ${folder ? `<button class="hb-note-folder-delete" type="button" data-delete-note-folder="${escapeAttr(folder.id)}" aria-label="${escapeAttr(`Delete ${folder.name}`)}">Delete folder</button>` : ''}`;
     }
 
     function noteListOptionButton(id, label, count, folder = null) {
         const active = String(state.selectedNoteFolderId || 'all') === String(id);
         return `
-            <button type="button" data-note-folder="${escapeAttr(id)}" aria-pressed="${active}">
+            <button class="hb-note-list-option" type="button" data-note-folder="${escapeAttr(id)}" aria-pressed="${active}">
                 ${icons.notes}<span>${escapeHtml(label || 'Folder')}</span><em>${count}</em>
             </button>
-            ${folder ? `<button class="hb-note-list-option-danger" type="button" data-delete-note-folder="${escapeAttr(folder.id)}">${icons.trash || ''}<span>Delete ${escapeHtml(folder.name)}</span></button>` : ''}`;
+            ${folder ? `<button class="hb-note-list-option-delete" type="button" data-delete-note-folder="${escapeAttr(folder.id)}">Delete ${escapeHtml(folder.name)}</button>` : ''}`;
     }
 
     function noteListSectionMarkup(section) {
