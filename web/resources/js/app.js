@@ -82,6 +82,7 @@ if (mount) {
         tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 2 2 4-5"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>',
         reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
         notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.8A2.8 2.8 0 0 1 6.8 2H17a3 3 0 0 1 3 3v14.2A2.8 2.8 0 0 1 17.2 22H7a3 3 0 0 1-3-3Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>',
+        memory: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5a4 4 0 0 0-4 4v.4A4.2 4.2 0 0 0 3 11.5 4.2 4.2 0 0 0 5 15v1.2a4.3 4.3 0 0 0 7 3.35 4.3 4.3 0 0 0 7-3.35V15a4.2 4.2 0 0 0 2-3.5 4.2 4.2 0 0 0-2-3.6v-.4a4 4 0 0 0-7-2.65A4 4 0 0 0 9 3.5Z"/><path d="M12 5v15M8 9h1.5M14.5 9H16M8 14h1.5M14.5 14H16"/></svg>',
         pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.8 4.6 15.2a1 1 0 0 0 .7 1.8h13.4a1 1 0 0 0 .7-1.8L15 10.8V5l1.2-1.2A1 1 0 0 0 15.5 2h-7a1 1 0 0 0-.7 1.8L9 5Z"/></svg>',
         settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.8l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.7.6 1 .3.25.68.4 1.1.4H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.6Z"/></svg>',
         spaces: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>',
@@ -96,6 +97,9 @@ if (mount) {
         bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
         mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
         menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+        moreVertical: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
+        lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+        unlock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M16 10V7a4 4 0 0 0-7.6-1.8"/></svg>',
         refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.2 6.5L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.2 5.5L21 8"/><path d="M21 3v5h-5"/></svg>',
         chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
         chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
@@ -130,9 +134,17 @@ if (mount) {
         calendar: [],
         noteFolders: [],
         notes: [],
+        memoryItems: [],
+        memorySummaries: [],
+        memoryHistory: [],
+        memorySearch: '',
+        memoryTypeFilter: '',
+        memorySaving: false,
         selectedNoteId: '',
         selectedNoteFolderId: 'all',
         notesSearch: '',
+        notesDetailOpen: false,
+        notesSort: 'recent',
         notesSaving: false,
         categories: [],
         settingsCategoryId: '',
@@ -212,6 +224,8 @@ if (mount) {
     let deferredDashboardRenderTimer = 0;
     let dashboardRefreshGeneration = 0;
     let localResourceSequence = -1;
+    const noteAutosaveTimers = new Map();
+    const noteAutosaveDelay = 650;
     let kioskRecognition = null;
     let kioskBargeRecognition = null;
     let kioskRecognitionActive = false;
@@ -571,7 +585,7 @@ if (mount) {
                 render();
             }
 
-            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, categories, googleStatus, subscription, billingPayment] = await Promise.all([
+            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, memoryItems, memorySummaries, memoryHistory, categories, googleStatus, subscription, billingPayment] = await Promise.all([
                 recover(api(workspaceScopedPath('/today')), state.summary || {}),
                 recover(api(workspaceScopedPath('/tasks')), state.tasks),
                 recover(api(workspaceScopedPath('/tasks/past')), []),
@@ -579,6 +593,9 @@ if (mount) {
                 recover(api(workspaceScopedPath('/calendar-events?skip_google_sync=1')), state.calendar),
                 recover(api(workspaceScopedPath('/note-folders')), state.noteFolders),
                 recover(api(workspaceScopedPath('/notes')), state.notes),
+                recover(api(workspaceScopedPath('/memory-items')), state.memoryItems),
+                recover(api(workspaceScopedPath('/memory-summaries')), state.memorySummaries),
+                recover(api(workspaceScopedPath('/memory/request-history?limit=10')), state.memoryHistory),
                 recover(api(workspaceScopedPath('/event-categories')), state.categories),
                 api('/google-calendar/status?cached=1').catch(() => null),
                 api('/billing/subscription').catch(() => state.subscriptionSummary),
@@ -595,6 +612,9 @@ if (mount) {
             state.noteFolders = normalizeList(noteFolders);
             state.notes = normalizeNotes(notes);
             ensureSelectedNote();
+            state.memoryItems = normalizeList(memoryItems);
+            state.memorySummaries = normalizeList(memorySummaries);
+            state.memoryHistory = normalizeList(memoryHistory);
             state.categories = normalizeList(categories);
             state.approvals = normalizeList(summary?.approvals);
             state.blockers = normalizeList(summary?.blockers);
@@ -696,6 +716,9 @@ if (mount) {
                 calendar: state.calendar,
                 noteFolders: state.noteFolders,
                 notes: state.notes,
+                memoryItems: state.memoryItems,
+                memorySummaries: state.memorySummaries,
+                memoryHistory: state.memoryHistory,
                 categories: state.categories,
                 approvals: state.approvals,
                 blockers: state.blockers,
@@ -719,6 +742,9 @@ if (mount) {
             state.noteFolders = normalizeList(cached.noteFolders);
             state.notes = normalizeNotes(cached.notes);
             ensureSelectedNote();
+            state.memoryItems = normalizeList(cached.memoryItems);
+            state.memorySummaries = normalizeList(cached.memorySummaries);
+            state.memoryHistory = normalizeList(cached.memoryHistory);
             state.categories = normalizeList(cached.categories);
             state.approvals = normalizeList(cached.approvals);
             state.blockers = normalizeList(cached.blockers);
@@ -747,6 +773,9 @@ if (mount) {
         state.calendar = [];
         state.noteFolders = [];
         state.notes = [];
+        state.memoryItems = [];
+        state.memorySummaries = [];
+        state.memoryHistory = [];
         state.selectedNoteId = '';
         state.selectedNoteFolderId = 'all';
         state.categories = [];
@@ -764,6 +793,9 @@ if (mount) {
             calendar: state.calendar,
             noteFolders: state.noteFolders,
             notes: state.notes,
+            memoryItems: state.memoryItems,
+            memorySummaries: state.memorySummaries,
+            memoryHistory: state.memoryHistory,
             categories: state.categories,
             approvals: state.approvals,
             blockers: state.blockers,
@@ -786,6 +818,9 @@ if (mount) {
         state.calendar = snapshot.calendar;
         state.noteFolders = snapshot.noteFolders;
         state.notes = snapshot.notes;
+        state.memoryItems = snapshot.memoryItems;
+        state.memorySummaries = snapshot.memorySummaries;
+        state.memoryHistory = snapshot.memoryHistory;
         state.categories = snapshot.categories;
         state.approvals = snapshot.approvals;
         state.blockers = snapshot.blockers;
@@ -960,9 +995,23 @@ if (mount) {
     function normalizeNotes(value) {
         return normalizeList(value).map((note) => ({
             ...note,
+            metadata: normalizeNoteMetadata(note?.metadata),
             is_pinned: Boolean(note.is_pinned ?? note.isPinned),
             note_folder_id: note.note_folder_id ?? note.noteFolderId ?? note.folder_id ?? note.folderId ?? null,
         })).sort(compareNotes);
+    }
+
+    function normalizeNoteMetadata(metadata) {
+        if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) return metadata;
+        if (typeof metadata === 'string' && metadata.trim()) {
+            try {
+                const parsed = JSON.parse(metadata);
+                return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+            } catch (_) {
+                return {};
+            }
+        }
+        return {};
     }
 
     function compareNotes(a, b) {
@@ -979,6 +1028,11 @@ if (mount) {
 
     function selectedNote() {
         return state.notes.find((note) => String(note.id) === String(state.selectedNoteId)) || null;
+    }
+
+    function noteIsLocked(note) {
+        const metadata = normalizeNoteMetadata(note?.metadata);
+        return metadata.locked === true || metadata.is_locked === true || metadata.locked === 'true';
     }
 
     function filteredNotes() {
@@ -1002,15 +1056,148 @@ if (mount) {
         });
     }
 
+    function currentNotesFolderTitle() {
+        const folderId = String(state.selectedNoteFolderId || 'all');
+        if (folderId === 'pinned') return 'Pinned';
+        if (folderId === 'unfiled') return 'Unfiled';
+        if (folderId === 'all') return 'All Notes';
+        return state.noteFolders.find((folder) => String(folder.id) === folderId)?.name || 'All Notes';
+    }
+
+    function sortedNotesForList(notes) {
+        const sorted = [...notes];
+        if (state.notesSort === 'title') {
+            return sorted.sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+        }
+        return sorted.sort((a, b) => new Date(b?.updated_at || b?.updatedAt || 0) - new Date(a?.updated_at || a?.updatedAt || 0));
+    }
+
+    function noteListSections(notes) {
+        const sorted = sortedNotesForList(notes);
+        const pinned = sorted.filter((note) => note.is_pinned || note.isPinned);
+        const unpinned = sorted.filter((note) => !(note.is_pinned || note.isPinned));
+        const now = Date.now();
+        const day = 24 * 60 * 60 * 1000;
+        const recent = [];
+        const previous30 = [];
+        const older = [];
+        unpinned.forEach((note) => {
+            const time = new Date(note.updated_at || note.updatedAt || 0).getTime();
+            const age = Number.isFinite(time) ? now - time : Infinity;
+            if (age <= 7 * day) recent.push(note);
+            else if (age <= 30 * day) previous30.push(note);
+            else older.push(note);
+        });
+        return [
+            { title: pinned.length ? 'Pinned' : '', notes: pinned },
+            { title: 'Recent', notes: recent },
+            { title: 'Previous 30 Days', notes: previous30 },
+            { title: 'Older', notes: older },
+        ].filter((section) => section.notes.length);
+    }
+
     function noteFolder(note) {
         const id = String(note?.note_folder_id || note?.noteFolderId || note?.folder_id || note?.folderId || '');
         return state.noteFolders.find((folder) => String(folder.id) === id) || null;
+    }
+
+    function linkedWorkspaceIdsForNote(note) {
+        const source = normalizeList(note?.linked_workspace_ids || note?.linkedWorkspaceIds);
+        return new Set(source.map((id) => String(id)));
     }
 
     function notePlainTextFromHtml(html) {
         const div = document.createElement('div');
         div.innerHTML = String(html || '').replace(/<br\s*\/?>/gi, '\n');
         return (div.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    function noteBodyPlainText(bodyNode) {
+        return (bodyNode?.innerText || '')
+            .replace(/\u00a0/g, ' ')
+            .replace(/\n{3,}/g, '\n\n')
+            .replace(/\n+$/g, '');
+    }
+
+    function noteTextToHtml(text) {
+        const lines = String(text || '').split('\n');
+        return lines.map((line) => {
+            const escaped = escapeHtml(line || '');
+            const markerMatch = line.match(/^(\s*)(☐|☑|•)\s?(.*)$/);
+            if (markerMatch) {
+                const [, indent, marker, rest] = markerMatch;
+                const checked = marker === '☑';
+                const bullet = marker === '•';
+                const visualMarker = bullet
+                    ? '<span class="hb-note-bullet-marker" aria-hidden="true">•</span>'
+                    : `<span class="hb-note-checkbox-marker ${checked ? 'hb-note-checkbox-marker-checked' : ''}" aria-hidden="true">${checked ? '☑' : '☐'}</span>`;
+                return `<div>${escapeHtml(indent)}${visualMarker}<span>${escapeHtml(rest || '')}</span></div>`;
+            }
+            return `<div>${escaped || '<br>'}</div>`;
+        }).join('');
+    }
+
+    function noteTextLineAt(text, offset) {
+        const safeOffset = Math.max(0, Math.min(Number(offset) || 0, text.length));
+        const before = text.lastIndexOf('\n', Math.max(0, safeOffset - 1));
+        const after = text.indexOf('\n', safeOffset);
+        const start = before === -1 ? 0 : before + 1;
+        const end = after === -1 ? text.length : after;
+        return { start, end, text: text.slice(start, end) };
+    }
+
+    function noteLineMarker(line) {
+        const match = String(line || '').match(/^(\s*)(☐ |☑ |• )/);
+        if (!match) return null;
+        return {
+            indent: match[1] || '',
+            marker: match[2],
+            start: match[1].length,
+            end: match[1].length + match[2].length,
+        };
+    }
+
+    function editableTextOffset(root) {
+        const selection = window.getSelection();
+        if (!root || !selection?.rangeCount) return 0;
+        const range = selection.getRangeAt(0);
+        const clone = range.cloneRange();
+        clone.selectNodeContents(root);
+        clone.setEnd(range.endContainer, range.endOffset);
+        return clone.toString().length;
+    }
+
+    function setEditableTextOffset(root, offset) {
+        if (!root) return;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let remaining = Math.max(0, Number(offset) || 0);
+        let node = walker.nextNode();
+        while (node) {
+            const length = node.textContent.length;
+            if (remaining <= length) {
+                const range = document.createRange();
+                range.setStart(node, remaining);
+                range.collapse(true);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                return;
+            }
+            remaining -= length;
+            node = walker.nextNode();
+        }
+        const range = document.createRange();
+        range.selectNodeContents(root);
+        range.collapse(false);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    function replaceNoteBodyText(bodyNode, text, caretOffset = null) {
+        if (!bodyNode) return;
+        bodyNode.innerHTML = noteTextToHtml(text);
+        setEditableTextOffset(bodyNode, caretOffset ?? text.length);
     }
 
     function mergeById(...lists) {
@@ -1366,7 +1553,7 @@ if (mount) {
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
                 </header>
-                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'notes' ? 'hb-main-notes' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
+                <main class="hb-main ${state.selected === 'bean' ? 'hb-main-chat' : ''} ${state.selected === 'today' ? 'hb-main-today' : ''} ${['tasks', 'reminders'].includes(state.selected) ? 'hb-main-board' : ''} ${state.selected === 'notes' ? 'hb-main-notes' : ''} ${state.selected === 'memory' ? 'hb-main-memory' : ''} ${state.selected === 'admin' ? 'hb-main-admin' : ''}">
                     ${state.selected === 'bean' ? chatMarkup() : appPanelMarkup()}
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
@@ -1389,6 +1576,9 @@ if (mount) {
         if (state.selected === 'notes') {
             ensureSelectedNote();
             return notesMarkup();
+        }
+        if (state.selected === 'memory') {
+            return memoryMarkup();
         }
         if (state.selected === 'admin' && !userIsAdmin()) {
             return `<div class="hb-shell"><section class="hb-card hb-card-pad hb-admin-access-card">
@@ -1465,8 +1655,10 @@ if (mount) {
         const folders = normalizeList(state.noteFolders);
         const notes = filteredNotes();
         const selected = selectedNote();
+        const sections = noteListSections(notes);
+        const detailOpen = state.notesDetailOpen && selected;
         return `
-            <section class="hb-notes-app" aria-label="Notes">
+            <section class="hb-notes-app ${detailOpen ? 'hb-notes-detail-open' : ''}" aria-label="Notes">
                 <aside class="hb-notes-folders">
                     <div class="hb-notes-sidebar-title">
                         <strong>Folders</strong>
@@ -1478,12 +1670,33 @@ if (mount) {
                     ${noteFolderButtonMarkup('unfiled', 'Unfiled', state.notes.filter((note) => !(note.note_folder_id || note.noteFolderId)).length, icons.notes)}
                 </aside>
                 <aside class="hb-notes-list-pane">
+                    <div class="hb-notes-list-heading">
+                        <details class="hb-notes-list-options">
+                            <summary aria-label="Notes options" title="Notes options">${icons.moreVertical}</summary>
+                            <div class="hb-notes-list-options-popover">
+                                <strong>Folders</strong>
+                                ${noteListOptionButton('all', 'All Notes', state.notes.length)}
+                                ${noteListOptionButton('pinned', 'Pinned', state.notes.filter((note) => note.is_pinned || note.isPinned).length)}
+                                ${folders.map((folder) => noteListOptionButton(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length, folder)).join('')}
+                                ${noteListOptionButton('unfiled', 'Unfiled', state.notes.filter((note) => !(note.note_folder_id || note.noteFolderId)).length)}
+                                <span></span>
+                                <strong>Sort</strong>
+                                <button type="button" data-note-sort="recent" aria-pressed="${state.notesSort !== 'title'}">Most recently edited</button>
+                                <button type="button" data-note-sort="title" aria-pressed="${state.notesSort === 'title'}">Title</button>
+                                <button type="button" data-create-note-folder>${icons.add}<span>New folder</span></button>
+                            </div>
+                        </details>
+                        <div>
+                            <strong>${escapeHtml(currentNotesFolderTitle())}</strong>
+                            <small>${notes.length} ${notes.length === 1 ? 'note' : 'notes'}</small>
+                        </div>
+                    </div>
                     <div class="hb-notes-search-row">
                         <input class="hb-notes-search" type="search" data-notes-search placeholder="Search" value="${escapeAttr(state.notesSearch)}">
-                        <button class="hb-button-secondary hb-notes-new-button" type="button" data-create-note>New</button>
+                        <button class="hb-icon-button hb-notes-new-button" type="button" data-create-note aria-label="New note" title="New note">${icons.add}</button>
                     </div>
                     <div class="hb-notes-list" role="listbox" aria-label="Notes list">
-                        ${notes.length ? notes.map(noteListItemMarkup).join('') : `<div class="hb-notes-empty">No notes</div>`}
+                        ${sections.length ? sections.map(noteListSectionMarkup).join('') : `<div class="hb-notes-empty">No notes</div>`}
                     </div>
                 </aside>
                 <article class="hb-notes-editor-pane">
@@ -1502,6 +1715,23 @@ if (mount) {
             ${folder ? `<button class="hb-note-folder-delete" type="button" data-delete-note-folder="${escapeAttr(folder.id)}" aria-label="${escapeAttr(`Delete ${folder.name}`)}">Delete</button>` : ''}`;
     }
 
+    function noteListOptionButton(id, label, count, folder = null) {
+        const active = String(state.selectedNoteFolderId || 'all') === String(id);
+        return `
+            <button type="button" data-note-folder="${escapeAttr(id)}" aria-pressed="${active}">
+                ${icons.notes}<span>${escapeHtml(label || 'Folder')}</span><em>${count}</em>
+            </button>
+            ${folder ? `<button class="hb-note-list-option-danger" type="button" data-delete-note-folder="${escapeAttr(folder.id)}">${icons.trash || ''}<span>Delete ${escapeHtml(folder.name)}</span></button>` : ''}`;
+    }
+
+    function noteListSectionMarkup(section) {
+        return `
+            <section class="hb-note-list-section">
+                ${section.title ? `<h3>${escapeHtml(section.title)}</h3>` : ''}
+                ${section.notes.map(noteListItemMarkup).join('')}
+            </section>`;
+    }
+
     function noteListItemMarkup(note) {
         const active = String(state.selectedNoteId) === String(note.id);
         const text = String(note.plain_text || note.plainText || '').trim();
@@ -1516,32 +1746,56 @@ if (mount) {
 
     function noteEditorMarkup(note) {
         const folderId = note.note_folder_id || note.noteFolderId || '';
+        const pinned = note.is_pinned || note.isPinned;
+        const locked = noteIsLocked(note);
+        const metadata = normalizeNoteMetadata(note.metadata);
+        const noteWorkspaceIds = linkedWorkspaceIdsForNote(note);
+        const activeWorkspaceId = String(note.workspace_id || note.workspaceId || currentWorkspaceId() || '');
+        const syncWorkspaces = workspaces().filter((workspace) => String(workspace.id) !== activeWorkspaceId);
         return `
-            <form class="hb-note-editor" data-note-editor="${escapeAttr(note.id)}">
+            <form class="hb-note-editor ${locked ? 'hb-note-editor-locked' : ''}" data-note-editor="${escapeAttr(note.id)}">
                 <div class="hb-note-editor-toolbar">
-                    <select class="hb-select hb-note-folder-select" name="note_folder_id" aria-label="Folder">
+                    <button class="hb-icon-button hb-note-back-button" type="button" data-note-back aria-label="Back to notes" title="Back to notes">${icons.chevronLeft}</button>
+                    <select class="hb-select hb-note-folder-select" name="note_folder_id" aria-label="Folder" ${locked ? 'disabled' : ''}>
                         <option value="">All Notes</option>
                         ${state.noteFolders.map((folder) => `<option value="${escapeAttr(folder.id)}" ${String(folder.id) === String(folderId) ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join('')}
                     </select>
-                    <button class="hb-icon-button ${note.is_pinned || note.isPinned ? 'hb-note-pin-active' : ''}" type="button" data-toggle-note-pin="${escapeAttr(note.id)}" aria-label="Pin note" title="Pin note">${icons.pin}</button>
                     <span class="hb-note-toolbar-divider"></span>
-                    ${noteCommandButton('formatBlock', 'h1', 'H1')}
-                    ${noteCommandButton('formatBlock', 'h2', 'H2')}
-                    ${noteCommandButton('bold', '', 'B')}
-                    ${noteCommandButton('italic', '', 'I')}
-                    ${noteCommandButton('insertUnorderedList', '', '-')}
-                    ${noteCommandButton('insertOrderedList', '', '1.')}
-                    ${noteCommandButton('insertHorizontalRule', '', '---')}
-                    <button class="hb-button-secondary" type="submit" ${state.notesSaving ? 'disabled' : ''}>${state.notesSaving ? 'Saving...' : 'Save'}</button>
-                    <button class="hb-button-danger" type="button" data-delete-note="${escapeAttr(note.id)}">Delete</button>
+                    ${noteCommandButton('formatBlock', 'h1', 'H1', locked)}
+                    ${noteCommandButton('bold', '', 'B', locked)}
+                    ${noteCommandButton('italic', '', 'I', locked)}
+                    ${noteCommandButton('checkbox', '', '☐', locked)}
+                    ${noteCommandButton('bullet', '', '•', locked)}
+                    ${noteCommandButton('outdent', '', 'Out', locked)}
+                    ${noteCommandButton('indent', '', 'In', locked)}
+                    ${noteCommandButton('insertHorizontalRule', '', '---', locked)}
+                    <span class="hb-note-save-state" aria-live="polite">${locked ? 'Locked' : state.notesSaving ? 'Saving...' : 'Auto-saved'}</span>
+                    <details class="hb-note-actions-menu">
+                        <summary aria-label="Note actions" title="Note actions">${icons.moreVertical}</summary>
+                        <div class="hb-note-actions-popover" role="menu">
+                            <button type="button" data-toggle-note-pin="${escapeAttr(note.id)}" role="menuitem">${icons.pin}<span>${pinned ? 'Unpin note' : 'Pin note'}</span></button>
+                            <details class="hb-note-workspace-menu">
+                                <summary>${icons.spaces}<span>Workspaces</span></summary>
+                                <div>
+                                    <small>Saved in ${escapeHtml(workspaceDisplayName(findWorkspace(activeWorkspaceId)))}.</small>
+                                    ${syncWorkspaces.length ? syncWorkspaces.map((workspace) => `<label><input type="checkbox" data-note-sync-workspace="${escapeAttr(workspace.id)}" ${noteWorkspaceIds.has(String(workspace.id)) ? 'checked' : ''}> <span>${escapeHtml(workspaceDisplayName(workspace))}</span></label>`).join('') : '<small>No other workspaces available.</small>'}
+                                </div>
+                            </details>
+                            <button type="button" data-move-note-folder="${escapeAttr(note.id)}" role="menuitem">${icons.notes}<span>Move note</span></button>
+                            <button type="button" data-toggle-note-lock="${escapeAttr(note.id)}" role="menuitem">${locked ? icons.unlock : icons.lock}<span>${locked ? 'Unlock note' : 'Lock note'}</span></button>
+                            <button class="hb-note-menu-danger" type="button" data-delete-note="${escapeAttr(note.id)}" role="menuitem">Delete note</button>
+                        </div>
+                    </details>
                 </div>
-                <input class="hb-note-title-input" name="title" value="${escapeAttr(note.title || '')}" placeholder="New Note" autocomplete="off">
-                <div class="hb-note-body" contenteditable="true" data-note-body spellcheck="true">${note.body_html || note.bodyHtml || ''}</div>
+                ${locked ? `<div class="hb-note-lock-banner">${icons.lock}<span>Locked notes are read-only until you unlock them from the note menu.</span></div>` : ''}
+                <input class="hb-note-title-input" name="title" value="${escapeAttr(note.title || '')}" placeholder="New Note" autocomplete="off" ${locked ? 'readonly' : ''}>
+                <div class="hb-note-body" contenteditable="${locked ? 'false' : 'true'}" data-note-body spellcheck="true" data-note-locked="${locked ? 'true' : 'false'}">${note.body_html || note.bodyHtml || noteTextToHtml(note.plain_text || note.plainText || '')}</div>
+                <input type="hidden" name="metadata" value="${escapeAttr(JSON.stringify(metadata))}">
             </form>`;
     }
 
-    function noteCommandButton(command, value, label) {
-        return `<button class="hb-note-format-button" type="button" data-note-command="${escapeAttr(command)}" data-note-command-value="${escapeAttr(value)}">${escapeHtml(label)}</button>`;
+    function noteCommandButton(command, value, label, disabled = false) {
+        return `<button class="hb-note-format-button" type="button" data-note-command="${escapeAttr(command)}" data-note-command-value="${escapeAttr(value)}" ${disabled ? 'disabled' : ''}>${escapeHtml(label)}</button>`;
     }
 
     function notesEmptyEditorMarkup() {
@@ -1550,6 +1804,123 @@ if (mount) {
                 ${icons.notes}
                 <strong>Select or create a note</strong>
             </div>`;
+    }
+
+    function memoryMarkup() {
+        const items = filteredMemoryItems();
+        const activeCount = state.memoryItems.filter((item) => (item.status || 'active') === 'active').length;
+        const highConfidence = state.memoryItems.filter((item) => Number(item.confidence || 0) >= 85).length;
+        const summaries = normalizeList(state.memorySummaries).slice(0, 4);
+        const history = normalizeList(state.memoryHistory).slice(0, 10);
+        return `
+            <section class="hb-memory-app" aria-label="Bean Memory">
+                <header class="hb-memory-hero">
+                    <div>
+                        <span class="hb-memory-kicker">${icons.memory}<span>Bean Memory</span></span>
+                        <h1>What Bean knows about this workspace</h1>
+                        <p>Review durable facts, preferences, project context, and recent recall without loading your whole history into every response.</p>
+                    </div>
+                    <div class="hb-memory-stats" aria-label="Memory health">
+                        <span><strong>${activeCount}</strong><small>active</small></span>
+                        <span><strong>${highConfidence}</strong><small>verified</small></span>
+                        <span><strong>${summaries.length}</strong><small>summaries</small></span>
+                    </div>
+                </header>
+                <div class="hb-memory-grid">
+                    <aside class="hb-memory-side">
+                        <form class="hb-memory-new" data-memory-create-form>
+                            <strong>Add memory</strong>
+                            <label>Type
+                                <select class="hb-select" name="type">${memoryTypeOptions('fact')}</select>
+                            </label>
+                            <label>Memory
+                                <textarea class="hb-textarea" name="content" rows="4" placeholder="Bean should remember..."></textarea>
+                            </label>
+                            <button class="hb-button" type="submit" ${state.memorySaving ? 'disabled' : ''}>${state.memorySaving ? 'Saving...' : 'Remember'}</button>
+                        </form>
+                        <section class="hb-memory-panel">
+                            <strong>Recent recall</strong>
+                            ${history.length ? history.map(memoryHistoryItemMarkup).join('') : '<div class="hb-empty">No recent requests loaded yet.</div>'}
+                        </section>
+                    </aside>
+                    <main class="hb-memory-main">
+                        <div class="hb-memory-toolbar">
+                            <input class="hb-input" type="search" data-memory-search placeholder="Search memory" value="${escapeAttr(state.memorySearch)}">
+                            <select class="hb-select" data-memory-type-filter>
+                                <option value="">All types</option>
+                                ${memoryTypeOptions(state.memoryTypeFilter)}
+                            </select>
+                            <button class="hb-button-secondary" type="button" data-refresh-memory>Refresh</button>
+                        </div>
+                        <div class="hb-memory-list">
+                            ${items.length ? items.map(memoryItemMarkup).join('') : '<div class="hb-memory-empty">No matching memories yet.</div>'}
+                        </div>
+                        <section class="hb-memory-summaries">
+                            <h2>Summaries</h2>
+                            ${summaries.length ? summaries.map(memorySummaryMarkup).join('') : '<div class="hb-empty">Summaries will appear as Bean builds history.</div>'}
+                        </section>
+                    </main>
+                </div>
+            </section>`;
+    }
+
+    function filteredMemoryItems() {
+        const search = String(state.memorySearch || '').trim().toLowerCase();
+        const type = String(state.memoryTypeFilter || '');
+        return normalizeList(state.memoryItems).filter((item) => {
+            if (type && String(item.type || '') !== type) return false;
+            if (!search) return true;
+            return [item.title, item.content, item.summary, item.type].some((value) => String(value || '').toLowerCase().includes(search));
+        });
+    }
+
+    function memoryItemMarkup(item) {
+        const id = String(item.id || '');
+        const confidence = Number(item.confidence || 0);
+        const importance = Number(item.importance || 0);
+        return `
+            <article class="hb-memory-card" data-memory-id="${escapeAttr(id)}">
+                <div class="hb-memory-card-head">
+                    <span class="hb-memory-type">${escapeHtml(memoryTypeLabel(item.type))}</span>
+                    <span class="hb-memory-score">${confidence}% · ${importance}</span>
+                </div>
+                <form data-memory-update-form="${escapeAttr(id)}">
+                    <input class="hb-memory-title-input" name="title" value="${escapeAttr(item.title || '')}" placeholder="Optional title">
+                    <textarea class="hb-memory-content-input" name="content" rows="3">${escapeHtml(item.content || '')}</textarea>
+                    <div class="hb-memory-card-actions">
+                        <select class="hb-select" name="type">${memoryTypeOptions(item.type || 'fact')}</select>
+                        <button class="hb-button-secondary" type="submit">Save</button>
+                        <button class="hb-button-ghost" type="button" data-memory-forget="${escapeAttr(id)}">Forget</button>
+                    </div>
+                </form>
+            </article>`;
+    }
+
+    function memorySummaryMarkup(summary) {
+        return `
+            <article class="hb-memory-summary">
+                <strong>${escapeHtml(summary.title || memoryTypeLabel(summary.summary_type || 'summary'))}</strong>
+                <p>${escapeHtml(summary.summary || '')}</p>
+                <small>${escapeHtml(summary.period_key || formatDateTime(summary.updated_at || summary.updatedAt || ''))}</small>
+            </article>`;
+    }
+
+    function memoryHistoryItemMarkup(item) {
+        return `
+            <div class="hb-memory-history-item">
+                <span>${escapeHtml(formatDateTime(item.created_at || item.createdAt || ''))}</span>
+                <p>${escapeHtml(item.content || '')}</p>
+            </div>`;
+    }
+
+    function memoryTypeOptions(selected = '') {
+        return ['fact', 'preference', 'identity', 'relationship', 'project', 'routine', 'constraint', 'decision', 'instruction', 'temporary_context']
+            .map((type) => `<option value="${escapeAttr(type)}" ${String(selected) === type ? 'selected' : ''}>${escapeHtml(memoryTypeLabel(type))}</option>`)
+            .join('');
+    }
+
+    function memoryTypeLabel(type) {
+        return String(type || 'fact').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
     }
 
     function adminMarkup() {
@@ -2247,7 +2618,9 @@ if (mount) {
         const targetsTask = /\b(?:task|tasks|todo|to do)\b/.test(command);
         const targetsReminder = /\b(?:reminder|reminders|remind)\b/.test(command);
         const targetsNote = /\b(?:note|notes|folder|folders|list|lists)\b/.test(command);
+        const targetsMemory = /\b(?:remember|memory|forget|knows about me|preferences?)\b/.test(command);
         if (/\b(?:delete|remove|cancel)\b/.test(command)) {
+            if (targetsMemory) return 'Forgetting memory';
             if (targetsEvent) return 'Deleting event';
             if (targetsReminder) return 'Deleting reminder';
             if (targetsTask) return 'Deleting task';
@@ -2255,6 +2628,7 @@ if (mount) {
             return 'Deleting item';
         }
         if (/\b(?:move|reschedule|update|change)\b/.test(command)) {
+            if (targetsMemory) return 'Updating memory';
             if (targetsEvent) return 'Updating event';
             if (targetsReminder) return 'Updating reminder';
             if (targetsTask) return 'Updating task';
@@ -2262,6 +2636,7 @@ if (mount) {
             return 'Updating item';
         }
         if (/\b(?:add|create|put|schedule|write|save)\b/.test(command)) {
+            if (targetsMemory) return 'Saving memory';
             if (targetsEvent) return 'Creating event';
             if (targetsReminder) return 'Creating reminder';
             if (targetsTask) return 'Creating task';
@@ -2273,7 +2648,7 @@ if (mount) {
             if (targetsReminder) return 'Updating reminder';
             return 'Updating item';
         }
-        if (/\b(?:remember|memory)\b/.test(command)) return 'Saving memory';
+        if (targetsMemory) return 'Saving memory';
         if (/\b(?:plan|organize|prioritize)\b/.test(command)) return 'Planning request';
         return 'Working on request';
     }
@@ -2323,6 +2698,9 @@ if (mount) {
         if (type.includes('.note_folder.created')) return `Create folder${readable}`;
         if (type.includes('.note_folder.updated')) return `Update folder${readable}`;
         if (type.includes('.note_folder.deleted')) return `Delete folder${readable}`;
+        if (type.includes('.memory.created')) return `Save memory${readable}`;
+        if (type.includes('.memory.updated')) return `Update memory${readable}`;
+        if (type.includes('.memory.deleted')) return `Forget memory${readable}`;
         if (type.includes('.approval.created')) return `Prepare approval${readable}`;
         if (type.includes('.blocker.created')) return `Flag blocker${readable}`;
         if (type.includes('.workspace_memory.noted')) return 'Save memory';
@@ -2859,6 +3237,7 @@ if (mount) {
                     ${workspaceItems.length > 1 ? `<label class="hb-profile-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
                     <button class="hb-profile-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
                     <button class="hb-profile-action ${state.selected === 'notes' ? 'hb-profile-action-active' : ''}" type="button" data-nav="notes">${icons.notes}<span>Notes</span></button>
+                    <button class="hb-profile-action ${state.selected === 'memory' ? 'hb-profile-action-active' : ''}" type="button" data-nav="memory">${icons.memory}<span>Memory</span></button>
                     <button class="hb-profile-action ${state.selected === 'settings' ? 'hb-profile-action-active' : ''}" type="button" data-nav="settings">${icons.settings}<span>Settings</span></button>
                     <button class="hb-profile-action" type="button" data-logout>${icons.user}<span>Sign out</span></button>
                 </div>
@@ -2966,6 +3345,7 @@ if (mount) {
             ['tasks', 'Tasks', icons.tasks],
             ['reminders', 'Reminders', icons.reminders],
             ['notes', 'Notes', icons.notes],
+            ['memory', 'Memory', icons.memory],
         ];
         return `
             <nav class="hb-bottom-menu" aria-label="App navigation">
@@ -2994,6 +3374,7 @@ if (mount) {
             ['tasks', 'Tasks', icons.tasks],
             ['notes', 'Notes', icons.notes],
             ['reminders', 'Reminders', icons.reminders],
+            ['memory', 'Memory', icons.memory],
         ];
         if (userIsAdmin()) nav.push(['admin', 'Admin', icons.activity]);
         return `
@@ -4264,9 +4645,14 @@ if (mount) {
         mount.querySelectorAll('[data-admin-log-id]').forEach((button) => button.addEventListener('click', () => openAdminUsageLog(button.dataset.adminLogId)));
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
         mount.querySelectorAll('[data-create-note]').forEach((button) => button.addEventListener('click', createNote));
-        mount.querySelector('[data-create-note-folder]')?.addEventListener('click', createNoteFolder);
+        mount.querySelectorAll('[data-create-note-folder]').forEach((button) => button.addEventListener('click', createNoteFolder));
+        mount.querySelectorAll('[data-note-sort]').forEach((button) => button.addEventListener('click', () => {
+            state.notesSort = button.dataset.noteSort || 'recent';
+            render();
+        }));
         mount.querySelectorAll('[data-note-folder]').forEach((button) => button.addEventListener('click', () => {
             state.selectedNoteFolderId = button.dataset.noteFolder || 'all';
+            state.notesDetailOpen = false;
             ensureSelectedNote();
             render();
         }));
@@ -4277,13 +4663,34 @@ if (mount) {
         });
         mount.querySelectorAll('[data-select-note]').forEach((button) => button.addEventListener('click', () => {
             state.selectedNoteId = button.dataset.selectNote || '';
+            state.notesDetailOpen = true;
             render();
         }));
+        mount.querySelector('[data-note-back]')?.addEventListener('click', () => {
+            flushNoteAutosave(mount.querySelector('[data-note-editor]'));
+            state.notesDetailOpen = false;
+            render();
+        });
         mount.querySelectorAll('[data-toggle-note-pin]').forEach((button) => button.addEventListener('click', () => toggleNotePin(button.dataset.toggleNotePin)));
+        mount.querySelectorAll('[data-toggle-note-lock]').forEach((button) => button.addEventListener('click', () => toggleNoteLock(button.dataset.toggleNoteLock)));
         mount.querySelectorAll('[data-delete-note]').forEach((button) => button.addEventListener('click', () => deleteNote(button.dataset.deleteNote)));
         mount.querySelectorAll('[data-delete-note-folder]').forEach((button) => button.addEventListener('click', () => deleteNoteFolder(button.dataset.deleteNoteFolder)));
+        mount.querySelectorAll('[data-move-note-folder]').forEach((button) => button.addEventListener('click', () => moveNoteFolder(button.dataset.moveNoteFolder)));
+        mount.querySelectorAll('[data-note-sync-workspace]').forEach((input) => input.addEventListener('change', () => updateNoteWorkspaceSync(input.closest('[data-note-editor]'))));
         mount.querySelectorAll('[data-note-command]').forEach((button) => button.addEventListener('click', () => execNoteCommand(button.dataset.noteCommand, button.dataset.noteCommandValue)));
-        mount.querySelector('[data-note-editor]')?.addEventListener('submit', saveNoteEditor);
+        bindNoteEditorAutosave();
+        mount.querySelector('[data-memory-search]')?.addEventListener('input', (event) => {
+            state.memorySearch = event.currentTarget.value;
+            render();
+        });
+        mount.querySelector('[data-memory-type-filter]')?.addEventListener('change', (event) => {
+            state.memoryTypeFilter = event.currentTarget.value;
+            render();
+        });
+        mount.querySelector('[data-refresh-memory]')?.addEventListener('click', refreshMemory);
+        mount.querySelector('[data-memory-create-form]')?.addEventListener('submit', createMemory);
+        mount.querySelectorAll('[data-memory-update-form]').forEach((form) => form.addEventListener('submit', updateMemory));
+        mount.querySelectorAll('[data-memory-forget]').forEach((button) => button.addEventListener('click', () => forgetMemory(button.dataset.memoryForget)));
         mount.querySelector('[data-open-issue-report]')?.addEventListener('click', () => openModal('issue-report'));
         mount.querySelectorAll('[data-edit-task]').forEach((button) => button.addEventListener('click', () => openModal('task', findById(state.tasks, button.dataset.editTask))));
         mount.querySelectorAll('[data-edit-reminder]').forEach((button) => button.addEventListener('click', () => openModal('reminder', findById(state.reminders, button.dataset.editReminder))));
@@ -4386,6 +4793,7 @@ if (mount) {
             const note = await api(workspaceScopedPath('/notes'), { method: 'POST', body });
             state.notes = normalizeNotes(upsertById(state.notes, note));
             state.selectedNoteId = String(note.id);
+            state.notesDetailOpen = true;
             state.selected = 'notes';
             saveDashboardCache();
             render();
@@ -4410,31 +4818,85 @@ if (mount) {
         }
     }
 
-    async function saveNoteEditor(event) {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const id = form.dataset.noteEditor;
+    function bindNoteEditorAutosave() {
+        const form = mount.querySelector('[data-note-editor]');
+        if (!form) return;
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            flushNoteAutosave(form);
+        });
+        const note = findById(state.notes, form.dataset.noteEditor);
+        if (noteIsLocked(note)) return;
+        form.querySelector('[name="title"]')?.addEventListener('input', () => scheduleNoteAutosave(form));
+        form.querySelector('[name="note_folder_id"]')?.addEventListener('change', () => scheduleNoteAutosave(form, true));
+        const body = form.querySelector('[data-note-body]');
+        body?.addEventListener('input', () => scheduleNoteAutosave(form));
+        body?.addEventListener('blur', () => flushNoteAutosave(form));
+        body?.addEventListener('keydown', (event) => handleNoteBodyKeydown(event, form));
+        body?.addEventListener('click', (event) => handleNoteBodyClick(event, form));
+    }
+
+    function notePayloadFromForm(form) {
         const bodyNode = form.querySelector('[data-note-body]');
         const bodyHtml = bodyNode?.innerHTML || '';
-        const body = {
+        const plainText = noteBodyPlainText(bodyNode);
+        return {
             title: String(form.elements.title?.value || '').trim() || 'New Note',
             body_html: bodyHtml,
-            plain_text: notePlainTextFromHtml(bodyHtml),
+            plain_text: plainText,
             note_folder_id: form.elements.note_folder_id?.value ? Number(form.elements.note_folder_id.value) : null,
         };
+    }
+
+    function scheduleNoteAutosave(form, immediate = false) {
+        const id = form?.dataset?.noteEditor;
+        const note = findById(state.notes, id);
+        if (!id || noteIsLocked(note)) return;
+        const body = notePayloadFromForm(form);
+        state.notes = normalizeNotes(upsertById(state.notes, {
+            ...note,
+            ...body,
+            noteFolderId: body.note_folder_id,
+        }));
+        setNoteSaveStatus('Saving...');
+        const queued = noteAutosaveTimers.get(String(id));
+        if (queued?.timer) window.clearTimeout(queued.timer);
+        const timer = window.setTimeout(() => saveNotePayload(id, body), immediate ? 1 : noteAutosaveDelay);
+        noteAutosaveTimers.set(String(id), { timer, body });
+    }
+
+    function flushNoteAutosave(form) {
+        const id = form?.dataset?.noteEditor;
+        if (!id) return;
+        const queued = noteAutosaveTimers.get(String(id));
+        if (queued?.timer) window.clearTimeout(queued.timer);
+        const body = form.isConnected ? notePayloadFromForm(form) : queued?.body;
+        if (body) saveNotePayload(id, body);
+    }
+
+    function setNoteSaveStatus(text) {
+        const status = mount.querySelector('.hb-note-save-state');
+        if (status) status.textContent = text;
+    }
+
+    async function saveNotePayload(id, body) {
+        if (!id) return;
+        noteAutosaveTimers.delete(String(id));
         state.notesSaving = true;
         state.error = '';
-        render();
+        setNoteSaveStatus('Saving...');
         try {
             const note = await api(`/notes/${encodeURIComponent(id)}`, { method: 'PATCH', body });
             state.notes = normalizeNotes(upsertById(state.notes, note));
             state.selectedNoteId = String(note.id);
             saveDashboardCache();
+            setNoteSaveStatus('Auto-saved');
         } catch (error) {
             state.error = friendlyError(error, 'save that note');
+            setNoteSaveStatus('Save failed');
+            render();
         } finally {
             state.notesSaving = false;
-            render();
         }
     }
 
@@ -4456,11 +4918,61 @@ if (mount) {
         }
     }
 
+    async function toggleNoteLock(id) {
+        const note = findById(state.notes, id);
+        if (!note) return;
+        const currentForm = Array.from(mount.querySelectorAll('[data-note-editor]'))
+            .find((form) => String(form.dataset.noteEditor) === String(id));
+        if (currentForm && !noteIsLocked(note)) flushNoteAutosave(currentForm);
+        const metadata = normalizeNoteMetadata(note.metadata);
+        const nextLocked = !noteIsLocked(note);
+        const updatedMetadata = { ...metadata, locked: nextLocked };
+        state.notes = normalizeNotes(upsertById(state.notes, { ...note, metadata: updatedMetadata }));
+        render();
+        try {
+            const saved = await api(`/notes/${encodeURIComponent(id)}`, { method: 'PATCH', body: { metadata: updatedMetadata } });
+            state.notes = normalizeNotes(upsertById(state.notes, saved));
+            saveDashboardCache();
+            render();
+        } catch (error) {
+            state.notes = normalizeNotes(upsertById(state.notes, note));
+            state.error = friendlyError(error, nextLocked ? 'lock that note' : 'unlock that note');
+            render();
+        }
+    }
+
+    async function moveNoteFolder(id) {
+        const note = findById(state.notes, id);
+        if (!note) return;
+        const choices = [
+            { id: '', name: 'All Notes' },
+            ...normalizeList(state.noteFolders).map((folder) => ({ id: String(folder.id), name: folder.name })),
+        ];
+        const label = choices.map((choice, index) => `${index + 1}. ${choice.name}`).join('\n');
+        const choice = window.prompt(`Move note to folder:\n${label}`, '1');
+        if (!choice) return;
+        const selected = choices[Number(choice) - 1];
+        if (!selected) return;
+        await saveNotePayload(id, {
+            note_folder_id: selected.id ? Number(selected.id) : null,
+        });
+    }
+
+    async function updateNoteWorkspaceSync(form) {
+        const id = form?.dataset?.noteEditor;
+        if (!id) return;
+        const selected = Array.from(form.querySelectorAll('[data-note-sync-workspace]:checked'))
+            .map((input) => Number(input.dataset.noteSyncWorkspace))
+            .filter((value) => Number.isFinite(value));
+        await saveNotePayload(id, { sync_to_workspace_ids: selected });
+    }
+
     async function deleteNote(id) {
         if (!id || !window.confirm('Delete this note?')) return;
         const previous = state.notes;
         state.notes = state.notes.filter((note) => String(note.id) !== String(id));
         ensureSelectedNote();
+        state.notesDetailOpen = false;
         render();
         try {
             await api(`/notes/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -4491,9 +5003,182 @@ if (mount) {
     }
 
     function execNoteCommand(command, value = '') {
+        const form = mount.querySelector('[data-note-editor]');
+        const note = findById(state.notes, form?.dataset?.noteEditor);
+        if (noteIsLocked(note)) return;
         const body = mount.querySelector('[data-note-body]');
+        if (command === 'checkbox') {
+            updateCurrentNoteLine(body, '☐ ');
+            if (form) scheduleNoteAutosave(form, true);
+            return;
+        }
+        if (command === 'bullet') {
+            updateCurrentNoteLine(body, '• ');
+            if (form) scheduleNoteAutosave(form, true);
+            return;
+        }
+        if (command === 'indent' || command === 'outdent') {
+            indentCurrentNoteLine(body, command === 'indent' ? 1 : -1);
+            if (form) scheduleNoteAutosave(form, true);
+            return;
+        }
         body?.focus();
         document.execCommand(command, false, value || null);
+        if (form) scheduleNoteAutosave(form, true);
+    }
+
+    function handleNoteBodyKeydown(event, form) {
+        if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+        const body = event.currentTarget;
+        const text = noteBodyPlainText(body);
+        const offset = editableTextOffset(body);
+        const line = noteTextLineAt(text, offset);
+        const marker = noteLineMarker(line.text);
+        const indentation = (line.text.match(/^\s*/) || [''])[0];
+        const prefix = marker ? `${marker.indent}${marker.marker}` : indentation;
+        if (!prefix) return;
+        event.preventDefault();
+        const nextText = `${text.slice(0, offset)}\n${prefix}${text.slice(offset)}`;
+        replaceNoteBodyText(body, nextText, offset + 1 + prefix.length);
+        scheduleNoteAutosave(form);
+    }
+
+    function handleNoteBodyClick(event, form) {
+        const marker = event.target.closest?.('.hb-note-checkbox-marker');
+        if (!marker) return;
+        event.preventDefault();
+        const body = form.querySelector('[data-note-body]');
+        const text = noteBodyPlainText(body);
+        const row = marker.closest('div');
+        const rows = Array.from(body.children);
+        const rowIndex = Math.max(0, rows.indexOf(row));
+        let lineStart = 0;
+        for (let index = 0; index < rowIndex; index += 1) {
+            lineStart += (rows[index]?.innerText || '').length + 1;
+        }
+        const line = noteTextLineAt(text, lineStart);
+        const current = noteLineMarker(line.text);
+        if (!current || !current.marker.startsWith('☐') && !current.marker.startsWith('☑')) return;
+        const checked = current.marker.startsWith('☑');
+        const replacement = checked ? '☐ ' : '☑ ';
+        const markerStart = line.start + current.start;
+        const nextText = `${text.slice(0, markerStart)}${replacement}${text.slice(markerStart + current.marker.length)}`;
+        replaceNoteBodyText(body, nextText, markerStart + replacement.length);
+        scheduleNoteAutosave(form, true);
+    }
+
+    function updateCurrentNoteLine(body, prefix) {
+        if (!body) return;
+        const text = noteBodyPlainText(body);
+        const offset = editableTextOffset(body);
+        const line = noteTextLineAt(text, offset);
+        const marker = noteLineMarker(line.text);
+        const indentation = (line.text.match(/^\s*/) || [''])[0];
+        const markerStart = line.start + (marker ? marker.start : indentation.length);
+        const markerEnd = line.start + (marker ? marker.end : indentation.length);
+        const nextText = `${text.slice(0, markerStart)}${prefix}${text.slice(markerEnd)}`;
+        replaceNoteBodyText(body, nextText, markerStart + prefix.length);
+    }
+
+    function indentCurrentNoteLine(body, amount) {
+        if (!body) return;
+        const text = noteBodyPlainText(body);
+        const offset = editableTextOffset(body);
+        const line = noteTextLineAt(text, offset);
+        const indentMatch = line.text.match(/^\s*/) || [''];
+        const currentIndent = indentMatch[0] || '';
+        const nextIndent = amount > 0
+            ? `${currentIndent}  `
+            : currentIndent.slice(0, Math.max(0, currentIndent.length - 2));
+        const nextText = `${text.slice(0, line.start)}${nextIndent}${line.text.slice(currentIndent.length)}${text.slice(line.end)}`;
+        const delta = nextIndent.length - currentIndent.length;
+        replaceNoteBodyText(body, nextText, Math.max(line.start + nextIndent.length, offset + delta));
+    }
+
+    async function refreshMemory() {
+        try {
+            const [items, summaries, history] = await Promise.all([
+                api(workspaceScopedPath('/memory-items')),
+                api(workspaceScopedPath('/memory-summaries')),
+                api(workspaceScopedPath('/memory/request-history?limit=10')),
+            ]);
+            state.memoryItems = normalizeList(items);
+            state.memorySummaries = normalizeList(summaries);
+            state.memoryHistory = normalizeList(history);
+            saveDashboardCache();
+            render();
+        } catch (error) {
+            state.error = friendlyError(error, 'refresh Bean memory');
+            render();
+        }
+    }
+
+    async function createMemory(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const content = String(form.elements.content?.value || '').trim();
+        if (!content) return;
+        state.memorySaving = true;
+        state.error = '';
+        render();
+        try {
+            const item = await api(workspaceScopedPath('/memory-items'), {
+                method: 'POST',
+                body: {
+                    type: form.elements.type?.value || 'fact',
+                    content,
+                    confidence: 95,
+                    importance: 75,
+                    metadata: { source: 'memory_screen' },
+                },
+            });
+            state.memoryItems = upsertById(state.memoryItems, item);
+            saveDashboardCache();
+        } catch (error) {
+            state.error = friendlyError(error, 'save that memory');
+        } finally {
+            state.memorySaving = false;
+            render();
+        }
+    }
+
+    async function updateMemory(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const id = form.dataset.memoryUpdateForm;
+        if (!id) return;
+        try {
+            const item = await api(`/memory-items/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
+                body: {
+                    type: form.elements.type?.value || 'fact',
+                    title: String(form.elements.title?.value || '').trim() || null,
+                    content: String(form.elements.content?.value || '').trim(),
+                },
+            });
+            state.memoryItems = upsertById(state.memoryItems, item);
+            state.notice = 'Memory saved.';
+            saveDashboardCache();
+            render();
+        } catch (error) {
+            state.error = friendlyError(error, 'update that memory');
+            render();
+        }
+    }
+
+    async function forgetMemory(id) {
+        if (!id || !window.confirm('Forget this memory?')) return;
+        const previous = state.memoryItems;
+        state.memoryItems = state.memoryItems.filter((item) => String(item.id) !== String(id));
+        render();
+        try {
+            await api(`/memory-items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            saveDashboardCache();
+        } catch (error) {
+            state.memoryItems = previous;
+            state.error = friendlyError(error, 'forget that memory');
+            render();
+        }
     }
 
     function toggleTaskDetails(id) {
@@ -9825,7 +10510,7 @@ if (mount) {
         try {
             const calendarPath = options.skipCalendarSync === false ? '/calendar-events' : '/calendar-events?skip_google_sync=1';
             const workspaceId = currentWorkspaceId();
-            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, categories, googleStatus] = await Promise.all([
+            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, memoryItems, memorySummaries, memoryHistory, categories, googleStatus] = await Promise.all([
                 api(workspaceScopedPath('/today', workspaceId)),
                 api(workspaceScopedPath('/tasks', workspaceId)),
                 api(workspaceScopedPath('/tasks/past', workspaceId)),
@@ -9833,6 +10518,9 @@ if (mount) {
                 api(workspaceScopedPath(calendarPath, workspaceId)),
                 api(workspaceScopedPath('/note-folders', workspaceId)),
                 api(workspaceScopedPath('/notes', workspaceId)),
+                api(workspaceScopedPath('/memory-items', workspaceId)),
+                api(workspaceScopedPath('/memory-summaries', workspaceId)),
+                api(workspaceScopedPath('/memory/request-history?limit=10', workspaceId)),
                 api(workspaceScopedPath('/event-categories', workspaceId)),
                 api('/google-calendar/status?cached=1').catch(() => state.googleStatus),
             ]);
@@ -9844,6 +10532,9 @@ if (mount) {
             state.noteFolders = normalizeList(noteFolders);
             state.notes = normalizeNotes(notes);
             ensureSelectedNote();
+            state.memoryItems = normalizeList(memoryItems);
+            state.memorySummaries = normalizeList(memorySummaries);
+            state.memoryHistory = normalizeList(memoryHistory);
             state.categories = normalizeList(categories);
             state.approvals = normalizeList(summary?.approvals);
             state.blockers = normalizeList(summary?.blockers);

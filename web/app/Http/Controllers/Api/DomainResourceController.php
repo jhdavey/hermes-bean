@@ -7,6 +7,9 @@ use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\EventCategory;
+use App\Models\ConversationSession;
+use App\Models\MemoryItem;
+use App\Models\MemorySummary;
 use App\Models\Note;
 use App\Models\NoteFolder;
 use App\Models\Reminder;
@@ -15,6 +18,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Models\WorkspaceMembership;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\BeanMemoryService;
 use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
 use App\Services\RecurringCalendarEventService;
@@ -41,7 +45,119 @@ class DomainResourceController extends Controller
         private readonly RecurringCalendarEventService $recurringCalendarEvents,
         private readonly PlanLimitService $planLimits,
         private readonly PlanHistoryService $history,
+        private readonly BeanMemoryService $memory,
     ) {}
+
+    public function listMemoryItems(Request $request): JsonResponse
+    {
+        $workspace = $this->workspace($request);
+        $validated = $request->validate([
+            'query' => ['nullable', 'string', 'max:255'],
+            'type' => ['nullable', 'string', 'max:50'],
+            'status' => ['nullable', 'string', 'max:50'],
+            'include_archived' => ['nullable', 'boolean'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+        ]);
+
+        return response()->json(['data' => $this->memory->searchMemory($request->user(), $workspace, $validated)]);
+    }
+
+    public function storeMemoryItem(Request $request): JsonResponse
+    {
+        $workspace = $this->workspace($request);
+        $validated = $request->validate([
+            'type' => ['nullable', 'string', 'max:50'],
+            'status' => ['nullable', 'string', 'max:50'],
+            'visibility' => ['nullable', 'string', 'max:50'],
+            'title' => ['nullable', 'string', 'max:255'],
+            'content' => ['required', 'string'],
+            'summary' => ['nullable', 'string'],
+            'confidence' => ['nullable', 'integer', 'min:0', 'max:100'],
+            'importance' => ['nullable', 'integer', 'min:0', 'max:100'],
+            'source_type' => ['nullable', 'string', 'max:80'],
+            'source_id' => ['nullable', 'integer'],
+            'expires_at' => ['nullable', 'date'],
+            'metadata' => ['nullable', 'array'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+        ]);
+
+        return response()->json(['data' => $this->memory->createItem($request->user(), $workspace, $validated, $request->user())], 201);
+    }
+
+    public function updateMemoryItem(Request $request, string $memoryItem): JsonResponse
+    {
+        $item = MemoryItem::withTrashed()->where('user_id', $request->user()->id)->findOrFail($memoryItem);
+        $validated = $request->validate([
+            'type' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'visibility' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'title' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'content' => ['sometimes', 'required', 'string'],
+            'summary' => ['sometimes', 'nullable', 'string'],
+            'confidence' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100'],
+            'importance' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100'],
+            'last_verified_at' => ['sometimes', 'nullable', 'date'],
+            'expires_at' => ['sometimes', 'nullable', 'date'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+        ]);
+
+        return response()->json(['data' => $this->memory->updateItem($request->user(), $item, $validated)]);
+    }
+
+    public function destroyMemoryItem(Request $request, string $memoryItem): JsonResponse
+    {
+        $item = MemoryItem::where('user_id', $request->user()->id)->findOrFail($memoryItem);
+        $this->memory->forgetItem($request->user(), $item);
+
+        return response()->json(status: 204);
+    }
+
+    public function listMemorySummaries(Request $request): JsonResponse
+    {
+        $workspace = $this->workspace($request);
+        $summaries = MemorySummary::query()
+            ->where('user_id', $request->user()->id)
+            ->where('workspace_id', $workspace->id)
+            ->when($request->filled('summary_type'), fn ($query) => $query->where('summary_type', (string) $request->input('summary_type')))
+            ->latest('ends_at')
+            ->latest('updated_at')
+            ->limit(min(max((int) $request->input('limit', 20), 1), 100))
+            ->get();
+
+        return $this->listed($summaries);
+    }
+
+    public function requestHistory(Request $request): JsonResponse
+    {
+        $session = $this->historySession($request);
+        $validated = $request->validate([
+            'date' => ['nullable', 'date_format:Y-m-d'],
+            'from_date' => ['nullable', 'date_format:Y-m-d'],
+            'to_date' => ['nullable', 'date_format:Y-m-d'],
+            'query' => ['nullable', 'string', 'max:255'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
+        ]);
+
+        return response()->json(['data' => $this->memory->requestHistory($session, $validated)]);
+    }
+
+    public function activityTimeline(Request $request): JsonResponse
+    {
+        $session = $this->historySession($request);
+        $validated = $request->validate([
+            'date' => ['nullable', 'date_format:Y-m-d'],
+            'from_date' => ['nullable', 'date_format:Y-m-d'],
+            'to_date' => ['nullable', 'date_format:Y-m-d'],
+            'event_type' => ['nullable', 'string', 'max:120'],
+            'tool_name' => ['nullable', 'string', 'max:120'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
+        ]);
+
+        return response()->json(['data' => $this->memory->activityTimeline($session, $validated)]);
+    }
 
     public function listNoteFolders(Request $request): JsonResponse
     {
@@ -805,6 +921,28 @@ class DomainResourceController extends Controller
             'integer',
             Rule::exists('conversation_sessions', 'id')->where('user_id', $request->user()->id),
         ];
+    }
+
+    private function historySession(Request $request): ConversationSession
+    {
+        $workspace = $this->workspace($request);
+
+        return ConversationSession::query()
+            ->where('user_id', $request->user()->id)
+            ->where('workspace_id', $workspace->id)
+            ->orderByRaw('COALESCE(last_activity_at, updated_at, created_at) desc')
+            ->latest('id')
+            ->first()
+            ?? ConversationSession::create([
+                'user_id' => $request->user()->id,
+                'workspace_id' => $workspace->id,
+                'created_by_user_id' => $request->user()->id,
+                'title' => 'Memory lookup',
+                'status' => 'active',
+                'runtime_mode' => 'memory',
+                'metadata' => ['source' => 'memory_lookup'],
+                'last_activity_at' => now(),
+            ]);
     }
 
     /**

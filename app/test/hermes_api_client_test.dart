@@ -81,6 +81,34 @@ void main() {
     expect(result.status, 'completed');
   });
 
+  test('creates notes when empty metadata returns as a JSON array', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        expect(request.method, 'POST');
+        expect(request.path, '/notes');
+        return HermesApiResponse(
+          201,
+          jsonEncode({
+            'data': {
+              'id': 7,
+              'title': 'New Note',
+              'body_html': '',
+              'plain_text': '',
+              'metadata': [],
+            },
+          }),
+        );
+      },
+    );
+
+    final note = await client.createNote(metadata: const {});
+
+    expect(note.id, 7);
+    expect(note.metadata, isEmpty);
+  });
+
   test('requests a password reset link without authenticating', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
@@ -1524,6 +1552,164 @@ void main() {
     );
   });
 
+  test('supports Bean memory endpoints and parses memory models', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.headers['Authorization'], 'Bearer token-123');
+
+        if (request.method == 'GET' &&
+            request.path == '/memory-items?query=miata&type=project&limit=5') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': [
+                {
+                  'id': 3,
+                  'type': 'project',
+                  'title': 'Miata',
+                  'content': 'Joshua is working on the Miata.',
+                  'status': 'active',
+                  'confidence': 92,
+                  'importance': 80,
+                  'updated_at': '2026-06-20T12:00:00Z',
+                },
+              ],
+            }),
+          );
+        }
+
+        if (request.method == 'POST' && request.path == '/memory-items') {
+          expect(request.body, {
+            'content': 'Prefers short morning briefings.',
+            'type': 'preference',
+            'title': 'Briefings',
+            'confidence': 95,
+            'importance': 75,
+            'metadata': {'source': 'flutter_memory_screen'},
+          });
+          return HermesApiResponse(
+            201,
+            jsonEncode({
+              'data': {
+                'id': 4,
+                'type': 'preference',
+                'title': 'Briefings',
+                'content': 'Prefers short morning briefings.',
+              },
+            }),
+          );
+        }
+
+        if (request.method == 'PATCH' && request.path == '/memory-items/4') {
+          expect(request.body, {
+            'content': 'Prefers concise morning briefings.',
+            'type': 'preference',
+            'title': 'Briefings',
+          });
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'id': 4,
+                'type': 'preference',
+                'title': 'Briefings',
+                'content': 'Prefers concise morning briefings.',
+                'confidence': 95,
+              },
+            }),
+          );
+        }
+
+        if (request.method == 'GET' && request.path == '/memory-summaries') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': [
+                {
+                  'id': 8,
+                  'title': 'Daily memory activity',
+                  'summary': 'Bean captured one durable preference.',
+                  'summary_type': 'daily',
+                  'period_key': '2026-06-20',
+                },
+              ],
+            }),
+          );
+        }
+
+        if (request.method == 'GET' &&
+            request.path == '/memory/request-history?limit=10') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': [
+                {
+                  'id': 9,
+                  'content': 'What did I ask yesterday?',
+                  'assistant_reply': 'You asked about memory.',
+                  'created_at': '2026-06-20T12:05:00Z',
+                },
+              ],
+            }),
+          );
+        }
+
+        if (request.method == 'DELETE' && request.path == '/memory-items/4') {
+          return HermesApiResponse(204, '');
+        }
+
+        throw StateError(
+          'Unexpected request: ${request.method} ${request.path}',
+        );
+      },
+    );
+
+    final items = await client.listMemoryItems(
+      query: 'miata',
+      type: 'project',
+      limit: 5,
+    );
+    expect(items.single.title, 'Miata');
+    expect(items.single.importance, 80);
+
+    final created = await client.createMemoryItem(
+      content: 'Prefers short morning briefings.',
+      type: 'preference',
+      title: 'Briefings',
+    );
+    expect(created.type, 'preference');
+
+    final updated = await client.updateMemoryItem(
+      created.id,
+      content: 'Prefers concise morning briefings.',
+      type: 'preference',
+      title: 'Briefings',
+    );
+    expect(updated.content, 'Prefers concise morning briefings.');
+    expect(updated.confidence, 95);
+
+    final summaries = await client.listMemorySummaries();
+    expect(summaries.single.content, 'Bean captured one durable preference.');
+
+    final history = await client.listRequestHistory();
+    expect(history.single.assistantReply, 'You asked about memory.');
+
+    await client.deleteMemoryItem(created.id);
+
+    expect(requests.map((request) => '${request.method} ${request.path}'), [
+      'GET /memory-items?query=miata&type=project&limit=5',
+      'POST /memory-items',
+      'PATCH /memory-items/4',
+      'GET /memory-summaries',
+      'GET /memory/request-history?limit=10',
+      'DELETE /memory-items/4',
+    ]);
+  });
+
   test(
     'adds workspace and sync parameters to domain resource payloads',
     () async {
@@ -1609,6 +1795,24 @@ void main() {
               }),
             );
           }
+          if (request.path == '/notes' && request.method == 'POST') {
+            expect(request.body, containsPair('sync_to_workspace_ids', [2]));
+            return HermesApiResponse(
+              201,
+              jsonEncode({
+                'data': {'id': 5, 'title': 'Plan'},
+              }),
+            );
+          }
+          if (request.path == '/notes/5' && request.method == 'PATCH') {
+            expect(request.body, containsPair('sync_to_workspace_ids', [2, 3]));
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {'id': 5, 'title': 'Plan'},
+              }),
+            );
+          }
           if (request.path == '/tasks/1' && request.method == 'DELETE') {
             expect(
               request.body,
@@ -1680,6 +1884,8 @@ void main() {
         status: 'confirmed',
         syncToWorkspaceIds: [2, 3],
       );
+      await client.createNote(title: 'Plan', syncToWorkspaceIds: [2]);
+      await client.updateNote(5, syncToWorkspaceIds: [2, 3]);
       await client.deleteTask(1, deleteFromWorkspaceIds: [1, 2, 3]);
       await client.deleteReminder(2, deleteFromWorkspaceIds: [1, 3]);
       await client.deleteEventCategory(4, deleteFromWorkspaceIds: [2, 3]);
@@ -1690,7 +1896,7 @@ void main() {
         recurringOccurrenceDate: '2026-05-27',
       );
 
-      expect(requests, hasLength(10));
+      expect(requests, hasLength(12));
     },
   );
 
@@ -1728,6 +1934,14 @@ void main() {
               }),
             );
           }
+          if (request.path == '/notes/4' && request.method == 'PATCH') {
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': {'id': 4, 'title': 'Note'},
+              }),
+            );
+          }
           fail('Unexpected request: ${request.method} ${request.path}');
         },
       );
@@ -1740,10 +1954,12 @@ void main() {
         startsAt: '2026-05-20T10:00:00Z',
         syncToWorkspaceIds: const [],
       );
+      await client.updateNote(4, syncToWorkspaceIds: const []);
 
       expect(requests[0].body, containsPair('sync_to_workspace_ids', const []));
       expect(requests[1].body, containsPair('sync_to_workspace_ids', const []));
       expect(requests[2].body, containsPair('sync_to_workspace_ids', const []));
+      expect(requests[3].body, containsPair('sync_to_workspace_ids', const []));
     },
   );
 

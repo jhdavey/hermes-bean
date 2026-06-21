@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AgentProfile;
+use App\Models\MemoryItem;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Support\Facades\File;
@@ -343,6 +344,14 @@ class AgentProfileService
         return $profile->refresh();
     }
 
+    public function refreshRuntimeMemoryForWorkspace(Workspace $workspace, User $actor): AgentProfile
+    {
+        $profile = $this->ensureForWorkspace($workspace, $actor);
+        $this->writeRuntimeMarkdownMemory($profile->refresh());
+
+        return $profile->refresh();
+    }
+
     private function preferenceSummary(string $personality, array $priorities, ?string $context): string
     {
         $parts = ['User prefers Bean personality: '.$personality.'.'];
@@ -412,6 +421,7 @@ class AgentProfileService
         $summary = data_get($memory, 'user_preferences.summary') ?: data_get($settings, 'memory.user_preferences.summary');
         $personality = (string) data_get($settings, 'personality_type', 'balanced');
         $updatedAt = now()->toISOString();
+        $learnedFacts = $this->structuredMemoryFacts($profile);
 
         $this->putManagedMarkdown(
             $this->memoryPath($profile, 'USER.md'),
@@ -445,8 +455,42 @@ class AgentProfileService
                 $summary ? '- preference_summary: '.$summary : null,
                 is_string($context) && trim($context) !== '' ? '- context: '.trim($context) : null,
                 '- updated_at: '.$updatedAt,
-            ])).PHP_EOL.PHP_EOL."## Agent-learned durable facts\nAdd concise durable facts for this workspace below this heading. Keep Personal-only facts out of household files and household facts out of Personal files.\n"
+            ])).PHP_EOL.PHP_EOL."## Agent-learned durable facts\n"
+            .($learnedFacts !== [] ? implode(PHP_EOL, $learnedFacts).PHP_EOL : 'No structured durable facts yet.'.PHP_EOL)
+            ."\nKeep Personal-only facts out of household files and household facts out of Personal files.\n"
         );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function structuredMemoryFacts(AgentProfile $profile): array
+    {
+        if (! $profile->workspace_id || ! $profile->user_id) {
+            return [];
+        }
+
+        return MemoryItem::query()
+            ->where('user_id', $profile->user_id)
+            ->where('workspace_id', $profile->workspace_id)
+            ->where('status', 'active')
+            ->where(function ($query): void {
+                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->orderByDesc('importance')
+            ->orderByDesc('confidence')
+            ->latest('last_seen_at')
+            ->latest('updated_at')
+            ->limit(30)
+            ->get(['type', 'content', 'confidence', 'importance'])
+            ->map(function (MemoryItem $item): string {
+                $type = str_replace('_', ' ', (string) $item->type);
+
+                return '- ['.$type.'] '.str($item->content)->squish()->limit(260, '')->toString()
+                    .' (confidence: '.$item->confidence.', importance: '.$item->importance.')';
+            })
+            ->values()
+            ->all();
     }
 
     private function putManagedMarkdown(string $path, string $defaultHeader, string $managedContent): void

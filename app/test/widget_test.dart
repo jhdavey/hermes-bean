@@ -19,6 +19,11 @@ Future<void> openSettingsFromBottomNav(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> openNotesFromBottomNav(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('nav-notes')));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -36,6 +41,511 @@ void main() {
     expect(payload['session'], isA<Map<String, Object?>>());
     expect(payload['session'], containsPair('type', 'realtime'));
     expect(payload['session'], containsPair('instructions', 'Fresh context'));
+  });
+
+  testWidgets('notes screen opens as list and drills into note detail', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _NotesFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+
+    expect(find.byKey(const Key('notes-view')), findsOneWidget);
+    expect(find.byKey(const Key('notes-list-menu')), findsOneWidget);
+    expect(find.byKey(const Key('notes-folder-title')), findsOneWidget);
+    expect(find.text('All Notes'), findsOneWidget);
+    expect(find.text('Meeting notes'), findsWidgets);
+    expect(find.text('Pinned'), findsOneWidget);
+    expect(find.byKey(const Key('note-detail-back')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('note-detail-back')), findsOneWidget);
+    expect(find.byKey(const Key('note-detail-menu')), findsOneWidget);
+    expect(find.text('Bring the launch plan.'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('notes-list-screen')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('notes list shows selected folder title', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _NotesFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('notes-list-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('notes-filter-folder-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Work'), findsOneWidget);
+    expect(find.byKey(const Key('notes-folder-title')), findsOneWidget);
+  });
+
+  testWidgets('note formatting toolbar saves rendered formatting metadata', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('note-body-field')), '');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('note-format-bold')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('note-body-field')),
+      'Launch plan',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotes, isNotEmpty);
+    expect(api.updatedNotes.last.plainText, 'Launch plan');
+    expect(
+      api.updatedNotes.last.bodyHtml,
+      contains('<strong>Launch plan</strong>'),
+    );
+    expect(api.updatedNotes.last.bodyHtml, isNot(contains('**')));
+    expect(api.updatedNotes.last.metadata['flutter_note_formats'], isA<List>());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'note formatting toolbar formats selected text without placeholders',
+    (WidgetTester tester) async {
+      final api = _NotesFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await openNotesFromBottomNav(tester);
+      await tester.tap(find.byKey(const Key('note-list-item-1')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('note-body-field')),
+        'plain words',
+      );
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: 'plain words',
+          selection: TextSelection(baseOffset: 0, extentOffset: 5),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('note-format-bold')));
+      await tester.pumpAndSettle();
+      expect(find.text('H1').hitTestable(), findsOneWidget);
+      await tester.tap(find.byKey(const Key('note-detail-back')));
+      await tester.pumpAndSettle();
+
+      expect(api.updatedNotes.last.plainText, 'plain words');
+      expect(
+        api.updatedNotes.last.bodyHtml,
+        contains('<strong>plain</strong>'),
+      );
+      expect(api.updatedNotes.last.bodyHtml, isNot(contains('Bold text')));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('note checkbox toolbar creates only unchecked checkbox items', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('note-body-field')),
+      'Buy milk',
+    );
+    await tester.tap(find.byKey(const Key('note-format-checkbox')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-format-checkbox')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotes.last.plainText, '☐ Buy milk');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('note checkbox formatting respects indented lines', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('note-body-field')),
+      '  Buy milk',
+    );
+    await tester.tap(find.byKey(const Key('note-format-checkbox')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget.runtimeType.toString() == '_NoteCheckboxMarker',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotes.last.plainText, '  ☐ Buy milk');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('note list format buttons convert the current marker', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('note-body-field')),
+      '  • Buy milk',
+    );
+    await tester.tap(find.byKey(const Key('note-format-checkbox')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-format-bullet-list')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotes.last.plainText, '  • Buy milk');
+    expect(
+      api.updatedNotes.last.metadata['flutter_note_formats'],
+      isNot(
+        contains(
+          allOf(
+            containsPair('kind', 'checkbox_checked'),
+            containsPair('start', 2),
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('note editor continues checkbox items after return', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('note-body-field')),
+      '☐ Buy milk',
+    );
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '☐ Buy milk\n',
+        selection: TextSelection.collapsed(offset: 11),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotes.last.plainText, '☐ Buy milk\n☐ ');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('note editor keeps indentation after return', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('note-body-field')),
+      '  Project',
+    );
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '  Project\n',
+        selection: TextSelection.collapsed(offset: 10),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotes.last.plainText, '  Project\n  ');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('note editor continues bullet items and indents current line', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('note-body-field')), '• First');
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '• First\n',
+        selection: TextSelection.collapsed(offset: 8),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-format-indent')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotes.last.plainText, '• First\n  • ');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping an existing note checkbox checks and unchecks it', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('note-body-field')),
+      '☐ Buy milk',
+    );
+    await tester.pumpAndSettle();
+
+    final checkboxTap =
+        tester.getTopLeft(find.byKey(const Key('note-body-field'))) +
+        const Offset(8, 14);
+    await tester.tapAt(checkboxTap);
+    await tester.pumpAndSettle();
+    expect(find.text('☑ Buy milk'), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget.runtimeType.toString() == '_NoteCheckboxMarker',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tapAt(checkboxTap);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('note-detail-back')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNotes.last.plainText, '☐ Buy milk');
+    expect(
+      api.updatedNotes.last.metadata['flutter_note_formats'],
+      isNot(
+        contains(
+          allOf(
+            containsPair('kind', 'checkbox_checked'),
+            containsPair('start', 0),
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'tapping outside a focused note editor closes the keyboard toolbar',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _NotesFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await openNotesFromBottomNav(tester);
+      await tester.tap(find.byKey(const Key('note-list-item-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('note-body-field')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('H1').hitTestable(), findsOneWidget);
+
+      await tester.tapAt(const Offset(400, 60));
+      await tester.pumpAndSettle();
+
+      expect(find.text('H1').hitTestable(), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('note menu can edit synced workspaces', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('note-list-item-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-detail-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-workspaces-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Note workspaces'), findsOneWidget);
+    expect(find.byKey(const Key('note-sync-workspace-2')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('note-sync-workspace-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('note-sync-workspaces-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedNoteSyncWorkspaceIds.last, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('top create menu can create a note and open its detail screen', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await _openCreateMenuAndChoose(tester, const Key('create-note-action'));
+
+    expect(api.createdNotes, hasLength(1));
+    expect(find.byKey(const Key('note-detail-back')), findsOneWidget);
+    expect(find.text('New Note'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('notes list new folder dialog can be canceled safely', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _NotesFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('notes-list-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('notes-new-folder')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('new-note-folder-name')), findsOneWidget);
+
+    await tester.tap(find.text('Cancel').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('new-note-folder-name')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('notes list options can delete a folder', (
+    WidgetTester tester,
+  ) async {
+    final api = _NotesFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openNotesFromBottomNav(tester);
+    await tester.tap(find.byKey(const Key('notes-list-menu')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('notes-filter-folder-1')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('delete-note-folder-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete folder?'), findsOneWidget);
+
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+
+    expect(api.deletedFolderIds, [1]);
+    expect(find.text('Notes options'), findsOneWidget);
+    expect(find.byKey(const Key('notes-filter-folder-1')), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -342,7 +852,7 @@ void main() {
         isTrue,
       );
 
-      await tester.tap(find.byKey(const Key('nav-today')));
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('calendar-view')), findsOneWidget);
@@ -525,7 +1035,7 @@ void main() {
     },
   );
 
-  testWidgets('single-workspace users do not see the top workspace switcher', (
+  testWidgets('single-workspace users do not see workspace choices in More', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -536,9 +1046,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('top-workspace-switcher')), findsNothing);
+    await tester.tap(find.byKey(const Key('nav-more')));
+    await tester.pumpAndSettle();
 
-    await openSettingsFromBottomNav(tester);
+    expect(find.text('Workspace'), findsNothing);
+    expect(find.byKey(const Key('more-workspace-option-1')), findsNothing);
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
 
     expect(
       find.byKey(const Key('workspace-create-household-action')),
@@ -689,7 +1204,7 @@ void main() {
     },
   );
 
-  testWidgets('top app bar workspace dropdown switches active workspace', (
+  testWidgets('More menu workspace list switches active workspace', (
     WidgetTester tester,
   ) async {
     final api = _WorkspaceFakeHermesApiClient()
@@ -715,16 +1230,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('top-workspace-switcher')), findsOneWidget);
-    expect(find.text('Personal'), findsWidgets);
+    expect(find.byKey(const Key('more-workspace-option-1')), findsNothing);
 
-    await tester.tap(find.byKey(const Key('top-workspace-switcher')));
+    await tester.tap(find.byKey(const Key('nav-more')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('top-workspace-option-2')));
+    expect(find.text('Workspace'), findsOneWidget);
+    expect(find.text('Personal'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('more-workspace-option-2')));
     await tester.pumpAndSettle();
 
     expect(api.defaultWorkspaceSetTo, 2);
-    expect(find.text('Family'), findsWidgets);
   });
 
   testWidgets('inviting a household member shows a copyable invite link', (
@@ -1685,9 +2200,57 @@ void main() {
       expect(find.text('Pending approvals'), findsNothing);
       expect(find.byKey(const Key('chat-approval-bottom-dock')), findsNothing);
 
-      for (final label in <String>['Calendar', 'Tasks', 'Reminders', 'More']) {
+      for (final label in <String>['Tasks', 'Reminders', 'Notes', 'More']) {
         expect(find.text(label), findsWidgets);
       }
+      for (final key in const [
+        Key('nav-tasks'),
+        Key('nav-reminders'),
+        Key('nav-notes'),
+        Key('nav-more'),
+      ]) {
+        expect(find.byKey(key).hitTestable(), findsOneWidget);
+      }
+
+      await tester.tap(find.byKey(const Key('nav-more')));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Bean's Knowledge"), findsOneWidget);
+      expect(find.text('Memory'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'empty Bean chat intro stays concise with saved Bean preferences',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient()
+        ..updatedAgentPersonality = 'organizer'
+        ..updatedPriorities = ['Family', 'Work']
+        ..updatedContext = 'Protect dinner and batch errands before lunch.';
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('What should Bean organize first?'), findsOneWidget);
+      expect(find.textContaining('Organizer style'), findsNothing);
+      expect(find.textContaining('Family'), findsNothing);
+      expect(find.textContaining('Protect dinner'), findsNothing);
+
+      final decoration =
+          tester
+                  .widget<AnimatedContainer>(
+                    find.byKey(const Key('heybean-center-bean-button')),
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(
+        (decoration.border! as Border).top.color,
+        HeyBeanTheme.accentStrong,
+      );
     },
   );
 
@@ -1714,6 +2277,17 @@ void main() {
     expect(find.byKey(const Key('chat-view')), findsNothing);
     expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
     expect(find.text('Listening'), findsWidgets);
+    final heldDecoration =
+        tester
+                .widget<AnimatedContainer>(
+                  find.byKey(const Key('heybean-center-bean-button')),
+                )
+                .decoration
+            as BoxDecoration;
+    expect(
+      (heldDecoration.border! as Border).top.color,
+      HeyBeanTheme.accentStrong,
+    );
 
     await gesture.up();
     await tester.pump();
@@ -1983,9 +2557,9 @@ void main() {
     for (final navKey in const [
       Key('nav-tasks'),
       Key('nav-reminders'),
+      Key('nav-notes'),
       Key('nav-more'),
       Key('nav-bean'),
-      Key('nav-today'),
     ]) {
       await tester.tap(find.byKey(navKey));
       await tester.pump();
@@ -2807,7 +3381,7 @@ void main() {
       await tester.tap(find.text('9 PM').last);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('nav-today')));
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
       await tester.pumpAndSettle();
       expect(find.text('10 AM'), findsOneWidget);
       expect(find.text('9 PM'), findsOneWidget);
@@ -3017,7 +3591,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('tasks-view')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('nav-today')));
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('calendar-view')), findsOneWidget);
@@ -4681,7 +5255,6 @@ void main() {
       expect(find.byKey(const Key('event-end-field')), findsOneWidget);
       expect(find.byKey(const Key('event-notes-field')), findsOneWidget);
       expect(find.text('Description'), findsOneWidget);
-      expect(find.text('Notes'), findsNothing);
       expect(find.byKey(const Key('event-location-field')), findsOneWidget);
       expect(find.byKey(const Key('event-status-field')), findsOneWidget);
       expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
@@ -6001,6 +6574,124 @@ class _PastTasksUnavailableHermesApiClient extends _FakeHermesApiClient {
 class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {
   _SignedInFakeHermesApiClient() {
     bearerToken = 'existing-token';
+  }
+}
+
+class _NotesFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  static const personalWorkspace = HermesWorkspace(
+    id: '1',
+    name: 'Personal',
+    type: 'personal',
+    role: 'owner',
+    active: true,
+    isDefault: true,
+  );
+  static const familyWorkspace = HermesWorkspace(
+    id: '2',
+    name: 'Family',
+    type: 'household',
+    role: 'owner',
+  );
+
+  final createdNotes = <HermesNote>[];
+  final updatedNotes = <HermesNote>[];
+  final updatedNoteSyncWorkspaceIds = <List<Object>?>[];
+  final deletedFolderIds = <int>[];
+
+  @override
+  Future<HermesUser> me() async {
+    final user = await super.me();
+    return user.copyWith(
+      defaultWorkspaceId: 1,
+      personalWorkspace: personalWorkspace,
+      activeWorkspace: personalWorkspace,
+      workspaces: const [personalWorkspace, familyWorkspace],
+    );
+  }
+
+  @override
+  Future<List<HermesWorkspace>> listWorkspaces() async => const [
+    personalWorkspace,
+    familyWorkspace,
+  ];
+
+  @override
+  Future<List<HermesNoteFolder>> listNoteFolders() async => const [
+    HermesNoteFolder(id: 1, name: 'Work'),
+  ];
+
+  @override
+  Future<List<HermesNote>> listNotes() async => const [
+    HermesNote(
+      id: 1,
+      title: 'Meeting notes',
+      plainText: 'Bring the launch plan.',
+      folderId: 1,
+      isPinned: true,
+      updatedAt: '2026-06-20T12:00:00Z',
+      workspaceId: 1,
+      linkedWorkspaceIds: [1, 2],
+    ),
+  ];
+
+  @override
+  Future<HermesNote> createNote({
+    String title = 'New Note',
+    String bodyHtml = '',
+    String plainText = '',
+    int? folderId,
+    bool isPinned = false,
+    Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
+  }) async {
+    final note = HermesNote(
+      id: 2 + createdNotes.length,
+      title: title,
+      bodyHtml: bodyHtml,
+      plainText: plainText,
+      folderId: folderId,
+      isPinned: isPinned,
+      updatedAt: '2026-06-20T13:00:00Z',
+      metadata: metadata ?? const {},
+      workspaceId: 1,
+      linkedWorkspaceIds: [1, ...syncToWorkspaceIds.whereType<int>()],
+    );
+    createdNotes.add(note);
+    return note;
+  }
+
+  @override
+  Future<HermesNote> updateNote(
+    int noteId, {
+    String? title,
+    String? bodyHtml,
+    String? plainText,
+    int? folderId,
+    bool clearFolder = false,
+    bool? isPinned,
+    Map<String, Object?>? metadata,
+    List<Object>? syncToWorkspaceIds,
+  }) async {
+    updatedNoteSyncWorkspaceIds.add(syncToWorkspaceIds);
+    final note = HermesNote(
+      id: noteId,
+      title: title ?? 'Meeting notes',
+      bodyHtml: bodyHtml,
+      plainText: plainText,
+      folderId: clearFolder ? null : folderId ?? 1,
+      isPinned: isPinned ?? true,
+      updatedAt: '2026-06-20T14:00:00Z',
+      metadata: metadata ?? const {},
+      workspaceId: 1,
+      linkedWorkspaceIds: [1, ...?syncToWorkspaceIds?.whereType<int>()],
+    );
+    updatedNotes.add(note);
+    return note;
+  }
+
+  @override
+  Future<void> deleteNoteFolder(int folderId) async {
+    deletedFolderIds.add(folderId);
   }
 }
 

@@ -445,6 +445,8 @@ class HermesApiClient {
     String plainText = '',
     int? folderId,
     bool isPinned = false,
+    Map<String, Object?>? metadata,
+    List<Object> syncToWorkspaceIds = const [],
   }) async {
     final data = await _sendJson(
       'POST',
@@ -455,6 +457,9 @@ class HermesApiClient {
         'plain_text': plainText,
         'note_folder_id': folderId,
         'is_pinned': isPinned,
+        if (metadata != null) 'metadata': metadata,
+        if (syncToWorkspaceIds.isNotEmpty)
+          'sync_to_workspace_ids': syncToWorkspaceIds,
       },
     );
     return HermesNote.fromJson(_expectMap(data['data']));
@@ -468,6 +473,8 @@ class HermesApiClient {
     int? folderId,
     bool clearFolder = false,
     bool? isPinned,
+    Map<String, Object?>? metadata,
+    List<Object>? syncToWorkspaceIds,
   }) async {
     final data = await _sendJson(
       'PATCH',
@@ -478,6 +485,9 @@ class HermesApiClient {
         if (plainText != null) 'plain_text': plainText,
         if (folderId != null || clearFolder) 'note_folder_id': folderId,
         if (isPinned != null) 'is_pinned': isPinned,
+        if (metadata != null) 'metadata': metadata,
+        if (syncToWorkspaceIds != null)
+          'sync_to_workspace_ids': syncToWorkspaceIds,
       },
     );
     return HermesNote.fromJson(_expectMap(data['data']));
@@ -485,6 +495,93 @@ class HermesApiClient {
 
   Future<void> deleteNote(int noteId) async {
     await _sendJson('DELETE', '/notes/$noteId');
+  }
+
+  Future<List<HermesMemoryItem>> listMemoryItems({
+    String? query,
+    String? type,
+    int? limit,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/memory-items', {
+        if (query != null && query.trim().isNotEmpty) 'query': query.trim(),
+        if (type != null && type.trim().isNotEmpty) 'type': type.trim(),
+        if (limit != null) 'limit': limit.toString(),
+      }),
+    );
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesMemoryItem.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<HermesMemoryItem> createMemoryItem({
+    required String content,
+    String type = 'fact',
+    String? title,
+    int confidence = 95,
+    int importance = 75,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/memory-items',
+      body: {
+        'content': content,
+        'type': type,
+        if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
+        'confidence': confidence,
+        'importance': importance,
+        'metadata': {'source': 'flutter_memory_screen'},
+      },
+    );
+    return HermesMemoryItem.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesMemoryItem> updateMemoryItem(
+    int itemId, {
+    String? content,
+    String? type,
+    String? title,
+    int? confidence,
+    int? importance,
+    String? status,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/memory-items/$itemId',
+      body: {
+        if (content != null) 'content': content,
+        if (type != null) 'type': type,
+        if (title != null) 'title': title,
+        if (confidence != null) 'confidence': confidence,
+        if (importance != null) 'importance': importance,
+        if (status != null) 'status': status,
+      },
+    );
+    return HermesMemoryItem.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> deleteMemoryItem(int itemId) async {
+    await _sendJson('DELETE', '/memory-items/$itemId');
+  }
+
+  Future<List<HermesMemorySummary>> listMemorySummaries() async {
+    final data = await _sendJson('GET', '/memory-summaries');
+    return _expectList(
+      data['data'],
+    ).map((json) => HermesMemorySummary.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<List<HermesRequestHistoryItem>> listRequestHistory({
+    int limit = 10,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/memory/request-history', {'limit': limit.toString()}),
+    );
+    return _expectList(data['data'])
+        .map((json) => HermesRequestHistoryItem.fromJson(_expectMap(json)))
+        .toList();
   }
 
   Future<List<HermesTask>> listPastTasks() async {
@@ -2171,6 +2268,9 @@ class HermesNote {
     this.folderId,
     this.isPinned = false,
     this.updatedAt,
+    this.metadata = const {},
+    this.workspaceId,
+    this.linkedWorkspaceIds = const [],
   });
 
   final int id;
@@ -2180,6 +2280,9 @@ class HermesNote {
   final int? folderId;
   final bool isPinned;
   final String? updatedAt;
+  final Map<String, Object?> metadata;
+  final int? workspaceId;
+  final List<int> linkedWorkspaceIds;
 
   factory HermesNote.fromJson(Map<String, Object?> json) => HermesNote(
     id: _readIntOrNull(json['id']) ?? 0,
@@ -2194,6 +2297,11 @@ class HermesNote {
         json['isPinned'] == true ||
         json['pinned'] == true,
     updatedAt: _readString(json['updated_at'] ?? json['updatedAt']),
+    metadata: _expectMapOrNull(json['metadata']) ?? const {},
+    workspaceId: _readIntOrNull(json['workspace_id'] ?? json['workspaceId']),
+    linkedWorkspaceIds: _expectList(
+      json['linked_workspace_ids'] ?? json['linkedWorkspaceIds'] ?? const [],
+    ).map(_readIntOrNull).whereType<int>().toList(),
   );
 
   HermesNote copyWith({
@@ -2204,6 +2312,9 @@ class HermesNote {
     bool clearFolder = false,
     bool? isPinned,
     String? updatedAt,
+    Map<String, Object?>? metadata,
+    int? workspaceId,
+    List<int>? linkedWorkspaceIds,
   }) => HermesNote(
     id: id,
     title: title ?? this.title,
@@ -2212,7 +2323,104 @@ class HermesNote {
     folderId: clearFolder ? null : folderId ?? this.folderId,
     isPinned: isPinned ?? this.isPinned,
     updatedAt: updatedAt ?? this.updatedAt,
+    metadata: metadata ?? this.metadata,
+    workspaceId: workspaceId ?? this.workspaceId,
+    linkedWorkspaceIds: linkedWorkspaceIds ?? this.linkedWorkspaceIds,
   );
+}
+
+class HermesMemoryItem {
+  const HermesMemoryItem({
+    required this.id,
+    required this.type,
+    required this.content,
+    this.title,
+    this.status = 'active',
+    this.confidence,
+    this.importance,
+    this.source,
+    this.lastReferencedAt,
+    this.updatedAt,
+  });
+
+  final int id;
+  final String type;
+  final String content;
+  final String? title;
+  final String status;
+  final int? confidence;
+  final int? importance;
+  final String? source;
+  final String? lastReferencedAt;
+  final String? updatedAt;
+
+  factory HermesMemoryItem.fromJson(Map<String, Object?> json) =>
+      HermesMemoryItem(
+        id: _readIntOrNull(json['id']) ?? 0,
+        type: _readString(json['type']) ?? 'fact',
+        content: _readString(json['content']) ?? '',
+        title: _readString(json['title']),
+        status: _readString(json['status']) ?? 'active',
+        confidence: _readIntOrNull(json['confidence']),
+        importance: _readIntOrNull(json['importance']),
+        source: _readString(json['source']),
+        lastReferencedAt: _readString(
+          json['last_referenced_at'] ?? json['lastReferencedAt'],
+        ),
+        updatedAt: _readString(json['updated_at'] ?? json['updatedAt']),
+      );
+}
+
+class HermesMemorySummary {
+  const HermesMemorySummary({
+    required this.id,
+    required this.title,
+    required this.content,
+    this.summaryType,
+    this.periodKey,
+    this.updatedAt,
+  });
+
+  final int id;
+  final String title;
+  final String content;
+  final String? summaryType;
+  final String? periodKey;
+  final String? updatedAt;
+
+  factory HermesMemorySummary.fromJson(Map<String, Object?> json) =>
+      HermesMemorySummary(
+        id: _readIntOrNull(json['id']) ?? 0,
+        title: _readString(json['title']) ?? 'Summary',
+        content: _readString(json['content'] ?? json['summary']) ?? '',
+        summaryType: _readString(json['summary_type'] ?? json['summaryType']),
+        periodKey: _readString(json['period_key'] ?? json['periodKey']),
+        updatedAt: _readString(json['updated_at'] ?? json['updatedAt']),
+      );
+}
+
+class HermesRequestHistoryItem {
+  const HermesRequestHistoryItem({
+    required this.id,
+    required this.content,
+    this.createdAt,
+    this.assistantReply,
+  });
+
+  final int id;
+  final String content;
+  final String? createdAt;
+  final String? assistantReply;
+
+  factory HermesRequestHistoryItem.fromJson(Map<String, Object?> json) =>
+      HermesRequestHistoryItem(
+        id: _readIntOrNull(json['id']) ?? 0,
+        content: _readString(json['content']) ?? '',
+        createdAt: _readString(json['created_at'] ?? json['createdAt']),
+        assistantReply: _readString(
+          json['assistant_reply'] ?? json['assistantReply'],
+        ),
+      );
 }
 
 class HermesTask {
@@ -2874,6 +3082,7 @@ Map<String, Object?> _expectMap(Object? value) {
 
 Map<String, Object?>? _expectMapOrNull(Object? value) {
   if (value == null) return null;
+  if (value is List && value.isEmpty) return null;
   if (value is String) {
     final trimmed = value.trim();
     if (trimmed.isEmpty || trimmed == 'null') return null;

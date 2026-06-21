@@ -28,6 +28,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         private readonly AiUsageService $usageService,
         private readonly AdminSettingsService $adminSettings,
         private readonly OpenMeteoWeatherService $weatherService,
+        private readonly BeanMemoryService $memoryService,
     ) {}
 
     public function startSession(array $attributes = []): ConversationSession
@@ -254,7 +255,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 : $this->nativeReadFallbackContent($toolOutputs);
         }
 
-        return DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse): array {
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse): array {
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
                 'response_count' => count($responses),
@@ -300,6 +301,13 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'blocker' => null,
             ];
         });
+
+        $assistantMessage = $result['assistant_message'] ?? null;
+        if ($assistantMessage instanceof ConversationMessage) {
+            $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
+        }
+
+        return $result;
     }
 
     private function chatCompletion(array $modelRoute, array $messages, bool $allowTools): array
@@ -419,6 +427,9 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'resolve_blocker' => 'blocker.resolve',
             'delete_blocker' => 'blocker.delete',
             'update_agent_profile' => 'agent_profile.update',
+            'remember_memory' => 'memory.create',
+            'update_memory' => 'memory.update',
+            'forget_memory' => 'memory.delete',
             'note_workspace_memory' => 'workspace_memory.note',
             'update_conversation_session' => 'conversation_session.update',
             'create_activity_event' => 'activity_event.create',
@@ -427,7 +438,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     private function isNativeReadTool(string $name): bool
     {
-        return in_array($name, ['search_tasks', 'search_reminders', 'search_calendar_events', 'search_notes', 'get_day_context', 'external_lookup'], true);
+        return in_array($name, ['search_tasks', 'search_reminders', 'search_calendar_events', 'search_notes', 'search_memory', 'get_request_history', 'get_activity_timeline', 'get_day_context', 'external_lookup'], true);
     }
 
     private function executeNativeReadTool(ConversationSession $session, string $name, array $arguments): array
@@ -438,6 +449,9 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'search_reminders' => $this->searchRemindersForTool($session, $arguments),
                 'search_calendar_events' => $this->searchCalendarEventsForTool($session, $arguments),
                 'search_notes' => $this->searchNotesForTool($session, $arguments),
+                'search_memory' => $this->searchMemoryForTool($session, $arguments),
+                'get_request_history' => $this->requestHistoryForTool($session, $arguments),
+                'get_activity_timeline' => $this->activityTimelineForTool($session, $arguments),
                 'get_day_context' => $this->dayContextForTool($session, $arguments),
                 'external_lookup' => $this->externalLookupForTool($session, $arguments),
                 default => ['ok' => false, 'tool' => $name, 'error_code' => 'unsupported_read_tool'],
@@ -620,6 +634,46 @@ class HermesToolRuntimeService implements HermesRuntimeService
             ])->values()->all();
 
         return $this->readToolResult('search_notes', $items, $workspaceId);
+    }
+
+    private function searchMemoryForTool(ConversationSession $session, array $arguments): array
+    {
+        $user = User::findOrFail($session->user_id);
+        $workspace = Workspace::findOrFail($this->toolWorkspaceId($session, $arguments));
+        $this->workspaceService->authorizeMember($user, $workspace);
+        $items = $this->memoryService->searchMemory($user, $workspace, $arguments);
+
+        return $this->readToolResult('search_memory', $items, $workspace->id);
+    }
+
+    private function requestHistoryForTool(ConversationSession $session, array $arguments): array
+    {
+        if (filled($arguments['workspace_id'] ?? null)) {
+            $user = User::findOrFail($session->user_id);
+            $this->workspaceService->authorizeMember($user, Workspace::findOrFail((int) $arguments['workspace_id']));
+        }
+
+        return [
+            'ok' => true,
+            'tool' => 'get_request_history',
+            'workspace_id' => $arguments['workspace_id'] ?? $session->workspace_id,
+            'items' => $this->memoryService->requestHistory($session, $arguments),
+        ];
+    }
+
+    private function activityTimelineForTool(ConversationSession $session, array $arguments): array
+    {
+        if (filled($arguments['workspace_id'] ?? null)) {
+            $user = User::findOrFail($session->user_id);
+            $this->workspaceService->authorizeMember($user, Workspace::findOrFail((int) $arguments['workspace_id']));
+        }
+
+        return [
+            'ok' => true,
+            'tool' => 'get_activity_timeline',
+            'workspace_id' => $arguments['workspace_id'] ?? $session->workspace_id,
+            'items' => $this->memoryService->activityTimeline($session, $arguments),
+        ];
     }
 
     private function dayContextForTool(ConversationSession $session, array $arguments): array
@@ -1202,6 +1256,9 @@ class HermesToolRuntimeService implements HermesRuntimeService
             $user = $this->agentProfileService->syncUserOnboardingFlag($user, $profile);
         }
         $profileSettings = $profile->settings ?? [];
+        $memoryContext = ($user && $workspace)
+            ? $this->memoryService->runtimeContext($user, $workspace, (string) $message->content, 8)
+            : ['items' => [], 'summaries' => []];
 
         return [
             'session' => [
@@ -1245,6 +1302,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     ],
                 ],
             ] : null,
+            'memory_context' => $memoryContext,
             'temporal_context' => [
                 'server_now_utc' => now()->utc()->toIso8601String(),
                 'server_today' => now()->toDateString(),
@@ -1275,7 +1333,7 @@ Laravel owns app mechanics: workspace access, database writes, validation, synci
 Timed read-tool *_at timestamps are formatted in the tool result timezone and match the user-visible app. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date.
 Use external_lookup for live information outside HeyBean, including current store hours, flights, hotel prices, weather, traffic, news, prices, availability, sports scores, or other current web facts. Do not invent current external facts. When external_lookup returns sources or citations, use them to answer concisely, include a brief source title or URL when useful, and mention uncertainty when results are incomplete.
 
-Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no extra notes unless the user says otherwise. For note requests, create/update/delete Notes records with note tools rather than workspace memory unless the user explicitly asks Bean to remember a preference. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
+Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no extra notes unless the user says otherwise. For note requests, create/update/delete Notes records with note tools rather than memory unless the user explicitly asks Bean to remember a preference/fact. For durable user preferences, stable constraints, identity facts, project context, or explicit "remember/forget" requests, use search_memory plus remember_memory/update_memory/forget_memory. Do not save ordinary one-off requests as durable memory. For "what did I ask/say/do" recall questions, use get_request_history or get_activity_timeline instead of guessing from recent context. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
 When setting recurrence, always use recurrence as one of: none, daily, weekly, monthly, yearly, specific_days, or interval. For custom intervals like "every 3 days", set recurrence to interval and put interval plus interval_unit in metadata. Never put an object in recurrence.
 
 Use the current workspace unless the user clearly names another accessible workspace. Adapt tone to agent_profile settings and memory. If onboarding is incomplete, run a quick onboarding interview and use update_agent_profile when enough preferences are provided.
@@ -1306,6 +1364,9 @@ PROMPT;
             $this->nativeTool('search_reminders', 'Search reminders in the current or specified workspace.', $this->searchReminderProperties()),
             $this->nativeTool('search_calendar_events', 'Search calendar events in the current or specified workspace.', $this->searchCalendarEventProperties()),
             $this->nativeTool('search_notes', 'Search notes by title, folder, or body text in the current or specified workspace.', $this->searchNoteProperties()),
+            $this->nativeTool('search_memory', 'Search durable Bean memory for user preferences, constraints, projects, decisions, routines, and facts.', $this->searchMemoryProperties()),
+            $this->nativeTool('get_request_history', 'Recall prior user requests from Bean conversation history by local date, text, or workspace. Use for questions like what did I ask yesterday.', $this->historyProperties()),
+            $this->nativeTool('get_activity_timeline', 'Recall Bean activity/tool outcomes by local date, event type, tool, or workspace.', $this->activityTimelineProperties()),
             $this->nativeTool('get_day_context', 'Get tasks, reminders, and calendar events for a specific local date.', $this->dayContextProperties(), ['date']),
             $this->nativeTool('external_lookup', 'Look up current external information outside HeyBean, such as live web facts, store hours, travel, weather, prices, traffic, news, sports, or current availability. Use this instead of guessing when the answer depends on current outside data.', $this->externalLookupProperties(), ['query']),
             $this->nativeTool('create_task', 'Create a visible task in Hey Bean.', $this->taskProperties(), ['title']),
@@ -1331,6 +1392,9 @@ PROMPT;
             $this->nativeTool('resolve_blocker', 'Resolve a blocker by id.', $this->idProperties(), ['id']),
             $this->nativeTool('delete_blocker', 'Delete a blocker by id.', $this->idProperties(), ['id']),
             $this->nativeTool('update_agent_profile', 'Update Bean preferences, onboarding, model/profile settings, or memory settings.', $this->agentProfileProperties()),
+            $this->nativeTool('remember_memory', 'Save a durable Bean memory only when the user explicitly asks Bean to remember something or the fact is clearly stable and useful.', $this->memoryProperties(), ['content']),
+            $this->nativeTool('update_memory', 'Update one existing durable memory. Prefer id from search_memory; otherwise use query/title and Laravel will require a unique match.', $this->memoryProperties(requireId: false)),
+            $this->nativeTool('forget_memory', 'Forget/archive one durable memory by id.', $this->idProperties(), ['id']),
             $this->nativeTool('note_workspace_memory', 'Save a durable workspace memory note when the user explicitly asks Bean to remember something.', [
                 'note' => ['type' => 'string'],
                 'workspace_id' => ['type' => 'integer'],
@@ -1419,6 +1483,43 @@ PROMPT;
             'query' => ['type' => 'string', 'description' => 'Title, folder, or body words to search for.'],
             'folder_id' => ['type' => 'integer'],
             'pinned' => ['type' => 'boolean'],
+            'workspace_id' => ['type' => 'integer'],
+            'limit' => ['type' => 'integer'],
+        ];
+    }
+
+    private function searchMemoryProperties(): array
+    {
+        return [
+            'query' => ['type' => 'string', 'description' => 'Words related to a preference, project, decision, routine, instruction, or fact.'],
+            'type' => ['type' => 'string', 'description' => 'preference, identity, relationship, project, routine, constraint, decision, instruction, temporary_context, or fact.'],
+            'status' => ['type' => 'string'],
+            'include_archived' => ['type' => 'boolean'],
+            'workspace_id' => ['type' => 'integer'],
+            'limit' => ['type' => 'integer'],
+        ];
+    }
+
+    private function historyProperties(): array
+    {
+        return [
+            'query' => ['type' => 'string', 'description' => 'Optional words to search in prior user requests.'],
+            'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD local date.'],
+            'from_date' => ['type' => 'string'],
+            'to_date' => ['type' => 'string'],
+            'workspace_id' => ['type' => 'integer'],
+            'limit' => ['type' => 'integer'],
+        ];
+    }
+
+    private function activityTimelineProperties(): array
+    {
+        return [
+            'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD local date.'],
+            'from_date' => ['type' => 'string'],
+            'to_date' => ['type' => 'string'],
+            'event_type' => ['type' => 'string'],
+            'tool_name' => ['type' => 'string'],
             'workspace_id' => ['type' => 'integer'],
             'limit' => ['type' => 'integer'],
         ];
@@ -1517,6 +1618,22 @@ PROMPT;
             'metadata' => ['type' => 'object', 'additionalProperties' => true],
             'workspace_id' => ['type' => 'integer'],
             'target_workspace_id' => ['type' => 'integer'],
+        ]);
+    }
+
+    private function memoryProperties(bool $requireId = false): array
+    {
+        return array_merge($requireId ? $this->idProperties() : ['id' => ['type' => 'integer'], 'query' => ['type' => 'string'], 'match_title' => ['type' => 'string']], [
+            'type' => ['type' => 'string', 'description' => 'preference, identity, relationship, project, routine, constraint, decision, instruction, temporary_context, or fact.'],
+            'title' => ['type' => 'string'],
+            'content' => ['type' => 'string'],
+            'summary' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'visibility' => ['type' => 'string'],
+            'confidence' => ['type' => 'integer'],
+            'importance' => ['type' => 'integer'],
+            'expires_at' => ['type' => 'string'],
+            'metadata' => ['type' => 'object', 'additionalProperties' => true],
         ]);
     }
 

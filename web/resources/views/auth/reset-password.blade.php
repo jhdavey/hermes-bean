@@ -10,8 +10,8 @@
         h1 { margin: 0 0 8px; font-size: 1.45rem; }
         p { color: #64748b; line-height: 1.5; }
         label { display: block; margin: 14px 0 6px; font-weight: 700; }
-        input { box-sizing: border-box; width: 100%; border: 1px solid rgba(148, 163, 184, .45); border-radius: 14px; padding: 12px 14px; font: inherit; }
-        button, .button { display: inline-flex; justify-content: center; align-items: center; margin-top: 18px; width: 100%; border: 0; border-radius: 14px; padding: 13px 16px; background: #16a34a; color: #fff; font-weight: 800; text-decoration: none; cursor: pointer; }
+        input { box-sizing: border-box; width: 100%; border: 1px solid rgba(148, 163, 184, .45); border-radius: 999px; padding: 12px 14px; font: inherit; }
+        button, .button { display: inline-flex; justify-content: center; align-items: center; margin-top: 18px; width: 100%; border: 0; border-radius: 999px; padding: 13px 16px; background: #16a34a; color: #fff; font-weight: 800; text-decoration: none; cursor: pointer; }
         .error { color: #dc2626; font-size: .92rem; margin-top: 6px; }
     </style>
 </head>

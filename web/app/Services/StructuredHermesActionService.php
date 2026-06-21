@@ -9,6 +9,7 @@ use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
 use App\Models\EventCategory;
+use App\Models\MemoryItem;
 use App\Models\Note;
 use App\Models\NoteFolder;
 use App\Models\Reminder;
@@ -453,6 +454,7 @@ class StructuredHermesActionService
             'approval.create', 'approval.update', 'approval.approve', 'approval.deny', 'approval.delete',
             'blocker.create', 'blocker.update', 'blocker.resolve', 'blocker.delete',
             'agent_profile.update',
+            'memory.create', 'memory.update', 'memory.delete',
             'workspace_memory.note',
             'conversation_session.update',
             'activity_event.create',
@@ -520,6 +522,9 @@ class StructuredHermesActionService
             'blocker.resolve' => collect([$this->resolveBlocker($session, $parameters)]),
             'blocker.delete' => collect([$this->deleteOwned(Blocker::class, $session, $parameters, 'assistant.blocker.deleted', 'blockers.delete', 'blocker_id')]),
             'agent_profile.update' => collect([$this->updateAgentProfile($session, $parameters)]),
+            'memory.create' => collect([$this->createMemory($session, $parameters)]),
+            'memory.update' => collect([$this->updateMemory($session, $parameters)]),
+            'memory.delete' => collect([$this->deleteMemory($session, $parameters)]),
             'workspace_memory.note' => collect([$this->createWorkspaceMemoryNote($session, $parameters)]),
             'conversation_session.update' => collect([$this->updateConversationSession($session, $parameters)]),
             'activity_event.create' => collect([$this->createActivityEvent($session, $parameters)]),
@@ -1000,6 +1005,64 @@ class StructuredHermesActionService
         return $this->recordEvent($session, 'assistant.agent_profile.updated', ['agent_profile_id' => $profile->id], 'agent_profile.update', 'succeeded');
     }
 
+    private function createMemory(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $workspace = Workspace::findOrFail($session->workspace_id);
+        $actor = User::findOrFail($session->user_id);
+        app(WorkspaceService::class)->authorizeMember($actor, $workspace);
+
+        $item = app(BeanMemoryService::class)->createItem($actor, $workspace, [
+            'type' => $this->stringParameter($parameters, 'type', 'fact'),
+            'title' => $this->optionalScalar($parameters, 'title'),
+            'content' => $this->stringParameter($parameters, 'content', $this->stringParameter($parameters, 'note', '')),
+            'summary' => $this->optionalScalar($parameters, 'summary'),
+            'confidence' => $this->boundedInteger($parameters, 'confidence', 90),
+            'importance' => $this->boundedInteger($parameters, 'importance', 70),
+            'source_type' => 'assistant_tool',
+            'source_id' => $session->id,
+            'metadata' => ['source' => 'bean_tool'],
+        ], $actor);
+
+        return $this->recordEvent($session, 'assistant.memory.created', [
+            'memory_item_id' => $item->id,
+            'type' => $item->type,
+            'content' => $item->content,
+        ], 'memory.create', 'succeeded');
+    }
+
+    private function updateMemory(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $actor = User::findOrFail($session->user_id);
+        $item = $this->memoryForUpdate($session, $parameters);
+        $updates = $this->onlyPresent($parameters, ['type', 'title', 'content', 'summary', 'status', 'visibility', 'last_verified_at', 'expires_at', 'metadata']);
+        if (array_key_exists('confidence', $parameters)) {
+            $updates['confidence'] = $this->boundedInteger($parameters, 'confidence', 70);
+        }
+        if (array_key_exists('importance', $parameters)) {
+            $updates['importance'] = $this->boundedInteger($parameters, 'importance', 50);
+        }
+        $updated = app(BeanMemoryService::class)->updateItem($actor, $item, $updates);
+
+        return $this->recordEvent($session, 'assistant.memory.updated', [
+            'memory_item_id' => $updated->id,
+            'type' => $updated->type,
+        ], 'memory.update', 'succeeded');
+    }
+
+    private function deleteMemory(ConversationSession $session, array $parameters): ActivityEvent
+    {
+        $actor = User::findOrFail($session->user_id);
+        $item = $this->memoryForUpdate($session, $parameters);
+        $id = $item->id;
+        $content = $item->content;
+        app(BeanMemoryService::class)->forgetItem($actor, $item);
+
+        return $this->recordEvent($session, 'assistant.memory.deleted', [
+            'memory_item_id' => $id,
+            'content' => $content,
+        ], 'memory.delete', 'succeeded');
+    }
+
     private function normalizedAgentProfileSettings(array $parameters): array
     {
         $settings = (isset($parameters['settings']) && is_array($parameters['settings']))
@@ -1292,6 +1355,39 @@ class StructuredHermesActionService
         );
     }
 
+    private function memoryForUpdate(ConversationSession $session, array $parameters): MemoryItem
+    {
+        if (! empty($parameters['id'])) {
+            return $this->ownedModel(MemoryItem::class, $session, $parameters);
+        }
+
+        $needle = trim((string) ($parameters['match_title'] ?? $parameters['title'] ?? $parameters['query'] ?? $parameters['content'] ?? ''));
+        if ($needle === '') {
+            throw new InvalidArgumentException('Memory action is missing a memory id or matching text.');
+        }
+
+        $query = MemoryItem::query()
+            ->where('user_id', $session->user_id)
+            ->where('workspace_id', $session->workspace_id)
+            ->where('status', 'active');
+        $escaped = addcslashes($needle, '%_\\');
+        $query->where(function ($query) use ($escaped): void {
+            $query->where('title', 'like', '%'.$escaped.'%')
+                ->orWhere('content', 'like', '%'.$escaped.'%')
+                ->orWhere('summary', 'like', '%'.$escaped.'%');
+        });
+
+        $matches = $query->latest('importance')->latest('updated_at')->limit(5)->get();
+        if ($matches->count() === 1) {
+            return $matches->first();
+        }
+
+        throw new InvalidArgumentException($matches->isEmpty()
+            ? 'Bean could not find a matching memory.'
+            : 'Bean found multiple matching memories. Please include the exact memory.'
+        );
+    }
+
     private function noteFolderId(ConversationSession $session, array $parameters): ?int
     {
         $folderId = $parameters['note_folder_id'] ?? $parameters['folder_id'] ?? null;
@@ -1397,6 +1493,18 @@ class StructuredHermesActionService
         return isset($parameters[$key]) && is_scalar($parameters[$key]) && (string) $parameters[$key] !== ''
             ? (string) $parameters[$key]
             : $default;
+    }
+
+    private function optionalScalar(array $parameters, string $key): ?string
+    {
+        return isset($parameters[$key]) && is_scalar($parameters[$key]) && trim((string) $parameters[$key]) !== ''
+            ? trim((string) $parameters[$key])
+            : null;
+    }
+
+    private function boundedInteger(array $parameters, string $key, int $default): int
+    {
+        return max(0, min(100, (int) ($parameters[$key] ?? $default)));
     }
 
     private function metadataWithRecurrence(array $parameters, array $base = []): array
