@@ -40,9 +40,6 @@
             <span class="hero-icon" aria-label="Reminders">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
             </span>
-            <span class="hero-icon" aria-label="Voice">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
-            </span>
         </div>
         <h1>Run your day with Bean</h1>
         <p class="hero-subhead">Easy calendar, task, and reminder management with Bean, your AI assistant for the real-life details that keep slipping between apps.</p>
@@ -50,7 +47,7 @@
             <a class="button" href="#early-access">Try it for free <span aria-hidden="true">-></span></a>
         </div>
         <div class="agent-pills" aria-label="HeyBean highlights">
-            <a class="button ghost" href="#features">Ask by voice</a>
+            <a class="button ghost" href="#features">Capture once</a>
             <a class="button ghost" href="#features">Coordinate home + work</a>
             <a class="button ghost" href="#features">Approve sensitive changes</a>
         </div>
@@ -175,7 +172,7 @@
                     <h3>Turn loose ends into managed tasks.</h3>
                     <p>Capture what needs to happen, let Bean sort the next step, and keep task work connected to the people, dates, and reminders that make it real.</p>
                     <ul class="feature-list">
-                        <li>Natural-language task capture from chat or voice.</li>
+                        <li>Fast capture before small details slip away.</li>
                         <li>Due dates, owners, and workspace context in one list.</li>
                         <li>Follow-up reminders when a task needs another nudge.</li>
                     </ul>
@@ -230,7 +227,7 @@
                 </article>
                 <article class="review-card">
                     <div class="review-user"><img src="{{ asset('images/heybean-review-sam.svg') }}" alt="Sam Patel"><div><h3>Sam Patel</h3><span>Consultant</span></div></div>
-                    <p>"I use Bean to turn quick voice notes into real tasks and events. It saves me from reopening my calendar every time plans change."</p>
+                    <p>"I use Bean to turn quick thoughts into real tasks and events. It saves me from reopening my calendar every time plans change."</p>
                 </article>
             </div>
         </div>
