@@ -6692,6 +6692,12 @@
     font-weight: 700;
 }
 
+.hb-note-format-button svg {
+    width: 17px;
+    height: 17px;
+    display: block;
+}
+
 .hb-note-format-button:disabled,
 .hb-note-folder-select:disabled {
     cursor: not-allowed;
@@ -6820,6 +6826,27 @@
     color: var(--hb-text);
     font-size: 18px;
     line-height: 1.58;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.hb-note-body > div {
+    min-height: 1.58em;
+}
+
+.hb-note-body h1 {
+    margin: 0 0 10px;
+    color: var(--hb-text);
+    font-size: 1.45em;
+    font-weight: 900;
+    line-height: 1.18;
+}
+
+.hb-note-body hr {
+    height: 1px;
+    border: 0;
+    background: var(--hb-border);
+    margin: 14px 0;
 }
 
 .hb-note-checkbox-marker,

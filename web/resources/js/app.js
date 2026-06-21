@@ -103,6 +103,8 @@ if (mount) {
         refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.2 6.5L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.2 5.5L21 8"/><path d="M21 3v5h-5"/></svg>',
         chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
         chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+        indentIncrease: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h16"/><path d="m15 9 3 3-3 3"/></svg>',
+        indentDecrease: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M10 12h10M4 18h16"/><path d="m9 9-3 3 3 3"/></svg>',
         history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>',
     };
 
@@ -1109,14 +1111,32 @@ if (mount) {
     function notePlainTextFromHtml(html) {
         const div = document.createElement('div');
         div.innerHTML = String(html || '').replace(/<br\s*\/?>/gi, '\n');
-        return (div.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+        return noteBodyPlainText(div).trim();
     }
 
     function noteBodyPlainText(bodyNode) {
-        return (bodyNode?.innerText || '')
+        if (!bodyNode) return '';
+        const nodes = bodyNode.childNodes?.length ? Array.from(bodyNode.childNodes) : [bodyNode];
+        return nodes
+            .map(noteNodePlainText)
+            .join('\n')
             .replace(/\u00a0/g, ' ')
             .replace(/\n{3,}/g, '\n\n')
             .replace(/\n+$/g, '');
+    }
+
+    function noteNodePlainText(node) {
+        if (!node) return '';
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+        const element = node;
+        if (element.matches?.('.hb-note-checkbox-marker')) {
+            return element.classList.contains('hb-note-checkbox-marker-checked') ? '☑ ' : '☐ ';
+        }
+        if (element.matches?.('.hb-note-bullet-marker')) return '• ';
+        if (element.tagName === 'BR') return '\n';
+        if (element.tagName === 'HR') return '---';
+        return Array.from(element.childNodes || []).map(noteNodePlainText).join('');
     }
 
     function noteTextToHtml(text) {
@@ -1147,13 +1167,14 @@ if (mount) {
     }
 
     function noteLineMarker(line) {
-        const match = String(line || '').match(/^(\s*)(☐ |☑ |• )/);
+        const match = String(line || '').match(/^(\s*)(☐|☑|•)(\s?)/);
         if (!match) return null;
+        const marker = `${match[2]} `;
         return {
             indent: match[1] || '',
-            marker: match[2],
+            marker,
             start: match[1].length,
-            end: match[1].length + match[2].length,
+            end: match[1].length + match[2].length + (match[3] ? 1 : 0),
         };
     }
 
@@ -1161,6 +1182,7 @@ if (mount) {
         const selection = window.getSelection();
         if (!root || !selection?.rangeCount) return 0;
         const range = selection.getRangeAt(0);
+        if (!root.contains(range.endContainer)) return noteBodyPlainText(root).length;
         const clone = range.cloneRange();
         clone.selectNodeContents(root);
         clone.setEnd(range.endContainer, range.endOffset);
@@ -1761,14 +1783,14 @@ if (mount) {
                         ${state.noteFolders.map((folder) => `<option value="${escapeAttr(folder.id)}" ${String(folder.id) === String(folderId) ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join('')}
                     </select>
                     <span class="hb-note-toolbar-divider"></span>
-                    ${noteCommandButton('formatBlock', 'h1', 'H1', locked)}
-                    ${noteCommandButton('bold', '', 'B', locked)}
-                    ${noteCommandButton('italic', '', 'I', locked)}
-                    ${noteCommandButton('checkbox', '', '☐', locked)}
-                    ${noteCommandButton('bullet', '', '•', locked)}
-                    ${noteCommandButton('outdent', '', 'Out', locked)}
-                    ${noteCommandButton('indent', '', 'In', locked)}
-                    ${noteCommandButton('insertHorizontalRule', '', '---', locked)}
+                    ${noteCommandButton('formatBlock', 'h1', 'H1', locked, 'Heading 1')}
+                    ${noteCommandButton('bold', '', 'B', locked, 'Bold')}
+                    ${noteCommandButton('italic', '', 'I', locked, 'Italic')}
+                    ${noteCommandButton('checkbox', '', '☐', locked, 'Toggle checklist item')}
+                    ${noteCommandButton('bullet', '', '•', locked, 'Bulleted line')}
+                    ${noteCommandButton('outdent', '', icons.indentDecrease, locked, 'Decrease indent', true)}
+                    ${noteCommandButton('indent', '', icons.indentIncrease, locked, 'Increase indent', true)}
+                    ${noteCommandButton('insertHorizontalRule', '', '---', locked, 'Divider')}
                     <span class="hb-note-save-state" aria-live="polite">${locked ? 'Locked' : state.notesSaving ? 'Saving...' : 'Auto-saved'}</span>
                     <details class="hb-note-actions-menu">
                         <summary aria-label="Note actions" title="Note actions">${icons.moreVertical}</summary>
@@ -1794,8 +1816,10 @@ if (mount) {
             </form>`;
     }
 
-    function noteCommandButton(command, value, label, disabled = false) {
-        return `<button class="hb-note-format-button" type="button" data-note-command="${escapeAttr(command)}" data-note-command-value="${escapeAttr(value)}" ${disabled ? 'disabled' : ''}>${escapeHtml(label)}</button>`;
+    function noteCommandButton(command, value, label, disabled = false, title = '', htmlLabel = false) {
+        const accessibleTitle = title || label;
+        const content = htmlLabel ? label : escapeHtml(label);
+        return `<button class="hb-note-format-button" type="button" data-note-command="${escapeAttr(command)}" data-note-command-value="${escapeAttr(value)}" aria-label="${escapeAttr(accessibleTitle)}" title="${escapeAttr(accessibleTitle)}" ${disabled ? 'disabled' : ''}>${content}</button>`;
     }
 
     function notesEmptyEditorMarkup() {
@@ -4677,7 +4701,10 @@ if (mount) {
         mount.querySelectorAll('[data-delete-note-folder]').forEach((button) => button.addEventListener('click', () => deleteNoteFolder(button.dataset.deleteNoteFolder)));
         mount.querySelectorAll('[data-move-note-folder]').forEach((button) => button.addEventListener('click', () => moveNoteFolder(button.dataset.moveNoteFolder)));
         mount.querySelectorAll('[data-note-sync-workspace]').forEach((input) => input.addEventListener('change', () => updateNoteWorkspaceSync(input.closest('[data-note-editor]'))));
-        mount.querySelectorAll('[data-note-command]').forEach((button) => button.addEventListener('click', () => execNoteCommand(button.dataset.noteCommand, button.dataset.noteCommandValue)));
+        mount.querySelectorAll('[data-note-command]').forEach((button) => {
+            button.addEventListener('pointerdown', (event) => event.preventDefault());
+            button.addEventListener('click', () => execNoteCommand(button.dataset.noteCommand, button.dataset.noteCommandValue));
+        });
         bindNoteEditorAutosave();
         mount.querySelector('[data-memory-search]')?.addEventListener('input', (event) => {
             state.memorySearch = event.currentTarget.value;
@@ -5008,7 +5035,7 @@ if (mount) {
         if (noteIsLocked(note)) return;
         const body = mount.querySelector('[data-note-body]');
         if (command === 'checkbox') {
-            updateCurrentNoteLine(body, '☐ ');
+            toggleCurrentNoteCheckboxLine(body);
             if (form) scheduleNoteAutosave(form, true);
             return;
         }
@@ -5054,7 +5081,7 @@ if (mount) {
         const rowIndex = Math.max(0, rows.indexOf(row));
         let lineStart = 0;
         for (let index = 0; index < rowIndex; index += 1) {
-            lineStart += (rows[index]?.innerText || '').length + 1;
+            lineStart += noteNodePlainText(rows[index]).length + 1;
         }
         const line = noteTextLineAt(text, lineStart);
         const current = noteLineMarker(line.text);
@@ -5062,7 +5089,8 @@ if (mount) {
         const checked = current.marker.startsWith('☑');
         const replacement = checked ? '☐ ' : '☑ ';
         const markerStart = line.start + current.start;
-        const nextText = `${text.slice(0, markerStart)}${replacement}${text.slice(markerStart + current.marker.length)}`;
+        const markerEnd = line.start + current.end;
+        const nextText = `${text.slice(0, markerStart)}${replacement}${text.slice(markerEnd)}`;
         replaceNoteBodyText(body, nextText, markerStart + replacement.length);
         scheduleNoteAutosave(form, true);
     }
@@ -5078,6 +5106,22 @@ if (mount) {
         const markerEnd = line.start + (marker ? marker.end : indentation.length);
         const nextText = `${text.slice(0, markerStart)}${prefix}${text.slice(markerEnd)}`;
         replaceNoteBodyText(body, nextText, markerStart + prefix.length);
+    }
+
+    function toggleCurrentNoteCheckboxLine(body) {
+        if (!body) return;
+        const text = noteBodyPlainText(body);
+        const offset = editableTextOffset(body);
+        const line = noteTextLineAt(text, offset);
+        const marker = noteLineMarker(line.text);
+        if (marker && (marker.marker.startsWith('☐') || marker.marker.startsWith('☑'))) {
+            const markerStart = line.start + marker.start;
+            const markerEnd = line.start + marker.end;
+            const nextText = `${text.slice(0, markerStart)}${text.slice(markerEnd)}`;
+            replaceNoteBodyText(body, nextText, markerStart);
+            return;
+        }
+        updateCurrentNoteLine(body, '☐ ');
     }
 
     function indentCurrentNoteLine(body, amount) {
