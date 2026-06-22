@@ -2,6 +2,7 @@ import {
     commandAfterWakePhrase,
     normalizedVoiceCommand,
     realtimeSpokenAnswerAllowsBackgroundQueue,
+    voiceCommandIsCapabilityQuestion,
     voiceCommandNeedsAgentWork,
     voiceCommandRequiresBackgroundWork,
     voiceCommandWantsDetailedChat,
@@ -81,7 +82,7 @@ if (mount) {
         calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="3"/></svg>',
         tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 2 2 4-5"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>',
         reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
-        notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.8A2.8 2.8 0 0 1 6.8 2H17a3 3 0 0 1 3 3v14.2A2.8 2.8 0 0 1 17.2 22H7a3 3 0 0 1-3-3Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>',
+        notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M9 4v16"/><path d="M12 8h4M12 12h4M12 16h3"/></svg>',
         memory: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5a4 4 0 0 0-4 4v.4A4.2 4.2 0 0 0 3 11.5 4.2 4.2 0 0 0 5 15v1.2a4.3 4.3 0 0 0 7 3.35 4.3 4.3 0 0 0 7-3.35V15a4.2 4.2 0 0 0 2-3.5 4.2 4.2 0 0 0-2-3.6v-.4a4 4 0 0 0-7-2.65A4 4 0 0 0 9 3.5Z"/><path d="M12 5v15M8 9h1.5M14.5 9H16M8 14h1.5M14.5 14H16"/></svg>',
         pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.8 4.6 15.2a1 1 0 0 0 .7 1.8h13.4a1 1 0 0 0 .7-1.8L15 10.8V5l1.2-1.2A1 1 0 0 0 15.5 2h-7a1 1 0 0 0-.7 1.8L9 5Z"/></svg>',
         settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.8l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.7.6 1 .3.25.68.4 1.1.4H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.6Z"/></svg>',
@@ -311,6 +312,7 @@ if (mount) {
     let beanWorkStatusClearTimer = 0;
     let beanWorkStatusHoldUntil = 0;
     let beanWorkStatusMinUntil = 0;
+    let beanWorkEventFloorId = 0;
     const cancelledChatRequestIds = new Set();
 
     boot();
@@ -2518,6 +2520,7 @@ if (mount) {
     function resetBeanWorkItems(label, status = 'running') {
         cancelBeanWorkStatusClear();
         stopBeanWorkEventPolling();
+        beanWorkEventFloorId = maxActivityEventId(state.activity);
         state.beanWorkItems = [{ id: `turn-${Date.now()}`, label, status }];
         refreshBeanStatusTag();
     }
@@ -2621,14 +2624,36 @@ if (mount) {
         beanWorkStatusHoldUntil = 0;
     }
 
+    function clearCompletedBeanWorkItemsForFreshRequest() {
+        if (!state.beanWorkItems.length || state.beanWorkItems.some((item) => !beanWorkItemDone(item))) return;
+        window.clearTimeout(beanWorkStatusClearTimer);
+        beanWorkStatusClearTimer = 0;
+        beanWorkStatusHoldUntil = 0;
+        beanWorkStatusMinUntil = 0;
+        state.beanWorkItems = [];
+    }
+
+    function prepareBeanWorkForFreshRequest() {
+        beanWorkEventFloorId = maxActivityEventId(state.activity);
+        clearCompletedBeanWorkItemsForFreshRequest();
+    }
+
+    function maxActivityEventId(events = []) {
+        return normalizeList(events).reduce((maxId, event) => {
+            const eventId = Number(event?.id || 0);
+            return Number.isFinite(eventId) ? Math.max(maxId, eventId) : maxId;
+        }, 0);
+    }
+
     function refreshBeanStatusTag() {
         if (state.phase !== 'signedIn') return;
         updateKioskVoicePillsInPlace();
     }
 
-    function ensureRealtimeRequestWorkItem(content, status = 'running') {
+    function ensureRealtimeRequestWorkItem(content, status = 'running', options = {}) {
         const label = beanWorkLabelForRequest(content);
         if (!label) return;
+        if (options.freshRequest) prepareBeanWorkForFreshRequest();
         const existing = state.beanWorkItems.find((item) => item.id === 'realtime-request');
         if (existing?.resolvedByEvent && !beanWorkItemDone(existing)) {
             refreshBeanStatusTag();
@@ -2669,7 +2694,7 @@ if (mount) {
 
     function beanWorkLabelForRequest(content) {
         const command = normalizedVoiceCommand(content);
-        if (!command) return 'Working on request';
+        if (!command || voiceCommandIsCapabilityQuestion(command)) return null;
         const targetsEvent = /\b(?:calendar|event|events|appointment|appointments|meeting|meetings)\b/.test(command);
         const targetsTask = /\b(?:task|tasks|todo|to do)\b/.test(command);
         const targetsReminder = /\b(?:reminder|reminders|remind)\b/.test(command);
@@ -2711,6 +2736,8 @@ if (mount) {
 
     function applyBeanWorkEvents(events = []) {
         normalizeList(events).forEach((event) => {
+            const eventId = Number(event?.id || 0);
+            if (Number.isFinite(eventId) && eventId <= beanWorkEventFloorId) return;
             const item = beanWorkItemFromEvent(event);
             if (!item) return;
             upsertBeanWorkItem(item.id, item.label, item.status, { source: 'event', resolvedByEvent: true });
@@ -3047,7 +3074,7 @@ if (mount) {
                 </div>
                 <div class="hb-compact-item">
                     <span class="hb-compact-icon">${icons.tune}</span>
-                    <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')}${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
+                    <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')} • memory context${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
                     <button class="hb-button-ghost" type="button" data-open-agent>Update</button>
                 </div>
                 <form class="hb-surface-soft hb-card-pad hb-settings-section hb-home-city-settings" data-home-city-form>
@@ -3289,11 +3316,13 @@ if (mount) {
                     <span class="hb-avatar" aria-hidden="true">${escapeHtml(userInitials(name, email))}</span>
                 </summary>
                 <div class="hb-profile-popover">
-                    ${userIsAdmin() ? `<button class="hb-profile-action ${state.selected === 'admin' ? 'hb-profile-action-active' : ''}" type="button" data-nav="admin">${icons.activity}<span>Admin monitor</span></button>` : ''}
+                    ${userIsAdmin() ? `<button class="hb-profile-action hb-profile-nav-action ${state.selected === 'admin' ? 'hb-profile-action-active' : ''}" type="button" data-nav="admin">${icons.activity}<span>Admin monitor</span></button>` : ''}
                     ${workspaceItems.length > 1 ? `<label class="hb-profile-workspace"><span>${icons.spaces}<strong>Workspace</strong></span><select data-top-workspace-select aria-label="Switch workspace">${workspaceItems.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === String(activeWorkspace?.id) ? 'selected' : ''}>${escapeHtml(workspaceDisplayName(workspace))}</option>`).join('')}</select></label>` : ''}
                     <button class="hb-profile-action" type="button" data-refresh-app ${state.calendarRefreshing ? 'disabled' : ''}>${state.calendarRefreshing ? '<span class="hb-spinner hb-spinner-tiny"></span>' : icons.refresh}<span>Refresh</span></button>
-                    <button class="hb-profile-action ${state.selected === 'notes' ? 'hb-profile-action-active' : ''}" type="button" data-nav="notes">${icons.notes}<span>Notes</span></button>
-                    <button class="hb-profile-action ${state.selected === 'memory' ? 'hb-profile-action-active' : ''}" type="button" data-nav="memory">${icons.memory}<span>Memory</span></button>
+                    <button class="hb-profile-action hb-profile-nav-action ${state.selected === 'today' ? 'hb-profile-action-active' : ''}" type="button" data-nav="today">${icons.calendar}<span>Calendar</span></button>
+                    <button class="hb-profile-action hb-profile-nav-action ${state.selected === 'tasks' ? 'hb-profile-action-active' : ''}" type="button" data-nav="tasks">${icons.tasks}<span>Tasks</span></button>
+                    <button class="hb-profile-action hb-profile-nav-action ${state.selected === 'reminders' ? 'hb-profile-action-active' : ''}" type="button" data-nav="reminders">${icons.reminders}<span>Reminders</span></button>
+                    <button class="hb-profile-action hb-profile-nav-action ${state.selected === 'notes' ? 'hb-profile-action-active' : ''}" type="button" data-nav="notes">${icons.notes}<span>Notes</span></button>
                     <button class="hb-profile-action ${state.selected === 'settings' ? 'hb-profile-action-active' : ''}" type="button" data-nav="settings">${icons.settings}<span>Settings</span></button>
                     <button class="hb-profile-action" type="button" data-logout>${icons.user}<span>Sign out</span></button>
                 </div>
@@ -3401,7 +3430,6 @@ if (mount) {
             ['tasks', 'Tasks', icons.tasks],
             ['reminders', 'Reminders', icons.reminders],
             ['notes', 'Notes', icons.notes],
-            ['memory', 'Memory', icons.memory],
         ];
         return `
             <nav class="hb-bottom-menu" aria-label="App navigation">
@@ -3430,7 +3458,6 @@ if (mount) {
             ['tasks', 'Tasks', icons.tasks],
             ['notes', 'Notes', icons.notes],
             ['reminders', 'Reminders', icons.reminders],
-            ['memory', 'Memory', icons.memory],
         ];
         if (userIsAdmin()) nav.push(['admin', 'Admin', icons.activity]);
         return `
@@ -4352,7 +4379,7 @@ if (mount) {
                     <div class="hb-label">What should Bean prioritize?
                         <div class="hb-tabs">${['Work', 'Family', 'Health', 'Planning', 'Reminders', 'Focus'].map((priority) => `<label class="hb-chip"><input type="checkbox" name="priorities" value="${priority}" ${priorities.has(priority) ? 'checked' : ''}> ${priority}</label>`).join('')}</div>
                     </div>
-                    <label class="hb-label">Anything Bean should know?<textarea class="hb-textarea" name="context" placeholder="Example: I work nights, protect family time, and need gentle nudges.">${escapeHtml(profileOnboardingContext(profile))}</textarea></label>
+                    <label class="hb-label">Anything Bean should remember?<textarea class="hb-textarea" name="context" placeholder="Example: I work nights, protect family time, and need gentle nudges.">${escapeHtml(profileOnboardingContext(profile))}</textarea></label>
                     <div class="hb-surface-soft hb-card-pad hb-tts-settings">
                         <strong>Voice responses</strong>
                         <p class="hb-item-meta">Bean uses OpenAI audio automatically.</p>
@@ -7951,7 +7978,7 @@ if (mount) {
             window.clearTimeout(kioskConversationTimer);
             kioskConversationTimer = 0;
             const requestedWork = String(context?.userContent || kioskRealtimePendingUser?.content || '').trim();
-            if (requestedWork) ensureRealtimeRequestWorkItem(requestedWork);
+            if (requestedWork) ensureRealtimeRequestWorkItem(requestedWork, 'running', { freshRequest: true });
             if (context) {
                 kioskRealtimeBackgroundProgressContext = {
                     userContent: String(context.userContent || '').trim(),
@@ -8858,7 +8885,7 @@ if (mount) {
                 call_id: callId || null,
                 arguments: args,
             });
-            ensureRealtimeRequestWorkItem(userContent);
+            ensureRealtimeRequestWorkItem(userContent, 'running', { freshRequest: true });
             setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent });
         }
         showRealtimeWorkingInBackgroundWhenReady();
@@ -8939,7 +8966,7 @@ if (mount) {
             finishRealtimeTurnStatus();
             return;
         }
-        ensureRealtimeRequestWorkItem(content);
+        ensureRealtimeRequestWorkItem(content, 'running', { freshRequest: true });
         setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent: content });
         showRealtimeWorkingInBackgroundWhenReady();
         try {
@@ -8980,7 +9007,7 @@ if (mount) {
         kioskRealtimeResponseTimer = 0;
         kioskRealtimeCurrentUserTurn = kioskRealtimePendingUser ? { ...kioskRealtimePendingUser } : kioskRealtimeCurrentUserTurn;
         persistRealtimeConversationTurn().catch(() => {});
-        ensureRealtimeRequestWorkItem(content);
+        ensureRealtimeRequestWorkItem(content, 'running', { freshRequest: true });
         setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent: content });
         setKioskVoiceStatus('working', 'working');
         recordRealtimeSpokenSegment(quickReplyText);

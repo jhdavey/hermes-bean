@@ -1505,9 +1505,51 @@ bool _conversationEndRequested(String transcript) =>
       caseSensitive: false,
     ).hasMatch(transcript);
 
+bool _voiceCommandIsCapabilityQuestion(String transcript) {
+  final command = _normalizedVoiceCommand(transcript);
+  if (command.isEmpty) return false;
+  final asksCapability = RegExp(
+    r"^(?:can|could|would)\s+you\s+(?:really\s+|actually\s+)?(?:add|create|make|put|schedule|write|save|delete|remove|cancel|update|change|move|reschedule|complete|finish|mark|remind|remember|plan|organize|prioritize)\b|^(?:are you able to|do you know how to|is it possible (?:for you )?to|can bean|could bean|does bean know how to|does bean support)\s+(?:add|create|make|put|schedule|write|save|delete|remove|cancel|update|change|move|reschedule|complete|finish|mark|remind|remember|plan|organize|prioritize)\b",
+  ).hasMatch(command);
+  return asksCapability && !_voiceCommandLooksConcreteAction(command);
+}
+
+bool _voiceCommandLooksConcreteAction(String command) {
+  if (RegExp(
+    r'\b(?:called|named|titled|labelled|labeled|that says|saying|with title|with the title)\b',
+  ).hasMatch(command)) {
+    return true;
+  }
+  if (RegExp(
+    r'\b(?:today|tonight|tomorrow|yesterday|this morning|this afternoon|this evening|next week|next month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+  ).hasMatch(command)) {
+    return true;
+  }
+  if (RegExp(
+    r'\b(?:at|by|before|after|from|until)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b',
+  ).hasMatch(command)) {
+    return true;
+  }
+  if (RegExp(
+    r'\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b',
+  ).hasMatch(command)) {
+    return true;
+  }
+  if (RegExp(
+        r'\b(?:for|about|to)\s+(?:me|my|the|a|an)\s+\w+',
+      ).hasMatch(command) &&
+      !RegExp(
+        r'\b(?:something|anything|things|stuff|items)\b',
+      ).hasMatch(command)) {
+    return true;
+  }
+  return false;
+}
+
 bool _voiceCommandNeedsAgentWork(String transcript) {
   final command = _normalizedVoiceCommand(transcript);
   if (command.isEmpty) return false;
+  if (_voiceCommandIsCapabilityQuestion(command)) return false;
   if (RegExp(
     r'\b(?:calendar|calendars|event|events|task|tasks|todo|to do|reminder|reminders|agenda|approval|approvals|workspace|workspaces|google calendar)\b',
   ).hasMatch(command)) {
@@ -1553,6 +1595,7 @@ bool _voiceCommandNeedsAgentWork(String transcript) {
 bool _voiceCommandRequiresBackgroundWork(String transcript) {
   final command = _normalizedVoiceCommand(transcript);
   if (command.isEmpty) return false;
+  if (_voiceCommandIsCapabilityQuestion(command)) return false;
   if (RegExp(
     r'\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b',
   ).hasMatch(command)) {

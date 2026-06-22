@@ -79,6 +79,51 @@ class HermesRuntimeApiTest extends TestCase
         ], collect($events)->pluck('event_type')->all());
     }
 
+    public function test_message_branch_replaces_the_selected_message_and_later_chat_history(): void
+    {
+        Http::fakeSequence()
+            ->push($this->assistantResponse('Old answer.'), 200)
+            ->push($this->assistantResponse('Updated answer.'), 200);
+
+        $token = $this->apiToken();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Branch test',
+        ])->assertCreated()->json('data.id');
+
+        $originalMessageId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Plan today',
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Old answer.')
+            ->json('data.user_message.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages/{$originalMessageId}/branch", [
+            'content' => 'Plan tomorrow',
+            'metadata' => ['source' => 'flutter'],
+        ])->assertCreated()
+            ->assertJsonPath('data.user_message.content', 'Plan tomorrow')
+            ->assertJsonPath('data.user_message.metadata.edited_from_message_id', $originalMessageId)
+            ->assertJsonPath('data.assistant_message.content', 'Updated answer.');
+
+        $this->assertDatabaseMissing('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'content' => 'Plan today',
+        ]);
+        $this->assertDatabaseMissing('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'content' => 'Old answer.',
+        ]);
+        $this->assertDatabaseHas('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Plan tomorrow',
+        ]);
+        $this->assertDatabaseHas('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Updated answer.',
+        ]);
+    }
+
     public function test_runtime_lists_previous_sessions_and_returns_today_session(): void
     {
         $token = $this->apiToken('history@example.com');

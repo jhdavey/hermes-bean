@@ -41,9 +41,27 @@ export function voiceCancelRequested(transcript) {
     return /\b(?:stop talking|be quiet|never\s*mind|nevermind|forget it|stop listening)\b/.test(command);
 }
 
+export function voiceCommandIsCapabilityQuestion(transcript) {
+    const command = normalizedVoiceCommand(transcript);
+    if (!command) return false;
+    const asksCapability = /^(?:can|could|would)\s+you\s+(?:really\s+|actually\s+)?(?:add|create|make|put|schedule|write|save|delete|remove|cancel|update|change|move|reschedule|complete|finish|mark|remind|remember|plan|organize|prioritize)\b/.test(command)
+        || /^(?:are you able to|do you know how to|is it possible (?:for you )?to|can bean|could bean|does bean know how to|does bean support)\s+(?:add|create|make|put|schedule|write|save|delete|remove|cancel|update|change|move|reschedule|complete|finish|mark|remind|remember|plan|organize|prioritize)\b/.test(command);
+    return asksCapability && !voiceCommandLooksConcreteAction(command);
+}
+
+function voiceCommandLooksConcreteAction(command) {
+    if (/\b(?:called|named|titled|labelled|labeled|that says|saying|with title|with the title)\b/.test(command)) return true;
+    if (/\b(?:today|tonight|tomorrow|yesterday|this morning|this afternoon|this evening|next week|next month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(command)) return true;
+    if (/\b(?:at|by|before|after|from|until)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/.test(command)) return true;
+    if (/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b/.test(command)) return true;
+    return /\b(?:for|about|to)\s+(?:me|my|the|a|an)\s+\w+/.test(command)
+        && !/\b(?:something|anything|things|stuff|items)\b/.test(command);
+}
+
 export function voiceCommandNeedsAgentWork(transcript) {
     const command = normalizedVoiceCommand(transcript);
     if (!command) return false;
+    if (voiceCommandIsCapabilityQuestion(command)) return false;
     if (/\b(?:calendar|calendars|event|events|task|tasks|todo|to do|reminder|reminders|agenda|approval|approvals|workspace|workspaces|google calendar)\b/.test(command)) {
         return true;
     }
@@ -71,6 +89,7 @@ export function voiceCommandNeedsAgentWork(transcript) {
 export function voiceCommandRequiresBackgroundWork(transcript) {
     const command = normalizedVoiceCommand(transcript);
     if (!command) return false;
+    if (voiceCommandIsCapabilityQuestion(command)) return false;
 
     if (/\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b/.test(command)) {
         return true;

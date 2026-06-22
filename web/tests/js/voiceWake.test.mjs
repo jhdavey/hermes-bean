@@ -62,6 +62,11 @@ assert.equal(voiceCommandNeedsAgentWork('what is the weather in Orlando Florida 
 assert.equal(voiceCommandNeedsAgentWork('when does my local store close today'), true);
 assert.equal(voiceCommandNeedsAgentWork('is the place near me open tonight'), true);
 assert.equal(voiceCommandNeedsAgentWork('can you give me a taco recipe'), false);
+assert.equal(voiceCommandNeedsAgentWork('can you create notes'), false);
+assert.equal(voiceCommandNeedsAgentWork('could you create something'), false);
+assert.equal(voiceCommandNeedsAgentWork('are you able to schedule events'), false);
+assert.equal(voiceCommandNeedsAgentWork('can you create a note called groceries'), true);
+assert.equal(voiceCommandNeedsAgentWork('could you schedule an event tomorrow at 9am'), true);
 assert.equal(voiceCommandNeedsAgentWork('when am I supposed to take out the trash'), true);
 assert.equal(voiceCommandNeedsAgentWork('which recycling bin do I put out'), true);
 assert.equal(voiceCommandRequiresBackgroundWork('what is on my calendar today'), false);
@@ -72,6 +77,10 @@ assert.equal(voiceCommandRequiresBackgroundWork('what is the weather in Orlando 
 assert.equal(voiceCommandRequiresBackgroundWork('cheapest flights from MCO to Dublin tomorrow one way'), true);
 assert.equal(voiceCommandRequiresBackgroundWork('when does my local store close today'), true);
 assert.equal(voiceCommandRequiresBackgroundWork('plan my day'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('can you create notes'), false);
+assert.equal(voiceCommandRequiresBackgroundWork('could you create something'), false);
+assert.equal(voiceCommandRequiresBackgroundWork('can you create a note called groceries'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('could you schedule an event tomorrow at 9am'), true);
 assert.equal(voiceCommandRequiresBackgroundWork('when am I supposed to take out the trash'), false);
 assert.equal(voiceCommandWantsDetailedChat('give me a 30 minute full body workout but I do not have equipment'), true);
 assert.equal(voiceCommandWantsDetailedChat('can you give me a taco recipe'), true);

@@ -893,14 +893,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Done — I updated your day.'), findsOneWidget);
-      expect(find.text('gpt-5.4'), findsOneWidget);
+      expect(find.text('gpt-5.4'), findsNothing);
       expect(
         find.byKey(const Key('assistant-message-model-label')),
-        findsOneWidget,
+        findsNothing,
       );
       tester.testTextInput.hide();
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('chat-activity-menu')), findsOneWidget);
+      expect(find.byKey(const Key('chat-activity-menu')), findsNothing);
 
       await openSettingsFromBottomNav(tester);
       expect(find.byKey(const Key('open-bean-preferences')), findsOneWidget);
@@ -1168,6 +1168,60 @@ void main() {
     expect(find.text('We talked about dinner.'), findsOneWidget);
     expect(api.startedSessionCount, 0);
   });
+
+  testWidgets(
+    'collapsed Bean response preview expires, pauses, and swipes away',
+    (WidgetTester tester) async {
+      Future<Finder> pumpCollapsedPreview() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        final api = _SignedInFakeHermesApiClient()
+          ..todaySession = const HermesSession(
+            id: 77,
+            status: 'active',
+            title: 'Today with Bean',
+          )
+          ..todaySessionMessages = const [
+            HermesMessage(
+              id: 701,
+              role: 'assistant',
+              content: 'One two three four five six',
+            ),
+          ];
+        await tester.pumpWidget(
+          HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const Key('command-center-chat-collapse-toggle')),
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+        return find.byKey(const Key('bean-collapsed-response-tag'));
+      }
+
+      var preview = await pumpCollapsedPreview();
+      expect(preview, findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 1500));
+      expect(preview, findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(preview, findsNothing);
+
+      preview = await pumpCollapsedPreview();
+      expect(preview, findsOneWidget);
+      final heldPreview = await tester.startGesture(tester.getCenter(preview));
+      await tester.pump(const Duration(seconds: 3));
+      expect(preview, findsOneWidget);
+      await heldPreview.up();
+      await tester.pump(const Duration(milliseconds: 2200));
+      expect(preview, findsNothing);
+
+      preview = await pumpCollapsedPreview();
+      expect(preview, findsOneWidget);
+      await tester.drag(preview, const Offset(80, 0));
+      await tester.pumpAndSettle();
+      expect(preview, findsNothing);
+    },
+  );
 
   testWidgets(
     'accepting a workspace invitation from Settings joins and reloads workspaces',
@@ -1795,6 +1849,62 @@ void main() {
     expect(find.text('Gray'), findsOneWidget);
   });
 
+  testWidgets('Bean opens to command center with chronological agenda', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _CommandCenterAgendaFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+    expect(find.byKey(const Key('command-center-title')), findsNothing);
+    expect(find.byKey(const Key('command-center-chat-panel')), findsOneWidget);
+    expect(find.byKey(const Key('chat-view')), findsOneWidget);
+
+    final task = find.byKey(const Key('command-center-agenda-task-501'));
+    final event = find.byKey(const Key('command-center-agenda-event-503'));
+    final reminder = find.byKey(
+      const Key('command-center-agenda-reminder-502'),
+    );
+    expect(task, findsOneWidget);
+    expect(event, findsOneWidget);
+    expect(reminder, findsOneWidget);
+    expect(tester.getTopLeft(task).dy, lessThan(tester.getTopLeft(event).dy));
+    expect(
+      tester.getTopLeft(event).dy,
+      lessThan(tester.getTopLeft(reminder).dy),
+    );
+  });
+
+  testWidgets('settings can rename command center in appearance', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await openSettingsFromBottomNav(tester);
+    await tester.ensureVisible(find.byKey(const Key('theme-preferences-card')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('theme-preferences-toggle')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('command-center-label-field')),
+      'Mission Control',
+    );
+    await tester.tap(find.byKey(const Key('command-center-label-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedCommandCenterLabel, 'Mission Control');
+  });
+
   testWidgets('settings edits reminder notification preferences', (
     WidgetTester tester,
   ) async {
@@ -2193,8 +2303,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('chat-input-dock')), findsOneWidget);
-      expect(find.byKey(const Key('chat-new-session-action')), findsOneWidget);
-      expect(find.byKey(const Key('chat-activity-menu')), findsOneWidget);
+      expect(find.byKey(const Key('chat-new-session-action')), findsNothing);
+      expect(find.byKey(const Key('chat-activity-menu')), findsNothing);
       expect(find.text('Agent progress'), findsNothing);
       expect(find.text('Activity feed'), findsNothing);
       expect(find.text('Pending approvals'), findsNothing);
@@ -2254,48 +2364,57 @@ void main() {
     },
   );
 
-  testWidgets('holding the Bean button starts voice without opening chat', (
-    WidgetTester tester,
-  ) async {
-    final api = _SignedInFakeHermesApiClient();
-    final realtime = _FakeBeanRealtimeConversation(api);
-    await tester.pumpWidget(
-      HermesBeanApp(
-        apiClient: api,
-        tokenStore: _MemoryAuthTokenStore(),
-        realtimeConversation: realtime,
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'holding the Bean button starts voice on the current Bean screen',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      final realtime = _FakeBeanRealtimeConversation(api);
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: _MemoryAuthTokenStore(),
+          realtimeConversation: realtime,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('chat-view')), findsOneWidget);
 
-    final gesture = await tester.startGesture(
-      tester.getCenter(find.byKey(const Key('nav-bean'))),
-    );
-    await tester.pump(const Duration(milliseconds: 650));
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('nav-bean'))),
+      );
+      await tester.pump(const Duration(milliseconds: 650));
 
-    expect(realtime.started, isTrue);
-    expect(find.byKey(const Key('chat-view')), findsNothing);
-    expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
-    expect(find.text('Listening'), findsWidgets);
-    final heldDecoration =
+      expect(realtime.started, isTrue);
+      expect(find.byKey(const Key('chat-view')), findsOneWidget);
+      expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
+      expect(find.text('Listening'), findsWidgets);
+      expect(
         tester
-                .widget<AnimatedContainer>(
-                  find.byKey(const Key('heybean-center-bean-button')),
-                )
-                .decoration
-            as BoxDecoration;
-    expect(
-      (heldDecoration.border! as Border).top.color,
-      HeyBeanTheme.accentStrong,
-    );
+            .widget<TextField>(find.byKey(const Key('chat-input')))
+            .decoration
+            ?.hintText,
+        'Listening',
+      );
+      final heldDecoration =
+          tester
+                  .widget<AnimatedContainer>(
+                    find.byKey(const Key('heybean-center-bean-button')),
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(
+        (heldDecoration.border! as Border).top.color,
+        HeyBeanTheme.accentStrong,
+      );
 
-    await gesture.up();
-    await tester.pump();
+      await gesture.up();
+      await tester.pump();
 
-    expect(realtime.captureStarted, isTrue);
-    expect(realtime.captureEnded, isTrue);
-    expect(realtime.microphoneEnabled, isFalse);
-  });
+      expect(realtime.captureStarted, isTrue);
+      expect(realtime.captureEnded, isTrue);
+      expect(realtime.microphoneEnabled, isFalse);
+    },
+  );
 
   testWidgets('holding the selected Bean button records until release', (
     WidgetTester tester,
@@ -2358,6 +2477,75 @@ void main() {
       expect(find.text('Plan today'), findsOneWidget);
     },
   );
+
+  testWidgets('sent Bean messages can be copied or edited and resent', (
+    WidgetTester tester,
+  ) async {
+    String? copiedText;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copiedText = (call.arguments as Map<Object?, Object?>)['text']
+                ?.toString();
+            return null;
+          }
+          if (call.method == 'Clipboard.getData') {
+            return <String, Object?>{'text': copiedText};
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+
+    final api = _SignedInFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('chat-input')), 'Plan today');
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const Key('sent-message-actions-trigger')).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('chat-copy-sent-message-action')));
+    await tester.pumpAndSettle();
+    expect(copiedText, 'Plan today');
+
+    await tester.tap(
+      find.byKey(const Key('sent-message-actions-trigger')).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('chat-edit-sent-message-action')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('chat-input')))
+          .controller
+          ?.text,
+      'Plan today',
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Plan tomorrow',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.branchMessageCalls, 1);
+    expect(api.branchedFromMessageId, 7001);
+    expect(api.sentMessages, ['Plan today', 'Plan tomorrow']);
+    expect(find.text('Plan today'), findsNothing);
+    expect(find.text('Plan tomorrow'), findsOneWidget);
+  });
 
   testWidgets('declining optional Bean setup uses a direct reply', (
     WidgetTester tester,
@@ -2537,43 +2725,47 @@ void main() {
     );
   });
 
-  testWidgets('signed-in screens show a loading indicator while data loads', (
-    WidgetTester tester,
-  ) async {
-    final api = _SlowDashboardFakeHermesApiClient();
+  testWidgets(
+    'signed-in screens do not overlay global loading during refresh',
+    (WidgetTester tester) async {
+      final api = _SlowDashboardFakeHermesApiClient();
 
-    await tester.pumpWidget(
-      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-    );
-    await tester.pump();
-    await tester.pump();
-
-    expect(
-      find.byKey(const Key('signed-in-loading-indicator')),
-      findsOneWidget,
-    );
-    expect(find.text('Loading...'), findsNothing);
-
-    for (final navKey in const [
-      Key('nav-tasks'),
-      Key('nav-reminders'),
-      Key('nav-notes'),
-      Key('nav-more'),
-      Key('nav-bean'),
-    ]) {
-      await tester.tap(find.byKey(navKey));
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
       await tester.pump();
+      await tester.pump();
+
       expect(
         find.byKey(const Key('signed-in-loading-indicator')),
-        findsOneWidget,
+        findsNothing,
       );
-    }
+      expect(find.text('Loading...'), findsNothing);
 
-    api.completeDashboardLoad();
-    await tester.pumpAndSettle();
+      for (final navKey in const [
+        Key('nav-tasks'),
+        Key('nav-reminders'),
+        Key('nav-notes'),
+        Key('nav-more'),
+        Key('nav-bean'),
+      ]) {
+        await tester.tap(find.byKey(navKey));
+        await tester.pump();
+        expect(
+          find.byKey(const Key('signed-in-loading-indicator')),
+          findsNothing,
+        );
+      }
 
-    expect(find.byKey(const Key('signed-in-loading-indicator')), findsNothing);
-  });
+      api.completeDashboardLoad();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('signed-in-loading-indicator')),
+        findsNothing,
+      );
+    },
+  );
 
   testWidgets('iPhone app icon badge mirrors the visible critical count', (
     WidgetTester tester,
@@ -3176,6 +3368,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+      expect(find.byKey(const Key('chat-view')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
+      await tester.pumpAndSettle();
+
       expect(find.byKey(const Key('calendar-view')), findsOneWidget);
       expect(find.byKey(const Key('critical-task-count')), findsOneWidget);
       expect(find.byKey(const Key('calendar-today-button')), findsOneWidget);
@@ -3333,7 +3530,7 @@ void main() {
       expect(find.byKey(const Key('signed-in-refresh-scroll')), findsNothing);
       expect(find.byKey(const Key('quick-plan-today')), findsNothing);
       final chatTopBeforeDrag = tester.getTopLeft(
-        find.byKey(const Key('chat-top-bar')),
+        find.byKey(const Key('chat-view')),
       );
       await tester.drag(
         find.byKey(const Key('chat-message-list')),
@@ -3341,15 +3538,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(
-        tester.getTopLeft(find.byKey(const Key('chat-top-bar'))),
+        tester.getTopLeft(find.byKey(const Key('chat-view'))),
         chatTopBeforeDrag,
       );
-      expect(
-        tester.getRect(find.byKey(const Key('chat-input-dock'))).bottom,
-        lessThanOrEqualTo(
-          tester.getRect(find.byKey(const Key('heybean-bottom-menu'))).top,
-        ),
-      );
+      final composerOverlap =
+          tester.getRect(find.byKey(const Key('chat-input-dock'))).bottom -
+          tester.getRect(find.byKey(const Key('heybean-bottom-menu'))).top;
+      expect(composerOverlap, greaterThanOrEqualTo(0));
+      expect(composerOverlap, lessThanOrEqualTo(30));
       await tester.enterText(
         find.byKey(const Key('chat-input')),
         'Help me plan today',
@@ -6478,6 +6674,54 @@ class _StaleTodayPersistedResourcesFakeHermesApiClient
   }
 }
 
+class _CommandCenterAgendaFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  DateTime _todayFutureTime(int offsetMinutes) {
+    final now = DateTime.now();
+    final latestToday = DateTime(now.year, now.month, now.day, 23, 59);
+    final minutesLeft = math.max(1, latestToday.difference(now).inMinutes);
+    final clampedOffset = math.min(offsetMinutes, minutesLeft);
+    return now.add(Duration(minutes: clampedOffset));
+  }
+
+  @override
+  Future<List<HermesTask>> listTasks() async {
+    return [
+      HermesTask(
+        id: 501,
+        title: 'Prep launch notes',
+        status: 'open',
+        dueAt: _todayFutureTime(20).toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<List<HermesReminder>> listReminders() async {
+    return [
+      HermesReminder(
+        id: 502,
+        title: 'Send recap',
+        status: 'pending',
+        dueAt: _todayFutureTime(60).toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final start = _todayFutureTime(40);
+    return [
+      HermesCalendarEvent(
+        id: 503,
+        title: 'Design review',
+        startsAt: start.toIso8601String(),
+        endsAt: start.add(const Duration(minutes: 30)).toIso8601String(),
+      ),
+    ];
+  }
+}
+
 class _WeekendMultiDayCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
@@ -7110,6 +7354,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   HermesNotificationPreferences updatedNotificationPreferences =
       const HermesNotificationPreferences();
   String updatedTheme = 'green';
+  String updatedCommandCenterLabel = 'Command Center';
   String subscriptionTier = 'base';
   String? currentSubscriptionStatus = 'active';
   String subscriptionCurrentPeriodEnd = '2026-06-25T00:00:00+00:00';
@@ -7127,6 +7372,8 @@ class _FakeHermesApiClient extends HermesApiClient {
   final registeredUsers = <Map<String, String>>[];
   final checkoutRequests = <Map<String, String>>[];
   int sendMessageCalls = 0;
+  int branchMessageCalls = 0;
+  int? branchedFromMessageId;
   int queueMessageCalls = 0;
   final mobileSubscriptionSetupRequests = <String>[];
   final mobileSubscriptionConfirmRequests = <Map<String, String>>[];
@@ -7194,6 +7441,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       subscriptionTier: subscriptionTier,
       subscriptionStatus: subscriptionStatus ?? currentSubscriptionStatus,
       theme: updatedTheme,
+      commandCenterLabel: updatedCommandCenterLabel,
       onboardComplete: !needsBeanOnboarding,
       agentProfile: profile,
       activeWorkspaceAgentProfile: profile,
@@ -7350,6 +7598,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? name,
     String? email,
     String? theme,
+    String? commandCenterLabel,
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
@@ -7358,6 +7607,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     updatedName = name ?? updatedName;
     updatedEmail = email ?? updatedEmail;
     updatedTheme = theme ?? updatedTheme;
+    updatedCommandCenterLabel = commandCenterLabel ?? updatedCommandCenterLabel;
     updatedAgentPersonality = agentPersonality ?? updatedAgentPersonality;
     updatedPriorities = onboardingPriorities ?? updatedPriorities;
     updatedContext = onboardingContext ?? updatedContext;
@@ -7686,6 +7936,12 @@ class _FakeHermesApiClient extends HermesApiClient {
     return HermesMessageResult(
       status: 'completed',
       session: const HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 7000 + sendMessageCalls + branchMessageCalls,
+        role: 'user',
+        content: content,
+        metadata: metadata ?? const {},
+      ),
       assistantMessage: HermesMessage(
         id: 8,
         role: 'assistant',
@@ -7700,6 +7956,22 @@ class _FakeHermesApiClient extends HermesApiClient {
           eventType: 'assistant.calendar_event.created',
         ),
       ],
+    );
+  }
+
+  @override
+  Future<HermesMessageResult> branchMessage({
+    required int sessionId,
+    required int messageId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) {
+    branchMessageCalls++;
+    branchedFromMessageId = messageId;
+    return sendMessage(
+      sessionId: sessionId,
+      content: content,
+      metadata: metadata,
     );
   }
 
@@ -9373,6 +9645,10 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   void beginVoiceCapture() {
     captureStarted = true;
     microphoneEnabled = true;
+  }
+
+  void emitTranscript(String role, String text) {
+    onTranscript?.call(role, text);
   }
 
   @override

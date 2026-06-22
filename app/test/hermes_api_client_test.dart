@@ -81,6 +81,52 @@ void main() {
     expect(result.status, 'completed');
   });
 
+  test('branchMessage posts edited content to the branch endpoint', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        expect(request.method, 'POST');
+        expect(request.path, '/assistant/sessions/42/messages/7001/branch');
+        expect(request.body, {
+          'content': 'Plan tomorrow',
+          'metadata': {'source': 'flutter', 'edited_message_id': 7001},
+        });
+        return HermesApiResponse(
+          201,
+          jsonEncode({
+            'data': {
+              'status': 'completed',
+              'session': {'id': 42, 'status': 'active'},
+              'user_message': {
+                'id': 7002,
+                'role': 'user',
+                'content': 'Plan tomorrow',
+              },
+              'assistant_message': {
+                'id': 7003,
+                'role': 'assistant',
+                'content': 'Updated.',
+              },
+              'events': [],
+            },
+          }),
+        );
+      },
+    );
+
+    final result = await client.branchMessage(
+      sessionId: 42,
+      messageId: 7001,
+      content: 'Plan tomorrow',
+      metadata: const {'source': 'flutter', 'edited_message_id': 7001},
+    );
+
+    expect(result.status, 'completed');
+    expect(result.userMessage?.id, 7002);
+    expect(result.assistantMessage?.content, 'Updated.');
+  });
+
   test('creates notes when empty metadata returns as a JSON array', () async {
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),
@@ -699,6 +745,36 @@ void main() {
     final user = await client.updateMe(theme: 'purple');
 
     expect(user.theme, 'purple');
+    expect(requests, hasLength(1));
+  });
+
+  test('updates command center label through auth profile update', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'PATCH');
+        expect(request.path, '/auth/me');
+        expect(request.body, {'command_center_label': 'HQ'});
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'id': 9,
+              'name': 'Bean User',
+              'email': 'bean@example.com',
+              'command_center_label': 'HQ',
+            },
+          }),
+        );
+      },
+    );
+
+    final user = await client.updateMe(commandCenterLabel: 'HQ');
+
+    expect(user.commandCenterLabel, 'HQ');
     expect(requests, hasLength(1));
   });
 

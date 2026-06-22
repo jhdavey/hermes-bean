@@ -152,6 +152,29 @@ class AuthAndAccountLifecycleTest extends TestCase
         ])->assertUnprocessable();
     }
 
+    public function test_signed_in_user_can_update_command_center_label(): void
+    {
+        $token = $this->registerToken('command-center-user@example.com');
+
+        $this->withToken($token)->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.command_center_label', 'Command Center');
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'command_center_label' => 'Mission Control',
+        ])->assertOk()
+            ->assertJsonPath('data.command_center_label', 'Mission Control');
+
+        $this->assertDatabaseHas('users', [
+            'email' => 'command-center-user@example.com',
+            'command_center_label' => 'Mission Control',
+        ]);
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'command_center_label' => '',
+        ])->assertUnprocessable();
+    }
+
     public function test_forgot_password_sends_reset_link_without_revealing_accounts(): void
     {
         Notification::fake();

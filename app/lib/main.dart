@@ -71,6 +71,81 @@ final Uri _enterpriseContactUrl = Uri.parse(
   'mailto:support@heybean.org?subject=HeyBean%20Enterprise',
 );
 const String _beanGreenCategoryColor = '#34C759';
+const double _beanChatComposerReservedHeight = 66;
+const double _beanBottomMenuSurfaceInset = 22;
+
+class _BeanNotesIcon extends StatelessWidget {
+  const _BeanNotesIcon({this.size, this.color});
+
+  final double? size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconTheme = IconTheme.of(context);
+    final resolvedSize = size ?? iconTheme.size ?? 24;
+    final resolvedColor = color ?? iconTheme.color ?? HeyBeanTheme.text;
+
+    return SizedBox.square(
+      dimension: resolvedSize,
+      child: CustomPaint(painter: _BeanNotesIconPainter(color: resolvedColor)),
+    );
+  }
+}
+
+class _BeanNotesIconPainter extends CustomPainter {
+  const _BeanNotesIconPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scale = math.min(size.width, size.height) / 24;
+    final offset = Offset(
+      (size.width - (24 * scale)) / 2,
+      (size.height - (24 * scale)) / 2,
+    );
+    canvas
+      ..save()
+      ..translate(offset.dx, offset.dy)
+      ..scale(scale);
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.1
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final cover = Path()
+      ..moveTo(7, 4)
+      ..lineTo(17, 4)
+      ..cubicTo(18.1046, 4, 19, 4.8954, 19, 6)
+      ..lineTo(19, 20)
+      ..lineTo(7, 20)
+      ..cubicTo(5.8954, 20, 5, 19.1046, 5, 18)
+      ..lineTo(5, 6)
+      ..cubicTo(5, 4.8954, 5.8954, 4, 7, 4)
+      ..close();
+    canvas.drawPath(cover, paint);
+
+    final lines = Path()
+      ..moveTo(9, 4)
+      ..lineTo(9, 20)
+      ..moveTo(12, 8)
+      ..lineTo(16, 8)
+      ..moveTo(12, 12)
+      ..lineTo(16, 12)
+      ..moveTo(12, 16)
+      ..lineTo(15, 16);
+    canvas.drawPath(lines, paint);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _BeanNotesIconPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
 
 class _BeanWorkItem {
   const _BeanWorkItem({
@@ -104,6 +179,18 @@ class _BeanWorkItem {
     status: status ?? this.status,
     resolvedByEvent: resolvedByEvent ?? this.resolvedByEvent,
   );
+}
+
+class _BeanResponsePreview {
+  const _BeanResponsePreview({
+    required this.key,
+    required this.text,
+    required this.wordCount,
+  });
+
+  final String key;
+  final String text;
+  final int wordCount;
 }
 
 @pragma('vm:entry-point')
@@ -1422,14 +1509,20 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _checkoutBusyPlan;
   String? _checkoutError;
   bool _busy = false;
-  bool _dashboardLoading = false;
   String _chatRunState = 'Ready';
   int _chatRunToken = 0;
   List<_BeanWorkItem> _beanWorkItems = const [];
+  int _beanWorkEventFloorId = 0;
   Timer? _beanWorkStatusClearTimer;
+  Timer? _beanResponsePreviewTimer;
   DateTime? _beanWorkStatusHoldUntil;
   DateTime? _beanWorkStatusMinUntil;
-  _HomeDestination _selectedDestination = _HomeDestination.today;
+  DateTime? _beanResponsePreviewExpiresAt;
+  Duration? _beanResponsePreviewRemaining;
+  String? _beanResponsePreviewTimerKey;
+  String? _dismissedBeanResponsePreviewKey;
+  bool _beanResponsePreviewHeld = false;
+  _HomeDestination _selectedDestination = _HomeDestination.bean;
   bool _showCalendarMonth = false;
   DateTime _selectedCalendarDay = _dateOnly(DateTime.now());
   int _calendarStartHour = _defaultCalendarStartHour;
@@ -1439,6 +1532,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _editingAgentPreferences = false;
   bool _onboardingTourVisible = false;
   int _onboardingTourStep = 0;
+  final TextEditingController _chatInputController = TextEditingController();
+  final FocusNode _chatInputFocusNode = FocusNode();
+  bool _beanChatCollapsed = false;
+  int? _editingChatMessageId;
   bool _beanVoiceListening = false;
   String? _beanVoiceDraft;
   int _localMessageSequence = -1;
@@ -1515,9 +1612,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _notifiedReminderIds.clear();
     _shownApprovalSheetId = null;
     _approvalSheetOpen = false;
+    _editingChatMessageId = null;
     _beanVoiceListening = false;
     _beanVoiceDraft = null;
-    _dashboardLoading = false;
+    _cancelBeanResponsePreviewTimer();
+    _dismissedBeanResponsePreviewKey = null;
+    _beanResponsePreviewHeld = false;
     _loadingStatusText = null;
     _onboardingTourVisible = false;
     _onboardingTourStep = 0;
@@ -1992,6 +2092,25 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkStatusHoldUntil = null;
   }
 
+  void _clearCompletedBeanWorkItemsForFreshRequest() {
+    if (_beanWorkItems.isEmpty || _beanWorkItems.any((item) => !item.done)) {
+      return;
+    }
+    _beanWorkStatusClearTimer?.cancel();
+    _beanWorkStatusClearTimer = null;
+    _beanWorkStatusHoldUntil = null;
+    _beanWorkStatusMinUntil = null;
+    _beanWorkItems = const [];
+  }
+
+  void _prepareBeanWorkForFreshRequest() {
+    _beanWorkEventFloorId = _events.fold<int>(
+      0,
+      (maxId, event) => math.max(maxId, event.id),
+    );
+    _clearCompletedBeanWorkItemsForFreshRequest();
+  }
+
   bool _beanWorkStatusDone(String status) => const {
     'completed',
     'succeeded',
@@ -2055,9 +2174,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     caseSensitive: false,
   ).hasMatch(label.trim());
 
-  void _ensureBeanRequestWorkItem(String content, {String status = 'running'}) {
+  void _ensureBeanRequestWorkItem(
+    String content, {
+    String status = 'running',
+    bool freshRequest = false,
+  }) {
+    if (_beanRequestIsCapabilityQuestion(content)) return;
     final label = _beanWorkLabelForRequest(content);
     if (label == null) return;
+    if (freshRequest) {
+      _prepareBeanWorkForFreshRequest();
+    }
     _BeanWorkItem? existing;
     for (final item in _beanWorkItems) {
       if (item.id == 'realtime-request') {
@@ -2072,6 +2199,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _beanWorkLabelForRequest(String content) {
     final command = _normalizedVoiceCommand(content);
     if (command.isEmpty) return null;
+    if (_beanCommandIsCapabilityQuestion(command)) return null;
     final targetsEvent = RegExp(
       r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
     ).hasMatch(command);
@@ -2125,8 +2253,53 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return 'Working on request';
   }
 
+  bool _beanRequestIsCapabilityQuestion(String content) =>
+      _beanCommandIsCapabilityQuestion(_normalizedVoiceCommand(content));
+
+  bool _beanCommandIsCapabilityQuestion(String command) {
+    if (command.isEmpty) return false;
+    final asksCapability = RegExp(
+      r"^(?:can|could|would)\s+you\s+(?:really\s+|actually\s+)?(?:add|create|make|put|schedule|write|save|delete|remove|cancel|update|change|move|reschedule|complete|finish|mark|remind|remember|plan|organize|prioritize)\b|^(?:are you able to|do you know how to|is it possible (?:for you )?to|can bean|could bean|does bean know how to|does bean support)\s+(?:add|create|make|put|schedule|write|save|delete|remove|cancel|update|change|move|reschedule|complete|finish|mark|remind|remember|plan|organize|prioritize)\b",
+    ).hasMatch(command);
+    if (!asksCapability) return false;
+    return !_beanCommandLooksConcreteAction(command);
+  }
+
+  bool _beanCommandLooksConcreteAction(String command) {
+    if (RegExp(
+      r'\b(?:called|named|titled|labelled|labeled|that says|saying|with title|with the title)\b',
+    ).hasMatch(command)) {
+      return true;
+    }
+    if (RegExp(
+      r'\b(?:today|tonight|tomorrow|yesterday|this morning|this afternoon|this evening|next week|next month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+    ).hasMatch(command)) {
+      return true;
+    }
+    if (RegExp(
+      r'\b(?:at|by|before|after|from|until)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b',
+    ).hasMatch(command)) {
+      return true;
+    }
+    if (RegExp(
+      r'\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b',
+    ).hasMatch(command)) {
+      return true;
+    }
+    if (RegExp(
+          r'\b(?:for|about|to)\s+(?:me|my|the|a|an)\s+\w+',
+        ).hasMatch(command) &&
+        !RegExp(
+          r'\b(?:something|anything|things|stuff|items)\b',
+        ).hasMatch(command)) {
+      return true;
+    }
+    return false;
+  }
+
   void _applyBeanWorkEvents(List<HermesActivityEvent> events) {
     for (final event in events) {
+      if (event.id <= _beanWorkEventFloorId) continue;
       final item = _beanWorkItemFromEvent(event);
       if (item == null) continue;
       _upsertBeanWorkItem(
@@ -2287,7 +2460,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             if (!mounted) return;
             setState(() {
               _chatRunState = 'working...';
-              _ensureBeanRequestWorkItem(userContent);
+              _ensureBeanRequestWorkItem(userContent, freshRequest: true);
             });
             unawaited(_pollQueuedRun(runId, _chatRunToken));
             unawaited(_pollDashboardChanges());
@@ -2305,8 +2478,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _beanWorkStatusClearTimer?.cancel();
+    _beanResponsePreviewTimer?.cancel();
     _reminderDueTimer?.cancel();
     _stopDashboardChangePolling();
+    _chatInputController.dispose();
+    _chatInputFocusNode.dispose();
     unawaited(_pushNotifications.dispose());
     unawaited(_realtimeConversation.stop());
     super.dispose();
@@ -2345,17 +2521,162 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _beanWorkItems.isNotEmpty ||
       _beanWorkStatusHolding;
 
+  bool get _beanStopAvailable =>
+      _beanVoiceListening ||
+      _busy ||
+      _beanVisibleWorkItems.any((item) => !item.done) ||
+      RegExp(
+        r'\b(working|thinking|responding|queued|running)\b',
+        caseSensitive: false,
+      ).hasMatch(_chatRunState);
+
   String get _beanStatusTagLabel {
     final items = _beanVisibleWorkItems;
     if (items.isNotEmpty && items.every((item) => item.done)) return 'Done';
-    if (items.any((item) => !item.done) || _busy) return 'Working...';
+    if (items.any((item) => !item.done)) return 'Working...';
     if (_beanVoiceListening) {
       return _beanVoiceDraft?.trim().isNotEmpty == true
           ? 'Ready to send'
           : 'Listening';
     }
+    if (_busy) {
+      final compact = _compactBeanStatusLabel(_chatRunState);
+      return compact == 'Ready' ? 'Thinking...' : compact;
+    }
     final compact = _compactBeanStatusLabel(_chatRunState);
     return compact == 'Ready' ? 'Bean is ready' : compact;
+  }
+
+  _BeanResponsePreview? get _beanCollapsedResponsePreview {
+    if (!_beanChatCollapsed ||
+        _selectedDestination != _HomeDestination.bean ||
+        _beanStatusTagVisible) {
+      return null;
+    }
+    for (final message in _messages.reversed) {
+      if (message.role == 'user') continue;
+      final content = (message.content ?? '').trim();
+      if (content.isEmpty) continue;
+      final key = _beanResponsePreviewKey(message);
+      if (key == _dismissedBeanResponsePreviewKey) return null;
+      final cleaned = _cleanBeanResponsePreviewContent(content);
+      if (cleaned.isEmpty) continue;
+      return _BeanResponsePreview(
+        key: key,
+        text: _compactBeanResponsePreview(cleaned),
+        wordCount: _beanResponsePreviewWordCount(cleaned),
+      );
+    }
+    return null;
+  }
+
+  String _beanResponsePreviewKey(HermesMessage message) {
+    final content = (message.content ?? '').trim();
+    return '${message.id}:${content.length}:${content.hashCode}';
+  }
+
+  String _cleanBeanResponsePreviewContent(String content) => content
+      .replaceAll(RegExp(r'```[\s\S]*?```'), ' ')
+      .replaceAll(RegExp(r'[#*_>`]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  String _compactBeanResponsePreview(String cleaned) {
+    if (cleaned.length <= 150) return cleaned;
+    return '${cleaned.substring(0, 147)}...';
+  }
+
+  int _beanResponsePreviewWordCount(String cleaned) {
+    if (cleaned.isEmpty) return 0;
+    return RegExp(r'\S+').allMatches(cleaned).length;
+  }
+
+  Duration _beanResponsePreviewDuration(_BeanResponsePreview preview) =>
+      Duration(seconds: math.max(1, (preview.wordCount / 3).ceil()));
+
+  void _cancelBeanResponsePreviewTimer() {
+    _beanResponsePreviewTimer?.cancel();
+    _beanResponsePreviewTimer = null;
+    _beanResponsePreviewExpiresAt = null;
+    _beanResponsePreviewRemaining = null;
+    _beanResponsePreviewTimerKey = null;
+  }
+
+  void _syncBeanResponsePreviewTimer(_BeanResponsePreview? preview) {
+    if (preview == null) {
+      _cancelBeanResponsePreviewTimer();
+      return;
+    }
+    if (_beanResponsePreviewHeld) return;
+    if (_beanResponsePreviewTimerKey == preview.key &&
+        _beanResponsePreviewTimer?.isActive == true) {
+      return;
+    }
+    _startBeanResponsePreviewTimer(
+      preview,
+      duration: _beanResponsePreviewDuration(preview),
+    );
+  }
+
+  void _startBeanResponsePreviewTimer(
+    _BeanResponsePreview preview, {
+    required Duration duration,
+  }) {
+    _beanResponsePreviewTimer?.cancel();
+    final normalizedDuration = duration <= Duration.zero
+        ? const Duration(seconds: 1)
+        : duration;
+    _beanResponsePreviewTimerKey = preview.key;
+    _beanResponsePreviewExpiresAt = DateTime.now().add(normalizedDuration);
+    _beanResponsePreviewRemaining = normalizedDuration;
+    _beanResponsePreviewTimer = Timer(normalizedDuration, () {
+      if (!mounted || _beanResponsePreviewHeld) return;
+      if (_beanResponsePreviewTimerKey != preview.key) return;
+      setState(() {
+        _dismissedBeanResponsePreviewKey = preview.key;
+        _cancelBeanResponsePreviewTimer();
+      });
+    });
+  }
+
+  void _holdBeanResponsePreview() {
+    final timer = _beanResponsePreviewTimer;
+    final expiresAt = _beanResponsePreviewExpiresAt;
+    _beanResponsePreviewHeld = true;
+    if (timer == null || !timer.isActive || expiresAt == null) return;
+    final remaining = expiresAt.difference(DateTime.now());
+    _beanResponsePreviewRemaining = remaining > Duration.zero
+        ? remaining
+        : const Duration(milliseconds: 1);
+    timer.cancel();
+    _beanResponsePreviewTimer = null;
+  }
+
+  void _releaseBeanResponsePreview() {
+    if (!_beanResponsePreviewHeld) return;
+    _beanResponsePreviewHeld = false;
+    final preview = _beanCollapsedResponsePreview;
+    if (preview == null) {
+      _cancelBeanResponsePreviewTimer();
+      return;
+    }
+    _startBeanResponsePreviewTimer(
+      preview,
+      duration:
+          _beanResponsePreviewRemaining ??
+          _beanResponsePreviewDuration(preview),
+    );
+  }
+
+  void _dismissBeanResponsePreview() {
+    final preview = _beanCollapsedResponsePreview;
+    final key = preview?.key ?? _beanResponsePreviewTimerKey;
+    if (key == null) return;
+    setState(() {
+      _dismissedBeanResponsePreviewKey = key;
+      _beanResponsePreviewHeld = false;
+      _cancelBeanResponsePreviewTimer();
+    });
   }
 
   void _scheduleAppIconBadgeSync(int count) {
@@ -2512,7 +2833,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _approvals = const [];
           _events = const [];
           _phase = _AuthPhase.planSelection;
-          _dashboardLoading = false;
           _loadingStatusText = null;
           _error = null;
           _checkoutError = null;
@@ -2535,7 +2855,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = const [];
         _events = const [];
         _phase = _AuthPhase.signedIn;
-        _dashboardLoading = true;
         _loadingStatusText = null;
       });
 
@@ -2632,9 +2951,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _session = session;
         _replaceMessagesFromSession(sessionDetails, user: user);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _noteFolders = _sortedNoteFolders(
-          results[4] as List<HermesNoteFolder>,
-        );
+        _noteFolders = _sortedNoteFolders(results[4] as List<HermesNoteFolder>);
         _notes = _sortedNotes(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
         _memorySummaries = results[7] as List<HermesMemorySummary>;
@@ -2649,7 +2966,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = summary.approvals;
         _events = results[11] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
-        _dashboardLoading = false;
         _loadingStatusText = null;
         _error = refreshError == null
             ? null
@@ -2690,7 +3006,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = const [];
         _events = const [];
         _phase = _AuthPhase.signedOut;
-        _dashboardLoading = false;
         _loadingStatusText = null;
       });
     }
@@ -3074,54 +3389,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     );
   }
 
-  Future<void> _startNewChatSession() async {
-    setState(() {
-      _busy = true;
-      _chatRunState = 'Starting new session…';
-      _error = null;
-    });
-    try {
-      final session = await widget.apiClient.startSession(
-        title: _needsBeanIntroduction ? 'Welcome to Bean' : 'New chat',
-        runtimeMode: _needsBeanIntroduction ? 'onboarding' : 'chat',
-        workspaceId: _user?.activeWorkspace?.numericId,
-        metadata: _flutterChatMetadata(),
-      );
-      final events = await widget.apiClient
-          .pollActivityEvents(session.id)
-          .catchError((_) => const <HermesActivityEvent>[]);
-      if (!mounted) return;
-      setState(() {
-        _session = session;
-        _messages
-          ..clear()
-          ..add(
-            HermesMessage(
-              id: 0,
-              role: 'assistant',
-              content: _personalizedBeanIntroMessage(_user),
-            ),
-          );
-        _events = events;
-        _chatRunState = 'Ready';
-        _beanWorkItems = const [];
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _chatRunState = 'Failed';
-        _error = beanFriendlyErrorMessage(error, action: 'start a new chat');
-      });
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   Future<void> _startBeanVoiceDraft() async {
     if (_busy || _beanVoiceListening) return;
     setState(() {
       _beanVoiceListening = true;
       _beanVoiceDraft = '';
+      _editingChatMessageId = null;
+      _chatInputController.clear();
       _error = null;
       _chatRunState = 'Connecting Bean voice';
     });
@@ -3158,6 +3432,36 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() => _beanVoiceDraft = draft);
   }
 
+  void _replaceChatMessage(int localMessageId, HermesMessage message) {
+    final index = _messages.indexWhere(
+      (candidate) => candidate.id == localMessageId,
+    );
+    if (index == -1) return;
+    _messages[index] = _displayableAssistantMessage(message);
+  }
+
+  void _beginEditingChatMessage(HermesMessage message) {
+    if (_busy || _beanVoiceListening || message.role != 'user') return;
+    setState(() {
+      _editingChatMessageId = message.id;
+      _chatInputController.text = message.content ?? '';
+      _chatInputController.selection = TextSelection.collapsed(
+        offset: _chatInputController.text.length,
+      );
+    });
+    _chatInputFocusNode.requestFocus();
+  }
+
+  Future<void> _copyChatMessage(HermesMessage message) async {
+    final content = (message.content ?? '').trim();
+    if (content.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: content));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Copied')));
+  }
+
   Future<void> _stopAgent() async {
     final session = _session;
     if (_beanVoiceListening) {
@@ -3166,18 +3470,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
+        _editingChatMessageId = null;
+        _chatInputController.clear();
         _chatRunState = 'Ready';
         _beanWorkItems = const [];
       });
       return;
     }
 
-    if (!_busy) return;
+    if (!_beanStopAvailable) return;
     _chatRunToken++;
     if (mounted) {
       setState(() {
         _busy = false;
+        _editingChatMessageId = null;
         _chatRunState = 'Stopped';
+        _beanWorkItems = const [];
         _messages.add(
           HermesMessage(
             id: _messages.length + 1,
@@ -3209,6 +3517,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _beanVoiceListening = false;
       _beanVoiceDraft = null;
+      _chatInputController.clear();
       _chatRunState = dictated.isEmpty ? 'Ready' : 'Bean is working...';
       _beanWorkItems = const [];
     });
@@ -3217,18 +3526,45 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  Future<void> _sendChat(String content) async {
+  Future<void> _sendChatInputDraft() async {
+    final text = _chatInputController.text.trim();
+    if (text.isEmpty || _busy) return;
+    final editingMessageId = _editingChatMessageId;
+    _chatInputController.clear();
+    await _sendChat(text, editingMessageId: editingMessageId);
+  }
+
+  Future<void> _sendChat(String content, {int? editingMessageId}) async {
     final trimmed = content.trim();
     var session = _session;
     if (trimmed.isEmpty || session == null) return;
     final runToken = ++_chatRunToken;
+    final capabilityQuestion = _beanRequestIsCapabilityQuestion(trimmed);
+    final localUserMessageId = _nextLocalMessageId();
+    final editingServerMessageId =
+        editingMessageId != null && editingMessageId > 0
+        ? editingMessageId
+        : null;
     var chatPhase = 'preparing message';
     setState(() {
       _busy = true;
-      _chatRunState = 'Bean is working…';
-      _ensureBeanRequestWorkItem(trimmed);
+      _editingChatMessageId = null;
+      _chatRunState = capabilityQuestion ? 'Thinking…' : 'Bean is working…';
+      if (capabilityQuestion) {
+        _prepareBeanWorkForFreshRequest();
+      } else {
+        _ensureBeanRequestWorkItem(trimmed, freshRequest: true);
+      }
+      if (editingMessageId != null) {
+        final editIndex = _messages.indexWhere(
+          (message) => message.id == editingMessageId && message.role == 'user',
+        );
+        if (editIndex != -1) {
+          _messages.removeRange(editIndex, _messages.length);
+        }
+      }
       _messages.add(
-        HermesMessage(id: _messages.length + 1, role: 'user', content: trimmed),
+        HermesMessage(id: localUserMessageId, role: 'user', content: trimmed),
       );
     });
     try {
@@ -3245,28 +3581,46 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       session = _session ?? session;
       final needsBeanIntroduction = _needsBeanIntroduction;
       final useDirectConversationReply =
-          !needsBeanIntroduction && _shouldUseDirectConversationReply(trimmed);
+          !needsBeanIntroduction &&
+          (capabilityQuestion || _shouldUseDirectConversationReply(trimmed));
       chatPhase = needsBeanIntroduction
           ? 'sending Bean introduction message'
+          : editingServerMessageId != null
+          ? 'branching Bean chat message'
           : useDirectConversationReply
           ? 'sending Bean conversation reply'
           : 'queueing Bean chat message';
+      final messageMetadata = _flutterChatMetadata(
+        additional: editingServerMessageId == null
+            ? const {}
+            : {'edited_message_id': editingServerMessageId},
+      );
       final result = needsBeanIntroduction
           ? await _sendBeanIntroductionMessage(session.id, trimmed)
+          : editingServerMessageId != null
+          ? await widget.apiClient.branchMessage(
+              sessionId: session.id,
+              messageId: editingServerMessageId,
+              content: trimmed,
+              metadata: messageMetadata,
+            )
           : useDirectConversationReply
           ? await widget.apiClient.sendMessage(
               sessionId: session.id,
               content: trimmed,
-              metadata: _flutterChatMetadata(),
+              metadata: messageMetadata,
             )
           : await widget.apiClient.queueMessage(
               sessionId: session.id,
               content: trimmed,
-              metadata: _flutterChatMetadata(),
+              metadata: messageMetadata,
             );
       if (!mounted || runToken != _chatRunToken) return;
       if (result.status == 'queued') {
         setState(() {
+          if (result.userMessage != null) {
+            _replaceChatMessage(localUserMessageId, result.userMessage!);
+          }
           _session = result.session;
           _chatRunState = 'working...';
           _events = _mergeEvents(result.events, _events);
@@ -3316,6 +3670,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final completedBeanIntroduction =
           needsBeanIntroduction && !_userNeedsBeanIntroduction(refreshedUser);
       setState(() {
+        if (result.userMessage != null) {
+          _replaceChatMessage(localUserMessageId, result.userMessage!);
+        }
         _user = refreshedUser;
         _session = result.session;
         _error = null;
@@ -3859,13 +4216,12 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
-  Future<void> _refreshSignedInViews({bool showLoading = true}) async {
+  Future<void> _refreshSignedInViews() async {
     final session = _session;
     if (_phase != _AuthPhase.signedIn || session == null) return;
     final authGeneration = _authGeneration;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
-    if (showLoading) setState(() => _dashboardLoading = true);
     try {
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected();
       final results = await Future.wait<Object>([
@@ -3919,9 +4275,7 @@ ${_truncateDiagnostic(stack, 2200)}
       }
       setState(() {
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _noteFolders = _sortedNoteFolders(
-          results[4] as List<HermesNoteFolder>,
-        );
+        _noteFolders = _sortedNoteFolders(results[4] as List<HermesNoteFolder>);
         _notes = _sortedNotes(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
         _memorySummaries = results[7] as List<HermesMemorySummary>;
@@ -3935,7 +4289,6 @@ ${_truncateDiagnostic(stack, 2200)}
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
         _events = results[11] as List<HermesActivityEvent>;
-        if (showLoading) _dashboardLoading = false;
         _error = null;
       });
       _syncReminderNotifications();
@@ -3948,19 +4301,11 @@ ${_truncateDiagnostic(stack, 2200)}
         return;
       }
       setState(() {
-        if (showLoading) _dashboardLoading = false;
         _error = beanFriendlyErrorMessage(
           error,
           action: 'refresh your latest data',
         );
       });
-    } finally {
-      if (mounted &&
-          _phase == _AuthPhase.signedIn &&
-          authGeneration == _authGeneration &&
-          refreshGeneration == _dashboardRefreshGeneration) {
-        if (showLoading) setState(() => _dashboardLoading = false);
-      }
     }
   }
 
@@ -3973,7 +4318,6 @@ ${_truncateDiagnostic(stack, 2200)}
     final generation = ++_workspaceRefreshGeneration;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
-    setState(() => _dashboardLoading = true);
     try {
       final user = await widget.apiClient.me();
       final sessionDetails = await _loadDailySessionForUser(
@@ -4050,9 +4394,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _session = session;
         _replaceMessagesFromSession(sessionDetails, user: user);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _noteFolders = _sortedNoteFolders(
-          results[4] as List<HermesNoteFolder>,
-        );
+        _noteFolders = _sortedNoteFolders(results[4] as List<HermesNoteFolder>);
         _notes = _sortedNotes(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
         _memorySummaries = results[7] as List<HermesMemorySummary>;
@@ -4066,7 +4408,6 @@ ${_truncateDiagnostic(stack, 2200)}
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
         _events = results[11] as List<HermesActivityEvent>;
-        _dashboardLoading = false;
         _error = null;
       });
       _syncReminderNotifications();
@@ -4079,16 +4420,8 @@ ${_truncateDiagnostic(stack, 2200)}
         return;
       }
       setState(() {
-        _dashboardLoading = false;
         _error = beanFriendlyErrorMessage(error, action: errorAction);
       });
-    } finally {
-      if (mounted &&
-          _phase == _AuthPhase.signedIn &&
-          authGeneration == _authGeneration &&
-          generation == _workspaceRefreshGeneration) {
-        setState(() => _dashboardLoading = false);
-      }
     }
   }
 
@@ -4245,7 +4578,7 @@ ${_truncateDiagnostic(stack, 2200)}
         }
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingTaskWriteIsCurrent(
@@ -4432,7 +4765,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingTaskWriteIsCurrent(
@@ -4601,7 +4934,7 @@ ${_truncateDiagnostic(stack, 2200)}
       if (!_canApplyBackgroundSave(mutationVersion)) return;
       _forgetPendingTaskWrite(task.id);
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (_canApplyBackgroundSave(mutationVersion)) {
         _markDashboardDataMutated();
@@ -4760,7 +5093,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingReminderWriteIsCurrent(
@@ -4837,7 +5170,7 @@ ${_truncateDiagnostic(stack, 2200)}
             .toList();
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingReminderWriteIsCurrent(
@@ -4896,7 +5229,7 @@ ${_truncateDiagnostic(stack, 2200)}
       if (!_canApplyBackgroundSave(mutationVersion)) return;
       _forgetPendingReminderWrite(reminder.id);
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (_canApplyBackgroundSave(mutationVersion)) {
         _markDashboardDataMutated();
@@ -4926,9 +5259,7 @@ ${_truncateDiagnostic(stack, 2200)}
     if (!mounted) return;
     setState(() {
       _noteFolders = _sortedNoteFolders(
-        _noteFolders
-            .where((candidate) => candidate.id != folder.id)
-            .toList(),
+        _noteFolders.where((candidate) => candidate.id != folder.id).toList(),
       );
       _notes = _notes
           .map(
@@ -5295,7 +5626,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingCalendarEventWriteIsCurrent(
@@ -5482,7 +5813,7 @@ ${_truncateDiagnostic(stack, 2200)}
             .toList();
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingCalendarEventWriteIsCurrent(
@@ -5586,7 +5917,7 @@ ${_truncateDiagnostic(stack, 2200)}
       if (!_canApplyBackgroundSave(mutationVersion)) return;
       _forgetPendingCalendarEventWrite(event.id);
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews(showLoading: false));
+      unawaited(_refreshSignedInViews());
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion)) return;
       _markDashboardDataMutated();
@@ -5769,6 +6100,43 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
+  Future<void> _updateCommandCenterLabel(String label) async {
+    if (_busy) return;
+    final normalizedLabel = label.trim().isEmpty
+        ? 'Command Center'
+        : label.trim();
+    final previousUser = _user;
+    setState(() {
+      _busy = true;
+      _error = null;
+      if (previousUser != null) {
+        _user = previousUser.copyWith(commandCenterLabel: normalizedLabel);
+      }
+    });
+    try {
+      final updatedUser = await widget.apiClient.updateMe(
+        commandCenterLabel: normalizedLabel,
+      );
+      if (!mounted) return;
+      _applyUserTheme(updatedUser);
+      setState(() {
+        _user = updatedUser;
+        _busy = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _user = previousUser;
+        _busy = false;
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'update your command center name',
+        );
+      });
+    }
+  }
+
   Future<void> _logout() async {
     if (_busy) return;
     final authGeneration = ++_authGeneration;
@@ -5817,7 +6185,6 @@ ${_truncateDiagnostic(stack, 2200)}
           _busy = false;
           _phase = _AuthPhase.signedOut;
           _loadingStatusText = null;
-          _dashboardLoading = false;
           _clearSignedInState();
           _error = null;
         });
@@ -5960,6 +6327,8 @@ ${_truncateDiagnostic(stack, 2200)}
   Widget build(BuildContext context) {
     final criticalItemCount = _criticalItemCountForToday();
     final showBeanIntroSpotlight = _showBeanIntroSpotlight;
+    final beanResponsePreview = _beanCollapsedResponsePreview;
+    _syncBeanResponsePreviewTimer(beanResponsePreview);
     _scheduleAppIconBadgeSync(criticalItemCount);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: HeyBeanTheme.lightSystemOverlayStyle,
@@ -5993,35 +6362,42 @@ ${_truncateDiagnostic(stack, 2200)}
             Scaffold(
               appBar: AppBar(
                 titleSpacing: 12,
-                title: null,
+                title: _phase == _AuthPhase.signedIn
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _CalendarHeaderButton(
+                            key: const Key('calendar-today-button'),
+                            label: _calendarHeaderDayLabel(DateTime.now()),
+                            icon: null,
+                            horizontalPadding: 10,
+                            verticalPadding: 7,
+                            labelStyle: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                            ),
+                            onTap: _returnToToday,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: _CalendarHeaderButton(
+                              key: const Key('calendar-month-chevron'),
+                              label: _calendarHeaderMonthLabel(DateTime.now()),
+                              icon: Icons.calendar_month_rounded,
+                              horizontalPadding: 10,
+                              verticalPadding: 7,
+                              labelStyle: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
+                              onTap: _openCurrentCalendarMonth,
+                            ),
+                          ),
+                        ],
+                      )
+                    : null,
                 actions: [
                   if (_phase == _AuthPhase.signedIn) ...[
-                    _CalendarHeaderButton(
-                      key: const Key('calendar-today-button'),
-                      label: _calendarHeaderDayLabel(DateTime.now()),
-                      icon: null,
-                      horizontalPadding: 10,
-                      verticalPadding: 7,
-                      labelStyle: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                      onTap: _returnToToday,
-                    ),
-                    const SizedBox(width: 8),
-                    _CalendarHeaderButton(
-                      key: const Key('calendar-month-chevron'),
-                      label: _calendarHeaderMonthLabel(DateTime.now()),
-                      icon: Icons.calendar_month_rounded,
-                      horizontalPadding: 10,
-                      verticalPadding: 7,
-                      labelStyle: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                      onTap: _openCurrentCalendarMonth,
-                    ),
-                    const SizedBox(width: 8),
                     _CriticalTaskBadge(
                       tasks: _criticalTasksForToday(_tasks),
                       reminders: _criticalRemindersForToday(_reminders),
@@ -6040,21 +6416,61 @@ ${_truncateDiagnostic(stack, 2200)}
               ),
               body: SafeArea(child: _bodyWithBetaBanner()),
               bottomNavigationBar: _phase == _AuthPhase.signedIn
-                  ? _HeyBeanBottomMenu(
-                      selected: _selectedDestination,
-                      beanListening: _beanVoiceListening,
-                      beanWorkItems: _beanVisibleWorkItems,
-                      beanWorkStatus: _beanStatusTagLabel,
-                      beanWorkActive: _beanStatusTagVisible,
-                      onSelected: _selectDestination,
-                      onMorePressed: _openMoreMenu,
-                      onBeanLongPressStart: () =>
-                          unawaited(_startBeanVoiceDraft()),
-                      onBeanLongPressEnd: () =>
-                          unawaited(_finishBeanVoiceDraft()),
+                  ? _SignedInBottomDock(
+                      showComposer:
+                          _selectedDestination == _HomeDestination.bean,
+                      composer: _DockedBeanChatComposer(
+                        controller: _chatInputController,
+                        focusNode: _chatInputFocusNode,
+                        busy: _beanStopAvailable,
+                        listening: _beanVoiceListening,
+                        voiceDraft: _beanVoiceDraft,
+                        onChanged: _updateBeanVoiceDraft,
+                        onSend: () => unawaited(_sendChatInputDraft()),
+                        onStop: _stopAgent,
+                      ),
+                      menu: _HeyBeanBottomMenu(
+                        selected: _selectedDestination,
+                        beanListening: _beanVoiceListening,
+                        beanWorkItems: _beanVisibleWorkItems,
+                        beanWorkStatus: _beanStatusTagLabel,
+                        beanWorkActive: _beanStatusTagVisible,
+                        statusLift:
+                            _selectedDestination == _HomeDestination.bean
+                            ? _beanChatComposerReservedHeight
+                            : 0,
+                        onSelected: _selectDestination,
+                        onMorePressed: _openMoreMenu,
+                        onBeanLongPressStart: () =>
+                            unawaited(_startBeanVoiceDraft()),
+                        onBeanLongPressEnd: () =>
+                            unawaited(_finishBeanVoiceDraft()),
+                      ),
                     )
                   : null,
             ),
+            if (beanResponsePreview != null)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom:
+                    86 +
+                    (MediaQuery.paddingOf(context).bottom > 0
+                        ? MediaQuery.paddingOf(context).bottom + 2
+                        : 6) +
+                    (_selectedDestination == _HomeDestination.bean
+                        ? _beanChatComposerReservedHeight
+                        : 0),
+                child: Center(
+                  child: _BeanResponsePreviewTag(
+                    key: const Key('bean-collapsed-response-tag'),
+                    text: beanResponsePreview.text,
+                    onHoldStart: _holdBeanResponsePreview,
+                    onHoldEnd: _releaseBeanResponsePreview,
+                    onDismissed: _dismissBeanResponsePreview,
+                  ),
+                ),
+              ),
             if (showBeanIntroSpotlight)
               _BeanIntroSpotlightOverlay(
                 onBeanTap: () => _selectDestination(_HomeDestination.bean),
@@ -6126,12 +6542,17 @@ ${_truncateDiagnostic(stack, 2200)}
     final editingAgentPreferences = _editingAgentPreferences;
     final dueReminder = _dueReminderBanner();
     final signedInContent = _signedInContent(user);
+    final beanScreenSelected = _selectedDestination == _HomeDestination.bean;
     final usesFullHeightSurface =
-        _selectedDestination == _HomeDestination.bean ||
-        _selectedDestination == _HomeDestination.notes;
+        beanScreenSelected || _selectedDestination == _HomeDestination.notes;
     final signedInSurface = usesFullHeightSurface
         ? Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              8,
+              20,
+              beanScreenSelected ? 8 : 12,
+            ),
             child: signedInContent,
           )
         : RefreshIndicator(
@@ -6147,10 +6568,6 @@ ${_truncateDiagnostic(stack, 2200)}
     return Stack(
       children: [
         signedInSurface,
-        if (_dashboardLoading)
-          const Positioned.fill(
-            child: IgnorePointer(child: _SignedInLoadingIndicator()),
-          ),
         if (dueReminder != null)
           Positioned(
             key: const Key('due-reminder-banner'),
@@ -6235,6 +6652,13 @@ ${_truncateDiagnostic(stack, 2200)}
     messages: _messages,
     busy: _busy,
     chatRunState: _chatRunState,
+    chatInputController: _chatInputController,
+    chatInputFocusNode: _chatInputFocusNode,
+    onChatMessageCopied: _copyChatMessage,
+    onChatMessageEdited: _beginEditingChatMessage,
+    beanChatCollapsed: _beanChatCollapsed,
+    onBeanChatCollapsedChanged: (collapsed) =>
+        setState(() => _beanChatCollapsed = collapsed),
     error: _error,
     selectedDestination: _selectedDestination,
     selectedCalendarDay: _selectedCalendarDay,
@@ -6251,12 +6675,6 @@ ${_truncateDiagnostic(stack, 2200)}
     onCalendarStartHourChanged: _setCalendarStartHour,
     onCalendarEndHourChanged: _setCalendarEndHour,
     onSelectDestination: _selectDestination,
-    onSend: _sendChat,
-    onStop: _stopAgent,
-    onNewChatSession: _startNewChatSession,
-    beanVoiceListening: _beanVoiceListening,
-    beanVoiceDraft: _beanVoiceDraft,
-    onBeanVoiceDraftChanged: _updateBeanVoiceDraft,
     onTaskCompleted: _toggleTaskCompletion,
     pendingTaskIds: const <int>{},
     onTaskSaved: _createOrUpdateTask,
@@ -6282,6 +6700,7 @@ ${_truncateDiagnostic(stack, 2200)}
     onAccountEmailChanged: _updateAccountEmail,
     onNotificationPreferencesChanged: _updateNotificationPreferences,
     onThemeChanged: _updateTheme,
+    onCommandCenterLabelChanged: _updateCommandCenterLabel,
     launchExternalUrl: widget.launchExternalUrl,
     stripePaymentHandler: widget.stripePaymentHandler,
     onBillingChanged: () =>
@@ -6369,18 +6788,18 @@ class _CreateItemMenu extends StatelessWidget {
           return;
       }
     },
-    itemBuilder: (context) => const [
-      PopupMenuItem<_CreateItemAction>(
+    itemBuilder: (context) => [
+      const PopupMenuItem<_CreateItemAction>(
         key: Key('create-event-action'),
         value: _CreateItemAction.event,
         child: _CreateItemMenuRow(icon: Icons.event_rounded, label: 'Event'),
       ),
-      PopupMenuItem<_CreateItemAction>(
+      const PopupMenuItem<_CreateItemAction>(
         key: Key('create-task-action'),
         value: _CreateItemAction.task,
         child: _CreateItemMenuRow(icon: Icons.task_alt_rounded, label: 'Task'),
       ),
-      PopupMenuItem<_CreateItemAction>(
+      const PopupMenuItem<_CreateItemAction>(
         key: Key('create-reminder-action'),
         value: _CreateItemAction.reminder,
         child: _CreateItemMenuRow(
@@ -6389,9 +6808,15 @@ class _CreateItemMenu extends StatelessWidget {
         ),
       ),
       PopupMenuItem<_CreateItemAction>(
-        key: Key('create-note-action'),
+        key: const Key('create-note-action'),
         value: _CreateItemAction.note,
-        child: _CreateItemMenuRow(icon: Icons.note_add_rounded, label: 'Note'),
+        child: _CreateItemMenuRow(
+          iconWidget: _BeanNotesIcon(
+            size: 18,
+            color: HeyBeanTheme.accentStrong,
+          ),
+          label: 'Note',
+        ),
       ),
     ],
     child: const _ThemedPlusButtonChrome(key: Key('create-item-menu-button')),
@@ -6445,16 +6870,17 @@ class _ThemedPlusButtonChrome extends StatelessWidget {
 }
 
 class _CreateItemMenuRow extends StatelessWidget {
-  const _CreateItemMenuRow({required this.icon, required this.label});
+  const _CreateItemMenuRow({this.icon, this.iconWidget, required this.label});
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? iconWidget;
   final String label;
 
   @override
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
+      iconWidget ?? Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
       const SizedBox(width: 10),
       Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
     ],
@@ -7867,6 +8293,12 @@ class _CommandCenterContent extends StatelessWidget {
     required this.messages,
     required this.busy,
     required this.chatRunState,
+    required this.chatInputController,
+    required this.chatInputFocusNode,
+    required this.onChatMessageCopied,
+    required this.onChatMessageEdited,
+    required this.beanChatCollapsed,
+    required this.onBeanChatCollapsedChanged,
     required this.selectedDestination,
     required this.selectedCalendarDay,
     required this.showCalendarMonth,
@@ -7880,12 +8312,6 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
     required this.onSelectDestination,
-    required this.onSend,
-    required this.onStop,
-    required this.onNewChatSession,
-    required this.beanVoiceListening,
-    required this.beanVoiceDraft,
-    required this.onBeanVoiceDraftChanged,
     required this.onTaskCompleted,
     required this.pendingTaskIds,
     required this.onTaskSaved,
@@ -7911,6 +8337,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onAccountEmailChanged,
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
+    required this.onCommandCenterLabelChanged,
     required this.launchExternalUrl,
     required this.stripePaymentHandler,
     required this.onBillingChanged,
@@ -7937,6 +8364,12 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesMessage> messages;
   final bool busy;
   final String chatRunState;
+  final TextEditingController chatInputController;
+  final FocusNode chatInputFocusNode;
+  final Future<void> Function(HermesMessage message) onChatMessageCopied;
+  final ValueChanged<HermesMessage> onChatMessageEdited;
+  final bool beanChatCollapsed;
+  final ValueChanged<bool> onBeanChatCollapsedChanged;
   final _HomeDestination selectedDestination;
   final DateTime selectedCalendarDay;
   final bool showCalendarMonth;
@@ -7950,12 +8383,6 @@ class _CommandCenterContent extends StatelessWidget {
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
   final ValueChanged<_HomeDestination> onSelectDestination;
-  final Future<void> Function(String content) onSend;
-  final Future<void> Function() onStop;
-  final Future<void> Function() onNewChatSession;
-  final bool beanVoiceListening;
-  final String? beanVoiceDraft;
-  final ValueChanged<String> onBeanVoiceDraftChanged;
   final Future<void> Function(HermesTask task) onTaskCompleted;
   final Set<int> pendingTaskIds;
   final Future<void> Function(
@@ -8090,6 +8517,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(HermesNotificationPreferences preferences)
   onNotificationPreferencesChanged;
   final Future<void> Function(String themeKey) onThemeChanged;
+  final Future<void> Function(String label) onCommandCenterLabelChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final StripePaymentHandler stripePaymentHandler;
   final Future<void> Function() onBillingChanged;
@@ -8109,13 +8537,10 @@ class _CommandCenterContent extends StatelessWidget {
           messages: messages,
           busy: busy,
           runState: chatRunState,
-          events: events,
-          voiceListening: beanVoiceListening,
-          voiceDraft: beanVoiceDraft,
-          onVoiceDraftChanged: onBeanVoiceDraftChanged,
-          onNewSession: onNewChatSession,
-          onSend: onSend,
-          onStop: onStop,
+          inputController: chatInputController,
+          inputFocusNode: chatInputFocusNode,
+          onMessageCopied: onChatMessageCopied,
+          onMessageEdited: onChatMessageEdited,
         );
         final selectedPanel = switch (selectedDestination) {
           _HomeDestination.today => _TodayHomeView(
@@ -8154,7 +8579,14 @@ class _CommandCenterContent extends StatelessWidget {
             workspaces: user.workspaces,
             activeWorkspaceId: user.activeWorkspace?.id,
           ),
-          _HomeDestination.bean => beanPanel,
+          _HomeDestination.bean => _CommandCenterHome(
+            tasks: tasks,
+            reminders: reminders,
+            calendar: calendar,
+            chat: beanPanel,
+            chatCollapsed: beanChatCollapsed,
+            onChatCollapsedChanged: onBeanChatCollapsedChanged,
+          ),
           _HomeDestination.reminders => _ReminderListCard(
             reminders: reminders,
             eventCategories: eventCategories,
@@ -8201,6 +8633,7 @@ class _CommandCenterContent extends StatelessWidget {
             onAccountEmailChanged: onAccountEmailChanged,
             onNotificationPreferencesChanged: onNotificationPreferencesChanged,
             onThemeChanged: onThemeChanged,
+            onCommandCenterLabelChanged: onCommandCenterLabelChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onWorkspacesChanged: onWorkspacesChanged,
             error: error,
@@ -8287,66 +8720,348 @@ class _CommandCenterContent extends StatelessWidget {
   }
 }
 
+class _CommandCenterHome extends StatefulWidget {
+  const _CommandCenterHome({
+    required this.tasks,
+    required this.reminders,
+    required this.calendar,
+    required this.chat,
+    required this.chatCollapsed,
+    required this.onChatCollapsedChanged,
+  });
+
+  final List<HermesTask> tasks;
+  final List<HermesReminder> reminders;
+  final List<HermesCalendarEvent> calendar;
+  final Widget chat;
+  final bool chatCollapsed;
+  final ValueChanged<bool> onChatCollapsedChanged;
+
+  @override
+  State<_CommandCenterHome> createState() => _CommandCenterHomeState();
+}
+
+class _CommandCenterHomeState extends State<_CommandCenterHome> {
+  double? _expandedChatHeight;
+
+  void _toggleChatCollapsed(double fallbackHeight) {
+    if (widget.chatCollapsed) {
+      setState(() {
+        _expandedChatHeight ??= fallbackHeight;
+      });
+      widget.onChatCollapsedChanged(false);
+    } else {
+      widget.onChatCollapsedChanged(true);
+    }
+  }
+
+  void _resizeChat(double deltaY, double currentHeight, double maxHeight) {
+    if (maxHeight <= 0) return;
+    setState(() {
+      _expandedChatHeight = (currentHeight - deltaY).clamp(0.0, maxHeight);
+    });
+    if (widget.chatCollapsed) widget.onChatCollapsedChanged(false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _commandCenterAgendaItems(
+      tasks: widget.tasks,
+      reminders: widget.reminders,
+      calendar: widget.calendar,
+    );
+
+    return LayoutBuilder(
+      key: const Key('command-center-home'),
+      builder: (context, constraints) {
+        final maxChatHeight = math.max(0.0, constraints.maxHeight - 150.0);
+        final minChatHeight = math.min(150.0, maxChatHeight);
+        final fallbackChatHeight = math.min(
+          math.max(220.0, constraints.maxHeight * .34),
+          maxChatHeight,
+        );
+        final expandedChatHeight = (_expandedChatHeight ?? fallbackChatHeight)
+            .clamp(minChatHeight, maxChatHeight)
+            .toDouble();
+        final chatHeight = widget.chatCollapsed ? 0.0 : expandedChatHeight;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: _CommandCenterAgendaList(items: items)),
+            _CommandCenterSplitDivider(
+              collapsed: widget.chatCollapsed,
+              onToggle: () => _toggleChatCollapsed(fallbackChatHeight),
+              onDragUpdate: (details) => _resizeChat(
+                details.delta.dy,
+                expandedChatHeight,
+                maxChatHeight,
+              ),
+            ),
+            if (!widget.chatCollapsed)
+              SizedBox(
+                key: const Key('command-center-chat-panel'),
+                height: chatHeight,
+                child: widget.chat,
+              )
+            else
+              const SizedBox(
+                key: Key('command-center-chat-panel-collapsed'),
+                height: 0,
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CommandCenterSplitDivider extends StatelessWidget {
+  const _CommandCenterSplitDivider({
+    required this.collapsed,
+    required this.onToggle,
+    required this.onDragUpdate,
+  });
+
+  final bool collapsed;
+  final VoidCallback onToggle;
+  final GestureDragUpdateCallback onDragUpdate;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    key: const Key('command-center-chat-resizer'),
+    behavior: HitTestBehavior.opaque,
+    onVerticalDragUpdate: onDragUpdate,
+    child: SizedBox(
+      height: 20,
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              key: const Key('command-center-chat-divider-line'),
+              height: 1,
+              color: HeyBeanTheme.accent,
+            ),
+          ),
+          const SizedBox(width: 4),
+          SizedBox.square(
+            dimension: 20,
+            child: IconButton(
+              key: const Key('command-center-chat-collapse-toggle'),
+              tooltip: collapsed ? 'Expand chat' : 'Collapse chat',
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              onPressed: onToggle,
+              icon: Icon(
+                collapsed
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: HeyBeanTheme.accentStrong,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _CommandCenterAgendaList extends StatelessWidget {
+  const _CommandCenterAgendaList({required this.items});
+
+  final List<_CommandCenterAgendaItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return Container(
+        key: const Key('command-center-agenda-empty'),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface.withValues(alpha: .62),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: HeyBeanTheme.border),
+        ),
+        child: const Text(
+          'Nothing else scheduled for today.',
+          style: TextStyle(
+            color: HeyBeanTheme.muted,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      key: const Key('command-center-agenda-list'),
+      padding: EdgeInsets.zero,
+      itemCount: items.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 6),
+      itemBuilder: (context, index) =>
+          _CommandCenterAgendaRow(item: items[index]),
+    );
+  }
+}
+
+class _CommandCenterAgendaRow extends StatelessWidget {
+  const _CommandCenterAgendaRow({required this.item});
+
+  final _CommandCenterAgendaItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (item.kind) {
+      _CommandCenterAgendaKind.event => HeyBeanTheme.accentStrong,
+      _CommandCenterAgendaKind.task => HeyBeanTheme.warning,
+      _CommandCenterAgendaKind.reminder => const Color(0xFF3B82F6),
+    };
+    final icon = switch (item.kind) {
+      _CommandCenterAgendaKind.event => Icons.event_rounded,
+      _CommandCenterAgendaKind.task => Icons.checklist_rounded,
+      _CommandCenterAgendaKind.reminder => Icons.notifications_rounded,
+    };
+    final kindLabel = switch (item.kind) {
+      _CommandCenterAgendaKind.event => 'Event',
+      _CommandCenterAgendaKind.task => 'Task',
+      _CommandCenterAgendaKind.reminder => 'Reminder',
+    };
+
+    return Container(
+      key: Key('command-center-agenda-${item.key}'),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface.withValues(alpha: .82),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 58,
+            child: Text(
+              item.timeLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: HeyBeanTheme.muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: .12),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Icon(icon, color: color, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                if (item.subtitle.isNotEmpty)
+                  Text(
+                    item.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  )
+                else
+                  Text(
+                    kindLabel,
+                    style: const TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _CommandCenterAgendaKind { event, task, reminder }
+
+class _CommandCenterAgendaItem {
+  const _CommandCenterAgendaItem({
+    required this.key,
+    required this.kind,
+    required this.title,
+    required this.time,
+    required this.timeLabel,
+    this.subtitle = '',
+  });
+
+  final String key;
+  final _CommandCenterAgendaKind kind;
+  final String title;
+  final DateTime time;
+  final String timeLabel;
+  final String subtitle;
+}
+
 class _HeroChatCard extends StatefulWidget {
   const _HeroChatCard({
     required this.messages,
     required this.busy,
     required this.runState,
-    required this.events,
-    required this.voiceListening,
-    required this.voiceDraft,
-    required this.onVoiceDraftChanged,
-    required this.onNewSession,
-    required this.onSend,
-    required this.onStop,
+    required this.inputController,
+    required this.inputFocusNode,
+    required this.onMessageCopied,
+    required this.onMessageEdited,
   });
 
   final List<HermesMessage> messages;
   final bool busy;
   final String runState;
-  final List<HermesActivityEvent> events;
-  final bool voiceListening;
-  final String? voiceDraft;
-  final ValueChanged<String> onVoiceDraftChanged;
-  final Future<void> Function() onNewSession;
-  final Future<void> Function(String content) onSend;
-  final Future<void> Function() onStop;
+  final TextEditingController inputController;
+  final FocusNode inputFocusNode;
+  final Future<void> Function(HermesMessage message) onMessageCopied;
+  final ValueChanged<HermesMessage> onMessageEdited;
 
   @override
   State<_HeroChatCard> createState() => _HeroChatCardState();
 }
 
 class _HeroChatCardState extends State<_HeroChatCard> {
-  final _controller = TextEditingController();
   final _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _syncVoiceDraftToInput();
-  }
-
-  void _syncVoiceDraftToInput() {
-    if (widget.voiceListening &&
-        widget.voiceDraft != null &&
-        widget.voiceDraft != _controller.text) {
-      _controller.text = widget.voiceDraft!;
-      _controller.selection = TextSelection.collapsed(
-        offset: _controller.text.length,
-      );
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
   @override
   void didUpdateWidget(covariant _HeroChatCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _syncVoiceDraftToInput();
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
   @override
   void dispose() {
-    _controller.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -8360,20 +9075,6 @@ class _HeroChatCardState extends State<_HeroChatCard> {
     );
   }
 
-  Future<void> _sendCurrentDraft() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty || widget.busy) return;
-    _controller.clear();
-    await widget.onSend(text);
-  }
-
-  void _editSentMessage(HermesMessage message) {
-    _controller.text = message.content ?? '';
-    _controller.selection = TextSelection.collapsed(
-      offset: _controller.text.length,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return SizedBox.expand(
@@ -8383,31 +9084,9 @@ class _HeroChatCardState extends State<_HeroChatCard> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                key: const Key('chat-top-bar'),
-                children: [
-                  Flexible(child: _ChatRunStatePill(label: widget.runState)),
-                  const Spacer(),
-                  _ChatActivityMenu(events: widget.events),
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    key: const Key('chat-new-session-action'),
-                    onPressed: widget.busy ? null : widget.onNewSession,
-                    icon: const Icon(Icons.add_comment_rounded, size: 18),
-                    label: const Text('/new'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
               Expanded(
                 child: Builder(
                   builder: (context) {
-                    final latestAssistantModelIndex = widget.messages
-                        .lastIndexWhere(
-                          (message) =>
-                              message.role != 'user' &&
-                              message.modelName != null,
-                        );
                     return ListView.builder(
                       key: const Key('chat-message-list'),
                       controller: _scrollController,
@@ -8429,11 +9108,12 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                             sender: isUser ? 'You' : 'Bean',
                             message: message.content ?? '',
                             alignRight: isUser,
-                            modelName: index == latestAssistantModelIndex
-                                ? message.modelName
+                            onCopy: isUser
+                                ? () =>
+                                      unawaited(widget.onMessageCopied(message))
                                 : null,
-                            onEdit: isUser
-                                ? () => _editSentMessage(message)
+                            onEdit: isUser && !widget.busy
+                                ? () => widget.onMessageEdited(message)
                                 : null,
                           ),
                         );
@@ -8441,16 +9121,6 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                     );
                   },
                 ),
-              ),
-              _ChatInputDock(
-                controller: _controller,
-                busy: widget.busy,
-                listening: widget.voiceListening,
-                onChanged: widget.voiceListening
-                    ? widget.onVoiceDraftChanged
-                    : null,
-                onSend: _sendCurrentDraft,
-                onStop: widget.onStop,
               ),
             ],
           ),
@@ -8460,9 +9130,71 @@ class _HeroChatCardState extends State<_HeroChatCard> {
   }
 }
 
+class _DockedBeanChatComposer extends StatefulWidget {
+  const _DockedBeanChatComposer({
+    required this.controller,
+    required this.focusNode,
+    required this.busy,
+    required this.listening,
+    required this.voiceDraft,
+    required this.onChanged,
+    required this.onSend,
+    required this.onStop,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool busy;
+  final bool listening;
+  final String? voiceDraft;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onSend;
+  final Future<void> Function() onStop;
+
+  @override
+  State<_DockedBeanChatComposer> createState() =>
+      _DockedBeanChatComposerState();
+}
+
+class _DockedBeanChatComposerState extends State<_DockedBeanChatComposer> {
+  @override
+  void initState() {
+    super.initState();
+    _syncVoiceDraftToInput();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DockedBeanChatComposer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncVoiceDraftToInput();
+  }
+
+  void _syncVoiceDraftToInput() {
+    if (!widget.listening) return;
+    final draft = widget.voiceDraft;
+    if (draft == null || draft == widget.controller.text) return;
+    widget.controller.text = draft;
+    widget.controller.selection = TextSelection.collapsed(
+      offset: widget.controller.text.length,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => _ChatInputDock(
+    controller: widget.controller,
+    focusNode: widget.focusNode,
+    busy: widget.busy,
+    listening: widget.listening,
+    onChanged: widget.listening ? widget.onChanged : null,
+    onSend: widget.onSend,
+    onStop: widget.onStop,
+  );
+}
+
 class _ChatInputDock extends StatelessWidget {
   const _ChatInputDock({
     required this.controller,
+    required this.focusNode,
     required this.busy,
     required this.listening,
     required this.onSend,
@@ -8471,6 +9203,7 @@ class _ChatInputDock extends StatelessWidget {
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final bool busy;
   final bool listening;
   final VoidCallback onSend;
@@ -8483,7 +9216,10 @@ class _ChatInputDock extends StatelessWidget {
     padding: const EdgeInsets.all(8),
     decoration: BoxDecoration(
       color: HeyBeanTheme.surface,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: const BorderRadius.only(
+        topLeft: Radius.circular(22),
+        topRight: Radius.circular(22),
+      ),
       border: Border.all(
         color: listening ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
         width: listening ? 2 : 1,
@@ -8503,15 +9239,14 @@ class _ChatInputDock extends StatelessWidget {
           child: TextField(
             key: const Key('chat-input'),
             controller: controller,
+            focusNode: focusNode,
             minLines: 1,
             maxLines: 3,
             onChanged: onChanged,
             textInputAction: TextInputAction.send,
             onSubmitted: busy ? null : (_) => onSend(),
             decoration: InputDecoration(
-              hintText: listening
-                  ? 'Listening… speak now or type to correct the transcript'
-                  : 'Message Bean…',
+              hintText: listening ? 'Listening' : 'Message Bean…',
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
@@ -8540,51 +9275,6 @@ class _ChatInputDock extends StatelessWidget {
           ),
       ],
     ),
-  );
-}
-
-class _ChatActivityMenu extends StatelessWidget {
-  const _ChatActivityMenu({required this.events});
-
-  final List<HermesActivityEvent> events;
-
-  @override
-  Widget build(BuildContext context) => PopupMenuButton<void>(
-    key: const Key('chat-activity-menu'),
-    tooltip: 'Activity feed',
-    icon: const Icon(Icons.menu_rounded),
-    itemBuilder: (context) => [
-      PopupMenuItem<void>(
-        enabled: false,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 320, minWidth: 240),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Activity feed',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
-              if (events.isEmpty)
-                const Text(
-                  'No recent activity.',
-                  style: TextStyle(color: HeyBeanTheme.muted),
-                )
-              else
-                for (final event in events.take(6))
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      '${event.eventType} · ${event.status ?? 'updated'}',
-                    ),
-                  ),
-            ],
-          ),
-        ),
-      ),
-    ],
   );
 }
 
@@ -8816,57 +9506,6 @@ String _approvalActionDescription(HermesApproval approval) {
   return 'Bean wants to ${type.replaceAll('.', ' ')}. This action is marked $risk risk.';
 }
 
-class _ChatRunStatePill extends StatelessWidget {
-  const _ChatRunStatePill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final displayLabel = _compactBeanStatusLabel(label);
-    final normalized = displayLabel.toLowerCase();
-    final color =
-        normalized.contains('blocked') || normalized.contains('failed')
-        ? HeyBeanTheme.warning
-        : normalized.contains('working')
-        ? HeyBeanTheme.accentStrong
-        : HeyBeanTheme.muted;
-
-    return Container(
-      key: const Key('chat-run-state'),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: .24)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              displayLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 String _compactBeanStatusLabel(String value) {
   final raw = value.trim();
   if (raw.isEmpty) return 'Ready';
@@ -8951,7 +9590,7 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     this.alignRight = false,
     this.progress = false,
-    this.modelName,
+    this.onCopy,
     this.onEdit,
   });
 
@@ -8959,13 +9598,14 @@ class _MessageBubble extends StatelessWidget {
   final String message;
   final bool alignRight;
   final bool progress;
-  final String? modelName;
+  final VoidCallback? onCopy;
   final VoidCallback? onEdit;
 
   @override
-  Widget build(BuildContext context) => Align(
-    alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
-    child: Container(
+  Widget build(BuildContext context) {
+    final hasActions = onCopy != null || onEdit != null;
+    final bubble = Container(
+      key: alignRight ? const Key('user-message-bubble') : null,
       constraints: const BoxConstraints(maxWidth: 560),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -8987,63 +9627,71 @@ class _MessageBubble extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
               ],
-              if (modelName == null)
-                Text(
-                  sender,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: HeyBeanTheme.accentStrong,
-                    fontWeight: FontWeight.w800,
-                  ),
-                )
-              else
-                Expanded(
-                  child: Text(
-                    sender,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: HeyBeanTheme.accentStrong,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+              Text(
+                sender,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: HeyBeanTheme.accentStrong,
+                  fontWeight: FontWeight.w800,
                 ),
-              if (modelName != null) ...[
-                const SizedBox(width: 10),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 160),
-                  child: Text(
-                    modelName!,
-                    key: const Key('assistant-message-model-label'),
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      color: HeyBeanTheme.muted,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-              if (onEdit != null) ...[
-                const SizedBox(width: 8),
-                InkWell(
-                  key: const Key('chat-edit-sent-message-action'),
-                  onTap: onEdit,
-                  borderRadius: BorderRadius.circular(999),
-                  child: const Padding(
-                    padding: EdgeInsets.all(3),
-                    child: Icon(Icons.edit_outlined, size: 14),
-                  ),
-                ),
-              ],
+              ),
             ],
           ),
           const SizedBox(height: 4),
           Text(message),
         ],
       ),
-    ),
-  );
+    );
+
+    return Align(
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      child: hasActions
+          ? Material(
+              color: Colors.transparent,
+              child: InkWell(
+                key: const Key('sent-message-actions-trigger'),
+                borderRadius: BorderRadius.circular(18),
+                onTap: () => _showSentMessageActions(context),
+                child: bubble,
+              ),
+            )
+          : bubble,
+    );
+  }
+
+  void _showSentMessageActions(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (onCopy != null)
+              ListTile(
+                key: const Key('chat-copy-sent-message-action'),
+                leading: const Icon(Icons.copy_rounded),
+                title: const Text('Copy'),
+                onTap: () {
+                  Navigator.pop(context);
+                  onCopy?.call();
+                },
+              ),
+            if (onEdit != null)
+              ListTile(
+                key: const Key('chat-edit-sent-message-action'),
+                leading: const Icon(Icons.edit_rounded),
+                title: const Text('Edit'),
+                onTap: () {
+                  Navigator.pop(context);
+                  onEdit?.call();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ignore: unused_element
@@ -9238,36 +9886,6 @@ class _ProgressCard extends StatelessWidget {
         Text('$taskCount live tasks loaded'),
         if (error != null) _InlinePlanLimitError(message: error!),
       ],
-    ),
-  );
-}
-
-class _SignedInLoadingIndicator extends StatelessWidget {
-  const _SignedInLoadingIndicator();
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: DecoratedBox(
-      key: const Key('signed-in-loading-indicator'),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface.withValues(alpha: .86),
-        shape: BoxShape.circle,
-        border: Border.all(color: HeyBeanTheme.border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x18000000),
-            blurRadius: 24,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: const Padding(
-        padding: EdgeInsets.all(16),
-        child: SizedBox.square(
-          dimension: 28,
-          child: CircularProgressIndicator(strokeWidth: 3),
-        ),
-      ),
     ),
   );
 }
@@ -9879,14 +10497,14 @@ class _CriticalTaskBadge extends StatelessWidget {
     ],
     child: Container(
       key: const Key('critical-task-count'),
-      width: 36,
-      height: 36,
+      width: 40,
+      height: 40,
       alignment: Alignment.center,
       child: Text(
         '$count',
         style: TextStyle(
           color: HeyBeanTheme.accentStrong,
-          fontSize: 20,
+          fontSize: 24,
           fontWeight: FontWeight.w900,
         ),
       ),
@@ -12763,7 +13381,10 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       _MobileFormSection(
                         title: 'Event details',
                         subtitle: 'Location, description, and status',
-                        icon: Icons.notes_rounded,
+                        iconWidget: _BeanNotesIcon(
+                          size: 18,
+                          color: HeyBeanTheme.accentStrong,
+                        ),
                         children: [
                           TextField(
                             key: const Key('event-location-field'),
@@ -12801,7 +13422,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             decoration: const InputDecoration(
                               labelText: 'Description',
                               hintText: 'Add event description',
-                              prefixIcon: Icon(Icons.notes_rounded),
+                              prefixIcon: _BeanNotesIcon(),
                             ),
                           ),
                         ],
@@ -15726,7 +16347,10 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                             _MobileFormSection(
                               title: 'Details',
                               subtitle: 'Notes and importance',
-                              icon: Icons.notes_rounded,
+                              iconWidget: _BeanNotesIcon(
+                                size: 18,
+                                color: HeyBeanTheme.accentStrong,
+                              ),
                               children: [
                                 TextFormField(
                                   key: const Key('title-time-editor-notes'),
@@ -15736,7 +16360,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                   decoration: const InputDecoration(
                                     labelText: 'Notes',
                                     hintText: 'Add task details',
-                                    prefixIcon: Icon(Icons.notes_rounded),
+                                    prefixIcon: _BeanNotesIcon(),
                                   ),
                                 ),
                               ],
@@ -18831,7 +19455,7 @@ class _NotesViewState extends State<_NotesView> {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.note_rounded, color: HeyBeanTheme.muted, size: 42),
+        const _BeanNotesIcon(color: HeyBeanTheme.muted, size: 42),
         const SizedBox(height: 10),
         const Text('No notes', style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 12),
@@ -19052,7 +19676,12 @@ class _NotesListOptionsSheetState extends State<_NotesListOptionsSheet> {
                 children: [
                   _NotesOptionRow(
                     key: const Key('notes-filter-all'),
-                    icon: Icons.note_rounded,
+                    iconWidget: _BeanNotesIcon(
+                      size: 22,
+                      color: widget.selectedFolder == 'all'
+                          ? HeyBeanTheme.accentStrong
+                          : HeyBeanTheme.muted,
+                    ),
                     label: 'All Notes',
                     count: widget.notes.length,
                     selected: widget.selectedFolder == 'all',
@@ -19191,7 +19820,8 @@ class _NotesOptionsSection extends StatelessWidget {
 class _NotesOptionRow extends StatelessWidget {
   const _NotesOptionRow({
     super.key,
-    required this.icon,
+    this.icon,
+    this.iconWidget,
     required this.label,
     required this.selected,
     required this.onTap,
@@ -19199,7 +19829,8 @@ class _NotesOptionRow extends StatelessWidget {
     this.trailing,
   });
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? iconWidget;
   final String label;
   final int? count;
   final bool selected;
@@ -19219,13 +19850,14 @@ class _NotesOptionRow extends StatelessWidget {
           height: 46,
           child: Row(
             children: [
-              Icon(
-                icon,
-                color: selected
-                    ? HeyBeanTheme.accentStrong
-                    : HeyBeanTheme.muted,
-                size: 22,
-              ),
+              iconWidget ??
+                  Icon(
+                    icon,
+                    color: selected
+                        ? HeyBeanTheme.accentStrong
+                        : HeyBeanTheme.muted,
+                    size: 22,
+                  ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
@@ -20110,6 +20742,7 @@ class _SettingsView extends StatelessWidget {
     required this.onAccountEmailChanged,
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
+    required this.onCommandCenterLabelChanged,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
     this.error,
@@ -20131,6 +20764,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(HermesNotificationPreferences preferences)
   onNotificationPreferencesChanged;
   final Future<void> Function(String themeKey) onThemeChanged;
+  final Future<void> Function(String label) onCommandCenterLabelChanged;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
@@ -20180,7 +20814,9 @@ class _SettingsView extends StatelessWidget {
             ),
             _ThemePreferencesCard(
               selectedThemeKey: user.theme,
+              commandCenterLabel: user.commandCenterLabel,
               onChanged: onThemeChanged,
+              onCommandCenterLabelChanged: onCommandCenterLabelChanged,
             ),
             _NotificationPreferencesCard(
               preferences: user.notificationPreferences,
@@ -20817,11 +21453,15 @@ class _PlanManagementTile extends StatelessWidget {
 class _ThemePreferencesCard extends StatefulWidget {
   const _ThemePreferencesCard({
     required this.selectedThemeKey,
+    required this.commandCenterLabel,
     required this.onChanged,
+    required this.onCommandCenterLabelChanged,
   });
 
   final String selectedThemeKey;
+  final String commandCenterLabel;
   final Future<void> Function(String themeKey) onChanged;
+  final Future<void> Function(String label) onCommandCenterLabelChanged;
 
   @override
   State<_ThemePreferencesCard> createState() => _ThemePreferencesCardState();
@@ -20829,13 +21469,18 @@ class _ThemePreferencesCard extends StatefulWidget {
 
 class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
   late String _selectedThemeKey;
+  late final TextEditingController _commandCenterLabelController;
   bool _saving = false;
   bool _expanded = false;
+  bool _savingLabel = false;
 
   @override
   void initState() {
     super.initState();
     _selectedThemeKey = heyBeanColorThemeForKey(widget.selectedThemeKey).key;
+    _commandCenterLabelController = TextEditingController(
+      text: widget.commandCenterLabel,
+    );
   }
 
   @override
@@ -20844,6 +21489,17 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
     if (!_saving) {
       _selectedThemeKey = heyBeanColorThemeForKey(widget.selectedThemeKey).key;
     }
+    if (!_savingLabel &&
+        oldWidget.commandCenterLabel != widget.commandCenterLabel &&
+        _commandCenterLabelController.text != widget.commandCenterLabel) {
+      _commandCenterLabelController.text = widget.commandCenterLabel;
+    }
+  }
+
+  @override
+  void dispose() {
+    _commandCenterLabelController.dispose();
+    super.dispose();
   }
 
   Future<void> _save(String themeKey) async {
@@ -20857,6 +21513,23 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
       await widget.onChanged(normalizedThemeKey);
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _saveCommandCenterLabel() async {
+    if (_savingLabel) return;
+    final label = _commandCenterLabelController.text.trim().isEmpty
+        ? 'Command Center'
+        : _commandCenterLabelController.text.trim();
+    if (label == widget.commandCenterLabel) return;
+    setState(() {
+      _savingLabel = true;
+      _commandCenterLabelController.text = label;
+    });
+    try {
+      await widget.onCommandCenterLabelChanged(label);
+    } finally {
+      if (mounted) setState(() => _savingLabel = false);
     }
   }
 
@@ -20899,7 +21572,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${selectedTheme.label} accent',
+                            '${selectedTheme.label} accent · ${widget.commandCenterLabel}',
                             style: const TextStyle(
                               color: HeyBeanTheme.muted,
                               fontSize: 12,
@@ -20973,6 +21646,34 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                           onTap: () => _save(theme.key),
                         ),
                     ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    key: const Key('command-center-label-field'),
+                    controller: _commandCenterLabelController,
+                    enabled: !_savingLabel,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => unawaited(_saveCommandCenterLabel()),
+                    decoration: const InputDecoration(
+                      labelText: 'Command Center name',
+                      hintText: 'Command Center',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      key: const Key('command-center-label-save'),
+                      onPressed: _savingLabel
+                          ? null
+                          : () => unawaited(_saveCommandCenterLabel()),
+                      child: _savingLabel
+                          ? const SizedBox.square(
+                              dimension: 17,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Save'),
+                    ),
                   ),
                 ],
               ),
@@ -23290,6 +23991,90 @@ DateTime? _parseTaskDueDate(HermesTask task) {
   return DateTime.tryParse(dueAt)?.toLocal();
 }
 
+List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
+  required List<HermesTask> tasks,
+  required List<HermesReminder> reminders,
+  required List<HermesCalendarEvent> calendar,
+}) {
+  final now = DateTime.now();
+  final today = _dateOnly(now);
+  final endOfToday = today.add(const Duration(days: 1));
+  final items = <_CommandCenterAgendaItem>[];
+
+  for (final event in calendar) {
+    if (!_eventFallsOnDay(event, today)) continue;
+    final start = _parseCalendarEventDateTime(event.startsAt);
+    final end =
+        _parseCalendarEventDateTime(event.endsAt, event.startsAt) ?? start;
+    if (start == null) continue;
+    if (!_eventIsAllDay(event) && end != null && end.isBefore(now)) continue;
+    final allDay = _eventIsAllDay(event);
+    final displayTime = allDay
+        ? today
+        : start.isBefore(now) && end != null && end.isAfter(now)
+        ? now
+        : start;
+    items.add(
+      _CommandCenterAgendaItem(
+        key: 'event-${event.id}',
+        kind: _CommandCenterAgendaKind.event,
+        title: event.title,
+        time: displayTime,
+        timeLabel: allDay ? 'All day' : _eventTimeRangeShort(event),
+        subtitle: (event.location ?? '').trim(),
+      ),
+    );
+  }
+
+  for (final task in tasks) {
+    if (_taskIsCompleted(task) || _taskIsSubtask(task)) continue;
+    final due = _parseTaskDueDate(task);
+    if (due == null || !_sameCalendarDay(due, today)) continue;
+    final dateOnly = _wireValueLooksDateOnly(task.dueAt);
+    if (!dateOnly && due.isBefore(now)) continue;
+    items.add(
+      _CommandCenterAgendaItem(
+        key: 'task-${task.id}',
+        kind: _CommandCenterAgendaKind.task,
+        title: task.title,
+        time: dateOnly ? endOfToday.subtract(const Duration(minutes: 1)) : due,
+        timeLabel: dateOnly ? 'Today' : _naturalTimeLabel(due),
+        subtitle: (task.category ?? '').trim(),
+      ),
+    );
+  }
+
+  for (final reminder in reminders) {
+    if (_reminderIsCompleted(reminder)) continue;
+    final due = _parseReminderDueDate(reminder);
+    if (due == null || !_sameCalendarDay(due, today)) continue;
+    final dateOnly = _wireValueLooksDateOnly(reminder.dueAt);
+    if (!dateOnly && due.isBefore(now)) continue;
+    items.add(
+      _CommandCenterAgendaItem(
+        key: 'reminder-${reminder.id}',
+        kind: _CommandCenterAgendaKind.reminder,
+        title: reminder.title,
+        time: dateOnly ? endOfToday.subtract(const Duration(minutes: 1)) : due,
+        timeLabel: dateOnly ? 'Today' : _naturalTimeLabel(due),
+        subtitle: (reminder.category ?? '').trim(),
+      ),
+    );
+  }
+
+  items.sort((a, b) {
+    final timeCompare = a.time.compareTo(b.time);
+    if (timeCompare != 0) return timeCompare;
+    final kindCompare = a.kind.index.compareTo(b.kind.index);
+    if (kindCompare != 0) return kindCompare;
+    return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+  });
+  return items;
+}
+
+bool _wireValueLooksDateOnly(String? value) =>
+    value != null && RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value.trim());
+
 class _DeleteAccountConfirmationDialog extends StatefulWidget {
   const _DeleteAccountConfirmationDialog();
 
@@ -23685,6 +24470,7 @@ class _MobileFormSection extends StatelessWidget {
     required this.children,
     this.subtitle,
     this.icon,
+    this.iconWidget,
     this.infoKey,
     this.infoTitle,
     this.infoBullets = const [],
@@ -23694,6 +24480,7 @@ class _MobileFormSection extends StatelessWidget {
   final String title;
   final String? subtitle;
   final IconData? icon;
+  final Widget? iconWidget;
   final Key? infoKey;
   final String? infoTitle;
   final List<String> infoBullets;
@@ -23720,8 +24507,9 @@ class _MobileFormSection extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (icon != null) ...[
-              Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
+            if (iconWidget != null || icon != null) ...[
+              iconWidget ??
+                  Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
               const SizedBox(width: 8),
             ],
             Expanded(
@@ -24618,6 +25406,48 @@ class _BeanIntroArrowPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+class _SignedInBottomDock extends StatelessWidget {
+  const _SignedInBottomDock({
+    required this.showComposer,
+    required this.composer,
+    required this.menu,
+  });
+
+  final bool showComposer;
+  final Widget composer;
+  final Widget menu;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!showComposer) return menu;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final dockBottomPadding = bottomInset > 0 ? bottomInset + 2 : 6.0;
+    final menuHeight = 78.0 + dockBottomPadding;
+
+    return SizedBox(
+      key: const Key('signed-in-bottom-dock'),
+      height:
+          _beanChatComposerReservedHeight +
+          menuHeight -
+          _beanBottomMenuSurfaceInset,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(left: 0, right: 0, bottom: 0, child: menu),
+          Positioned(
+            key: const Key('bean-chat-composer-dock'),
+            left: 0,
+            right: 0,
+            top: 0,
+            height: _beanChatComposerReservedHeight,
+            child: Align(alignment: Alignment.bottomCenter, child: composer),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HeyBeanBottomMenu extends StatelessWidget {
   const _HeyBeanBottomMenu({
     required this.selected,
@@ -24626,6 +25456,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.beanWorkItems,
     required this.beanWorkStatus,
     required this.beanWorkActive,
+    this.statusLift = 0,
     required this.onMorePressed,
     required this.onBeanLongPressStart,
     required this.onBeanLongPressEnd,
@@ -24637,6 +25468,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   final List<_BeanWorkItem> beanWorkItems;
   final String beanWorkStatus;
   final bool beanWorkActive;
+  final double statusLift;
   final VoidCallback onMorePressed;
   final VoidCallback onBeanLongPressStart;
   final VoidCallback onBeanLongPressEnd;
@@ -24654,7 +25486,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Positioned.fill(
-            top: 22,
+            top: _beanBottomMenuSurfaceInset,
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: HeyBeanTheme.surface.withValues(alpha: .94),
@@ -24695,7 +25527,12 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                     Expanded(
                       child: _MenuIconButton(
                         key: const Key('nav-notes'),
-                        icon: Icons.note_rounded,
+                        iconWidget: _BeanNotesIcon(
+                          size: 24,
+                          color: selected == _HomeDestination.notes
+                              ? HeyBeanTheme.accentStrong
+                              : HeyBeanTheme.muted,
+                        ),
                         label: 'Notes',
                         selected: selected == _HomeDestination.notes,
                         onPressed: () => onSelected(_HomeDestination.notes),
@@ -24718,7 +25555,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             ),
           ),
           Positioned(
-            top: 7,
+            top: 9,
             child: _BeanFab(
               selected: selected == _HomeDestination.bean,
               listening: beanListening,
@@ -24728,7 +25565,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             ),
           ),
           Positioned(
-            bottom: 86 + dockBottomPadding,
+            bottom: 86 + dockBottomPadding + statusLift,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
               switchInCurve: Curves.easeOut,
@@ -24880,16 +25717,170 @@ class _BeanWorkStatusTag extends StatelessWidget {
   }
 }
 
+class _BeanResponsePreviewTag extends StatefulWidget {
+  const _BeanResponsePreviewTag({
+    super.key,
+    required this.text,
+    this.onHoldStart,
+    this.onHoldEnd,
+    this.onDismissed,
+  });
+
+  final String text;
+  final VoidCallback? onHoldStart;
+  final VoidCallback? onHoldEnd;
+  final VoidCallback? onDismissed;
+
+  @override
+  State<_BeanResponsePreviewTag> createState() =>
+      _BeanResponsePreviewTagState();
+}
+
+class _BeanResponsePreviewTagState extends State<_BeanResponsePreviewTag> {
+  static const double _dismissDistance = 48;
+  Offset _dragOffset = Offset.zero;
+  bool _dismissed = false;
+
+  void _holdStart() => widget.onHoldStart?.call();
+
+  void _holdEnd() {
+    if (!_dismissed) widget.onHoldEnd?.call();
+  }
+
+  void _dismiss() {
+    if (_dismissed) return;
+    _dismissed = true;
+    widget.onDismissed?.call();
+  }
+
+  bool _shouldDismiss(DragEndDetails details) {
+    final velocity = details.velocity.pixelsPerSecond;
+    return _dragOffset.dx.abs() >= _dismissDistance ||
+        _dragOffset.dy >= _dismissDistance ||
+        velocity.dx.abs() >= 450 ||
+        velocity.dy >= 450;
+  }
+
+  @override
+  Widget build(BuildContext context) => Listener(
+    onPointerDown: (_) => _holdStart(),
+    onPointerUp: (_) => _holdEnd(),
+    onPointerCancel: (_) => _holdEnd(),
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanStart: (_) => _holdStart(),
+      onPanUpdate: (details) {
+        setState(() {
+          _dragOffset += details.delta;
+          if (_dragOffset.dy < 0) {
+            _dragOffset = Offset(_dragOffset.dx, 0);
+          }
+        });
+      },
+      onPanEnd: (details) {
+        if (_shouldDismiss(details)) {
+          _dismiss();
+          return;
+        }
+        setState(() => _dragOffset = Offset.zero);
+        _holdEnd();
+      },
+      onPanCancel: () {
+        setState(() => _dragOffset = Offset.zero);
+        _holdEnd();
+      },
+      child: AnimatedSlide(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        offset: Offset(_dragOffset.dx / 240, _dragOffset.dy / 160),
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 140),
+          opacity: (1 - (_dragOffset.distance / 160)).clamp(.45, 1.0),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: math.min(MediaQuery.sizeOf(context).width - 32, 360.0),
+            ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: HeyBeanTheme.surface.withValues(alpha: .97),
+                border: Border.all(
+                  color: HeyBeanTheme.accent.withValues(alpha: .34),
+                ),
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: HeyBeanTheme.accent.withValues(alpha: .22),
+                    blurRadius: 30,
+                    offset: const Offset(0, 12),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: .10),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      margin: const EdgeInsets.only(top: 5),
+                      decoration: BoxDecoration(
+                        color: HeyBeanTheme.accentStrong,
+                        borderRadius: BorderRadius.circular(999),
+                        boxShadow: [
+                          BoxShadow(
+                            color: HeyBeanTheme.accent.withValues(alpha: .45),
+                            blurRadius: 12,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 9),
+                    Flexible(
+                      child: Text(
+                        widget.text,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: HeyBeanTheme.text,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class _MenuIconButton extends StatelessWidget {
   const _MenuIconButton({
     super.key,
-    required this.icon,
+    this.icon,
+    this.iconWidget,
     required this.label,
     required this.onPressed,
     this.selected = false,
   });
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? iconWidget;
   final String label;
   final VoidCallback onPressed;
   final bool selected;
@@ -24906,11 +25897,14 @@ class _MenuIconButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              color: selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
-              size: 20,
-            ),
+            iconWidget ??
+                Icon(
+                  icon,
+                  color: selected
+                      ? HeyBeanTheme.accentStrong
+                      : HeyBeanTheme.muted,
+                  size: 24,
+                ),
             const SizedBox(height: 3),
             Text(
               label,
@@ -25049,8 +26043,8 @@ class _BeanFabState extends State<_BeanFab>
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
                   key: const Key('heybean-center-bean-button'),
-                  width: 72,
-                  height: 72,
+                  width: 64,
+                  height: 64,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: HeyBeanTheme.surface,
@@ -25058,7 +26052,7 @@ class _BeanFabState extends State<_BeanFab>
                       color: widget.listening || widget.selected
                           ? activeColor
                           : const Color(0xFFE2E8F0),
-                      width: widget.listening ? 5 : 3,
+                      width: widget.listening ? 4 : 2.5,
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -25075,8 +26069,8 @@ class _BeanFabState extends State<_BeanFab>
                     child: Image.asset(
                       'assets/images/bean/bean-logo.png',
                       key: const Key('heybean-center-bean-logo'),
-                      width: 42,
-                      height: 42,
+                      width: 38,
+                      height: 38,
                       fit: BoxFit.contain,
                       semanticLabel: 'Bean chat',
                     ),

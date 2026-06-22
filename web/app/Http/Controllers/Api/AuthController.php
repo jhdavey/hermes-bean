@@ -165,6 +165,7 @@ class AuthController extends Controller
             'onboarding_priorities.*' => ['string', 'max:80'],
             'onboarding_context' => ['sometimes', 'nullable', 'string', 'max:500'],
             'theme' => ['sometimes', 'string', Rule::in(self::THEME_KEYS)],
+            'command_center_label' => ['sometimes', 'required', 'string', 'max:80'],
             'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
             'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
             'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
@@ -180,7 +181,7 @@ class AuthController extends Controller
         $homeCityData = array_key_exists('home_city', $data) ? ['home_city' => $data['home_city']] : [];
         $profileData = collect($data)->only($profileKeys)->all();
         $ttsData = collect($data)->only($ttsKeys)->all();
-        $userData = collect($data)->only(['name', 'email', 'theme'])->all();
+        $userData = collect($data)->only(['name', 'email', 'theme', 'command_center_label'])->all();
         if (array_key_exists('notification_preferences', $data)) {
             $planLimits = app(PlanLimitService::class);
             if (($data['notification_preferences']['reminder_email'] ?? false) && ! $planLimits->canUseEmailReminders($user)) {

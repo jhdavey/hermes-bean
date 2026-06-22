@@ -212,6 +212,7 @@ class HermesApiClient {
     String? name,
     String? email,
     String? theme,
+    String? commandCenterLabel,
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
@@ -224,6 +225,8 @@ class HermesApiClient {
         if (name != null) 'name': name,
         if (email != null) 'email': email,
         if (theme != null) 'theme': theme,
+        if (commandCenterLabel != null)
+          'command_center_label': commandCenterLabel,
         if (agentPersonality != null) 'agent_personality': agentPersonality,
         if (onboardingPriorities != null)
           'onboarding_priorities': onboardingPriorities,
@@ -1059,6 +1062,24 @@ class HermesApiClient {
     return HermesMessageResult.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesMessageResult> branchMessage({
+    required int sessionId,
+    required int messageId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    final body = <String, Object?>{'content': content};
+    if (metadata != null) body['metadata'] = metadata;
+
+    final data = await _sendJson(
+      'POST',
+      '/assistant/sessions/$sessionId/messages/$messageId/branch',
+      body: body,
+      responseTimeout: _assistantApiResponseTimeout,
+    );
+    return HermesMessageResult.fromJson(_expectMap(data['data']));
+  }
+
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
@@ -1634,6 +1655,7 @@ class HermesUser {
     this.subscriptionStatus,
     this.subscriptionTrialEndsAt,
     this.theme = 'green',
+    this.commandCenterLabel = 'Command Center',
     this.onboardComplete = false,
     this.agentProfile,
     this.defaultWorkspaceId,
@@ -1656,6 +1678,7 @@ class HermesUser {
   final String? subscriptionStatus;
   final String? subscriptionTrialEndsAt;
   final String theme;
+  final String commandCenterLabel;
   final bool onboardComplete;
   final HermesAgentProfile? agentProfile;
   final int? defaultWorkspaceId;
@@ -1680,6 +1703,7 @@ class HermesUser {
     String? subscriptionStatus,
     String? subscriptionTrialEndsAt,
     String? theme,
+    String? commandCenterLabel,
     bool? onboardComplete,
     HermesAgentProfile? agentProfile,
     int? defaultWorkspaceId,
@@ -1702,6 +1726,7 @@ class HermesUser {
     subscriptionTrialEndsAt:
         subscriptionTrialEndsAt ?? this.subscriptionTrialEndsAt,
     theme: theme ?? this.theme,
+    commandCenterLabel: commandCenterLabel ?? this.commandCenterLabel,
     onboardComplete: onboardComplete ?? this.onboardComplete,
     agentProfile: agentProfile ?? this.agentProfile,
     defaultWorkspaceId: defaultWorkspaceId ?? this.defaultWorkspaceId,
@@ -1733,6 +1758,10 @@ class HermesUser {
         (json['subscription_trial_ends_at'] ?? json['subscriptionTrialEndsAt'])
             ?.toString(),
     theme: _readStringOrDefault(json['theme'], 'green'),
+    commandCenterLabel: _readStringOrDefault(
+      json['command_center_label'] ?? json['commandCenterLabel'],
+      'Command Center',
+    ),
     onboardComplete: json['onboard_complete'] == true,
     agentProfile: json['agent_profile'] is Map<String, Object?>
         ? HermesAgentProfile.fromJson(_expectMap(json['agent_profile']))
