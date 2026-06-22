@@ -72,7 +72,7 @@ if (mount) {
             features: [
                 'Unlimited workspaces and connected accounts',
                 'Highest Bean usage and external tool budget',
-                'Full memory, priority background work, priority support',
+                "Full Bean's Knowledge, priority background work, priority support",
             ],
         },
     };
@@ -90,6 +90,7 @@ if (mount) {
         checkCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.5 11 14.5 15.5 9.5"/><circle cx="12" cy="12" r="9"/></svg>',
         send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>',
         stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+        copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>',
         edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>',
         user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>',
         palette: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a10 10 0 1 1 8.8-5.2 2.7 2.7 0 0 1-2.4 1.4h-1.3a2 2 0 0 0-1.7 3.1c.1.2 0 .5-.3.6a10.7 10.7 0 0 1-3.1.1Z"/><circle cx="7.5" cy="10" r="1"/><circle cx="10.5" cy="6.5" r="1"/><circle cx="15" cy="7.5" r="1"/><circle cx="16.5" cy="12" r="1"/></svg>',
@@ -174,6 +175,7 @@ if (mount) {
         chatSessions: [],
         chatHistoryOpen: false,
         chatRunState: 'Ready',
+        editingChatMessageId: '',
         beanWorkItems: [],
         voiceListening: false,
         voiceRecognition: null,
@@ -1871,14 +1873,14 @@ if (mount) {
         const summaries = normalizeList(state.memorySummaries).slice(0, 4);
         const history = normalizeList(state.memoryHistory).slice(0, 10);
         return `
-            <section class="hb-memory-app" aria-label="Bean Memory">
+            <section class="hb-memory-app" aria-label="Bean's Knowledge">
                 <header class="hb-memory-hero">
                     <div>
-                        <span class="hb-memory-kicker">${icons.memory}<span>Bean Memory</span></span>
+                        <span class="hb-memory-kicker">${icons.memory}<span>Bean's Knowledge</span></span>
                         <h1>What Bean knows about this workspace</h1>
                         <p>Review durable facts, preferences, project context, and recent recall without loading your whole history into every response.</p>
                     </div>
-                    <div class="hb-memory-stats" aria-label="Memory health">
+                    <div class="hb-memory-stats" aria-label="Knowledge health">
                         <span><strong>${activeCount}</strong><small>active</small></span>
                         <span><strong>${highConfidence}</strong><small>verified</small></span>
                         <span><strong>${summaries.length}</strong><small>summaries</small></span>
@@ -1887,14 +1889,14 @@ if (mount) {
                 <div class="hb-memory-grid">
                     <aside class="hb-memory-side">
                         <form class="hb-memory-new" data-memory-create-form>
-                            <strong>Add memory</strong>
+                            <strong>Add knowledge</strong>
                             <label>Type
                                 <select class="hb-select" name="type">${memoryTypeOptions('fact')}</select>
                             </label>
-                            <label>Memory
-                                <textarea class="hb-textarea" name="content" rows="4" placeholder="Bean should remember..."></textarea>
+                            <label>Knowledge
+                                <textarea class="hb-textarea" name="content" rows="4" placeholder="Bean should know..."></textarea>
                             </label>
-                            <button class="hb-button" type="submit" ${state.memorySaving ? 'disabled' : ''}>${state.memorySaving ? 'Saving...' : 'Remember'}</button>
+                            <button class="hb-button" type="submit" ${state.memorySaving ? 'disabled' : ''}>${state.memorySaving ? 'Saving...' : 'Save'}</button>
                         </form>
                         <section class="hb-memory-panel">
                             <strong>Recent recall</strong>
@@ -1903,7 +1905,7 @@ if (mount) {
                     </aside>
                     <main class="hb-memory-main">
                         <div class="hb-memory-toolbar">
-                            <input class="hb-input" type="search" data-memory-search placeholder="Search memory" value="${escapeAttr(state.memorySearch)}">
+                            <input class="hb-input" type="search" data-memory-search placeholder="Search knowledge" value="${escapeAttr(state.memorySearch)}">
                             <select class="hb-select" data-memory-type-filter>
                                 <option value="">All types</option>
                                 ${memoryTypeOptions(state.memoryTypeFilter)}
@@ -1911,7 +1913,7 @@ if (mount) {
                             <button class="hb-button-secondary" type="button" data-refresh-memory>Refresh</button>
                         </div>
                         <div class="hb-memory-list">
-                            ${items.length ? items.map(memoryItemMarkup).join('') : '<div class="hb-memory-empty">No matching memories yet.</div>'}
+                            ${items.length ? items.map(memoryItemMarkup).join('') : '<div class="hb-memory-empty">No matching knowledge yet.</div>'}
                         </div>
                         <section class="hb-memory-summaries">
                             <h2>Summaries</h2>
@@ -2521,6 +2523,11 @@ if (mount) {
         cancelBeanWorkStatusClear();
         stopBeanWorkEventPolling();
         beanWorkEventFloorId = maxActivityEventId(state.activity);
+        if (!label) {
+            state.beanWorkItems = [];
+            refreshBeanStatusTag();
+            return;
+        }
         state.beanWorkItems = [{ id: `turn-${Date.now()}`, label, status }];
         refreshBeanStatusTag();
     }
@@ -2701,7 +2708,7 @@ if (mount) {
         const targetsNote = /\b(?:note|notes|folder|folders|list|lists)\b/.test(command);
         const targetsMemory = /\b(?:remember|memory|forget|knows about me|preferences?)\b/.test(command);
         if (/\b(?:delete|remove|cancel)\b/.test(command)) {
-            if (targetsMemory) return 'Forgetting memory';
+            if (targetsMemory) return 'Forgetting knowledge';
             if (targetsEvent) return 'Deleting event';
             if (targetsReminder) return 'Deleting reminder';
             if (targetsTask) return 'Deleting task';
@@ -2709,7 +2716,7 @@ if (mount) {
             return 'Deleting item';
         }
         if (/\b(?:move|reschedule|update|change)\b/.test(command)) {
-            if (targetsMemory) return 'Updating memory';
+            if (targetsMemory) return 'Updating knowledge';
             if (targetsEvent) return 'Updating event';
             if (targetsReminder) return 'Updating reminder';
             if (targetsTask) return 'Updating task';
@@ -2717,7 +2724,7 @@ if (mount) {
             return 'Updating item';
         }
         if (/\b(?:add|create|put|schedule|write|save)\b/.test(command)) {
-            if (targetsMemory) return 'Saving memory';
+            if (targetsMemory) return 'Saving knowledge';
             if (targetsEvent) return 'Creating event';
             if (targetsReminder) return 'Creating reminder';
             if (targetsTask) return 'Creating task';
@@ -2729,7 +2736,7 @@ if (mount) {
             if (targetsReminder) return 'Updating reminder';
             return 'Updating item';
         }
-        if (targetsMemory) return 'Saving memory';
+        if (targetsMemory) return 'Saving knowledge';
         if (/\b(?:plan|organize|prioritize)\b/.test(command)) return 'Planning request';
         return 'Working on request';
     }
@@ -2781,12 +2788,12 @@ if (mount) {
         if (type.includes('.note_folder.created')) return `Create folder${readable}`;
         if (type.includes('.note_folder.updated')) return `Update folder${readable}`;
         if (type.includes('.note_folder.deleted')) return `Delete folder${readable}`;
-        if (type.includes('.memory.created')) return `Save memory${readable}`;
-        if (type.includes('.memory.updated')) return `Update memory${readable}`;
-        if (type.includes('.memory.deleted')) return `Forget memory${readable}`;
+        if (type.includes('.memory.created')) return `Save knowledge${readable}`;
+        if (type.includes('.memory.updated')) return `Update knowledge${readable}`;
+        if (type.includes('.memory.deleted')) return `Forget knowledge${readable}`;
         if (type.includes('.approval.created')) return `Prepare approval${readable}`;
         if (type.includes('.blocker.created')) return `Flag blocker${readable}`;
-        if (type.includes('.workspace_memory.noted')) return 'Save memory';
+        if (type.includes('.workspace_memory.noted')) return 'Save knowledge';
         if (type.includes('.google_calendar.')) return 'Sync Google Calendar';
         return null;
     }
@@ -3074,7 +3081,7 @@ if (mount) {
                 </div>
                 <div class="hb-compact-item">
                     <span class="hb-compact-icon">${icons.tune}</span>
-                    <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')} • memory context${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
+                    <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')} • knowledge context${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
                     <button class="hb-button-ghost" type="button" data-open-agent>Update</button>
                 </div>
                 <form class="hb-surface-soft hb-card-pad hb-settings-section hb-home-city-settings" data-home-city-form>
@@ -3842,15 +3849,17 @@ if (mount) {
 
     function messageMarkup(message, index = 0, messages = []) {
         const user = message.role === 'user';
-        const metadata = typeof message.metadata === 'object' && message.metadata ? message.metadata : {};
-        const model = metadata.model || metadata?.model_route?.model || '';
         const content = user ? (message.content || '') : conversationalMessageContent(message.content || '');
+        const canEdit = user && !state.busy && !String(message.id || '').startsWith('local-');
         return `
-            <article class="hb-message ${user ? 'hb-message-user' : ''}">
+            <article class="hb-message ${user ? 'hb-message-user' : ''}" ${user ? `data-message-id="${escapeAttr(message.id || '')}"` : ''}>
                 <div class="hb-message-head">
                     ${message.progress ? '<span class="hb-spinner" style="width:13px;height:13px;border-width:2px"></span>' : ''}
                     <span>${user ? 'You' : 'Bean'}</span>
-                    ${model ? `<span class="hb-message-model">${escapeHtml(model)}</span>` : ''}
+                    ${user ? `<span class="hb-message-actions-inline">
+                        <button class="hb-message-icon-action" type="button" data-copy-message="${escapeAttr(message.id || '')}" aria-label="Copy message" title="Copy">${icons.copy || icons.notes}</button>
+                        ${canEdit ? `<button class="hb-message-icon-action" type="button" data-edit-message="${escapeAttr(message.id || '')}" aria-label="Edit message" title="Edit">${icons.edit}</button>` : ''}
+                    </span>` : ''}
                 </div>
                 <div class="hb-message-body">${escapeHtml(content)}</div>
             </article>`;
@@ -4107,6 +4116,7 @@ if (mount) {
                     `)}
                     ${workspaceConnectionsMarkup(kind, item, workspaceId, editing)}
                     ${formSectionMarkup('Repeat', 'Make this repeat when it should come back', recurrenceFieldsMarkup(kind, item))}
+                    ${isEvent ? eventReminderFieldsMarkup() : ''}
                     <div class="hb-modal-actions">
                         ${editing ? `<button class="hb-button-danger" type="button" data-modal-delete="${kind}" data-id="${item.id}">Delete</button>` : ''}
                         <button class="hb-button-secondary" type="button" data-close-modal>Cancel</button>
@@ -4163,6 +4173,32 @@ if (mount) {
                 </select></label>
             </div>
             <label class="hb-label">Description<textarea class="hb-textarea" name="description" placeholder="Add notes, agenda, links, or anything useful for this event">${escapeHtml(item?.description || '')}</textarea></label>`;
+    }
+
+    function eventReminderFieldsMarkup() {
+        const options = [
+            [0, 'At start time'],
+            [5, '5 minutes before'],
+            [10, '10 minutes before'],
+            [15, '15 minutes before'],
+            [30, '30 minutes before'],
+            [60, '1 hour before'],
+            [120, '2 hours before'],
+            [1440, '1 day before'],
+        ];
+        return formSectionMarkup('Create reminder', 'Optionally remind me before this event or every event in this series', `
+            <label class="hb-switch-row hb-form-switch">
+                <input type="checkbox" name="createEventReminder" data-event-reminder-toggle>
+                <span><strong>Create reminder</strong><small>Reminder timing follows this event's repeat pattern.</small></span>
+            </label>
+            <div data-event-reminder-fields hidden>
+                <label class="hb-label">Remind me
+                    <select class="hb-select" name="eventReminderMinutesBefore" disabled>
+                        ${options.map(([value, label]) => `<option value="${value}" ${value === 15 ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}
+                    </select>
+                </label>
+            </div>
+        `);
     }
 
     function eventTimeFieldsMarkup(item = null, when = '', end = '') {
@@ -4853,6 +4889,8 @@ if (mount) {
             button.addEventListener('contextmenu', handleVoiceContextMenu);
         });
         mount.querySelectorAll('[data-cancel-turn]').forEach((button) => button.addEventListener('click', cancelBeanTurn));
+        mount.querySelectorAll('[data-copy-message]').forEach((button) => button.addEventListener('click', () => copyChatMessage(button.dataset.copyMessage)));
+        mount.querySelectorAll('[data-edit-message]').forEach((button) => button.addEventListener('click', () => editChatMessage(button.dataset.editMessage)));
         bindTimelineHorizontalScroll();
         mount.querySelector('[data-toggle-chat-history]')?.addEventListener('click', () => {
             state.chatHistoryOpen = !state.chatHistoryOpen;
@@ -5284,7 +5322,7 @@ if (mount) {
             saveDashboardCache();
             render();
         } catch (error) {
-            state.error = friendlyError(error, 'refresh Bean memory');
+            state.error = friendlyError(error, "refresh Bean's Knowledge");
             render();
         }
     }
@@ -5311,7 +5349,7 @@ if (mount) {
             state.memoryItems = upsertById(state.memoryItems, item);
             saveDashboardCache();
         } catch (error) {
-            state.error = friendlyError(error, 'save that memory');
+            state.error = friendlyError(error, 'save that knowledge');
         } finally {
             state.memorySaving = false;
             render();
@@ -5333,17 +5371,17 @@ if (mount) {
                 },
             });
             state.memoryItems = upsertById(state.memoryItems, item);
-            state.notice = 'Memory saved.';
+            state.notice = 'Knowledge saved.';
             saveDashboardCache();
             render();
         } catch (error) {
-            state.error = friendlyError(error, 'update that memory');
+            state.error = friendlyError(error, 'update that knowledge');
             render();
         }
     }
 
     async function forgetMemory(id) {
-        if (!id || !window.confirm('Forget this memory?')) return;
+        if (!id || !window.confirm('Forget this knowledge?')) return;
         const previous = state.memoryItems;
         state.memoryItems = state.memoryItems.filter((item) => String(item.id) !== String(id));
         render();
@@ -5352,7 +5390,7 @@ if (mount) {
             saveDashboardCache();
         } catch (error) {
             state.memoryItems = previous;
-            state.error = friendlyError(error, 'forget that memory');
+            state.error = friendlyError(error, 'forget that knowledge');
             render();
         }
     }
@@ -5406,6 +5444,10 @@ if (mount) {
         mount.querySelectorAll('[data-recurrence-select]').forEach((select) => {
             select.addEventListener('change', () => toggleRecurrenceFields(select.closest('form')));
             toggleRecurrenceFields(select.closest('form'));
+        });
+        mount.querySelectorAll('[data-event-reminder-toggle]').forEach((checkbox) => {
+            checkbox.addEventListener('change', () => toggleEventReminderFields(checkbox.closest('form')));
+            toggleEventReminderFields(checkbox.closest('form'));
         });
         mount.querySelectorAll('[data-all-day-toggle]').forEach((checkbox) => {
             checkbox.addEventListener('change', () => toggleAllDayFields(checkbox));
@@ -5514,6 +5556,12 @@ if (mount) {
         const recurrence = form.querySelector('[data-recurrence-select]')?.value || 'none';
         setFieldGroupState(form.querySelector('[data-recurrence-days]'), recurrence === 'specific_days');
         setFieldGroupState(form.querySelector('[data-recurrence-interval]'), recurrence === 'interval');
+    }
+
+    function toggleEventReminderFields(form) {
+        if (!form) return;
+        const enabled = Boolean(form.querySelector('[data-event-reminder-toggle]')?.checked);
+        setFieldGroupState(form.querySelector('[data-event-reminder-fields]'), enabled);
     }
 
     function toggleInlineCategoryManager(event) {
@@ -6122,6 +6170,7 @@ if (mount) {
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
             return {
                 body,
+                eventReminderMinutesBefore: form.elements.createEventReminder?.checked ? Number(data.eventReminderMinutesBefore || 15) : null,
                 path: item ? `/calendar-events/${item.id}` : '/calendar-events',
                 options: { method: item ? 'PATCH' : 'POST', body },
             };
@@ -6139,6 +6188,10 @@ if (mount) {
             .then((saved) => {
                 reconcileSavedOptimisticItem(kind, optimistic, saved, mutationId);
                 if (kind === 'event') {
+                    createLinkedEventReminderIfRequested(saved, request).catch((error) => {
+                        state.error = friendlyError(error, 'create the event reminder');
+                        render();
+                    });
                     refreshCalendarAfterEventSave();
                     return;
                 }
@@ -6159,6 +6212,43 @@ if (mount) {
             ...saved,
             linked_workspace_ids: linked.length ? linked : optimisticLinkedWorkspaceIds(saved, request.body || {}),
         };
+    }
+
+    async function createLinkedEventReminderIfRequested(event, request = {}) {
+        const minutesBefore = Number(request.eventReminderMinutesBefore);
+        if (!event?.id || !Number.isFinite(minutesBefore) || minutesBefore < 0) return null;
+        const body = request.body || {};
+        const startsAt = event.starts_at || event.startsAt || body.starts_at;
+        const start = startsAt ? new Date(startsAt) : null;
+        if (!start || Number.isNaN(start.getTime())) return null;
+        const remindAt = new Date(start);
+        remindAt.setMinutes(remindAt.getMinutes() - minutesBefore);
+        const recurrence = body.recurrence || event.recurrence || body.metadata?.recurrence || 'none';
+        const metadata = {
+            source: 'event_reminder',
+            minutes_before: minutesBefore,
+            recurrence,
+            ...(body.metadata || {}),
+            event_reminder: {
+                minutes_before: minutesBefore,
+                follows_event_recurrence: recurrence && recurrence !== 'none',
+            },
+        };
+        const workspaceId = event.workspace_id || event.workspaceId || body.workspace_id || currentWorkspaceId() || null;
+        const reminder = await api(workspaceScopedPath('/reminders', workspaceId), {
+            method: 'POST',
+            body: {
+                calendar_event_id: event.id,
+                title: `Reminder: ${event.title || body.title || 'Event'}`,
+                remind_at: remindAt.toISOString(),
+                category: event.category || body.category || null,
+                color: event.color || body.color || themeAccentColor(),
+                metadata,
+                ...(workspaceId ? { workspace_id: Number(workspaceId) } : {}),
+            },
+        });
+        cacheSavedItem('reminder', reminder);
+        return reminder;
     }
 
     function optimisticMutationId(kind) {
@@ -6869,7 +6959,38 @@ if (mount) {
         const form = event.currentTarget;
         const content = new FormData(form).get('message')?.toString().trim();
         if (!content || state.busy) return;
-        await sendChatContent(content);
+        const editingMessageId = state.editingChatMessageId || '';
+        state.editingChatMessageId = '';
+        await sendChatContent(content, editingMessageId ? { editingMessageId } : {});
+    }
+
+    async function copyChatMessage(messageId) {
+        const message = state.messages.find((item) => String(item.id) === String(messageId));
+        const content = String(message?.content || '').trim();
+        if (!content) return;
+        try {
+            await navigator.clipboard.writeText(content);
+            state.notice = 'Message copied.';
+        } catch (error) {
+            state.error = 'Could not copy that message.';
+        }
+        render();
+    }
+
+    function editChatMessage(messageId) {
+        if (state.busy) return;
+        const message = state.messages.find((item) => String(item.id) === String(messageId) && item.role === 'user');
+        if (!message) return;
+        state.editingChatMessageId = String(message.id);
+        state.voiceDraft = message.content || '';
+        const textarea = mount.querySelector('textarea[name="message"]');
+        if (textarea) {
+            textarea.value = state.voiceDraft;
+            resizeChatInput(textarea);
+            textarea.focus();
+            textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+        }
+        render();
     }
 
     async function cancelBeanTurn(event = null, options = {}) {
@@ -6948,19 +7069,26 @@ if (mount) {
         const requestId = ++chatRequestCounter;
         activeChatRequestId = requestId;
         const wasOnboarding = needsBeanOnboarding();
+        const editingMessageId = options.editingMessageId ? String(options.editingMessageId) : '';
         let result = null;
         let assistantContent = '';
         window.clearTimeout(kioskAutoCloseTimer);
         if (options.autoOpenChat && state.selected !== 'bean') {
             state.chatExpanded = true;
         }
+        if (editingMessageId) {
+            const editIndex = state.messages.findIndex((message) => String(message.id) === editingMessageId && message.role === 'user');
+            if (editIndex >= 0) state.messages.splice(editIndex);
+        }
         state.messages.push({ id: `local-${Date.now()}`, role: 'user', content });
         state.busy = true;
         state.voiceDraft = '';
+        state.editingChatMessageId = '';
         state.voiceStatus = '';
         state.voiceStatusTone = '';
-        state.chatRunState = 'Working…';
-        resetBeanWorkItems(options.voiceQuickReply || options.voiceQuickReplyPending ? 'Follow up on voice request' : 'Read request');
+        state.chatRunState = voiceCommandIsCapabilityQuestion(content) ? 'Thinking…' : 'Working…';
+        const initialWorkLabel = options.voiceQuickReply || options.voiceQuickReplyPending ? 'Follow up on voice request' : beanWorkLabelForRequest(content);
+        resetBeanWorkItems(initialWorkLabel || '');
         state.error = '';
         render();
         try {
@@ -6974,6 +7102,7 @@ if (mount) {
             startBeanWorkEventPolling(state.session.id);
             const metadata = {
                 client_context: clientContextPayload(),
+                ...(editingMessageId ? { edited_message_id: editingMessageId } : {}),
                 ...(options.voiceQuickReply || options.voiceQuickReplyPending
                     ? {
                         voice_context: {
@@ -6987,7 +7116,10 @@ if (mount) {
                     }
                     : {}),
             };
-            result = await api(`/assistant/sessions/${state.session.id}/messages`, {
+            const path = editingMessageId
+                ? `/assistant/sessions/${state.session.id}/messages/${encodeURIComponent(editingMessageId)}/branch`
+                : `/assistant/sessions/${state.session.id}/messages`;
+            result = await api(path, {
                 method: 'POST',
                 body: { content, metadata },
             });
@@ -7083,7 +7215,6 @@ if (mount) {
             const transcript = Array.from(event.results).map((result) => result[0]?.transcript || '').join(' ').trim();
             state.voiceDraft = transcript;
             if (transcript) {
-                upsertBeanWorkItem('voice-dictation', 'Send dictated request', 'running');
                 setVoiceStatus('Release to send.', '');
             }
             const textarea = mount.querySelector('textarea[name="message"]');
@@ -7129,7 +7260,7 @@ if (mount) {
         state.voiceRecognition = recognition;
         state.voiceListening = true;
         state.error = '';
-        resetBeanWorkItems('Listening for your request');
+        resetBeanWorkItems('');
         setVoiceStatus('Starting microphone…', '');
         try {
             recognition.start();

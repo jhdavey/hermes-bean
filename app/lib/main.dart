@@ -72,6 +72,7 @@ final Uri _enterpriseContactUrl = Uri.parse(
 );
 const String _beanGreenCategoryColor = '#34C759';
 const double _beanChatComposerReservedHeight = 66;
+const double _beanChatComposerMaxHeight = 134;
 const double _beanBottomMenuSurfaceInset = 22;
 
 class _BeanNotesIcon extends StatelessWidget {
@@ -1157,6 +1158,33 @@ class HeyBeanTheme {
   static ThemeData get lightTheme => lightThemeFor(_current.key);
 }
 
+InputDecoration _longFormInputDecoration({
+  String? labelText,
+  String? hintText,
+  Widget? prefixIcon,
+}) => InputDecoration(
+  labelText: labelText,
+  hintText: hintText,
+  prefixIcon: prefixIcon,
+  alignLabelWithHint: true,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+  border: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: const BorderSide(color: HeyBeanTheme.border),
+  ),
+  enabledBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: const BorderSide(color: HeyBeanTheme.border),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(
+      color: HeyBeanTheme.accent.withValues(alpha: .56),
+      width: 1.2,
+    ),
+  ),
+);
+
 ButtonStyle _destructiveFilledButtonStyle({double radius = 14}) =>
     FilledButton.styleFrom(
       backgroundColor: HeyBeanTheme.destructive,
@@ -1509,6 +1537,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _checkoutBusyPlan;
   String? _checkoutError;
   bool _busy = false;
+  bool _dashboardDataLoading = false;
   String _chatRunState = 'Ready';
   int _chatRunToken = 0;
   List<_BeanWorkItem> _beanWorkItems = const [];
@@ -1619,6 +1648,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _dismissedBeanResponsePreviewKey = null;
     _beanResponsePreviewHeld = false;
     _loadingStatusText = null;
+    _dashboardDataLoading = false;
     _onboardingTourVisible = false;
     _onboardingTourStep = 0;
   }
@@ -2799,6 +2829,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _phase = _AuthPhase.loading;
       _loadingStatusText = loadingStatusText;
+      _dashboardDataLoading = false;
       _error = null;
     });
     Object? refreshError;
@@ -2834,6 +2865,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _events = const [];
           _phase = _AuthPhase.planSelection;
           _loadingStatusText = null;
+          _dashboardDataLoading = false;
           _error = null;
           _checkoutError = null;
         });
@@ -2856,6 +2888,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _events = const [];
         _phase = _AuthPhase.signedIn;
         _loadingStatusText = null;
+        _dashboardDataLoading = true;
       });
 
       final sessionDetails = await recover<HermesSessionDetails?>(
@@ -2967,6 +3000,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _events = results[11] as List<HermesActivityEvent>;
         _phase = _AuthPhase.signedIn;
         _loadingStatusText = null;
+        _dashboardDataLoading = false;
         _error = refreshError == null
             ? null
             : 'You are signed in. ${beanFriendlyErrorMessage(refreshError!, action: 'refresh your latest data')}';
@@ -3007,6 +3041,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _events = const [];
         _phase = _AuthPhase.signedOut;
         _loadingStatusText = null;
+        _dashboardDataLoading = false;
       });
     }
   }
@@ -3065,6 +3100,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _authNotice = null;
         _error = null;
         _checkoutError = null;
+        _dashboardDataLoading = false;
       });
     } catch (error) {
       setState(
@@ -4289,6 +4325,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
         _events = results[11] as List<HermesActivityEvent>;
+        _dashboardDataLoading = false;
         _error = null;
       });
       _syncReminderNotifications();
@@ -4420,6 +4457,7 @@ ${_truncateDiagnostic(stack, 2200)}
         return;
       }
       setState(() {
+        _dashboardDataLoading = false;
         _error = beanFriendlyErrorMessage(error, action: errorAction);
       });
     }
@@ -5490,6 +5528,7 @@ ${_truncateDiagnostic(stack, 2200)}
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds = const [],
   }) {
     final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
@@ -5509,7 +5548,7 @@ ${_truncateDiagnostic(stack, 2200)}
       recurrence: recurrence,
       metadata: metadata,
       isCritical: isCritical ?? false,
-      workspaceId: _user?.activeWorkspace?.numericId,
+      workspaceId: workspaceId ?? _user?.activeWorkspace?.numericId,
     );
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
@@ -5537,6 +5576,7 @@ ${_truncateDiagnostic(stack, 2200)}
         reminderSpecificDays: reminderSpecificDays,
         reminderInterval: reminderInterval,
         reminderIntervalUnit: reminderIntervalUnit,
+        workspaceId: workspaceId,
         syncToWorkspaceIds: syncToWorkspaceIds,
         optimisticEvent: optimisticEvent,
         previousCalendar: previousCalendar,
@@ -5563,6 +5603,7 @@ ${_truncateDiagnostic(stack, 2200)}
     required List<String>? reminderSpecificDays,
     required int? reminderInterval,
     required String? reminderIntervalUnit,
+    required int? workspaceId,
     required List<Object> syncToWorkspaceIds,
     required HermesCalendarEvent optimisticEvent,
     required List<HermesCalendarEvent> previousCalendar,
@@ -5581,10 +5622,10 @@ ${_truncateDiagnostic(stack, 2200)}
         recurrence: recurrence,
         metadata: metadata,
         isCritical: isCritical ?? false,
-        workspaceId: _user?.activeWorkspace?.numericId,
+        workspaceId: workspaceId ?? _user?.activeWorkspace?.numericId,
         syncToWorkspaceIds: syncToWorkspaceIds,
       );
-      if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
+      if (reminderMinutesBefore != null && reminderMinutesBefore >= 0) {
         final start = _parseCalendarEventDateTime(wireStartsAt);
         if (start != null) {
           await widget.apiClient.createEventReminder(
@@ -5594,15 +5635,11 @@ ${_truncateDiagnostic(stack, 2200)}
                 .subtract(Duration(minutes: reminderMinutesBefore))
                 .toUtc()
                 .toIso8601String(),
-            metadata: {
-              'minutes_before': reminderMinutesBefore,
-              'recurrence': reminderRecurrence ?? 'none',
-              if ((reminderSpecificDays ?? const <String>[]).isNotEmpty)
-                'days': reminderSpecificDays,
-              if (reminderInterval != null && reminderInterval > 0)
-                'interval': reminderInterval,
-              if (reminderIntervalUnit != null) 'unit': reminderIntervalUnit,
-            },
+            metadata: _eventReminderMetadata(
+              minutesBefore: reminderMinutesBefore,
+              recurrence: recurrence,
+              eventMetadata: metadata,
+            ),
           );
         }
       }
@@ -5648,6 +5685,39 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
+  Map<String, Object?> _eventReminderMetadata({
+    required int minutesBefore,
+    required String? recurrence,
+    required Map<String, Object?>? eventMetadata,
+  }) {
+    final rawRecurrence = recurrence?.trim() ?? '';
+    final normalizedRecurrence = rawRecurrence.isEmpty ? 'none' : rawRecurrence;
+    final metadata = <String, Object?>{
+      'minutes_before': minutesBefore,
+      'recurrence': normalizedRecurrence,
+    };
+    final days = eventMetadata?['days'];
+    if (normalizedRecurrence == 'specific_days' && days is List) {
+      final sortedDays = days.whereType<String>().toList()..sort();
+      if (sortedDays.isNotEmpty) metadata['days'] = sortedDays;
+    }
+    if (normalizedRecurrence == 'specific_days' ||
+        normalizedRecurrence == 'interval') {
+      final interval = eventMetadata?['interval'];
+      if (interval is int && interval > 0) {
+        metadata['interval'] = interval;
+      } else if (interval is String) {
+        final parsed = int.tryParse(interval);
+        if (parsed != null && parsed > 0) metadata['interval'] = parsed;
+      }
+      final unit = eventMetadata?['unit'];
+      if (unit is String && unit.trim().isNotEmpty) {
+        metadata['unit'] = unit;
+      }
+    }
+    return metadata;
+  }
+
   Future<void> _editCalendarEvent(
     HermesCalendarEvent event, {
     required String title,
@@ -5666,6 +5736,7 @@ ${_truncateDiagnostic(stack, 2200)}
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds = const [],
   }) {
     final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
@@ -5773,7 +5844,7 @@ ${_truncateDiagnostic(stack, 2200)}
         clearLocation: location == null,
         syncToWorkspaceIds: syncToWorkspaceIds,
       );
-      if (reminderMinutesBefore != null && reminderMinutesBefore > 0) {
+      if (reminderMinutesBefore != null && reminderMinutesBefore >= 0) {
         final start = _parseCalendarEventDateTime(wireStartsAt);
         if (start != null) {
           await widget.apiClient.createEventReminder(
@@ -5783,15 +5854,11 @@ ${_truncateDiagnostic(stack, 2200)}
                 .subtract(Duration(minutes: reminderMinutesBefore))
                 .toUtc()
                 .toIso8601String(),
-            metadata: {
-              'minutes_before': reminderMinutesBefore,
-              'recurrence': reminderRecurrence ?? 'none',
-              if ((reminderSpecificDays ?? const <String>[]).isNotEmpty)
-                'days': reminderSpecificDays,
-              if (reminderInterval != null && reminderInterval > 0)
-                'interval': reminderInterval,
-              if (reminderIntervalUnit != null) 'unit': reminderIntervalUnit,
-            },
+            metadata: _eventReminderMetadata(
+              minutesBefore: reminderMinutesBefore,
+              recurrence: recurrence,
+              eventMetadata: metadata,
+            ),
           );
         }
       }
@@ -6011,6 +6078,7 @@ ${_truncateDiagnostic(stack, 2200)}
             List<String>? reminderSpecificDays,
             int? reminderInterval,
             String? reminderIntervalUnit,
+            int? workspaceId,
             List<Object> syncToWorkspaceIds = const [],
           }) => _createCalendarEvent(
             title: title,
@@ -6029,6 +6097,7 @@ ${_truncateDiagnostic(stack, 2200)}
             reminderSpecificDays: reminderSpecificDays,
             reminderInterval: reminderInterval,
             reminderIntervalUnit: reminderIntervalUnit,
+            workspaceId: workspaceId,
             syncToWorkspaceIds: syncToWorkspaceIds,
           ),
       onEventCategorySaved: _saveEventCategory,
@@ -6228,6 +6297,7 @@ ${_truncateDiagnostic(stack, 2200)}
       } else {
         _clearDashboardData();
       }
+      _dashboardDataLoading = cachedSnapshot == null;
       _busy = false;
       _error = null;
     });
@@ -6258,6 +6328,7 @@ ${_truncateDiagnostic(stack, 2200)}
         if (previousSnapshot != null) {
           _restoreDashboardSnapshot(previousSnapshot);
         }
+        _dashboardDataLoading = false;
         _error = beanFriendlyErrorMessage(error, action: 'switch workspaces');
       });
     }
@@ -6651,6 +6722,7 @@ ${_truncateDiagnostic(stack, 2200)}
     events: _events,
     messages: _messages,
     busy: _busy,
+    dashboardDataLoading: _dashboardDataLoading,
     chatRunState: _chatRunState,
     chatInputController: _chatInputController,
     chatInputFocusNode: _chatInputFocusNode,
@@ -7801,7 +7873,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
     minLines: 3,
     maxLines: 4,
     textInputAction: TextInputAction.newline,
-    decoration: const InputDecoration(
+    decoration: _longFormInputDecoration(
       labelText: 'Anything Bean should know?',
       hintText:
           'Example: I work nights, protect family time, and need gentle nudges.',
@@ -8292,6 +8364,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.events,
     required this.messages,
     required this.busy,
+    required this.dashboardDataLoading,
     required this.chatRunState,
     required this.chatInputController,
     required this.chatInputFocusNode,
@@ -8363,6 +8436,7 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
   final bool busy;
+  final bool dashboardDataLoading;
   final String chatRunState;
   final TextEditingController chatInputController;
   final FocusNode chatInputFocusNode;
@@ -8441,6 +8515,7 @@ class _CommandCenterContent extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onCalendarEventCreated;
@@ -8462,6 +8537,7 @@ class _CommandCenterContent extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onCalendarEventEdited;
@@ -8547,6 +8623,7 @@ class _CommandCenterContent extends StatelessWidget {
             user: user,
             tasks: calendarTasks,
             calendar: calendar,
+            loading: dashboardDataLoading,
             eventCategories: eventCategories,
             googleCalendarStatus: googleCalendarStatus,
             selectedDay: selectedCalendarDay,
@@ -8570,6 +8647,7 @@ class _CommandCenterContent extends StatelessWidget {
           _HomeDestination.tasks => _TaskListCard(
             tasks: tasks,
             pastTasks: pastTasks,
+            loading: dashboardDataLoading,
             eventCategories: eventCategories,
             pendingTaskIds: pendingTaskIds,
             onTaskCompleted: onTaskCompleted,
@@ -8583,12 +8661,14 @@ class _CommandCenterContent extends StatelessWidget {
             tasks: tasks,
             reminders: reminders,
             calendar: calendar,
+            loading: dashboardDataLoading,
             chat: beanPanel,
             chatCollapsed: beanChatCollapsed,
             onChatCollapsedChanged: onBeanChatCollapsedChanged,
           ),
           _HomeDestination.reminders => _ReminderListCard(
             reminders: reminders,
+            loading: dashboardDataLoading,
             eventCategories: eventCategories,
             onReminderSaved: onReminderSaved,
             onReminderCompleted: onReminderCompleted,
@@ -8725,6 +8805,7 @@ class _CommandCenterHome extends StatefulWidget {
     required this.tasks,
     required this.reminders,
     required this.calendar,
+    required this.loading,
     required this.chat,
     required this.chatCollapsed,
     required this.onChatCollapsedChanged,
@@ -8733,6 +8814,7 @@ class _CommandCenterHome extends StatefulWidget {
   final List<HermesTask> tasks;
   final List<HermesReminder> reminders;
   final List<HermesCalendarEvent> calendar;
+  final bool loading;
   final Widget chat;
   final bool chatCollapsed;
   final ValueChanged<bool> onChatCollapsedChanged;
@@ -8787,7 +8869,12 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(child: _CommandCenterAgendaList(items: items)),
+            Expanded(
+              child: _CommandCenterAgendaList(
+                items: items,
+                loading: widget.loading,
+              ),
+            ),
             _CommandCenterSplitDivider(
               collapsed: widget.chatCollapsed,
               onToggle: () => _toggleChatCollapsed(fallbackChatHeight),
@@ -8867,12 +8954,20 @@ class _CommandCenterSplitDivider extends StatelessWidget {
 }
 
 class _CommandCenterAgendaList extends StatelessWidget {
-  const _CommandCenterAgendaList({required this.items});
+  const _CommandCenterAgendaList({required this.items, required this.loading});
 
   final List<_CommandCenterAgendaItem> items;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
+    if (loading && items.isEmpty) {
+      return const _InlineLoadingSurface(
+        key: Key('command-center-agenda-loading'),
+        label: 'Loading today',
+        fillHeight: true,
+      );
+    }
     if (items.isEmpty) {
       return Container(
         key: const Key('command-center-agenda-empty'),
@@ -9241,7 +9336,8 @@ class _ChatInputDock extends StatelessWidget {
             controller: controller,
             focusNode: focusNode,
             minLines: 1,
-            maxLines: 3,
+            maxLines: 4,
+            keyboardType: TextInputType.multiline,
             onChanged: onChanged,
             textInputAction: TextInputAction.send,
             onSubmitted: busy ? null : (_) => onSend(),
@@ -9428,7 +9524,7 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
                   maxLines: 4,
                   enabled: !_busy,
                   autofocus: true,
-                  decoration: const InputDecoration(
+                  decoration: _longFormInputDecoration(
                     labelText: 'Change Bean’s instruction',
                     hintText: 'Tell Bean what to do instead…',
                   ),
@@ -10100,6 +10196,7 @@ class _TodayHomeView extends StatelessWidget {
     required this.user,
     required this.tasks,
     required this.calendar,
+    required this.loading,
     required this.eventCategories,
     required this.googleCalendarStatus,
     required this.selectedDay,
@@ -10124,6 +10221,7 @@ class _TodayHomeView extends StatelessWidget {
   final HermesUser user;
   final List<HermesTask> tasks;
   final List<HermesCalendarEvent> calendar;
+  final bool loading;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
   final DateTime selectedDay;
@@ -10173,6 +10271,7 @@ class _TodayHomeView extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onCalendarEventCreated;
@@ -10194,6 +10293,7 @@ class _TodayHomeView extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onCalendarEventEdited;
@@ -10244,6 +10344,13 @@ class _TodayHomeView extends StatelessWidget {
                 onDateSelected: onDateSelected,
               ),
             ] else ...[
+              if (loading && calendar.isEmpty) ...[
+                const _InlineLoadingSurface(
+                  key: Key('today-calendar-loading'),
+                  label: 'Loading calendar',
+                ),
+                const SizedBox(height: 10),
+              ],
               _AppleStyleTodayTimeline(
                 calendar: calendar,
                 eventCategories: eventCategories,
@@ -10282,7 +10389,12 @@ class _TodayHomeView extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            if (tasks.isEmpty)
+            if (loading && tasks.isEmpty)
+              const _InlineLoadingSurface(
+                key: Key('today-tasks-loading'),
+                label: 'Loading tasks',
+              )
+            else if (tasks.isEmpty)
               _EmptySurface(label: emptyTaskLabel)
             else ...[
               for (final task in tasks.where((task) => !_taskIsSubtask(task)))
@@ -10622,6 +10734,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onEventTap;
@@ -11033,6 +11146,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onEventTap;
@@ -11515,6 +11629,7 @@ class _MultiDayEventSpanRow extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onEventTap;
@@ -11667,6 +11782,7 @@ class _MultiDayEventSpan extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onEventTap;
@@ -11719,6 +11835,7 @@ class _MultiDayEventSpan extends StatelessWidget {
               List<String>? reminderSpecificDays,
               int? reminderInterval,
               String? reminderIntervalUnit,
+              int? workspaceId,
               List<Object> syncToWorkspaceIds = const [],
             }) => onEventTap(
               savedEvent,
@@ -11870,6 +11987,7 @@ class _AllDayEventRow extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onEventTap;
@@ -11938,6 +12056,7 @@ class _AllDayEventRow extends StatelessWidget {
                   List<String>? reminderSpecificDays,
                   int? reminderInterval,
                   String? reminderIntervalUnit,
+                  int? workspaceId,
                   List<Object> syncToWorkspaceIds = const [],
                 }) => onEventTap(
                   savedEvent,
@@ -12071,6 +12190,7 @@ class _TimelineEventBlock extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })
   onTap;
@@ -12160,6 +12280,7 @@ class _TimelineEventBlock extends StatelessWidget {
                 List<String>? reminderSpecificDays,
                 int? reminderInterval,
                 String? reminderIntervalUnit,
+                int? workspaceId,
                 List<Object> syncToWorkspaceIds = const [],
               }) => onTap(
                 savedEvent,
@@ -12280,6 +12401,7 @@ typedef _CalendarEventSaveCallback =
       List<String>? reminderSpecificDays,
       int? reminderInterval,
       String? reminderIntervalUnit,
+      int? workspaceId,
       List<Object> syncToWorkspaceIds,
     });
 
@@ -12412,23 +12534,21 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   late final TextEditingController _notes;
   late final TextEditingController _location;
   late final TextEditingController _category;
-  late final TextEditingController _reminder;
   late final TextEditingController _eventInterval;
-  late final TextEditingController _reminderInterval;
   late String _color;
   late String _recurrence;
   late String _status;
   late List<HermesEventCategory> _categories;
   String _eventIntervalUnit = 'days';
-  String _reminderRecurrence = 'none';
-  String _reminderIntervalUnit = 'days';
+  Object? _primaryWorkspaceId;
   final Set<String> _googleCalendarIds = <String>{};
   final Set<Object> _syncWorkspaceIds = <Object>{};
   String? _validationError;
   late bool _isCritical;
   late bool _allDay;
+  bool _createEventReminder = false;
+  int _reminderMinutesBefore = 15;
   final Set<String> _eventSpecificDays = <String>{};
-  final Set<String> _reminderSpecificDays = <String>{};
   bool _saving = false;
   bool _savingCategory = false;
   bool _showCategoryManager = false;
@@ -12451,19 +12571,21 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     (value: 'interval', label: 'Every X'),
   ];
 
-  static const _reminderRecurrences = <({String value, String label})>[
-    (value: 'none', label: 'Once'),
-    (value: 'daily', label: 'Daily'),
-    (value: 'weekly', label: 'Weekly'),
-    (value: 'monthly', label: 'Monthly'),
-    (value: 'specific_days', label: 'Specific days'),
-    (value: 'interval', label: 'Every X'),
-  ];
-
   static const _statuses = <({String value, String label})>[
     (value: 'confirmed', label: 'Confirmed'),
     (value: 'tentative', label: 'Tentative'),
     (value: 'cancelled', label: 'Cancelled'),
+  ];
+
+  static const _reminderMinuteOptions = <({int value, String label})>[
+    (value: 0, label: 'At start time'),
+    (value: 5, label: '5 minutes before'),
+    (value: 10, label: '10 minutes before'),
+    (value: 15, label: '15 minutes before'),
+    (value: 30, label: '30 minutes before'),
+    (value: 60, label: '1 hour before'),
+    (value: 120, label: '2 hours before'),
+    (value: 1440, label: '1 day before'),
   ];
 
   static const _weekdays = <({String value, String label})>[
@@ -12487,6 +12609,11 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     super.initState();
     final event = widget.event;
     final eventMetadata = event.metadata ?? const <String, Object?>{};
+    final initialPrimaryWorkspaceId =
+        event.workspaceId ?? _workspaceValueToInt(widget.activeWorkspaceId);
+    _primaryWorkspaceId =
+        initialPrimaryWorkspaceId ??
+        _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId);
     _allDay = _eventIsAllDay(event);
     _title = TextEditingController(text: event.title);
     _startsAt = TextEditingController(
@@ -12503,11 +12630,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _location = TextEditingController(text: event.location ?? '');
     _categories = [...widget.eventCategories];
     _category = TextEditingController(text: event.category ?? '');
-    _reminder = TextEditingController();
     _eventInterval = TextEditingController(
       text: eventMetadata['interval']?.toString() ?? '1',
     );
-    _reminderInterval = TextEditingController(text: '1');
     final writableGoogleCalendars =
         widget.googleCalendarStatus?.writableCalendars ??
         const <GoogleCalendarInfo>[];
@@ -12574,9 +12699,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _notes.dispose();
     _location.dispose();
     _category.dispose();
-    _reminder.dispose();
     _eventInterval.dispose();
-    _reminderInterval.dispose();
     super.dispose();
   }
 
@@ -12668,6 +12791,20 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
 
     final eventInterval = int.tryParse(_eventInterval.text.trim()) ?? 1;
     final sortedGoogleCalendarIds = _googleCalendarIds.toList()..sort();
+    final syncToWorkspaceIds = _syncWorkspaceIds.toList();
+    Object? primaryWorkspaceId = _primaryWorkspaceId;
+    if (widget.event.id == 0 && widget.workspaces.isNotEmpty) {
+      if (primaryWorkspaceId == null && syncToWorkspaceIds.isNotEmpty) {
+        primaryWorkspaceId = syncToWorkspaceIds.removeAt(0);
+      }
+      if (primaryWorkspaceId == null) {
+        setState(() => _validationError = 'Choose at least one workspace.');
+        return;
+      }
+      syncToWorkspaceIds.removeWhere(
+        (workspaceId) => _workspaceValuesMatch(workspaceId, primaryWorkspaceId),
+      );
+    }
     final eventMetadata = <String, Object?>{
       ...?widget.event.metadata,
       'recurrence': _recurrence,
@@ -12707,12 +12844,15 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         recurrence: _recurrence,
         metadata: eventMetadata,
         isCritical: _isCritical,
-        reminderMinutesBefore: int.tryParse(_reminder.text.trim()),
-        reminderRecurrence: _reminderRecurrence,
-        reminderSpecificDays: _reminderSpecificDays.toList()..sort(),
-        reminderInterval: int.tryParse(_reminderInterval.text.trim()),
-        reminderIntervalUnit: _reminderIntervalUnit,
-        syncToWorkspaceIds: _syncWorkspaceIds.toList(),
+        reminderMinutesBefore: _createEventReminder
+            ? _reminderMinutesBefore
+            : null,
+        reminderRecurrence: null,
+        reminderSpecificDays: const [],
+        reminderInterval: null,
+        reminderIntervalUnit: null,
+        workspaceId: _workspaceValueToInt(primaryWorkspaceId),
+        syncToWorkspaceIds: syncToWorkspaceIds,
       );
       if (!mounted) return;
       Navigator.of(context).pop(<String, Object?>{'action': 'saved'});
@@ -13249,6 +13389,64 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     });
   }
 
+  bool get _creatingEvent => widget.event.id == 0;
+
+  List<HermesWorkspace> get _eventWorkspaceChoices {
+    if (_creatingEvent) return widget.workspaces;
+    return widget.workspaces
+        .where((workspace) => workspace.id != widget.activeWorkspaceId)
+        .toList();
+  }
+
+  bool _eventWorkspaceSelected(HermesWorkspace workspace) {
+    final value = _workspaceValue(workspace);
+    return _workspaceValuesMatch(value, _primaryWorkspaceId) ||
+        _syncWorkspaceIds.any(
+          (workspaceId) => _workspaceValuesMatch(workspaceId, value),
+        );
+  }
+
+  void _setEventWorkspaceSelected(HermesWorkspace workspace, bool selected) {
+    final value = _workspaceValue(workspace);
+    setState(() {
+      _validationError = null;
+      if (!_creatingEvent) {
+        if (selected) {
+          _syncWorkspaceIds.add(value);
+        } else {
+          _syncWorkspaceIds.removeWhere(
+            (workspaceId) => _workspaceValuesMatch(workspaceId, value),
+          );
+        }
+        return;
+      }
+
+      if (selected) {
+        if (_primaryWorkspaceId == null) {
+          _primaryWorkspaceId = value;
+        } else {
+          _syncWorkspaceIds.add(value);
+        }
+        return;
+      }
+
+      if (_workspaceValuesMatch(value, _primaryWorkspaceId)) {
+        _primaryWorkspaceId = null;
+        if (_syncWorkspaceIds.isNotEmpty) {
+          final replacement = _syncWorkspaceIds.first;
+          _primaryWorkspaceId = replacement;
+          _syncWorkspaceIds.removeWhere(
+            (workspaceId) => _workspaceValuesMatch(workspaceId, replacement),
+          );
+        }
+      } else {
+        _syncWorkspaceIds.removeWhere(
+          (workspaceId) => _workspaceValuesMatch(workspaceId, value),
+        );
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -13419,10 +13617,10 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             controller: _notes,
                             minLines: 3,
                             maxLines: 6,
-                            decoration: const InputDecoration(
+                            decoration: _longFormInputDecoration(
                               labelText: 'Description',
                               hintText: 'Add event description',
-                              prefixIcon: _BeanNotesIcon(),
+                              prefixIcon: const _BeanNotesIcon(size: 20),
                             ),
                           ),
                         ],
@@ -13725,18 +13923,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           ],
                         ),
                       ],
-                      if (widget.workspaces
-                          .where(
-                            (workspace) =>
-                                workspace.id != widget.activeWorkspaceId,
-                          )
-                          .isNotEmpty) ...[
+                      if (_eventWorkspaceChoices.isNotEmpty) ...[
                         const SizedBox(height: 14),
                         _MobileFormSection(
                           key: const Key('event-workspace-sync-field'),
                           title: 'Local Workspace Sync',
-                          subtitle:
-                              'Copy this event only to selected HeyBean workspaces.',
+                          subtitle: _creatingEvent
+                              ? 'Choose every workspace this event should be created in.'
+                              : 'Copy this event only to selected HeyBean workspaces.',
                           icon: Icons.home_work_outlined,
                           infoKey: const Key('event-workspace-sync-info'),
                           infoTitle: 'Local Workspace Sync',
@@ -13750,27 +13944,32 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               spacing: 8,
                               runSpacing: 8,
                               children: [
-                                for (final workspace in widget.workspaces.where(
-                                  (workspace) =>
-                                      workspace.id != widget.activeWorkspaceId,
-                                ))
+                                for (final workspace in _eventWorkspaceChoices)
                                   FilterChip(
                                     key: Key(
                                       'event-sync-workspace-${workspace.id}',
                                     ),
-                                    label: Text(workspace.name),
-                                    selected: _syncWorkspaceIds.contains(
-                                      workspace.numericId ?? workspace.id,
+                                    label: Text(
+                                      _workspaceValuesMatch(
+                                            _workspaceValue(workspace),
+                                            _workspaceValueForId(
+                                              widget.workspaces,
+                                              widget.activeWorkspaceId,
+                                            ),
+                                          )
+                                          ? '${workspace.isPersonal ? 'Personal' : workspace.name} (current)'
+                                          : workspace.isPersonal
+                                          ? 'Personal'
+                                          : workspace.name,
                                     ),
-                                    onSelected: (selected) => setState(() {
-                                      final value =
-                                          workspace.numericId ?? workspace.id;
-                                      if (selected) {
-                                        _syncWorkspaceIds.add(value);
-                                      } else {
-                                        _syncWorkspaceIds.remove(value);
-                                      }
-                                    }),
+                                    selected: _eventWorkspaceSelected(
+                                      workspace,
+                                    ),
+                                    onSelected: (selected) =>
+                                        _setEventWorkspaceSelected(
+                                          workspace,
+                                          selected,
+                                        ),
                                   ),
                               ],
                             ),
@@ -13779,100 +13978,51 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       ],
                       const SizedBox(height: 14),
                       _MobileFormSection(
-                        title: 'Reminder',
-                        subtitle: 'Add a reminder relative to this event.',
+                        title: 'Create reminder',
+                        subtitle: _recurrence == 'none'
+                            ? 'Optionally remind me before this event.'
+                            : 'Optionally remind me before every event in this series.',
                         icon: Icons.notifications_active_outlined,
                         infoKey: const Key('event-reminder-info'),
                         infoTitle: 'Event reminders',
                         infoBullets: const [
                           'Minutes before controls when Bean reminds you before the event starts.',
-                          'Reminder repeats are separate from event recurrence, so reminders can follow their own pattern.',
-                          'Leave minutes blank if you do not need a reminder for this event.',
+                          'For repeating events, the reminder follows the event repeat pattern.',
+                          'Leave Create reminder off if you do not need a reminder for this event.',
                         ],
                         children: [
-                          TextField(
-                            key: const Key('event-reminder-minutes-field'),
-                            controller: _reminder,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: 'Minutes before',
-                              hintText: '15',
-                              prefixIcon: Icon(Icons.alarm_rounded),
+                          _MobileFormSwitch(
+                            widgetKey: const Key(
+                              'event-create-reminder-toggle',
                             ),
+                            value: _createEventReminder,
+                            onChanged: (value) =>
+                                setState(() => _createEventReminder = value),
+                            icon: Icons.alarm_rounded,
+                            title: 'Create reminder',
+                            subtitle: _recurrence == 'none'
+                                ? 'Add a reminder before this event starts.'
+                                : 'Add a reminder before each occurrence.',
                           ),
-                          const _EventFieldLabel(
-                            icon: Icons.repeat_on_rounded,
-                            label: 'Reminder repeats',
-                          ),
-                          Wrap(
-                            key: const Key('event-reminder-recurrence-field'),
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final recurrence in _reminderRecurrences)
-                                ChoiceChip(
-                                  label: Text(recurrence.label),
-                                  selected:
-                                      _reminderRecurrence == recurrence.value,
-                                  onSelected: (_) => setState(() {
-                                    _reminderRecurrence = recurrence.value;
-                                  }),
-                                ),
-                            ],
-                          ),
-                          if (_reminderRecurrence == 'specific_days')
-                            Wrap(
-                              key: const Key('event-reminder-specific-days'),
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final day in _weekdays)
-                                  FilterChip(
-                                    label: Text(day.label),
-                                    selected: _reminderSpecificDays.contains(
-                                      day.value,
-                                    ),
-                                    onSelected: (selected) => setState(() {
-                                      if (selected) {
-                                        _reminderSpecificDays.add(day.value);
-                                      } else {
-                                        _reminderSpecificDays.remove(day.value);
-                                      }
-                                    }),
+                          if (_createEventReminder)
+                            DropdownButtonFormField<int>(
+                              key: const Key('event-reminder-minutes-field'),
+                              initialValue: _reminderMinutesBefore,
+                              decoration: const InputDecoration(
+                                labelText: 'Remind me',
+                                prefixIcon: Icon(Icons.alarm_rounded),
+                              ),
+                              items: [
+                                for (final option in _reminderMinuteOptions)
+                                  DropdownMenuItem<int>(
+                                    value: option.value,
+                                    child: Text(option.label),
                                   ),
                               ],
-                            ),
-                          if (_reminderRecurrence == 'interval')
-                            Row(
-                              key: const Key('event-reminder-interval-field'),
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _reminderInterval,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Every',
-                                      prefixIcon: Icon(Icons.numbers_rounded),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                DropdownButton<String>(
-                                  value: _reminderIntervalUnit,
-                                  items: [
-                                    for (final unit in _intervalUnits)
-                                      DropdownMenuItem(
-                                        value: unit.value,
-                                        child: Text(unit.label),
-                                      ),
-                                  ],
-                                  onChanged: (value) => setState(() {
-                                    if (value != null) {
-                                      _reminderIntervalUnit = value;
-                                    }
-                                  }),
-                                ),
-                              ],
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setState(() => _reminderMinutesBefore = value);
+                              },
                             ),
                         ],
                       ),
@@ -15502,6 +15652,7 @@ class _CalendarAgenda extends StatelessWidget {
     List<String>? reminderSpecificDays,
     int? reminderInterval,
     String? reminderIntervalUnit,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds,
   })?
   onEventTap;
@@ -15567,6 +15718,7 @@ class _CalendarAgenda extends StatelessWidget {
                           List<String>? reminderSpecificDays,
                           int? reminderInterval,
                           String? reminderIntervalUnit,
+                          int? workspaceId,
                           List<Object> syncToWorkspaceIds = const [],
                         }) => onEventTap!(
                           savedEvent,
@@ -16075,6 +16227,22 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
       );
       return null;
     }
+    Object? payloadPrimaryWorkspaceId = selectedPrimaryWorkspaceId;
+    final payloadSyncWorkspaceIds = syncWorkspaceIds.toList();
+    if (showPrimaryWorkspaceSelector && workspaces.isNotEmpty) {
+      if (payloadPrimaryWorkspaceId == null &&
+          payloadSyncWorkspaceIds.isNotEmpty) {
+        payloadPrimaryWorkspaceId = payloadSyncWorkspaceIds.removeAt(0);
+      }
+      if (payloadPrimaryWorkspaceId == null) {
+        setModalState(() => validationError = 'Choose at least one workspace.');
+        return null;
+      }
+      payloadSyncWorkspaceIds.removeWhere(
+        (workspaceId) =>
+            _workspaceValuesMatch(workspaceId, payloadPrimaryWorkspaceId),
+      );
+    }
 
     return {
       'title': title,
@@ -16096,9 +16264,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
           interval: int.tryParse(recurrenceIntervalController.text.trim()) ?? 1,
           unit: recurrenceIntervalUnit,
         ),
-      'syncToWorkspaceIds': syncWorkspaceIds.toList(),
+      'syncToWorkspaceIds': payloadSyncWorkspaceIds,
       if (showPrimaryWorkspaceSelector)
-        'workspaceId': _workspaceValueToInt(selectedPrimaryWorkspaceId),
+        'workspaceId': _workspaceValueToInt(payloadPrimaryWorkspaceId),
       'googleCalendarIds': googleCalendarIds.toList()..sort(),
     };
   }
@@ -16174,6 +16342,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
               ),
             )
             .toList();
+        final workspaceChoices = showPrimaryWorkspaceSelector
+            ? workspaces
+            : syncTargets;
         final categoryDropdownValues = <HermesEventCategory>[
           ...modalCategories,
         ];
@@ -16357,10 +16528,10 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                   controller: notesController,
                                   minLines: 3,
                                   maxLines: 6,
-                                  decoration: const InputDecoration(
+                                  decoration: _longFormInputDecoration(
                                     labelText: 'Notes',
                                     hintText: 'Add task details',
-                                    prefixIcon: _BeanNotesIcon(),
+                                    prefixIcon: const _BeanNotesIcon(),
                                   ),
                                 ),
                               ],
@@ -16734,64 +16905,121 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                             ),
                           ],
                           if (showPrimaryWorkspaceSelector &&
-                              workspaces.isNotEmpty) ...[
+                              workspaceChoices.isNotEmpty) ...[
                             const SizedBox(height: 8),
                             _MobileFormSection(
                               key: const Key(
                                 'title-time-editor-primary-workspace',
                               ),
                               title: 'Workspaces',
-                              subtitle: 'Choose where this item belongs',
+                              subtitle:
+                                  'Choose every workspace this item should be created in.',
                               icon: Icons.home_work_outlined,
                               children: [
-                                DropdownButtonFormField<String>(
-                                  key: const Key(
-                                    'title-time-editor-primary-workspace-select',
-                                  ),
-                                  initialValue:
-                                      selectedPrimaryWorkspaceId?.toString() ??
-                                      '',
-                                  decoration: const InputDecoration(
-                                    labelText: 'Primary workspace',
-                                    prefixIcon: Icon(Icons.home_work_outlined),
-                                  ),
-                                  items: [
-                                    const DropdownMenuItem<String>(
-                                      value: '',
-                                      child: Text('No primary workspace'),
-                                    ),
-                                    for (final workspace in workspaces)
-                                      DropdownMenuItem<String>(
-                                        value: _workspaceValue(
-                                          workspace,
-                                        ).toString(),
-                                        child: Text(
-                                          workspace.isPersonal
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final workspace in workspaceChoices)
+                                      Builder(
+                                        builder: (context) {
+                                          final value = _workspaceValue(
+                                            workspace,
+                                          );
+                                          final selected =
+                                              _workspaceValuesMatch(
+                                                value,
+                                                selectedPrimaryWorkspaceId,
+                                              ) ||
+                                              syncWorkspaceIds.any(
+                                                (workspaceId) =>
+                                                    _workspaceValuesMatch(
+                                                      workspaceId,
+                                                      value,
+                                                    ),
+                                              );
+                                          final isCurrent =
+                                              _workspaceValuesMatch(
+                                                value,
+                                                _workspaceValueForId(
+                                                  workspaces,
+                                                  activeWorkspaceId,
+                                                ),
+                                              );
+                                          final label = workspace.isPersonal
                                               ? 'Personal'
-                                              : workspace.name,
-                                        ),
+                                              : workspace.name;
+                                          return FilterChip(
+                                            key: Key(
+                                              'title-time-editor-primary-workspace-${workspace.id}',
+                                            ),
+                                            label: Text(
+                                              isCurrent
+                                                  ? '$label (current)'
+                                                  : label,
+                                            ),
+                                            selected: selected,
+                                            onSelected: saving
+                                                ? null
+                                                : (
+                                                    nextSelected,
+                                                  ) => setModalState(() {
+                                                    validationError = null;
+                                                    if (nextSelected) {
+                                                      if (selectedPrimaryWorkspaceId ==
+                                                          null) {
+                                                        selectedPrimaryWorkspaceId =
+                                                            value;
+                                                      } else {
+                                                        syncWorkspaceIds.add(
+                                                          value,
+                                                        );
+                                                      }
+                                                      return;
+                                                    }
+
+                                                    if (_workspaceValuesMatch(
+                                                      value,
+                                                      selectedPrimaryWorkspaceId,
+                                                    )) {
+                                                      selectedPrimaryWorkspaceId =
+                                                          null;
+                                                      if (syncWorkspaceIds
+                                                          .isNotEmpty) {
+                                                        final replacement =
+                                                            syncWorkspaceIds
+                                                                .first;
+                                                        selectedPrimaryWorkspaceId =
+                                                            replacement;
+                                                        syncWorkspaceIds
+                                                            .removeWhere(
+                                                              (workspaceId) =>
+                                                                  _workspaceValuesMatch(
+                                                                    workspaceId,
+                                                                    replacement,
+                                                                  ),
+                                                            );
+                                                      }
+                                                    } else {
+                                                      syncWorkspaceIds.removeWhere(
+                                                        (workspaceId) =>
+                                                            _workspaceValuesMatch(
+                                                              workspaceId,
+                                                              value,
+                                                            ),
+                                                      );
+                                                    }
+                                                  }),
+                                          );
+                                        },
                                       ),
                                   ],
-                                  onChanged: saving
-                                      ? null
-                                      : (value) => setModalState(() {
-                                          selectedPrimaryWorkspaceId =
-                                              value == null || value.isEmpty
-                                              ? null
-                                              : value;
-                                          syncWorkspaceIds.removeWhere(
-                                            (workspaceId) =>
-                                                _workspaceValuesMatch(
-                                                  workspaceId,
-                                                  selectedPrimaryWorkspaceId,
-                                                ),
-                                          );
-                                        }),
                                 ),
                               ],
                             ),
                           ],
-                          if (syncTargets.isNotEmpty) ...[
+                          if (!showPrimaryWorkspaceSelector &&
+                              syncTargets.isNotEmpty) ...[
                             const SizedBox(height: 8),
                             _MobileFormSection(
                               key: const Key(
@@ -16957,6 +17185,7 @@ class _TaskListCard extends StatefulWidget {
   const _TaskListCard({
     required this.tasks,
     required this.pastTasks,
+    required this.loading,
     required this.eventCategories,
     required this.pendingTaskIds,
     required this.onTaskCompleted,
@@ -16969,6 +17198,7 @@ class _TaskListCard extends StatefulWidget {
 
   final List<HermesTask> tasks;
   final List<HermesTask> pastTasks;
+  final bool loading;
   final List<HermesEventCategory> eventCategories;
   final Set<int> pendingTaskIds;
   final Future<void> Function(HermesTask task) onTaskCompleted;
@@ -17022,7 +17252,8 @@ class _TaskListCardState extends State<_TaskListCard> {
         )
         .toList();
     visibleTasks.sort(_compareTasksByCompletionAndDueDate);
-    final currentTasks = <HermesTask>[];
+    final todayTasks = <HermesTask>[];
+    final upcomingTasks = <HermesTask>[];
     final moreThanSevenDaysTasks = <HermesTask>[];
     final moreThanThirtyDaysTasks = <HermesTask>[];
     for (final task in visibleTasks) {
@@ -17031,8 +17262,10 @@ class _TaskListCardState extends State<_TaskListCard> {
         moreThanThirtyDaysTasks.add(task);
       } else if (daysAway != null && daysAway > 7) {
         moreThanSevenDaysTasks.add(task);
+      } else if (daysAway != null && daysAway >= 1) {
+        upcomingTasks.add(task);
       } else {
-        currentTasks.add(task);
+        todayTasks.add(task);
       }
     }
     final activeSubtasks = widget.tasks
@@ -17090,7 +17323,12 @@ class _TaskListCardState extends State<_TaskListCard> {
           ],
         ),
         const SizedBox(height: 12),
-        if (visibleTasks.isEmpty)
+        if (widget.loading && visibleTasks.isEmpty)
+          const _InlineLoadingSurface(
+            key: Key('tasks-screen-loading'),
+            label: 'Loading tasks',
+          )
+        else if (visibleTasks.isEmpty)
           _EmptySurface(
             label: _showAll
                 ? 'No tasks yet'
@@ -17099,12 +17337,28 @@ class _TaskListCardState extends State<_TaskListCard> {
                 : 'No active tasks',
           )
         else ...[
-          for (final task in currentTasks) taskTile(task),
+          if (todayTasks.isNotEmpty)
+            _DatedListSection(
+              key: const Key('task-today-section'),
+              title: 'Today',
+              count: todayTasks.length,
+              itemLabel: 'task',
+              children: [for (final task in todayTasks) taskTile(task)],
+            ),
+          if (upcomingTasks.isNotEmpty)
+            _DatedListSection(
+              key: const Key('task-upcoming-section'),
+              title: 'Upcoming',
+              count: upcomingTasks.length,
+              itemLabel: 'task',
+              children: [for (final task in upcomingTasks) taskTile(task)],
+            ),
           if (moreThanSevenDaysTasks.isNotEmpty)
             _FutureTaskBucket(
               key: const Key('task-future-seven-section'),
               label: 'More than 7 days away',
               count: moreThanSevenDaysTasks.length,
+              itemLabel: 'task',
               expanded: _showMoreThanSevenDays,
               toggleKey: const Key('task-future-seven-toggle'),
               onTap: () => setState(
@@ -17119,6 +17373,7 @@ class _TaskListCardState extends State<_TaskListCard> {
               key: const Key('task-future-thirty-section'),
               label: 'More than 30 days away',
               count: moreThanThirtyDaysTasks.length,
+              itemLabel: 'task',
               expanded: _showMoreThanThirtyDays,
               toggleKey: const Key('task-future-thirty-toggle'),
               onTap: () => setState(
@@ -17258,6 +17513,7 @@ class _FutureTaskBucket extends StatelessWidget {
     super.key,
     required this.label,
     required this.count,
+    required this.itemLabel,
     required this.expanded,
     required this.toggleKey,
     required this.onTap,
@@ -17266,6 +17522,7 @@ class _FutureTaskBucket extends StatelessWidget {
 
   final String label;
   final int count;
+  final String itemLabel;
   final bool expanded;
   final Key toggleKey;
   final VoidCallback onTap;
@@ -17273,7 +17530,7 @@ class _FutureTaskBucket extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final countLabel = '$count task${count == 1 ? '' : 's'}';
+    final countLabel = '$count $itemLabel${count == 1 ? '' : 's'}';
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
@@ -17357,9 +17614,64 @@ class _FutureTaskBucket extends StatelessWidget {
   }
 }
 
+class _DatedListSection extends StatelessWidget {
+  const _DatedListSection({
+    super.key,
+    required this.title,
+    required this.count,
+    required this.itemLabel,
+    required this.children,
+  });
+
+  final String title;
+  final int count;
+  final String itemLabel;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final countLabel = '$count $itemLabel${count == 1 ? '' : 's'}';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 2, 2, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: HeyBeanTheme.text,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                Text(
+                  countLabel,
+                  style: const TextStyle(
+                    color: HeyBeanTheme.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
 class _ReminderListCard extends StatefulWidget {
   const _ReminderListCard({
     required this.reminders,
+    required this.loading,
     required this.eventCategories,
     required this.onReminderSaved,
     required this.onReminderCompleted,
@@ -17370,6 +17682,7 @@ class _ReminderListCard extends StatefulWidget {
   });
 
   final List<HermesReminder> reminders;
+  final bool loading;
   final List<HermesEventCategory> eventCategories;
   final Future<void> Function(
     HermesReminder? reminder, {
@@ -17406,6 +17719,8 @@ class _ReminderListCard extends StatefulWidget {
 class _ReminderListCardState extends State<_ReminderListCard> {
   bool _showCompleted = false;
   bool _showAll = false;
+  bool _showMoreThanSevenDays = false;
+  bool _showMoreThanThirtyDays = false;
 
   @override
   Widget build(BuildContext context) {
@@ -17416,6 +17731,28 @@ class _ReminderListCardState extends State<_ReminderListCard> {
         )
         .toList();
     visibleReminders.sort(_compareRemindersByCompletionAndDueDate);
+    final todayReminders = <HermesReminder>[];
+    final upcomingReminders = <HermesReminder>[];
+    final moreThanSevenDaysReminders = <HermesReminder>[];
+    final moreThanThirtyDaysReminders = <HermesReminder>[];
+    for (final reminder in visibleReminders) {
+      final daysAway = _reminderDaysAway(reminder);
+      if (daysAway != null && daysAway > 30) {
+        moreThanThirtyDaysReminders.add(reminder);
+      } else if (daysAway != null && daysAway > 7) {
+        moreThanSevenDaysReminders.add(reminder);
+      } else if (daysAway != null && daysAway >= 1) {
+        upcomingReminders.add(reminder);
+      } else {
+        todayReminders.add(reminder);
+      }
+    }
+    Widget reminderTile(HermesReminder reminder) => _ReminderItemTile(
+      reminder: reminder,
+      subtitle: _reminderSubtitle(reminder),
+      onTap: () => _showReminderEditor(context, reminder: reminder),
+      onCompleted: widget.onReminderCompleted,
+    );
     return Column(
       key: const Key('reminders-view'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -17454,7 +17791,12 @@ class _ReminderListCardState extends State<_ReminderListCard> {
           ],
         ),
         const SizedBox(height: 12),
-        if (visibleReminders.isEmpty)
+        if (widget.loading && visibleReminders.isEmpty)
+          const _InlineLoadingSurface(
+            key: Key('reminders-screen-loading'),
+            label: 'Loading reminders',
+          )
+        else if (visibleReminders.isEmpty)
           _EmptySurface(
             label: _showAll
                 ? 'No reminders yet'
@@ -17462,14 +17804,61 @@ class _ReminderListCardState extends State<_ReminderListCard> {
                 ? 'No completed reminders'
                 : 'No pending reminders',
           )
-        else
-          for (final reminder in visibleReminders)
-            _ReminderItemTile(
-              reminder: reminder,
-              subtitle: _reminderSubtitle(reminder),
-              onTap: () => _showReminderEditor(context, reminder: reminder),
-              onCompleted: widget.onReminderCompleted,
+        else ...[
+          if (todayReminders.isNotEmpty)
+            _DatedListSection(
+              key: const Key('reminder-today-section'),
+              title: 'Today',
+              count: todayReminders.length,
+              itemLabel: 'reminder',
+              children: [
+                for (final reminder in todayReminders) reminderTile(reminder),
+              ],
             ),
+          if (upcomingReminders.isNotEmpty)
+            _DatedListSection(
+              key: const Key('reminder-upcoming-section'),
+              title: 'Upcoming',
+              count: upcomingReminders.length,
+              itemLabel: 'reminder',
+              children: [
+                for (final reminder in upcomingReminders)
+                  reminderTile(reminder),
+              ],
+            ),
+          if (moreThanSevenDaysReminders.isNotEmpty)
+            _FutureTaskBucket(
+              key: const Key('reminder-future-seven-section'),
+              label: 'More than 7 days away',
+              count: moreThanSevenDaysReminders.length,
+              itemLabel: 'reminder',
+              expanded: _showMoreThanSevenDays,
+              toggleKey: const Key('reminder-future-seven-toggle'),
+              onTap: () => setState(
+                () => _showMoreThanSevenDays = !_showMoreThanSevenDays,
+              ),
+              children: [
+                for (final reminder in moreThanSevenDaysReminders)
+                  reminderTile(reminder),
+              ],
+            ),
+          if (moreThanThirtyDaysReminders.isNotEmpty)
+            _FutureTaskBucket(
+              key: const Key('reminder-future-thirty-section'),
+              label: 'More than 30 days away',
+              count: moreThanThirtyDaysReminders.length,
+              itemLabel: 'reminder',
+              expanded: _showMoreThanThirtyDays,
+              toggleKey: const Key('reminder-future-thirty-toggle'),
+              onTap: () => setState(
+                () => _showMoreThanThirtyDays = !_showMoreThanThirtyDays,
+              ),
+              children: [
+                for (final reminder in moreThanThirtyDaysReminders)
+                  reminderTile(reminder),
+              ],
+            ),
+        ],
       ],
     );
   }
@@ -17924,7 +18313,7 @@ class _MemoryComposer extends StatelessWidget {
             controller: contentController,
             minLines: 2,
             maxLines: 5,
-            decoration: const InputDecoration(
+            decoration: _longFormInputDecoration(
               hintText: 'Something Bean should remember',
             ),
           ),
@@ -18151,7 +18540,9 @@ class _MemoryEditSheetState extends State<_MemoryEditSheet> {
               autofocus: true,
               minLines: 4,
               maxLines: 8,
-              decoration: const InputDecoration(hintText: 'Knowledge content'),
+              decoration: _longFormInputDecoration(
+                hintText: 'Knowledge content',
+              ),
             ),
             const SizedBox(height: 10),
             DropdownButton<String>(
@@ -23508,6 +23899,67 @@ class _EmptySurface extends StatelessWidget {
   );
 }
 
+class _InlineLoadingSurface extends StatelessWidget {
+  const _InlineLoadingSurface({
+    super.key,
+    required this.label,
+    this.fillHeight = false,
+  });
+
+  final String label;
+  final bool fillHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface2,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Row(
+        mainAxisSize: fillHeight ? MainAxisSize.min : MainAxisSize.max,
+        mainAxisAlignment: fillHeight
+            ? MainAxisAlignment.center
+            : MainAxisAlignment.start,
+        children: [
+          SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: HeyBeanTheme.accentStrong,
+              backgroundColor: HeyBeanTheme.accent.withValues(alpha: .14),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: const TextStyle(
+              color: HeyBeanTheme.muted,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!fillHeight) return content;
+    return Container(
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface.withValues(alpha: .62),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 260),
+        child: content,
+      ),
+    );
+  }
+}
+
 List<HermesTask> _replaceTask(List<HermesTask> tasks, HermesTask replacement) =>
     tasks
         .map((task) => task.id == replacement.id ? replacement : task)
@@ -23660,6 +24112,14 @@ List<HermesTask> _tasksForMonthAgenda(List<HermesTask> tasks, DateTime month) {
 
 int? _taskDaysAway(HermesTask task) {
   final dueAt = _parseTaskDueDate(task);
+  if (dueAt == null) return null;
+  final today = _dateOnly(DateTime.now());
+  final dueDay = _dateOnly(dueAt);
+  return dueDay.difference(today).inDays;
+}
+
+int? _reminderDaysAway(HermesReminder reminder) {
+  final dueAt = _parseReminderDueDate(reminder);
   if (dueAt == null) return null;
   final today = _dateOnly(DateTime.now());
   final dueDay = _dateOnly(dueAt);
@@ -24993,10 +25453,9 @@ class _BetaFeedbackDialogState extends State<_BetaFeedbackDialog> {
           maxLines: 7,
           maxLength: 4000,
           textInputAction: TextInputAction.newline,
-          decoration: const InputDecoration(
+          decoration: _longFormInputDecoration(
             hintText:
                 'Describe what you were doing, what went wrong, and what you expected instead.',
-            border: OutlineInputBorder(),
           ),
         ),
         if (_error != null) ...[
@@ -25438,9 +25897,17 @@ class _SignedInBottomDock extends StatelessWidget {
             key: const Key('bean-chat-composer-dock'),
             left: 0,
             right: 0,
-            top: 0,
-            height: _beanChatComposerReservedHeight,
-            child: Align(alignment: Alignment.bottomCenter, child: composer),
+            bottom: menuHeight - _beanBottomMenuSurfaceInset,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minHeight: _beanChatComposerReservedHeight,
+                  maxHeight: _beanChatComposerMaxHeight,
+                ),
+                child: composer,
+              ),
+            ),
           ),
         ],
       ),

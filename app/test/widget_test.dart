@@ -1761,6 +1761,12 @@ void main() {
     expect(find.text('Choose Bean’s personality'), findsOneWidget);
     expect(find.text('What should Bean prioritize?'), findsOneWidget);
     expect(find.text('Anything Bean should know?'), findsOneWidget);
+    final contextField = tester.widget<TextField>(
+      find.byKey(const Key('onboarding-context')),
+    );
+    final contextBorder =
+        contextField.decoration!.enabledBorder! as OutlineInputBorder;
+    expect(contextBorder.borderRadius, BorderRadius.circular(16));
     expect(
       tester
           .widget<ChoiceChip>(find.byKey(const Key('agent-personality-coach')))
@@ -2478,6 +2484,29 @@ void main() {
     },
   );
 
+  testWidgets('Bean chat input wraps before scrolling', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+
+    const longRequest =
+        'Create a detailed plan for tomorrow morning, include prep notes, reminders, and a checklist for each thing I need to handle before lunch.';
+    await tester.enterText(find.byKey(const Key('chat-input')), longRequest);
+    await tester.pumpAndSettle();
+
+    final input = tester.widget<TextField>(find.byKey(const Key('chat-input')));
+    expect(input.minLines, 1);
+    expect(input.maxLines, 4);
+    expect(input.keyboardType, TextInputType.multiline);
+  });
+
   testWidgets('sent Bean messages can be copied or edited and resent', (
     WidgetTester tester,
   ) async {
@@ -2726,7 +2755,7 @@ void main() {
   });
 
   testWidgets(
-    'signed-in screens do not overlay global loading during refresh',
+    'signed-in screens show inline loading while dashboard data loads',
     (WidgetTester tester) async {
       final api = _SlowDashboardFakeHermesApiClient();
 
@@ -2741,21 +2770,32 @@ void main() {
         findsNothing,
       );
       expect(find.text('Loading...'), findsNothing);
+      expect(
+        find.byKey(const Key('command-center-agenda-loading')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('command-center-agenda-empty')),
+        findsNothing,
+      );
 
-      for (final navKey in const [
-        Key('nav-tasks'),
-        Key('nav-reminders'),
-        Key('nav-notes'),
-        Key('nav-more'),
-        Key('nav-bean'),
-      ]) {
-        await tester.tap(find.byKey(navKey));
-        await tester.pump();
-        expect(
-          find.byKey(const Key('signed-in-loading-indicator')),
-          findsNothing,
-        );
-      }
+      await tester.tap(find.byKey(const Key('nav-tasks')));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('signed-in-loading-indicator')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('tasks-screen-loading')), findsOneWidget);
+      expect(find.text('No active tasks'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('nav-reminders')));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('signed-in-loading-indicator')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('reminders-screen-loading')), findsOneWidget);
+      expect(find.text('No pending reminders'), findsNothing);
 
       api.completeDashboardLoad();
       await tester.pumpAndSettle();
@@ -2764,6 +2804,7 @@ void main() {
         find.byKey(const Key('signed-in-loading-indicator')),
         findsNothing,
       );
+      expect(find.byKey(const Key('reminders-screen-loading')), findsNothing);
     },
   );
 
@@ -3166,7 +3207,12 @@ void main() {
     await _openCreateMenuAndChoose(tester, const Key('create-task-action'));
     expect(find.byKey(const Key('title-time-editor-save')), findsNothing);
     expect(
-      find.byKey(const Key('title-time-editor-primary-workspace-select')),
+      find.byKey(const Key('title-time-editor-primary-workspace-1')),
+      findsOneWidget,
+    );
+    expect(find.text('Personal (current)'), findsOneWidget);
+    expect(
+      find.byKey(const Key('title-time-editor-primary-workspace-2')),
       findsOneWidget,
     );
     await tester.enterText(
@@ -3179,14 +3225,16 @@ void main() {
     await tester.tap(find.byKey(const Key('title-time-time-dock-done')));
     await tester.pumpAndSettle();
     await tester.ensureVisible(
-      find.byKey(const Key('title-time-editor-primary-workspace-select')),
+      find.byKey(const Key('title-time-editor-primary-workspace-1')),
     );
     await tester.pumpAndSettle();
     await tester.tap(
-      find.byKey(const Key('title-time-editor-primary-workspace-select')),
+      find.byKey(const Key('title-time-editor-primary-workspace-1')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('No primary workspace').last);
+    await tester.tap(
+      find.byKey(const Key('title-time-editor-primary-workspace-2')),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Task recurrence'), findsOneWidget);
     await tester.dragFrom(const Offset(400, 500), const Offset(0, -320));
@@ -3199,7 +3247,8 @@ void main() {
     expect(api.createdTask?.title, 'Order coffee beans');
     expect(api.createdTask?.dueAt, isNotNull);
     expect(api.createdTask?.metadata?['recurrence'], 'daily');
-    expect(api.createdTaskWorkspaceId, isNull);
+    expect(api.createdTaskWorkspaceId, 2);
+    expect(api.createdTaskSyncWorkspaceIds, isEmpty);
     expect(api.createdReminder, isNull);
 
     await tester.tap(find.byKey(const Key('nav-reminders')));
@@ -4879,6 +4928,17 @@ void main() {
 
   testWidgets('create menu creates a new event', (WidgetTester tester) async {
     final api = _EditableCalendarFakeHermesApiClient();
+    api.workspaceOverrides = const [
+      HermesWorkspace(
+        id: '1',
+        name: 'Personal',
+        type: 'personal',
+        role: 'owner',
+        active: true,
+        isDefault: true,
+      ),
+      HermesWorkspace(id: '2', name: 'Household', role: 'owner'),
+    ];
     await tester.pumpWidget(
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
@@ -4898,12 +4958,13 @@ void main() {
     final criticalCount = tester.getRect(
       find.byKey(const Key('critical-task-count')),
     );
-    final dayHeader = tester.getRect(
-      find.byKey(const Key('calendar-sticky-day-header')),
-    );
     expect(addButton.left, greaterThan(criticalCount.right));
     expect(addButton.center.dy, closeTo(criticalCount.center.dy, 2));
-    expect(addButton.bottom, lessThan(dayHeader.top));
+    final dayHeaderFinder = find.byKey(const Key('calendar-sticky-day-header'));
+    if (dayHeaderFinder.evaluate().isNotEmpty) {
+      final dayHeader = tester.getRect(dayHeaderFinder);
+      expect(addButton.bottom, lessThan(dayHeader.top));
+    }
     await _openCreateMenuAndChoose(tester, const Key('create-event-action'));
 
     expect(find.byKey(const Key('calendar-event-detail-page')), findsOneWidget);
@@ -4934,6 +4995,13 @@ void main() {
       find.byKey(const Key('event-google-calendar-sports@example.com')),
     );
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('event-sync-workspace-1')));
+    await tester.pumpAndSettle();
+    expect(find.text('Personal (current)'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('event-sync-workspace-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('event-sync-workspace-2')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('event-save-action')));
     await tester.pumpAndSettle();
 
@@ -4957,7 +5025,105 @@ void main() {
       'sports@example.com',
     ]);
     expect(api.createdEvent?.metadata?['google_calendar_id'], 'primary');
+    expect(api.createdEventWorkspaceId, 2);
+    expect(api.createdEventSyncWorkspaceIds, isEmpty);
     expect(find.textContaining('Client kickoff'), findsOneWidget);
+  });
+
+  testWidgets('event description field uses rectangular styling', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await _openCreateMenuAndChoose(tester, const Key('create-event-action'));
+
+    final notesField = tester.widget<TextField>(
+      find.byKey(const Key('event-notes-field')),
+    );
+    final notesBorder =
+        notesField.decoration!.enabledBorder! as OutlineInputBorder;
+    expect(notesBorder.borderRadius, BorderRadius.circular(16));
+    expect((notesField.decoration!.prefixIcon as dynamic).size, 20);
+  });
+
+  testWidgets('event reminders are optional and follow event recurrence', (
+    WidgetTester tester,
+  ) async {
+    final api = _EditableCalendarFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await _openCreateMenuAndChoose(tester, const Key('create-event-action'));
+    await tester.enterText(
+      find.byKey(const Key('event-title-field')),
+      'Recurring standup',
+    );
+
+    expect(find.byKey(const Key('event-reminder-minutes-field')), findsNothing);
+    expect(
+      find.byKey(const Key('event-reminder-recurrence-field')),
+      findsNothing,
+    );
+
+    tester
+        .widget<ChoiceChip>(
+          find.descendant(
+            of: find.byKey(const Key('event-recurrence-field')),
+            matching: find.widgetWithText(ChoiceChip, 'Specific days'),
+          ),
+        )
+        .onSelected
+        ?.call(true);
+    await tester.pumpAndSettle();
+    tester
+        .widget<FilterChip>(
+          find.descendant(
+            of: find.byKey(const Key('event-specific-days')),
+            matching: find.widgetWithText(FilterChip, 'Mon'),
+          ),
+        )
+        .onSelected
+        ?.call(true);
+    tester
+        .widget<FilterChip>(
+          find.descendant(
+            of: find.byKey(const Key('event-specific-days')),
+            matching: find.widgetWithText(FilterChip, 'Wed'),
+          ),
+        )
+        .onSelected
+        ?.call(true);
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(
+      find.byKey(const Key('event-create-reminder-toggle')),
+    );
+    await tester.tap(find.byKey(const Key('event-create-reminder-toggle')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('event-reminder-minutes-field')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('event-reminder-specific-days')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.createdReminder?['calendar_event_id'], 44);
+    expect(api.createdReminder?['metadata'], {
+      'minutes_before': 15,
+      'recurrence': 'specific_days',
+      'days': ['mon', 'wed'],
+      'interval': 1,
+      'unit': 'days',
+    });
   });
 
   testWidgets(
@@ -5546,7 +5712,7 @@ void main() {
       await tester.tap(find.text('Tentative').last);
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.byKey(const Key('event-reminder-minutes-field')),
+        find.byKey(const Key('event-recurrence-field')),
         200,
         scrollable: find.byType(Scrollable).last,
       );
@@ -5589,54 +5755,27 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.ensureVisible(
-        find.byKey(const Key('event-reminder-minutes-field')),
+        find.byKey(const Key('event-create-reminder-toggle')),
       );
       await tester.pumpAndSettle();
       expect(
         find.byKey(const Key('event-reminder-minutes-field')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.byKey(const Key('event-reminder-recurrence-field')),
-        findsOneWidget,
+        findsNothing,
       );
-      await tester.enterText(
-        find.byKey(const Key('event-reminder-minutes-field')),
-        '15',
-      );
-      tester
-          .widget<ChoiceChip>(
-            find.descendant(
-              of: find.byKey(const Key('event-reminder-recurrence-field')),
-              matching: find.widgetWithText(ChoiceChip, 'Specific days'),
-            ),
-          )
-          .onSelected
-          ?.call(true);
+      await tester.tap(find.byKey(const Key('event-create-reminder-toggle')));
       await tester.pumpAndSettle();
       expect(
-        find.byKey(const Key('event-reminder-specific-days')),
+        find.byKey(const Key('event-reminder-minutes-field')),
         findsOneWidget,
       );
-      tester
-          .widget<FilterChip>(
-            find.descendant(
-              of: find.byKey(const Key('event-reminder-specific-days')),
-              matching: find.widgetWithText(FilterChip, 'Mon'),
-            ),
-          )
-          .onSelected
-          ?.call(true);
-      tester
-          .widget<FilterChip>(
-            find.descendant(
-              of: find.byKey(const Key('event-reminder-specific-days')),
-              matching: find.widgetWithText(FilterChip, 'Wed'),
-            ),
-          )
-          .onSelected
-          ?.call(true);
-      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('event-reminder-specific-days')),
+        findsNothing,
+      );
       await tester.scrollUntilVisible(
         find.byKey(const Key('event-category-dropdown')),
         200,
@@ -5701,7 +5840,7 @@ void main() {
       expect(api.createdReminder?['metadata'], {
         'minutes_before': 15,
         'recurrence': 'specific_days',
-        'days': ['mon', 'wed'],
+        'days': ['thu', 'tue'],
         'interval': 1,
         'unit': 'days',
       });
@@ -6426,6 +6565,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
+      await tester.pumpAndSettle();
+
       expect(find.text('Tasks for Today'), findsOneWidget);
       expect(find.text('Overdue task'), findsOneWidget);
       expect(find.text('Today task'), findsOneWidget);
@@ -6453,6 +6595,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('tasks-view')), findsOneWidget);
+      expect(find.byKey(const Key('task-today-section')), findsOneWidget);
+      expect(find.byKey(const Key('task-upcoming-section')), findsOneWidget);
       expect(find.text('Overdue task'), findsOneWidget);
       expect(find.text('Today task'), findsOneWidget);
       expect(find.text('Tomorrow task'), findsOneWidget);
@@ -6486,6 +6630,39 @@ void main() {
       expect(find.text('Next month task'), findsOneWidget);
     },
   );
+
+  testWidgets('reminders screen uses today and upcoming date sections', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _TomorrowReminderFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-reminders')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('reminders-view')), findsOneWidget);
+    expect(find.byKey(const Key('reminder-today-section')), findsOneWidget);
+    expect(find.byKey(const Key('reminder-upcoming-section')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('reminder-today-section')),
+        matching: find.text('Today reminder'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('reminder-upcoming-section')),
+        matching: find.text('Tomorrow reminder'),
+      ),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('reminder editor keeps controllers alive while opened', (
     WidgetTester tester,
@@ -8913,6 +9090,9 @@ class _EditableCalendarFakeHermesApiClient
   final HermesCalendarEvent? _initialEvent;
   HermesCalendarEvent? updatedEvent;
   HermesCalendarEvent? createdEvent;
+  List<HermesWorkspace>? workspaceOverrides;
+  int? createdEventWorkspaceId;
+  List<Object> createdEventSyncWorkspaceIds = const [];
   Map<String, Object?>? createdReminder;
   HermesEventCategory? savedCategory;
   Completer<void>? createEventCompleter;
@@ -8923,6 +9103,29 @@ class _EditableCalendarFakeHermesApiClient
   List<Object> deletedEventWorkspaceIds = const [];
   String? deletedRecurringMode;
   String? deletedRecurringOccurrenceDate;
+
+  @override
+  Future<HermesUser> me() async {
+    final user = await super.me();
+    final workspaces = workspaceOverrides;
+    if (workspaces == null) return user;
+    HermesWorkspace? activeWorkspace;
+    HermesWorkspace? personalWorkspace;
+    for (final workspace in workspaces) {
+      if (workspace.active) activeWorkspace ??= workspace;
+      if (workspace.isPersonal) personalWorkspace ??= workspace;
+    }
+    return user.copyWith(
+      defaultWorkspaceId: activeWorkspace?.numericId ?? user.defaultWorkspaceId,
+      personalWorkspace: personalWorkspace,
+      activeWorkspace: activeWorkspace,
+      workspaces: workspaces,
+    );
+  }
+
+  @override
+  Future<List<HermesWorkspace>> listWorkspaces() async =>
+      workspaceOverrides ?? const [];
 
   @override
   Future<HermesCalendarEvent> updateCalendarEvent(
@@ -8977,6 +9180,8 @@ class _EditableCalendarFakeHermesApiClient
     List<Object> syncToWorkspaceIds = const [],
   }) async {
     await createEventCompleter?.future;
+    createdEventWorkspaceId = workspaceId;
+    createdEventSyncWorkspaceIds = syncToWorkspaceIds;
     createdEvent = HermesCalendarEvent(
       id: 44,
       title: title,

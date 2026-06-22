@@ -417,7 +417,7 @@
 }
 
 .heybean-app-body textarea {
-    border-radius: 24px;
+    border-radius: 16px;
 }
 
 .heybean-app-body a {
@@ -1313,7 +1313,7 @@
 
 .hb-textarea {
     min-height: 94px;
-    border-radius: 24px;
+    border-radius: 16px;
     resize: vertical;
 }
 
@@ -3794,8 +3794,38 @@
     font-weight: 900;
 }
 
-.hb-message-model {
+.hb-message-actions-inline {
     margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    opacity: .78;
+}
+
+.hb-message-icon-action {
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid rgba(var(--hb-accent-rgb), .18);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .62);
+    color: var(--hb-accent-strong);
+    cursor: pointer;
+}
+
+.hb-message-icon-action:hover {
+    border-color: rgba(var(--hb-accent-rgb), .34);
+    background: rgba(255, 255, 255, .9);
+}
+
+.hb-message-icon-action svg {
+    width: 15px;
+    height: 15px;
+}
+
+.hb-message-model {
     max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
