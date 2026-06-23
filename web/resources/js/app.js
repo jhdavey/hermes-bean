@@ -1602,7 +1602,7 @@ if (mount) {
         return `
             <div class="hb-billing-interval-toggle" role="group" aria-label="Billing interval">
                 <button type="button" class="${current === 'monthly' ? 'active' : ''}" data-${dataPrefix}="monthly" aria-pressed="${current === 'monthly' ? 'true' : 'false'}">Monthly</button>
-                <button type="button" class="${current === 'yearly' ? 'active' : ''}" data-${dataPrefix}="yearly" aria-pressed="${current === 'yearly' ? 'true' : 'false'}">Yearly <span>Save up to 17%</span></button>
+                <button type="button" class="${current === 'yearly' ? 'active' : ''}" data-${dataPrefix}="yearly" aria-pressed="${current === 'yearly' ? 'true' : 'false'}">Yearly <span>Save over 16%</span></button>
             </div>`;
     }
 

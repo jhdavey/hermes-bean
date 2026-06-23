@@ -78,8 +78,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('Platforms', false)
             ->assertDontSee('FAQ', false)
             ->assertDontSee('Blog', false)
-            ->assertDontSee('API', false)
-            ->assertDontSee('Billing', false);
+            ->assertDontSee('API', false);
     }
 
     public function test_homepage_proof_count_adds_registered_users_to_seed_count(): void
@@ -128,8 +127,8 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Organized Your Days With Less Effort', false)
             ->assertSee('Monthly', false)
             ->assertSee('Yearly', false)
-            ->assertSee('Save up to 17%', false)
-            ->assertSee('Free trial', false)
+            ->assertSee('Save over 16%', false)
+            ->assertSee('14-day Free Trial - cancel anytime', false)
             ->assertSee('Base', false)
             ->assertSee('Premium', false)
             ->assertSee('Pro', false)
@@ -144,10 +143,10 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('$4.99', false)
             ->assertSee('$19.99', false)
             ->assertSee('$49.99', false)
-            ->assertSee('Start 7 day free trial', false)
-            ->assertSee('href="/register?plan=base"', false)
-            ->assertSee('href="/register?plan=premium"', false)
-            ->assertSee('href="/register?plan=pro"', false)
+            ->assertSee('Start 14 day free trial', false)
+            ->assertSee('href="/register?plan=base&billing_interval=monthly"', false)
+            ->assertSee('href="/register?plan=premium&billing_interval=monthly"', false)
+            ->assertSee('href="/register?plan=pro&billing_interval=monthly"', false)
             ->assertSee('$0.00 due today, cancel anytime', false)
             ->assertSee('Contact us', false)
             ->assertSee('class="public-beta-banner"', false)
@@ -155,8 +154,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('FAQ', false)
             ->assertDontSee('Platforms', false)
             ->assertDontSee('Blog', false)
-            ->assertDontSee('API', false)
-            ->assertDontSee('Billing', false);
+            ->assertDontSee('API', false);
     }
 
     public function test_pricing_page_shows_flutter_upgrade_instruction_when_opened_from_app(): void

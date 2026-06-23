@@ -12,10 +12,22 @@
     <meta name="theme-color" content="#7bc98c">
     @include('partials.public-postbridge-styles')
     <style>
-        .segmented .billing-option {
+        .pricing-page .segmented {
+            overflow: visible;
+        }
+        .pricing-page .segmented input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .pricing-page .segmented .billing-option {
             position: relative;
             z-index: 1;
             height: 34px;
+            display: grid;
+            place-items: center;
             border: 0;
             border-radius: 999px;
             background: transparent;
@@ -26,9 +38,14 @@
             cursor: pointer;
             transition: background .18s ease, color .18s ease;
         }
-        .segmented .billing-option.active {
+        .pricing-page .segmented input:checked + .billing-option,
+        .pricing-page .segmented .billing-option.active {
             background: var(--pb-green);
             color: var(--pb-green-ink);
+        }
+        .pricing-page .segmented input:focus-visible + .billing-option {
+            outline: 2px solid var(--pb-green-dark);
+            outline-offset: 2px;
         }
         .section-head p {
             margin: 16px auto 0;
@@ -52,9 +69,11 @@
 
             <div class="billing-switch" aria-label="Billing options">
                 <div class="segmented" role="group" aria-label="Billing interval">
-                    <button type="button" class="billing-option active" data-billing-option="monthly" aria-pressed="true">Monthly</button>
-                    <button type="button" class="billing-option" data-billing-option="yearly" aria-pressed="false">Yearly</button>
-                    <strong class="save-badge">Save up to 17%</strong>
+                    <input id="billing-monthly" type="radio" name="billing_interval" value="monthly" data-billing-option checked>
+                    <label class="billing-option active" for="billing-monthly" data-billing-label="monthly" aria-pressed="true">Monthly</label>
+                    <input id="billing-yearly" type="radio" name="billing_interval" value="yearly" data-billing-option>
+                    <label class="billing-option" for="billing-yearly" data-billing-label="yearly" aria-pressed="false">Yearly</label>
+                    <strong class="save-badge">Save over 16%</strong>
                 </div>
             </div>
             @if ($fromFlutter)
@@ -126,16 +145,20 @@
     <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a></span></footer>
     <script>
         (() => {
-            const options = Array.from(document.querySelectorAll('[data-billing-option]'));
+            const options = Array.from(document.querySelectorAll('input[data-billing-option]'));
+            const labels = Array.from(document.querySelectorAll('[data-billing-label]'));
             const amounts = Array.from(document.querySelectorAll('.amount[data-monthly-price]'));
             const periods = Array.from(document.querySelectorAll('.period[data-monthly-period]'));
             const links = Array.from(document.querySelectorAll('[data-plan-link]'));
             const applyInterval = (interval) => {
                 const normalized = interval === 'yearly' ? 'yearly' : 'monthly';
                 options.forEach((option) => {
-                    const active = option.dataset.billingOption === normalized;
-                    option.classList.toggle('active', active);
-                    option.setAttribute('aria-pressed', active ? 'true' : 'false');
+                    option.checked = option.value === normalized;
+                });
+                labels.forEach((label) => {
+                    const active = label.dataset.billingLabel === normalized;
+                    label.classList.toggle('active', active);
+                    label.setAttribute('aria-pressed', active ? 'true' : 'false');
                 });
                 amounts.forEach((amount) => {
                     amount.textContent = normalized === 'yearly' ? amount.dataset.yearlyPrice : amount.dataset.monthlyPrice;
@@ -148,7 +171,7 @@
                     link.href = `/register?plan=${encodeURIComponent(plan)}&billing_interval=${normalized}`;
                 });
             };
-            options.forEach((option) => option.addEventListener('click', () => applyInterval(option.dataset.billingOption)));
+            options.forEach((option) => option.addEventListener('change', () => applyInterval(option.value)));
             applyInterval(new URLSearchParams(window.location.search).get('billing_interval'));
         })();
     </script>

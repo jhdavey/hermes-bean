@@ -7810,7 +7810,7 @@ class _BillingIntervalToggle extends StatelessWidget {
           ),
           _BillingIntervalButton(
             label: 'Yearly',
-            detail: 'Save up to 17%',
+            detail: 'Save over 16%',
             selected: current == 'yearly',
             onPressed: () => onChanged('yearly'),
           ),
