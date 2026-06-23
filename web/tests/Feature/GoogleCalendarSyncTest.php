@@ -845,6 +845,44 @@ class GoogleCalendarSyncTest extends TestCase
             && $request['summary'] === 'Updated client meeting');
     }
 
+    public function test_local_calendar_create_without_external_calendar_selection_does_not_export_to_google(): void
+    {
+        $token = $this->apiToken('calendar-no-external-export@example.com');
+        $user = User::where('email', 'calendar-no-external-export@example.com')->firstOrFail();
+        GoogleCalendarConnection::create([
+            'user_id' => $user->id,
+            'status' => 'connected',
+            'calendar_id' => 'primary',
+            'access_token_encrypted' => Crypt::encryptString('access-token'),
+            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
+            'token_expires_at' => now()->addHour(),
+            'metadata' => [
+                'selected_calendar_ids' => ['primary'],
+                'calendars' => [
+                    ['id' => 'primary', 'summary' => 'Main calendar', 'accessRole' => 'owner'],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/*' => Http::response([
+                'id' => 'should-not-be-created',
+            ]),
+        ]);
+
+        $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Local only planning',
+            'starts_at' => '2026-05-20T15:00:00Z',
+            'ends_at' => '2026-05-20T16:00:00Z',
+            'metadata' => ['google_calendar_ids' => []],
+        ])->assertCreated()
+            ->assertJsonPath('data.google_event_id', null)
+            ->assertJsonPath('data.google_calendar_id', null)
+            ->assertJsonPath('data.metadata.google_calendar_ids', []);
+
+        Http::assertNothingSent();
+    }
+
     public function test_local_calendar_create_exports_to_multiple_selected_google_calendars(): void
     {
         $token = $this->apiToken('calendar-multi-write@example.com');

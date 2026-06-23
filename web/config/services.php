@@ -87,11 +87,20 @@ return [
         'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
         'api_version' => env('STRIPE_API_VERSION', '2026-05-27.dahlia'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
-        'trial_days' => (int) env('STRIPE_TRIAL_DAYS', 7),
+        'trial_days' => (int) env('STRIPE_TRIAL_DAYS', 14),
         'prices' => [
-            'base' => env('STRIPE_PRICE_BASE'),
-            'premium' => env('STRIPE_PRICE_PREMIUM'),
-            'pro' => env('STRIPE_PRICE_PRO'),
+            'base' => [
+                'monthly' => env('STRIPE_PRICE_BASE_MONTHLY', env('STRIPE_PRICE_BASE')),
+                'yearly' => env('STRIPE_PRICE_BASE_YEARLY'),
+            ],
+            'premium' => [
+                'monthly' => env('STRIPE_PRICE_PREMIUM_MONTHLY', env('STRIPE_PRICE_PREMIUM')),
+                'yearly' => env('STRIPE_PRICE_PREMIUM_YEARLY'),
+            ],
+            'pro' => [
+                'monthly' => env('STRIPE_PRICE_PRO_MONTHLY', env('STRIPE_PRICE_PRO')),
+                'yearly' => env('STRIPE_PRICE_PRO_YEARLY'),
+            ],
         ],
     ],
 
@@ -127,6 +136,12 @@ return [
         'client_id' => env('GOOGLE_CALENDAR_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CALENDAR_CLIENT_SECRET'),
         'redirect_uri' => env('GOOGLE_CALENDAR_REDIRECT_URI'),
+    ],
+
+    'microsoft_outlook' => [
+        'client_id' => env('MICROSOFT_OUTLOOK_CLIENT_ID'),
+        'client_secret' => env('MICROSOFT_OUTLOOK_CLIENT_SECRET'),
+        'redirect_uri' => env('MICROSOFT_OUTLOOK_REDIRECT_URI'),
     ],
 
 ];

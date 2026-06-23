@@ -30,7 +30,7 @@ class BillingInfrastructureTest extends TestCase
                 $this->assertSame('cus_test_123', $data['customer']);
                 $this->assertSame('price_premium_test', $data['line_items'][0]['price']);
                 $this->assertSame(1, $data['line_items'][0]['quantity']);
-                $this->assertSame(7, $data['subscription_data']['trial_period_days']);
+                $this->assertSame(14, $data['subscription_data']['trial_period_days']);
                 $this->assertSame('premium', $data['subscription_data']['metadata']['plan']);
                 $this->assertSame('flutter', $data['subscription_data']['metadata']['source']);
                 $this->assertStringContainsString('source=flutter', $data['success_url']);
@@ -69,8 +69,8 @@ class BillingInfrastructureTest extends TestCase
 
             if ($request->url() === 'https://api.stripe.com/v1/checkout/sessions') {
                 $data = $request->data();
-                $this->assertStringContainsString('/subscribe?checkout=success&plan=base&source=subscribe', $data['success_url']);
-                $this->assertStringContainsString('/subscribe?checkout=cancel&plan=base&source=subscribe', $data['cancel_url']);
+                $this->assertStringContainsString('/subscribe?checkout=success&plan=base&billing_interval=monthly&source=subscribe', $data['success_url']);
+                $this->assertStringContainsString('/subscribe?checkout=cancel&plan=base&billing_interval=monthly&source=subscribe', $data['cancel_url']);
                 $this->assertSame('subscribe', $data['metadata']['source']);
 
                 return Http::response([
@@ -90,6 +90,43 @@ class BillingInfrastructureTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.id', 'cs_subscribe_123')
             ->assertJsonPath('data.plan', 'base');
+    }
+
+    public function test_checkout_session_uses_yearly_price_when_selected(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('checkout-yearly@example.com');
+
+        Http::fake(function (HttpRequest $request) {
+            if ($request->url() === 'https://api.stripe.com/v1/customers') {
+                return Http::response(['id' => 'cus_yearly_123'], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/checkout/sessions') {
+                $data = $request->data();
+                $this->assertSame('price_premium_yearly_test', $data['line_items'][0]['price']);
+                $this->assertSame('yearly', $data['metadata']['billing_interval']);
+                $this->assertSame('yearly', $data['subscription_data']['metadata']['billing_interval']);
+                $this->assertStringContainsString('billing_interval=yearly', $data['success_url']);
+
+                return Http::response([
+                    'id' => 'cs_yearly_123',
+                    'url' => 'https://checkout.stripe.com/c/pay/cs_yearly_123',
+                    'status' => 'open',
+                ], 200);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->withToken($token)->postJson('/api/billing/checkout-sessions', [
+            'plan' => 'premium',
+            'billing_interval' => 'yearly',
+            'source' => 'flutter',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.plan', 'premium')
+            ->assertJsonPath('data.billing_interval', 'yearly');
     }
 
     public function test_mobile_subscription_setup_returns_stripe_client_secrets_without_card_data(): void
@@ -180,15 +217,15 @@ class BillingInfrastructureTest extends TestCase
                 $this->assertSame('pm_card_visa', $data['default_payment_method']);
                 $this->assertSame('price_premium_test', $data['items'][0]['price']);
                 $this->assertSame(1, $data['items'][0]['quantity']);
-                $this->assertSame(7, $data['trial_period_days']);
+                $this->assertSame(14, $data['trial_period_days']);
                 $this->assertSame('on_subscription', $data['payment_settings']['save_default_payment_method']);
 
                 return Http::response([
                     'id' => 'sub_mobile_123',
                     'customer' => 'cus_mobile_confirm_123',
                     'status' => 'trialing',
-                    'current_period_end' => now()->addDays(7)->timestamp,
-                    'trial_end' => now()->addDays(7)->timestamp,
+                    'current_period_end' => now()->addDays(14)->timestamp,
+                    'trial_end' => now()->addDays(14)->timestamp,
                     'cancel_at_period_end' => false,
                     'metadata' => [
                         'heybean_user_id' => (string) $user->id,
@@ -767,9 +804,18 @@ class BillingInfrastructureTest extends TestCase
         config()->set('services.stripe.publishable_key', 'pk_test_123');
         config()->set('services.stripe.api_version', '2026-05-27.dahlia');
         config()->set('services.stripe.webhook_secret', null);
-        config()->set('services.stripe.trial_days', 7);
-        config()->set('services.stripe.prices.base', 'price_base_test');
-        config()->set('services.stripe.prices.premium', 'price_premium_test');
-        config()->set('services.stripe.prices.pro', 'price_pro_test');
+        config()->set('services.stripe.trial_days', 14);
+        config()->set('services.stripe.prices.base', [
+            'monthly' => 'price_base_test',
+            'yearly' => 'price_base_yearly_test',
+        ]);
+        config()->set('services.stripe.prices.premium', [
+            'monthly' => 'price_premium_test',
+            'yearly' => 'price_premium_yearly_test',
+        ]);
+        config()->set('services.stripe.prices.pro', [
+            'monthly' => 'price_pro_test',
+            'yearly' => 'price_pro_yearly_test',
+        ]);
     }
 }

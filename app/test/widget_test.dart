@@ -635,7 +635,10 @@ void main() {
     expect(find.byKey(const Key('signup-paywall-screen')), findsOneWidget);
     expect(find.text('Choose your HeyBean subscription'), findsOneWidget);
     expect(find.text('Account created for testing.'), findsOneWidget);
-    expect(find.text('7-day free trial, then billed monthly'), findsOneWidget);
+    expect(
+      find.text('14-day free trial, then billed monthly'),
+      findsNWidgets(3),
+    );
     expect(find.text('Start with a 7-day free trial.'), findsNothing);
     expect(find.byKey(const Key('calendar-view')), findsNothing);
     expect(tokenStore.token, 'fake-token');
@@ -668,13 +671,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.checkoutRequests, isEmpty);
-    expect(api.mobileSubscriptionSetupRequests, ['base']);
+    expect(api.mobileSubscriptionSetupRequests, [
+      {'plan': 'base', 'billingInterval': 'monthly'},
+    ]);
     expect(api.mobileSubscriptionConfirmRequests, [
-      {'plan': 'base', 'setupIntentId': 'seti_test_base'},
+      {
+        'plan': 'base',
+        'billingInterval': 'monthly',
+        'setupIntentId': 'seti_test_base',
+      },
     ]);
     expect(stripeHandler.preparedSetupIntentIds, ['seti_test_base']);
     expect(stripeHandler.presentedSheets, 1);
-    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
   });
 
   testWidgets(
@@ -1884,6 +1893,22 @@ void main() {
       tester.getTopLeft(event).dy,
       lessThan(tester.getTopLeft(reminder).dy),
     );
+
+    await tester.tap(task);
+    await tester.pumpAndSettle();
+    expect(find.text('Edit task'), findsOneWidget);
+    await tester.tap(find.text('Cancel').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(event);
+    await tester.pumpAndSettle();
+    expect(find.text('Event Details'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('event-detail-back-action')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(reminder);
+    await tester.pumpAndSettle();
+    expect(find.text('Edit reminder'), findsOneWidget);
   });
 
   testWidgets('settings can rename command center in appearance', (
@@ -4290,20 +4315,22 @@ void main() {
       find.byKey(const Key('google-calendar-sync-settings')),
       findsOneWidget,
     );
-    expect(find.text('Calendar sync'), findsOneWidget);
-    expect(find.text('Connect calendar'), findsOneWidget);
+    expect(find.text('External Calendar Sync'), findsOneWidget);
+    expect(find.text('Connect Calendar'), findsOneWidget);
 
     await tester.ensureVisible(
       find.byKey(const Key('google-calendar-connect-action')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Connect calendar'));
+    await tester.tap(find.text('Connect Calendar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('external-calendar-connect-google')));
     await tester.pumpAndSettle();
     expect(api.googleCalendarConnected, isTrue);
     expect(launchedUrls, hasLength(1));
     expect(launchedUrls.single.host, 'accounts.google.com');
     expect(
-      find.textContaining('Finish approving calendar access'),
+      find.textContaining('Finish approving Google Calendar access'),
       findsOneWidget,
     );
 
@@ -4312,7 +4339,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(api.googleCalendarSyncCalls, 1);
     expect(
-      find.textContaining('Calendar sync connected and synced 2 events'),
+      find.textContaining('Google Calendar connected and synced 2 events'),
       findsOneWidget,
     );
 
@@ -4323,16 +4350,18 @@ void main() {
     await tester.tap(find.text('Sync now'));
     await tester.pumpAndSettle();
     expect(api.googleCalendarSyncCalls, 2);
-    expect(find.textContaining('Synced 2 connected events'), findsOneWidget);
+    expect(
+      find.textContaining('Google Calendar sync pulled 2 external events'),
+      findsOneWidget,
+    );
 
-    expect(find.text('Displayed connected calendars'), findsNothing);
     expect(
       find.byKey(const Key('google-calendar-source-primary')),
-      findsNothing,
+      findsOneWidget,
     );
     expect(
       find.byKey(const Key('google-calendar-source-holidays@example.com')),
-      findsNothing,
+      findsOneWidget,
     );
   });
 
@@ -4370,9 +4399,15 @@ void main() {
     await tester.tap(find.byKey(const Key('settings-plan-premium')));
     await tester.pumpAndSettle();
 
-    expect(api.mobileSubscriptionSetupRequests, ['premium']);
+    expect(api.mobileSubscriptionSetupRequests, [
+      {'plan': 'premium', 'billingInterval': 'monthly'},
+    ]);
     expect(api.mobileSubscriptionConfirmRequests, [
-      {'plan': 'premium', 'setupIntentId': 'seti_test_premium'},
+      {
+        'plan': 'premium',
+        'billingInterval': 'monthly',
+        'setupIntentId': 'seti_test_premium',
+      },
     ]);
     expect(stripeHandler.preparedSetupIntentIds, ['seti_test_premium']);
     expect(stripeHandler.presentedSheets, 1);
@@ -4473,7 +4508,11 @@ void main() {
         find.byKey(const Key('google-calendar-connect-action')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Connect calendar'));
+      await tester.tap(find.text('Connect Calendar'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('external-calendar-connect-google')),
+      );
       await tester.pumpAndSettle();
 
       expect(
@@ -4526,7 +4565,13 @@ void main() {
       find.byKey(const Key('google-calendar-connect-action')),
     );
     await tester.pump();
-    await tester.tap(find.text('Connect calendar'));
+    await tester.tap(find.text('Connect Calendar'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('external-calendar-connect-google')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('external-calendar-connect-google')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
@@ -4547,7 +4592,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(api.googleCalendarSyncCalls, 1);
     expect(
-      find.textContaining('Calendar sync connected and synced 2 events'),
+      find.textContaining('Google Calendar connected and synced 2 events'),
       findsOneWidget,
     );
   });
@@ -5071,10 +5116,12 @@ void main() {
     expect(api.createdEvent?.startsAt, typedStart);
     expect(api.createdEvent?.endsAt, typedEnd);
     expect(api.createdEvent?.metadata?['google_calendar_ids'], [
-      'primary',
       'sports@example.com',
     ]);
-    expect(api.createdEvent?.metadata?['google_calendar_id'], 'primary');
+    expect(
+      api.createdEvent?.metadata?['google_calendar_id'],
+      'sports@example.com',
+    );
     expect(api.createdEventWorkspaceId, 2);
     expect(api.createdEventSyncWorkspaceIds, isEmpty);
     expect(find.textContaining('Client kickoff'), findsOneWidget);
@@ -5097,7 +5144,16 @@ void main() {
     final notesBorder =
         notesField.decoration!.enabledBorder! as OutlineInputBorder;
     expect(notesBorder.borderRadius, BorderRadius.circular(16));
-    expect((notesField.decoration!.prefixIcon as dynamic).size, 20);
+    final prefixIcon = notesField.decoration!.prefixIcon;
+    expect(prefixIcon, isA<SizedBox>());
+    expect((prefixIcon as SizedBox).width, 52);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('event-notes-field')),
+        matching: find.byIcon(Icons.description_outlined),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('event reminders are optional and follow event recurrence', (
@@ -5635,6 +5691,8 @@ void main() {
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
+      await tester.pumpAndSettle();
 
       await tester.ensureVisible(
         find.byKey(const Key('calendar-event-block-design-review')),
@@ -5872,8 +5930,8 @@ void main() {
       expect(api.updatedEvent?.recurrence, 'specific_days');
       expect(api.updatedEvent?.metadata, {
         'recurrence': 'specific_days',
-        'google_calendar_ids': ['primary', 'sports@example.com'],
-        'google_calendar_id': 'primary',
+        'google_calendar_ids': ['sports@example.com'],
+        'google_calendar_id': 'sports@example.com',
         'days': ['thu', 'tue'],
         'interval': 1,
         'unit': 'days',
@@ -6278,6 +6336,8 @@ void main() {
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
+      await tester.pumpAndSettle();
 
       await tester.ensureVisible(
         find.byKey(const Key('calendar-event-block-design-review')),
@@ -6367,6 +6427,8 @@ void main() {
       await tester.pumpWidget(
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
       await tester.pumpAndSettle();
 
       await tester.ensureVisible(
@@ -6913,7 +6975,9 @@ class _StaleTodayPersistedResourcesFakeHermesApiClient
   ];
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => [
     HermesCalendarEvent(
       id: 903,
       title: 'Persisted calendar event',
@@ -6971,7 +7035,9 @@ class _CommandCenterAgendaFakeHermesApiClient
   }
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final start = _todayFutureTime(40);
     return [
       HermesCalendarEvent(
@@ -6987,7 +7053,9 @@ class _CommandCenterAgendaFakeHermesApiClient
 class _WeekendMultiDayCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final start = DateTime.now();
     final end = start.add(const Duration(days: 3));
     return [
@@ -7227,7 +7295,9 @@ class _FutureCriticalFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   ];
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => [
     ...await super.listCalendarEvents(),
     HermesCalendarEvent(
       id: 103,
@@ -7601,10 +7671,14 @@ class _FakeHermesApiClient extends HermesApiClient {
   List<HermesMessage> todaySessionMessages = const [];
   int todaySummaryCalls = 0;
   bool googleCalendarConnected = false;
+  bool outlookCalendarConnected = false;
   bool showDueReminderBanner = false;
   int googleCalendarSyncCalls = 0;
+  int outlookCalendarSyncCalls = 0;
   List<String> selectedGoogleCalendarIds = <String>['primary'];
+  List<String> selectedOutlookCalendarIds = <String>['outlook-primary'];
   String defaultGoogleCalendarId = 'primary';
+  String defaultOutlookCalendarId = 'outlook-primary';
   int cancelledSessionCalls = 0;
   String? updatedName;
   String? registeredAgentPersonality;
@@ -7637,7 +7711,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   int branchMessageCalls = 0;
   int? branchedFromMessageId;
   int queueMessageCalls = 0;
-  final mobileSubscriptionSetupRequests = <String>[];
+  final mobileSubscriptionSetupRequests = <Map<String, String>>[];
   final mobileSubscriptionConfirmRequests = <Map<String, String>>[];
   int paymentMethodSetupRequests = 0;
   final paymentMethodConfirmRequests = <String>[];
@@ -7750,13 +7824,19 @@ class _FakeHermesApiClient extends HermesApiClient {
   @override
   Future<HermesCheckoutSession> createCheckoutSession({
     required String plan,
+    String billingInterval = 'monthly',
     String source = 'flutter',
   }) async {
-    checkoutRequests.add({'plan': plan, 'source': source});
+    checkoutRequests.add({
+      'plan': plan,
+      'billingInterval': billingInterval,
+      'source': source,
+    });
     return HermesCheckoutSession(
       id: 'cs_test_$plan',
       url: 'https://checkout.stripe.com/c/pay/cs_test_$plan',
       plan: plan,
+      billingInterval: billingInterval,
       status: 'open',
     );
   }
@@ -7764,8 +7844,12 @@ class _FakeHermesApiClient extends HermesApiClient {
   @override
   Future<HermesPaymentSheetSetup> createMobileSubscriptionSetup({
     required String plan,
+    String billingInterval = 'monthly',
   }) async {
-    mobileSubscriptionSetupRequests.add(plan);
+    mobileSubscriptionSetupRequests.add({
+      'plan': plan,
+      'billingInterval': billingInterval,
+    });
     return HermesPaymentSheetSetup(
       publishableKey: 'pk_test_fake',
       customerId: 'cus_test_fake',
@@ -7773,16 +7857,19 @@ class _FakeHermesApiClient extends HermesApiClient {
       setupIntentId: 'seti_test_$plan',
       setupIntentClientSecret: 'seti_test_${plan}_secret_fake',
       plan: plan,
+      billingInterval: billingInterval,
     );
   }
 
   @override
   Future<HermesSubscriptionResult> confirmMobileSubscription({
     required String plan,
+    String billingInterval = 'monthly',
     required String setupIntentId,
   }) async {
     mobileSubscriptionConfirmRequests.add({
       'plan': plan,
+      'billingInterval': billingInterval,
       'setupIntentId': setupIntentId,
     });
     subscriptionTier = plan;
@@ -7792,6 +7879,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     subscriptionCanResume = false;
     return HermesSubscriptionResult(
       plan: plan,
+      billingInterval: billingInterval,
       subscription: _billingSubscriptionSummary,
       paymentMethod: billingPaymentMethod,
     );
@@ -8016,7 +8104,9 @@ class _FakeHermesApiClient extends HermesApiClient {
   }
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => plannedToday
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => plannedToday
       ? const [
           HermesCalendarEvent(
             id: 30,
@@ -8162,6 +8252,66 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<GoogleCalendarSyncStatus> disconnectGoogleCalendar() async {
     googleCalendarConnected = false;
     return googleCalendarStatus();
+  }
+
+  @override
+  Future<GoogleCalendarSyncStatus> outlookCalendarStatus() async =>
+      GoogleCalendarSyncStatus(
+        connected: outlookCalendarConnected,
+        status: outlookCalendarConnected ? 'connected' : 'not_connected',
+        calendarId: defaultOutlookCalendarId,
+        defaultCalendarId: defaultOutlookCalendarId,
+        selectedCalendarIds: selectedOutlookCalendarIds,
+        calendars: outlookCalendarConnected
+            ? [
+                GoogleCalendarInfo(
+                  id: 'outlook-primary',
+                  summary: 'Outlook',
+                  primary: true,
+                  selected: selectedOutlookCalendarIds.contains(
+                    'outlook-primary',
+                  ),
+                  accessRole: 'writer',
+                ),
+              ]
+            : const [],
+        lastSyncedAt: outlookCalendarConnected
+            ? DateTime.now().toIso8601String()
+            : null,
+      );
+
+  @override
+  Future<GoogleCalendarSyncStatus> updateOutlookCalendarSelection({
+    required List<String> selectedCalendarIds,
+    String? defaultCalendarId,
+  }) async {
+    selectedOutlookCalendarIds = selectedCalendarIds;
+    defaultOutlookCalendarId = defaultCalendarId ?? defaultOutlookCalendarId;
+    outlookCalendarConnected = true;
+    return outlookCalendarStatus();
+  }
+
+  @override
+  Future<String> outlookCalendarAuthUrl() async {
+    outlookCalendarConnected = true;
+    return 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=fake';
+  }
+
+  @override
+  Future<GoogleCalendarSyncResult> syncOutlookCalendar() async {
+    outlookCalendarSyncCalls++;
+    outlookCalendarConnected = true;
+    return GoogleCalendarSyncResult(
+      imported: 1,
+      deleted: 0,
+      status: await outlookCalendarStatus(),
+    );
+  }
+
+  @override
+  Future<GoogleCalendarSyncStatus> disconnectOutlookCalendar() async {
+    outlookCalendarConnected = false;
+    return outlookCalendarStatus();
   }
 
   @override
@@ -8765,7 +8915,9 @@ class _TaskReminderCategoryFakeHermesApiClient
 
 class _TwoDayCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final selectedDay = DateTime.now();
     final tomorrow = selectedDay.add(const Duration(days: 1));
     return [
@@ -8807,7 +8959,9 @@ class _TwoDayCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
 class _SummaryOnlyCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => const [];
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => const [];
 
   @override
   Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
@@ -8843,7 +8997,9 @@ class _SummaryOnlyCalendarFakeHermesApiClient
 class _MaterializedRecurringCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final today = DateTime.now();
     return [
       HermesCalendarEvent(
@@ -8898,7 +9054,9 @@ class _MaterializedRecurringCalendarFakeHermesApiClient
 class _UtcMidnightAllDayCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final today = DateTime.now();
     final startUtc = DateTime.utc(today.year, today.month, today.day);
     return [
@@ -8916,7 +9074,9 @@ class _UtcMidnightAllDayCalendarFakeHermesApiClient
 class _OverlappingCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final selectedDay = DateTime.now();
     return [
       HermesCalendarEvent(
@@ -8976,7 +9136,9 @@ class _OverlappingCalendarFakeHermesApiClient
 class _BackToBackCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final selectedDay = DateTime.now();
     return [
       HermesCalendarEvent(
@@ -9006,7 +9168,9 @@ class _BackToBackCalendarFakeHermesApiClient
 
 class _EarlyCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final selectedDay = DateTime.now();
     return [
       HermesCalendarEvent(
@@ -9462,7 +9626,9 @@ class _EditableCalendarFakeHermesApiClient
   }
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => [
     if (createdEvent != null) createdEvent!,
     if (deletedEventId != 3)
       updatedEvent ??
@@ -9499,7 +9665,9 @@ class _StaleCalendarRefreshAfterEditFakeHermesApiClient
   final HermesCalendarEvent staleEvent;
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [staleEvent];
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => [staleEvent];
 }
 
 class _LinkedWorkspaceEditableCalendarFakeHermesApiClient
@@ -9539,7 +9707,9 @@ class _LinkedWorkspaceEditableCalendarFakeHermesApiClient
   );
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => [
     if (!deletedEventWorkspaceIds.map((id) => id.toString()).contains('1'))
       HermesCalendarEvent(
         id: 3,
@@ -9605,9 +9775,9 @@ class _SharedWorkspaceCategoryFakeHermesApiClient
   ];
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
-    if (createdEvent != null) createdEvent!,
-  ];
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => [if (createdEvent != null) createdEvent!];
 }
 
 class _CustomColorEditableCalendarFakeHermesApiClient
@@ -9618,7 +9788,9 @@ class _CustomColorEditableCalendarFakeHermesApiClient
   ];
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => [
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => [
     if (createdEvent != null) createdEvent!,
     updatedEvent ??
         HermesCalendarEvent(
@@ -9664,7 +9836,9 @@ class _GoogleCalendarAutoSyncFakeHermesApiClient
   }
 
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async => plannedToday
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => plannedToday
       ? [
           HermesCalendarEvent(
             id: 909,
@@ -9683,7 +9857,9 @@ class _GoogleCalendarAutoSyncFakeHermesApiClient
 class _AllDayGoogleCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final today = DateTime.now();
     final start = DateTime(today.year, today.month, today.day);
     return [
@@ -9707,7 +9883,9 @@ class _AllDayGoogleCalendarFakeHermesApiClient
 class _MultiDayEditableCalendarFakeHermesApiClient
     extends _EditableCalendarFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final tomorrow = DateTime.now().add(const Duration(days: 1));
     return [
       updatedEvent ??
@@ -9737,7 +9915,9 @@ class _MultiDayEditableCalendarFakeHermesApiClient
 class _UtcMultiDayCalendarFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final today = DateTime.now();
     final tomorrow = today.add(const Duration(days: 1));
     return [
@@ -9766,7 +9946,9 @@ class _UtcMultiDayCalendarFakeHermesApiClient
 
 class _OffsetCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   @override
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
     final today = DateTime.now();
     final tomorrow = today.add(const Duration(days: 1));
     final startDay =

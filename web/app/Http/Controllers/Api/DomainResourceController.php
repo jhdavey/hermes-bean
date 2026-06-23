@@ -18,6 +18,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Models\WorkspaceMembership;
 use App\Services\GoogleCalendarSyncService;
+use App\Services\OutlookCalendarSyncService;
 use App\Services\BeanMemoryService;
 use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
@@ -42,6 +43,7 @@ class DomainResourceController extends Controller
     public function __construct(
         private readonly StructuredHermesActionService $actions,
         private readonly GoogleCalendarSyncService $googleCalendar,
+        private readonly OutlookCalendarSyncService $outlookCalendar,
         private readonly RecurringCalendarEventService $recurringCalendarEvents,
         private readonly PlanLimitService $planLimits,
         private readonly PlanHistoryService $history,
@@ -353,6 +355,9 @@ class DomainResourceController extends Controller
         if (! $request->boolean('skip_google_sync')) {
             $this->googleCalendar->syncIfConnected($request->user(), $workspace);
         }
+        if (! $request->boolean('skip_outlook_sync')) {
+            $this->outlookCalendar->syncIfConnected($request->user(), $workspace);
+        }
         $this->materializeRecurringCalendarEventsForWorkspace($request, $workspace);
 
         $query = $this->scoped(CalendarEvent::query(), $request);
@@ -621,10 +626,10 @@ class DomainResourceController extends Controller
         $this->refreshRecurringCalendarEvents($request, $event->refresh());
 
         $event = $event->refresh();
-        if ($this->shouldSyncGoogleImmediately($request)) {
-            $event = $this->googleCalendar->exportEvent($event);
+        if ($this->shouldSyncExternalCalendarsImmediately($request)) {
+            $event = $this->exportExternalCalendarEvent($event);
         } else {
-            $this->deferGoogleCalendarExport($event);
+            $this->deferExternalCalendarExport($event);
         }
 
         return $this->created($event->refresh());
@@ -679,10 +684,10 @@ class DomainResourceController extends Controller
         $this->refreshRecurringCalendarEvents($request, $model->refresh());
 
         $model = $model->refresh();
-        if ($this->shouldSyncGoogleImmediately($request)) {
-            $model = $this->googleCalendar->exportEvent($model);
+        if ($this->shouldSyncExternalCalendarsImmediately($request)) {
+            $model = $this->exportExternalCalendarEvent($model);
         } else {
-            $this->deferGoogleCalendarExport($model);
+            $this->deferExternalCalendarExport($model);
         }
 
         return response()->json(['data' => $model->refresh()]);
@@ -759,6 +764,7 @@ class DomainResourceController extends Controller
         $eventIds = $eventsToDelete->pluck('id')->map(fn ($id): int => (int) $id)->all();
         foreach ($eventsToDelete as $eventToDelete) {
             $this->googleCalendar->deleteExportedEvent($eventToDelete);
+            $this->outlookCalendar->deleteExportedEvent($eventToDelete);
         }
         $eventsToDelete->each(fn (CalendarEvent $event): ?bool => $event->delete());
         $this->deleteWorkspaceItemLinksFor('calendar_events', $eventIds);
@@ -1158,6 +1164,7 @@ class DomainResourceController extends Controller
                 $itemsToRemove->each(function (CalendarEvent $event): void {
                     $this->recurringCalendarEvents->deleteGeneratedOccurrences($event);
                     $this->googleCalendar->deleteExportedEvent($event);
+                    $this->outlookCalendar->deleteExportedEvent($event);
                 });
             }
             $idsToRemove = $itemsToRemove->pluck('id')->map(fn ($id): int => (int) $id)->all();
@@ -1783,12 +1790,22 @@ class DomainResourceController extends Controller
         };
     }
 
-    private function shouldSyncGoogleImmediately(Request $request): bool
+    private function shouldSyncExternalCalendarsImmediately(Request $request): bool
     {
-        return app()->runningUnitTests() || $request->boolean('sync_google_now');
+        return app()->runningUnitTests()
+            || $request->boolean('sync_google_now')
+            || $request->boolean('sync_outlook_now')
+            || $request->boolean('sync_external_calendars_now');
     }
 
-    private function deferGoogleCalendarExport(CalendarEvent $event): void
+    private function exportExternalCalendarEvent(CalendarEvent $event): CalendarEvent
+    {
+        $event = $this->googleCalendar->exportEvent($event);
+
+        return $this->outlookCalendar->exportEvent($event->refresh());
+    }
+
+    private function deferExternalCalendarExport(CalendarEvent $event): void
     {
         $eventId = (int) $event->id;
 
@@ -1797,6 +1814,7 @@ class DomainResourceController extends Controller
                 $event = CalendarEvent::query()->find($eventId);
                 if ($event) {
                     app(GoogleCalendarSyncService::class)->exportEvent($event);
+                    app(OutlookCalendarSyncService::class)->exportEvent($event->refresh());
                 }
             } catch (Throwable $error) {
                 report($error);

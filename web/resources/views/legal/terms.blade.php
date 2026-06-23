@@ -25,7 +25,7 @@
 
     <h2>Subscriptions, trials, and billing</h2>
     <p>HeyBean offers paid subscriptions that may include a free trial period. Plan prices, renewal frequency, trial length, and included features are disclosed before purchase. Unless canceled before the end of the free trial, your subscription will automatically renew and billing will begin at the price shown at purchase.</p>
-    <p>Subscriptions renew monthly until canceled. If you subscribe through Apple, payment is charged to your Apple ID and renewals, cancellations, refunds, and billing management are handled through your Apple account settings and Apple’s subscription policies. If you subscribe through the HeyBean website, billing is handled by our payment provider and may be managed through HeyBean support until self-service billing controls are available.</p>
+    <p>Subscriptions renew monthly or yearly based on the billing interval selected at purchase until canceled. If you subscribe through Apple, payment is charged to your Apple ID and renewals, cancellations, refunds, and billing management are handled through your Apple account settings and Apple’s subscription policies. If you subscribe through the HeyBean website, billing is handled by our payment provider and may be managed through HeyBean support until self-service billing controls are available.</p>
     <p>You may cancel a subscription at any time. Cancellation stops future renewals but does not automatically refund amounts already billed unless required by law or the applicable app store/payment provider policy. If you cancel during a free trial, access to paid features may end when the trial period expires.</p>
 
     <h2>Account deletion</h2>

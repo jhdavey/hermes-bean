@@ -325,7 +325,11 @@ void main() {
         expect(request.method, 'POST');
         expect(request.path, '/billing/checkout-sessions');
         expect(request.headers['Authorization'], 'Bearer register-token');
-        expect(request.body, {'plan': 'premium', 'source': 'flutter'});
+        expect(request.body, {
+          'plan': 'premium',
+          'billing_interval': 'monthly',
+          'source': 'flutter',
+        });
         return HermesApiResponse(
           200,
           jsonEncode({
@@ -345,6 +349,11 @@ void main() {
     expect(result.id, 'cs_test_123');
     expect(result.url, 'https://checkout.stripe.com/c/pay/cs_test_123');
     expect(result.plan, 'premium');
+    expect(requests.single.body, {
+      'plan': 'premium',
+      'billing_interval': 'monthly',
+      'source': 'flutter',
+    });
     expect(requests, hasLength(1));
   });
 
@@ -358,7 +367,10 @@ void main() {
         expect(request.headers['Authorization'], 'Bearer register-token');
         if (request.path == '/billing/mobile-subscriptions/setup') {
           expect(request.method, 'POST');
-          expect(request.body, {'plan': 'premium'});
+          expect(request.body, {
+            'plan': 'premium',
+            'billing_interval': 'monthly',
+          });
           return HermesApiResponse(
             201,
             jsonEncode({
@@ -369,6 +381,7 @@ void main() {
                 'setup_intent_id': 'seti_test_123',
                 'setup_intent_client_secret': 'seti_test_123_secret',
                 'plan': 'premium',
+                'billing_interval': 'monthly',
               },
             }),
           );
@@ -377,6 +390,7 @@ void main() {
         expect(request.method, 'POST');
         expect(request.body, {
           'plan': 'premium',
+          'billing_interval': 'monthly',
           'setup_intent_id': 'seti_test_123',
         });
         return HermesApiResponse(
@@ -384,6 +398,7 @@ void main() {
           jsonEncode({
             'data': {
               'plan': 'premium',
+              'billing_interval': 'monthly',
               'subscription': {
                 'tier': 'premium',
                 'status': 'trialing',
@@ -1077,7 +1092,10 @@ void main() {
         transport: (request) async {
           requests.add(request);
           expect(request.method, 'POST');
-          expect(request.path, '/calendar-events');
+          expect(
+            request.path,
+            '/calendar-events?sync_external_calendars_now=1',
+          );
           expect(request.headers['Authorization'], 'Bearer token-123');
           expect(request.body, {
             'title': 'Client kickoff',
@@ -1869,7 +1887,9 @@ void main() {
               }),
             );
           }
-          if (request.path == '/calendar-events' && request.method == 'POST') {
+          if (request.path ==
+                  '/calendar-events?sync_external_calendars_now=1' &&
+              request.method == 'POST') {
             expect(request.body, containsPair('workspace_id', 1));
             expect(request.body, containsPair('sync_to_workspace_ids', [2]));
             expect(request.body, containsPair('location', 'Conference Room B'));
@@ -1881,7 +1901,8 @@ void main() {
               }),
             );
           }
-          if (request.path == '/calendar-events/3' &&
+          if (request.path ==
+                  '/calendar-events/3?sync_external_calendars_now=1' &&
               request.method == 'PATCH') {
             expect(request.body, containsPair('sync_to_workspace_ids', [2, 3]));
             expect(request.body, containsPair('location', 'Main Hall'));
@@ -2023,7 +2044,8 @@ void main() {
               }),
             );
           }
-          if (request.path == '/calendar-events/3' &&
+          if (request.path ==
+                  '/calendar-events/3?sync_external_calendars_now=1' &&
               request.method == 'PATCH') {
             return HermesApiResponse(
               200,

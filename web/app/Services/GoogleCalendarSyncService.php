@@ -666,8 +666,11 @@ class GoogleCalendarSyncService
         }
 
         $metadataCalendarId = $event->metadata['google_calendar_id'] ?? null;
+        if (is_string($metadataCalendarId) && trim($metadataCalendarId) !== '') {
+            return [(string) $metadataCalendarId];
+        }
 
-        return [$event->google_calendar_id ?: ($metadataCalendarId ? (string) $metadataCalendarId : ($connection->calendar_id ?: 'primary'))];
+        return [];
     }
 
     private function eventPayload(CalendarEvent $event): array

@@ -33,6 +33,7 @@ class StripeBillingService
 
         return [
             'tier' => $user->subscriptionTier(),
+            'billing_interval' => $this->billingIntervalForPriceId($user->stripe_price_id),
             'status' => $user->subscription_status,
             'current_period_end' => $user->subscription_current_period_end?->toIso8601String(),
             'trial_ends_at' => $user->subscription_trial_ends_at?->toIso8601String(),
@@ -60,19 +61,20 @@ class StripeBillingService
         return ['payment_method' => $this->paymentMethodDisplay($paymentMethod, $user)];
     }
 
-    public function createCheckoutSession(User $user, string $plan, ?string $source = null): array
+    public function createCheckoutSession(User $user, string $plan, string $billingInterval = 'monthly', ?string $source = null): array
     {
         $this->assertCheckoutPlan($plan);
-        $priceId = $this->priceId($plan);
+        $billingInterval = $this->normalizeBillingInterval($billingInterval);
+        $priceId = $this->priceId($plan, $billingInterval);
         $customerId = $this->ensureCustomer($user);
         $source = $this->cleanSource($source);
         $returnPath = in_array($source, ['register', 'signup', 'subscribe'], true) ? '/subscribe' : '/pricing';
         if ($source === 'settings') {
-            $successUrl = url('/app?billing=plan_success&plan='.$plan);
-            $cancelUrl = url('/app?billing=plan_cancel&plan='.$plan);
+            $successUrl = url('/app?billing=plan_success&plan='.$plan.'&billing_interval='.$billingInterval);
+            $cancelUrl = url('/app?billing=plan_cancel&plan='.$plan.'&billing_interval='.$billingInterval);
         } else {
-            $successUrl = url($returnPath.'?checkout=success&plan='.$plan.($source ? '&source='.$source : ''));
-            $cancelUrl = url($returnPath.'?checkout=cancel&plan='.$plan.($source ? '&source='.$source : ''));
+            $successUrl = url($returnPath.'?checkout=success&plan='.$plan.'&billing_interval='.$billingInterval.($source ? '&source='.$source : ''));
+            $cancelUrl = url($returnPath.'?checkout=cancel&plan='.$plan.'&billing_interval='.$billingInterval.($source ? '&source='.$source : ''));
         }
 
         $payload = [
@@ -87,13 +89,15 @@ class StripeBillingService
             'metadata' => [
                 'heybean_user_id' => (string) $user->id,
                 'plan' => $plan,
+                'billing_interval' => $billingInterval,
                 'source' => $source ?: 'web',
             ],
             'subscription_data' => [
-                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 7)),
+                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 14)),
                 'metadata' => [
                     'heybean_user_id' => (string) $user->id,
                     'plan' => $plan,
+                    'billing_interval' => $billingInterval,
                     'source' => $source ?: 'web',
                 ],
             ],
@@ -105,6 +109,7 @@ class StripeBillingService
             'id' => $session['id'] ?? null,
             'url' => $session['url'] ?? null,
             'plan' => $plan,
+            'billing_interval' => $billingInterval,
             'status' => $session['status'] ?? 'created',
         ];
     }
@@ -140,19 +145,22 @@ class StripeBillingService
         ];
     }
 
-    public function createMobileSubscriptionSetup(User $user, string $plan): array
+    public function createMobileSubscriptionSetup(User $user, string $plan, string $billingInterval = 'monthly'): array
     {
         $this->assertCheckoutPlan($plan);
+        $billingInterval = $this->normalizeBillingInterval($billingInterval);
 
         return $this->createSetupIntentResponse($user, [
             'purpose' => 'subscription',
             'plan' => $plan,
-        ], ['plan' => $plan]);
+            'billing_interval' => $billingInterval,
+        ], ['plan' => $plan, 'billing_interval' => $billingInterval]);
     }
 
-    public function confirmMobileSubscription(User $user, string $plan, string $setupIntentId): array
+    public function confirmMobileSubscription(User $user, string $plan, string $billingInterval, string $setupIntentId): array
     {
         $this->assertCheckoutPlan($plan);
+        $billingInterval = $this->normalizeBillingInterval($billingInterval);
         $setupIntent = $this->verifiedSetupIntent($user, $setupIntentId);
         $paymentMethodId = $this->paymentMethodIdFromSetupIntent($setupIntent);
 
@@ -164,13 +172,14 @@ class StripeBillingService
                 'default_payment_method' => $paymentMethodId,
                 'items' => [[
                     'id' => $user->stripe_subscription_item_id,
-                    'price' => $this->priceId($plan),
+                    'price' => $this->priceId($plan, $billingInterval),
                 ]],
                 'proration_behavior' => 'always_invoice',
                 'payment_behavior' => 'allow_incomplete',
                 'metadata' => [
                     'heybean_user_id' => (string) $user->id,
                     'plan' => $plan,
+                    'billing_interval' => $billingInterval,
                     'source' => 'flutter',
                 ],
             ])->json();
@@ -179,10 +188,10 @@ class StripeBillingService
                 'customer' => $user->stripe_customer_id,
                 'default_payment_method' => $paymentMethodId,
                 'items' => [[
-                    'price' => $this->priceId($plan),
+                    'price' => $this->priceId($plan, $billingInterval),
                     'quantity' => 1,
                 ]],
-                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 7)),
+                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 14)),
                 'payment_behavior' => 'allow_incomplete',
                 'payment_settings' => [
                     'save_default_payment_method' => 'on_subscription',
@@ -190,6 +199,7 @@ class StripeBillingService
                 'metadata' => [
                     'heybean_user_id' => (string) $user->id,
                     'plan' => $plan,
+                    'billing_interval' => $billingInterval,
                     'source' => 'flutter',
                 ],
             ])->json();
@@ -200,6 +210,7 @@ class StripeBillingService
 
         return [
             'plan' => $plan,
+            'billing_interval' => $billingInterval,
             'subscription' => $this->subscriptionSummary($freshUser),
             'payment_method' => $this->paymentMethodDisplayFromSetupIntent($setupIntent, $freshUser),
         ];
@@ -229,9 +240,10 @@ class StripeBillingService
         ];
     }
 
-    public function upgradeSubscription(User $user, string $plan): array
+    public function upgradeSubscription(User $user, string $plan, string $billingInterval = 'monthly'): array
     {
         $this->assertPaidPlan($plan);
+        $billingInterval = $this->normalizeBillingInterval($billingInterval);
         if (! $user->stripe_subscription_id || ! $user->stripe_subscription_item_id) {
             throw new InvalidArgumentException('No active Stripe subscription was found for this account.');
         }
@@ -245,13 +257,14 @@ class StripeBillingService
         $subscription = $this->stripePost('/subscriptions/'.$user->stripe_subscription_id, [
             'items' => [[
                 'id' => $user->stripe_subscription_item_id,
-                'price' => $this->priceId($plan),
+                'price' => $this->priceId($plan, $billingInterval),
             ]],
             'proration_behavior' => 'always_invoice',
             'payment_behavior' => 'allow_incomplete',
             'metadata' => [
                 'heybean_user_id' => (string) $user->id,
                 'plan' => $plan,
+                'billing_interval' => $billingInterval,
             ],
         ])->json();
 
@@ -259,19 +272,21 @@ class StripeBillingService
 
         return [
             'plan' => $plan,
+            'billing_interval' => $billingInterval,
             'status' => $subscription['status'] ?? $user->subscription_status,
             'subscription' => $this->subscriptionSummary($user->fresh()),
         ];
     }
 
-    public function changeSubscriptionPlan(User $user, string $plan): array
+    public function changeSubscriptionPlan(User $user, string $plan, string $billingInterval = 'monthly'): array
     {
         $this->assertCheckoutPlan($plan);
+        $billingInterval = $this->normalizeBillingInterval($billingInterval);
         if (! $user->stripe_subscription_id || ! $user->stripe_subscription_item_id) {
-            return $this->createCheckoutSession($user, $plan, 'settings');
+            return $this->createCheckoutSession($user, $plan, $billingInterval, 'settings');
         }
 
-        if ($user->subscriptionTier() === $plan) {
+        if ($user->subscriptionTier() === $plan && $this->billingIntervalForPriceId($user->stripe_price_id) === $billingInterval) {
             if ($user->subscription_cancel_at_period_end) {
                 return $this->resumeSubscription($user);
             }
@@ -283,13 +298,14 @@ class StripeBillingService
             'cancel_at_period_end' => 'false',
             'items' => [[
                 'id' => $user->stripe_subscription_item_id,
-                'price' => $this->priceId($plan),
+                'price' => $this->priceId($plan, $billingInterval),
             ]],
             'proration_behavior' => 'always_invoice',
             'payment_behavior' => 'allow_incomplete',
             'metadata' => [
                 'heybean_user_id' => (string) $user->id,
                 'plan' => $plan,
+                'billing_interval' => $billingInterval,
                 'source' => 'web',
             ],
         ])->json();
@@ -298,6 +314,7 @@ class StripeBillingService
 
         return [
             'plan' => $plan,
+            'billing_interval' => $billingInterval,
             'status' => $subscription['status'] ?? $user->subscription_status,
             'subscription' => $this->subscriptionSummary($user->fresh()),
         ];
@@ -560,13 +577,101 @@ class StripeBillingService
             return $metadataPlan === 'free' ? 'base' : $metadataPlan;
         }
 
-        foreach (config('services.stripe.prices', []) as $plan => $configuredPriceId) {
-            if ($configuredPriceId && $configuredPriceId === $priceId) {
+        foreach (config('services.stripe.prices', []) as $plan => $configuredPriceIds) {
+            if (is_string($configuredPriceIds) && $configuredPriceIds !== '' && $configuredPriceIds === $priceId) {
                 return $plan;
+            }
+
+            if (! is_array($configuredPriceIds)) {
+                continue;
+            }
+
+            foreach ($configuredPriceIds as $configuredPriceId) {
+                if ($configuredPriceId && $configuredPriceId === $priceId) {
+                    return $plan;
+                }
             }
         }
 
         return 'base';
+    }
+
+    private function billingIntervalForPriceId(?string $priceId): string
+    {
+        if (! $priceId) {
+            return 'monthly';
+        }
+
+        foreach (config('services.stripe.prices', []) as $configuredPriceIds) {
+            if (is_string($configuredPriceIds)) {
+                if ($configuredPriceIds === $priceId) {
+                    return 'monthly';
+                }
+
+                continue;
+            }
+
+            if (! is_array($configuredPriceIds)) {
+                continue;
+            }
+
+            foreach ($configuredPriceIds as $interval => $configuredPriceId) {
+                if ($configuredPriceId && $configuredPriceId === $priceId) {
+                    return $this->normalizeBillingInterval((string) $interval);
+                }
+            }
+        }
+
+        return 'monthly';
+    }
+
+    private function normalizeBillingInterval(?string $billingInterval): string
+    {
+        return strtolower((string) $billingInterval) === 'yearly' ? 'yearly' : 'monthly';
+    }
+
+    private function priceId(string $plan, string $billingInterval = 'monthly'): string
+    {
+        $billingInterval = $this->normalizeBillingInterval($billingInterval);
+        $configured = config('services.stripe.prices.'.$plan);
+        $priceId = is_array($configured)
+            ? (string) ($configured[$billingInterval] ?? '')
+            : (string) $configured;
+
+        if ($priceId === '') {
+            throw new RuntimeException('Stripe price is not configured for '.$plan.' '.$billingInterval.'.');
+        }
+
+        return $priceId;
+    }
+
+    private function assertPaidPlan(string $plan): void
+    {
+        if (! in_array($plan, ['premium', 'pro'], true)) {
+            throw new InvalidArgumentException('Choose Premium or Pro to start a paid plan.');
+        }
+    }
+
+    private function assertCheckoutPlan(string $plan): void
+    {
+        if (! in_array($plan, ['base', 'premium', 'pro'], true)) {
+            throw new InvalidArgumentException('Choose Base, Premium, or Pro to start a plan.');
+        }
+    }
+
+    private function verifiedWebhookEvent(string $payload, ?string $signature): array
+    {
+        $secret = (string) config('services.stripe.webhook_secret', '');
+        if ($secret !== '') {
+            $this->verifyWebhookSignature($payload, $signature, $secret);
+        }
+
+        $event = json_decode($payload, true);
+        if (! is_array($event)) {
+            throw new RuntimeException('Invalid Stripe webhook payload.');
+        }
+
+        return $event;
     }
 
     private function ensureCustomer(User $user): string
@@ -778,45 +883,6 @@ class StripeBillingService
         $version = (string) config('services.stripe.api_version', '');
 
         return $version !== '' ? $version : '2026-05-27.dahlia';
-    }
-
-    private function priceId(string $plan): string
-    {
-        $priceId = (string) config('services.stripe.prices.'.$plan, '');
-        if ($priceId === '') {
-            throw new RuntimeException('Stripe price is not configured for '.$plan.'.');
-        }
-
-        return $priceId;
-    }
-
-    private function assertPaidPlan(string $plan): void
-    {
-        if (! in_array($plan, ['premium', 'pro'], true)) {
-            throw new InvalidArgumentException('Choose Premium or Pro to start a paid plan.');
-        }
-    }
-
-    private function assertCheckoutPlan(string $plan): void
-    {
-        if (! in_array($plan, ['base', 'premium', 'pro'], true)) {
-            throw new InvalidArgumentException('Choose Base, Premium, or Pro to start a plan.');
-        }
-    }
-
-    private function verifiedWebhookEvent(string $payload, ?string $signature): array
-    {
-        $secret = (string) config('services.stripe.webhook_secret', '');
-        if ($secret !== '') {
-            $this->verifyWebhookSignature($payload, $signature, $secret);
-        }
-
-        $event = json_decode($payload, true);
-        if (! is_array($event)) {
-            throw new RuntimeException('Invalid Stripe webhook payload.');
-        }
-
-        return $event;
     }
 
     private function verifyWebhookSignature(string $payload, ?string $signature, string $secret): void

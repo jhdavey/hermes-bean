@@ -93,35 +93,46 @@ class HermesApiClient {
 
   Future<HermesCheckoutSession> createCheckoutSession({
     required String plan,
+    String billingInterval = 'monthly',
     String source = 'flutter',
   }) async {
     final data = await _sendJson(
       'POST',
       '/billing/checkout-sessions',
-      body: {'plan': plan, 'source': source},
+      body: {
+        'plan': plan,
+        'billing_interval': billingInterval,
+        'source': source,
+      },
     );
     return HermesCheckoutSession.fromJson(_expectMap(data['data']));
   }
 
   Future<HermesPaymentSheetSetup> createMobileSubscriptionSetup({
     required String plan,
+    String billingInterval = 'monthly',
   }) async {
     final data = await _sendJson(
       'POST',
       '/billing/mobile-subscriptions/setup',
-      body: {'plan': plan},
+      body: {'plan': plan, 'billing_interval': billingInterval},
     );
     return HermesPaymentSheetSetup.fromJson(_expectMap(data['data']));
   }
 
   Future<HermesSubscriptionResult> confirmMobileSubscription({
     required String plan,
+    String billingInterval = 'monthly',
     required String setupIntentId,
   }) async {
     final data = await _sendJson(
       'POST',
       '/billing/mobile-subscriptions/confirm',
-      body: {'plan': plan, 'setup_intent_id': setupIntentId},
+      body: {
+        'plan': plan,
+        'billing_interval': billingInterval,
+        'setup_intent_id': setupIntentId,
+      },
     );
     return HermesSubscriptionResult.fromJson(_expectMap(data['data']));
   }
@@ -787,8 +798,16 @@ class HermesApiClient {
     );
   }
 
-  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
-    final data = await _sendJson('GET', '/calendar-events');
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/calendar-events', {
+        if (skipExternalSync) 'skip_google_sync': '1',
+        if (skipExternalSync) 'skip_outlook_sync': '1',
+      }),
+    );
     return _expectList(
       data['data'],
     ).map((json) => HermesCalendarEvent.fromJson(_expectMap(json))).toList();
@@ -811,7 +830,7 @@ class HermesApiClient {
   }) async {
     final data = await _sendJson(
       'POST',
-      '/calendar-events',
+      '/calendar-events?sync_external_calendars_now=1',
       body: {
         'title': title,
         'starts_at': startsAt,
@@ -837,13 +856,28 @@ class HermesApiClient {
     return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
   }
 
+  Future<GoogleCalendarSyncStatus> outlookCalendarStatus() async {
+    final data = await _sendJson('GET', '/outlook-calendar/status');
+    return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
+  }
+
   Future<String> googleCalendarAuthUrl() async {
     final data = await _sendJson('POST', '/google-calendar/auth-url');
     return _expectString(_expectMap(data['data'])['auth_url']);
   }
 
+  Future<String> outlookCalendarAuthUrl() async {
+    final data = await _sendJson('POST', '/outlook-calendar/auth-url');
+    return _expectString(_expectMap(data['data'])['auth_url']);
+  }
+
   Future<GoogleCalendarSyncResult> syncGoogleCalendar() async {
     final data = await _sendJson('POST', '/google-calendar/sync');
+    return GoogleCalendarSyncResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<GoogleCalendarSyncResult> syncOutlookCalendar() async {
+    final data = await _sendJson('POST', '/outlook-calendar/sync');
     return GoogleCalendarSyncResult.fromJson(_expectMap(data['data']));
   }
 
@@ -862,8 +896,28 @@ class HermesApiClient {
     return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
   }
 
+  Future<GoogleCalendarSyncStatus> updateOutlookCalendarSelection({
+    required List<String> selectedCalendarIds,
+    String? defaultCalendarId,
+  }) async {
+    final data = await _sendJson(
+      'PATCH',
+      '/outlook-calendar/calendars',
+      body: {
+        'selected_calendar_ids': selectedCalendarIds,
+        if (defaultCalendarId != null) 'default_calendar_id': defaultCalendarId,
+      },
+    );
+    return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
+  }
+
   Future<GoogleCalendarSyncStatus> disconnectGoogleCalendar() async {
     final data = await _sendJson('DELETE', '/google-calendar');
+    return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
+  }
+
+  Future<GoogleCalendarSyncStatus> disconnectOutlookCalendar() async {
+    final data = await _sendJson('DELETE', '/outlook-calendar');
     return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
   }
 
@@ -952,7 +1006,7 @@ class HermesApiClient {
   }) async {
     final data = await _sendJson(
       'PATCH',
-      '/calendar-events/$eventId',
+      '/calendar-events/$eventId?sync_external_calendars_now=1',
       body: {
         'title': title,
         'starts_at': startsAt,
@@ -1402,12 +1456,14 @@ class HermesCheckoutSession {
     required this.id,
     required this.url,
     required this.plan,
+    this.billingInterval = 'monthly',
     this.status,
   });
 
   final String id;
   final String url;
   final String plan;
+  final String billingInterval;
   final String? status;
 
   factory HermesCheckoutSession.fromJson(Map<String, Object?> json) =>
@@ -1415,6 +1471,10 @@ class HermesCheckoutSession {
         id: _expectString(json['id']),
         url: _expectString(json['url']),
         plan: _expectString(json['plan']),
+        billingInterval: _readStringOrDefault(
+          json['billing_interval'] ?? json['billingInterval'],
+          'monthly',
+        ),
         status: json['status']?.toString(),
       );
 }
@@ -1427,6 +1487,7 @@ class HermesPaymentSheetSetup {
     required this.setupIntentId,
     required this.setupIntentClientSecret,
     this.plan,
+    this.billingInterval = 'monthly',
   });
 
   final String publishableKey;
@@ -1435,6 +1496,7 @@ class HermesPaymentSheetSetup {
   final String setupIntentId;
   final String setupIntentClientSecret;
   final String? plan;
+  final String billingInterval;
 
   factory HermesPaymentSheetSetup.fromJson(Map<String, Object?> json) =>
       HermesPaymentSheetSetup(
@@ -1448,12 +1510,17 @@ class HermesPaymentSheetSetup {
           json['setup_intent_client_secret'],
         ),
         plan: json['plan']?.toString(),
+        billingInterval: _readStringOrDefault(
+          json['billing_interval'] ?? json['billingInterval'],
+          'monthly',
+        ),
       );
 }
 
 class HermesSubscriptionSummary {
   const HermesSubscriptionSummary({
     required this.tier,
+    this.billingInterval = 'monthly',
     this.status,
     this.currentPeriodEnd,
     this.trialEndsAt,
@@ -1465,6 +1532,7 @@ class HermesSubscriptionSummary {
   });
 
   final String tier;
+  final String billingInterval;
   final String? status;
   final String? currentPeriodEnd;
   final String? trialEndsAt;
@@ -1477,6 +1545,10 @@ class HermesSubscriptionSummary {
   factory HermesSubscriptionSummary.fromJson(Map<String, Object?> json) =>
       HermesSubscriptionSummary(
         tier: _readStringOrDefault(json['tier'], 'base'),
+        billingInterval: _readStringOrDefault(
+          json['billing_interval'] ?? json['billingInterval'],
+          'monthly',
+        ),
         status: json['status']?.toString(),
         currentPeriodEnd: json['current_period_end']?.toString(),
         trialEndsAt: json['trial_ends_at']?.toString(),
@@ -1542,11 +1614,13 @@ class HermesSubscriptionResult {
   const HermesSubscriptionResult({
     required this.subscription,
     this.plan,
+    this.billingInterval = 'monthly',
     this.paymentMethod,
   });
 
   final HermesSubscriptionSummary subscription;
   final String? plan;
+  final String billingInterval;
   final HermesBillingPaymentMethod? paymentMethod;
 
   factory HermesSubscriptionResult.fromJson(Map<String, Object?> json) =>
@@ -1555,6 +1629,10 @@ class HermesSubscriptionResult {
           _expectMap(json['subscription']),
         ),
         plan: json['plan']?.toString(),
+        billingInterval: _readStringOrDefault(
+          json['billing_interval'] ?? json['billingInterval'],
+          'monthly',
+        ),
         paymentMethod: json['payment_method'] is Map<String, Object?>
             ? HermesBillingPaymentMethod.fromJson(
                 _expectMap(json['payment_method']),
@@ -2749,6 +2827,24 @@ class HermesCalendarEvent {
     }
     final single =
         metadata?['google_calendar_id'] ?? metadata?['googleCalendarId'];
+    return single == null || single.toString().isEmpty
+        ? const []
+        : [single.toString()];
+  }
+
+  String? get outlookCalendarId => outlookCalendarIds.firstOrNull;
+
+  List<String> get outlookCalendarIds {
+    final raw =
+        metadata?['outlook_calendar_ids'] ?? metadata?['outlookCalendarIds'];
+    if (raw is List) {
+      return raw
+          .map((value) => value.toString())
+          .where((value) => value.isNotEmpty)
+          .toList();
+    }
+    final single =
+        metadata?['outlook_calendar_id'] ?? metadata?['outlookCalendarId'];
     return single == null || single.toString().isEmpty
         ? const []
         : [single.toString()];

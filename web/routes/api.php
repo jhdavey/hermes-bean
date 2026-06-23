@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\IssueReportController;
+use App\Http\Controllers\Api\OutlookCalendarController;
 use App\Http\Controllers\Api\PushNotificationDeviceTokenController;
 use App\Http\Controllers\Api\QuickVoiceReplyController;
 use App\Http\Controllers\Api\RealtimeSessionController;
@@ -28,6 +29,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
     Route::get('/google-calendar/callback', [GoogleCalendarController::class, 'callback']);
+    Route::get('/outlook-calendar/callback', [OutlookCalendarController::class, 'callback']);
     Route::post('/billing/stripe/webhook', [BillingController::class, 'webhook']);
 
     Route::middleware('auth.bearer')->group(function (): void {
@@ -93,6 +95,11 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/google-calendar/sync', [GoogleCalendarController::class, 'sync']);
         Route::patch('/google-calendar/calendars', [GoogleCalendarController::class, 'calendars']);
         Route::delete('/google-calendar', [GoogleCalendarController::class, 'disconnect']);
+        Route::get('/outlook-calendar/status', [OutlookCalendarController::class, 'status']);
+        Route::post('/outlook-calendar/auth-url', [OutlookCalendarController::class, 'authUrl']);
+        Route::post('/outlook-calendar/sync', [OutlookCalendarController::class, 'sync']);
+        Route::patch('/outlook-calendar/calendars', [OutlookCalendarController::class, 'calendars']);
+        Route::delete('/outlook-calendar', [OutlookCalendarController::class, 'disconnect']);
 
         Route::get('/memory-items', [DomainResourceController::class, 'listMemoryItems']);
         Route::post('/memory-items', [DomainResourceController::class, 'storeMemoryItem']);

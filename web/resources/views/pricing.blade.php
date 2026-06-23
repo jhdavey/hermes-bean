@@ -11,6 +11,32 @@
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
     <meta name="theme-color" content="#7bc98c">
     @include('partials.public-postbridge-styles')
+    <style>
+        .segmented .billing-option {
+            position: relative;
+            z-index: 1;
+            height: 34px;
+            border: 0;
+            border-radius: 999px;
+            background: transparent;
+            color: var(--pb-muted);
+            font: inherit;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background .18s ease, color .18s ease;
+        }
+        .segmented .billing-option.active {
+            background: var(--pb-green);
+            color: var(--pb-green-ink);
+        }
+        .section-head p {
+            margin: 16px auto 0;
+            color: var(--pb-green-dark);
+            font-size: 18px;
+            font-weight: 800;
+        }
+    </style>
 </head>
 <body class="pricing-page">
     @include('partials.public-beta-banner')
@@ -21,15 +47,15 @@
             <div class="section-head">
                 <span class="section-kicker">Pricing</span>
                 <h2>Organized Your Days With Less Effort</h2>
+                <p>14-day Free Trial - cancel anytime</p>
             </div>
 
-            <div class="billing-switch" aria-label="Plan options">
-                <div class="segmented" aria-hidden="true">
-                    <span>Monthly</span>
-                    <span>Yearly</span>
+            <div class="billing-switch" aria-label="Billing options">
+                <div class="segmented" role="group" aria-label="Billing interval">
+                    <button type="button" class="billing-option active" data-billing-option="monthly" aria-pressed="true">Monthly</button>
+                    <button type="button" class="billing-option" data-billing-option="yearly" aria-pressed="false">Yearly</button>
                     <strong class="save-badge">Save up to 17%</strong>
                 </div>
-                <span class="trial-toggle">Free trial <i class="toggle-ui" aria-hidden="true"></i></span>
             </div>
             @if ($fromFlutter)
                 <p class="hero-subhead" style="font-size:15px;text-align:center;margin-top:-30px;margin-bottom:44px"><strong>Coming from the app?</strong> After upgrading on the site, close and reopen the Flutter app to apply your upgrade.</p>
@@ -39,7 +65,7 @@
                 <article class="plan">
                     <h3>Base</h3>
                     <p class="for">Best for getting your personal day into one organized place.</p>
-                    <div class="price"><span class="amount">$4.99</span><span class="period">/month</span></div>
+                    <div class="price"><span class="amount" data-monthly-price="$4.99" data-yearly-price="$49.99">$4.99</span><span class="period" data-monthly-period="/month" data-yearly-period="/year">/month</span></div>
                     <ul class="features">
                         <li>2 workspaces for personal and shared planning</li>
                         <li>Tasks, reminders, and calendar in one daily view</li>
@@ -48,14 +74,14 @@
                         <li>Push reminders for the things you cannot miss</li>
                         <li>Recent history so Bean can follow the thread of your day</li>
                     </ul>
-                    <a class="button" href="/register?plan=base">Start 7 day free trial <span aria-hidden="true">-></span></a>
+                    <a class="button" data-plan-link="base" href="/register?plan=base&billing_interval=monthly">Start 14 day free trial <span aria-hidden="true">-></span></a>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
 
                 <article class="plan popular">
                     <h3>Premium <span class="badge">Most popular</span></h3>
                     <p class="for">Best for families and power users who want Bean in the daily routine.</p>
-                    <div class="price"><span class="amount">$19.99</span><span class="period">/month</span></div>
+                    <div class="price"><span class="amount" data-monthly-price="$19.99" data-yearly-price="$199.99">$19.99</span><span class="period" data-monthly-period="/month" data-yearly-period="/year">/month</span></div>
                     <ul class="features">
                         <li>5 workspaces for home, work, school, and projects</li>
                         <li>Expanded Bean capacity for everyday planning</li>
@@ -65,14 +91,14 @@
                         <li>1 year of searchable context and history</li>
                         <li>The best fit for most busy households</li>
                     </ul>
-                    <a class="button" href="/register?plan=premium">Start 7 day free trial <span aria-hidden="true">-></span></a>
+                    <a class="button" data-plan-link="premium" href="/register?plan=premium&billing_interval=monthly">Start 14 day free trial <span aria-hidden="true">-></span></a>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
 
                 <article class="plan">
                     <h3>Pro</h3>
                     <p class="for">Best for people who want Bean across every workspace and workflow.</p>
-                    <div class="price"><span class="amount">$49.99</span><span class="period">/month</span></div>
+                    <div class="price"><span class="amount" data-monthly-price="$49.99" data-yearly-price="$499.99">$49.99</span><span class="period" data-monthly-period="/month" data-yearly-period="/year">/month</span></div>
                     <ul class="features">
                         <li>Unlimited workspaces for every area of life</li>
                         <li>Maximum Bean capacity for high-volume days</li>
@@ -82,7 +108,7 @@
                         <li>Priority background work</li>
                         <li>Priority support</li>
                     </ul>
-                    <a class="button" href="/register?plan=pro">Start 7 day free trial <span aria-hidden="true">-></span></a>
+                    <a class="button" data-plan-link="pro" href="/register?plan=pro&billing_interval=monthly">Start 14 day free trial <span aria-hidden="true">-></span></a>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
             </div>
@@ -98,5 +124,33 @@
     </section>
 
     <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a></span></footer>
+    <script>
+        (() => {
+            const options = Array.from(document.querySelectorAll('[data-billing-option]'));
+            const amounts = Array.from(document.querySelectorAll('.amount[data-monthly-price]'));
+            const periods = Array.from(document.querySelectorAll('.period[data-monthly-period]'));
+            const links = Array.from(document.querySelectorAll('[data-plan-link]'));
+            const applyInterval = (interval) => {
+                const normalized = interval === 'yearly' ? 'yearly' : 'monthly';
+                options.forEach((option) => {
+                    const active = option.dataset.billingOption === normalized;
+                    option.classList.toggle('active', active);
+                    option.setAttribute('aria-pressed', active ? 'true' : 'false');
+                });
+                amounts.forEach((amount) => {
+                    amount.textContent = normalized === 'yearly' ? amount.dataset.yearlyPrice : amount.dataset.monthlyPrice;
+                });
+                periods.forEach((period) => {
+                    period.textContent = normalized === 'yearly' ? period.dataset.yearlyPeriod : period.dataset.monthlyPeriod;
+                });
+                links.forEach((link) => {
+                    const plan = link.dataset.planLink;
+                    link.href = `/register?plan=${encodeURIComponent(plan)}&billing_interval=${normalized}`;
+                });
+            };
+            options.forEach((option) => option.addEventListener('click', () => applyInterval(option.dataset.billingOption)));
+            applyInterval(new URLSearchParams(window.location.search).get('billing_interval'));
+        })();
+    </script>
 </body>
 </html>

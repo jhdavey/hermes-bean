@@ -56,6 +56,7 @@ class AuthController extends Controller
             'email' => ['required', 'string', 'email:rfc', 'max:255', Rule::unique('users', 'email')],
             'password' => ['required', 'string', 'min:12', 'confirmed'],
             'plan' => ['sometimes', 'nullable', Rule::in(['base', 'premium', 'pro'])],
+            'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
         ]);
 
         $user = DB::transaction(function () use ($data): User {
@@ -86,6 +87,7 @@ class AuthController extends Controller
             'user' => $this->hydratedUser($user),
             'token' => $this->issueToken($user),
             'selected_plan' => $data['plan'] ?? null,
+            'selected_billing_interval' => $data['billing_interval'] ?? 'monthly',
         ]], 201);
     }
 

@@ -15,6 +15,7 @@ if (mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const initialMode = mount.dataset.authMode || 'login';
     const initialSelectedPlan = ['base', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
+    const initialBillingInterval = mount.dataset.selectedBillingInterval === 'yearly' ? 'yearly' : 'monthly';
     const initialBillingStatus = new URLSearchParams(window.location.search).get('billing') || '';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
@@ -41,8 +42,9 @@ if (mount) {
         base: {
             label: 'Base',
             price: '$4.99',
+            yearlyPrice: '$49.99',
             summary: '2 workspaces, Bean chat and voice, connected calendar planning, push reminders, and recent context.',
-            trial: 'Base 7-day free trial selected',
+            trial: 'Base 14-day free trial selected',
             bestFor: 'For getting your personal day into one organized place.',
             features: [
                 'Tasks, reminders, calendar, chat, and voice',
@@ -53,8 +55,9 @@ if (mount) {
         premium: {
             label: 'Premium',
             price: '$19.99',
+            yearlyPrice: '$199.99',
             summary: '5 workspaces, expanded Bean capacity, email reminders, recurring routines, multiple calendars, and 1 year of history.',
-            trial: 'Premium 7-day free trial selected',
+            trial: 'Premium 14-day free trial selected',
             bestFor: 'Best for busy households and daily routines.',
             popular: true,
             features: [
@@ -66,8 +69,9 @@ if (mount) {
         pro: {
             label: 'Pro',
             price: '$49.99',
+            yearlyPrice: '$499.99',
             summary: 'Unlimited workspaces, maximum Bean capacity, unlimited connected accounts, full history, and priority background work.',
-            trial: 'Pro 7-day free trial selected',
+            trial: 'Pro 14-day free trial selected',
             bestFor: 'For running Bean across every part of life.',
             features: [
                 'Unlimited workspaces and connected accounts',
@@ -114,12 +118,14 @@ if (mount) {
     const state = {
         authMode: initialMode,
         selectedPlan: initialSelectedPlan,
+        selectedBillingInterval: initialBillingInterval,
         subscriptionSummary: null,
         subscriptionCheckoutStatus: new URLSearchParams(window.location.search).get('checkout') || '',
         billingCheckoutStatus: initialBillingStatus,
         billingPaymentMethod: null,
         billingPaymentLoading: false,
         billingBusy: false,
+        billingPlanInterval: initialBillingInterval,
         billingMessage: '',
         billingError: '',
         token: readToken(),
@@ -170,6 +176,8 @@ if (mount) {
         ttsPreviewing: false,
         googleStatus: null,
         googleAuthUrl: '',
+        outlookStatus: null,
+        outlookAuthUrl: '',
         messages: [],
         session: null,
         chatSessions: [],
@@ -190,6 +198,7 @@ if (mount) {
         onboardingTourActive: false,
         onboardingTourStep: 0,
         calendarRefreshing: false,
+        dashboardDataLoading: false,
         taskFilter: 'active',
         reminderFilter: 'pending',
         dashboardChangeLastId: 0,
@@ -580,6 +589,7 @@ if (mount) {
 
     async function loadSignedIn() {
         state.phase = 'loading';
+        state.dashboardDataLoading = false;
         render();
         try {
             const user = await api('/auth/me');
@@ -596,18 +606,34 @@ if (mount) {
             restoreRememberedActiveWorkspace(user);
             state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || 0);
             const cachedWorkspaceId = currentWorkspaceIdFromUser(state.user);
-            if (cachedWorkspaceId && applyDashboardCache(cachedWorkspaceId)) {
-                state.phase = 'signedIn';
-                state.error = '';
-                render();
+            const cacheApplied = Boolean(cachedWorkspaceId && applyDashboardCache(cachedWorkspaceId));
+            state.phase = 'signedIn';
+            state.dashboardDataLoading = !cacheApplied;
+            state.error = '';
+            applyBillingReturnNotice();
+            if (needsBeanOnboarding()) {
+                state.selected = 'bean';
+                state.chatExpanded = false;
+                state.chatRunState = 'Onboarding';
             }
+            if (state.selected === 'admin') {
+                loadAdminUsage();
+            }
+            render();
+            startDashboardChangeFeed();
+            startKioskVoiceMode({ requestPermission: false });
+            state.session = null;
+            state.messages = [];
+            loadChatSessions({ resumeToday: true }).catch(() => {
+                // Chat history should hydrate opportunistically and never block the app shell.
+            });
 
-            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, memoryItems, memorySummaries, memoryHistory, categories, googleStatus, subscription, billingPayment] = await Promise.all([
+            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, memoryItems, memorySummaries, memoryHistory, categories, googleStatus, outlookStatus, subscription, billingPayment] = await Promise.all([
                 recover(api(workspaceScopedPath('/today')), state.summary || {}),
                 recover(api(workspaceScopedPath('/tasks')), state.tasks),
                 recover(api(workspaceScopedPath('/tasks/past')), []),
                 recover(api(workspaceScopedPath('/reminders')), state.reminders),
-                recover(api(workspaceScopedPath('/calendar-events?skip_google_sync=1')), state.calendar),
+                recover(api(workspaceScopedPath('/calendar-events?skip_google_sync=1&skip_outlook_sync=1')), state.calendar),
                 recover(api(workspaceScopedPath('/note-folders')), state.noteFolders),
                 recover(api(workspaceScopedPath('/notes')), state.notes),
                 recover(api(workspaceScopedPath('/memory-items')), state.memoryItems),
@@ -615,6 +641,7 @@ if (mount) {
                 recover(api(workspaceScopedPath('/memory/request-history?limit=10')), state.memoryHistory),
                 recover(api(workspaceScopedPath('/event-categories')), state.categories),
                 api('/google-calendar/status?cached=1').catch(() => null),
+                api('/outlook-calendar/status?cached=1').catch(() => null),
                 api('/billing/subscription').catch(() => state.subscriptionSummary),
                 api('/billing/payment-method').catch(() => ({ payment_method: null })),
             ]);
@@ -622,7 +649,10 @@ if (mount) {
             state.summary = summary;
             state.subscriptionSummary = subscription || state.subscriptionSummary;
             state.billingPaymentMethod = billingPayment?.payment_method || billingPayment?.paymentMethod || null;
-            setActiveWorkspaceLocally(currentWorkspaceId(), { persist: false });
+            const workspaceId = currentWorkspaceId();
+            if (workspaceId) {
+                setActiveWorkspaceLocally(workspaceId, { persist: false });
+            }
             state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks.length ? tasks : summary?.tasks), normalizeList(pastTasks)));
             state.reminders = reconcileReminderRefresh(reminders.length ? reminders : summary?.reminders);
             state.calendar = reconcileCalendarRefresh(calendar.length ? calendar : summary?.calendar_events);
@@ -637,9 +667,9 @@ if (mount) {
             state.blockers = normalizeList(summary?.blockers);
             state.activity = normalizeList(summary?.activity_events);
             state.googleStatus = googleStatus;
-            state.session = null;
-            state.messages = [];
+            state.outlookStatus = outlookStatus;
             state.phase = 'signedIn';
+            state.dashboardDataLoading = false;
             state.error = refreshError ? friendlyError(refreshError, 'refresh your latest data') : '';
             applyBillingReturnNotice();
             if (needsBeanOnboarding()) {
@@ -647,17 +677,13 @@ if (mount) {
                 state.chatExpanded = false;
                 state.chatRunState = 'Onboarding';
             }
-            if (state.selected === 'admin') {
-                loadAdminUsage();
-            }
-            await loadChatSessions({ resumeToday: true });
-            startDashboardChangeFeed();
-            startKioskVoiceMode({ requestPermission: false });
             saveDashboardCache();
+            renderDashboardDataUpdate({ deferIfEditing: true });
             refreshCalendarInBackground();
         } catch (error) {
             stopDashboardChangeFeed();
             stopKioskVoiceMode();
+            state.dashboardDataLoading = false;
             if (isUnauthenticatedError(error)) {
                 clearToken();
                 state.phase = 'signedOut';
@@ -667,8 +693,8 @@ if (mount) {
                 state.phase = 'signedOut';
             }
             state.error = friendlyError(error, 'load your account');
+            render();
         }
-        render();
     }
 
     function mergeUser(...parts) {
@@ -747,6 +773,7 @@ if (mount) {
                 blockers: state.blockers,
                 activity: state.activity,
                 googleStatus: state.googleStatus,
+                outlookStatus: state.outlookStatus,
                 savedAt: new Date().toISOString(),
             }));
         } catch (_) {
@@ -773,6 +800,7 @@ if (mount) {
             state.blockers = normalizeList(cached.blockers);
             state.activity = normalizeList(cached.activity);
             state.googleStatus = cached.googleStatus || state.googleStatus;
+            state.outlookStatus = cached.outlookStatus || state.outlookStatus;
             return true;
         } catch (_) {
             return false;
@@ -824,6 +852,7 @@ if (mount) {
             blockers: state.blockers,
             activity: state.activity,
             googleStatus: state.googleStatus,
+            outlookStatus: state.outlookStatus,
             pendingTaskUpserts: new Map(state.pendingTaskUpserts),
             pendingTaskDeletes: new Set(state.pendingTaskDeletes),
             pendingReminderUpserts: new Map(state.pendingReminderUpserts),
@@ -849,6 +878,7 @@ if (mount) {
         state.blockers = snapshot.blockers;
         state.activity = snapshot.activity;
         state.googleStatus = snapshot.googleStatus;
+        state.outlookStatus = snapshot.outlookStatus;
         state.pendingTaskUpserts = snapshot.pendingTaskUpserts;
         state.pendingTaskDeletes = snapshot.pendingTaskDeletes;
         state.pendingReminderUpserts = snapshot.pendingReminderUpserts;
@@ -1437,6 +1467,7 @@ if (mount) {
                 ${register ? labelInput('Name', 'name', 'text', '', 'autocomplete="name"') : ''}
                 ${labelInput('Email', 'email', 'email', '', 'required autocomplete="email"')}
                 ${register && state.selectedPlan ? `<input type="hidden" name="plan" value="${escapeAttr(state.selectedPlan)}">` : ''}
+                ${register ? `<input type="hidden" name="billing_interval" value="${escapeAttr(normalizedBillingInterval(state.selectedBillingInterval))}">` : ''}
                 ${register ? `
                     ${labelInput('Password', 'password', 'password', '', 'required autocomplete="new-password" minlength="12"')}
                     ${labelInput('Confirm password', 'password_confirmation', 'password', '', 'required autocomplete="new-password" minlength="12"')}
@@ -1485,7 +1516,7 @@ if (mount) {
                                 <img src="${escapeAttr(logoUrl)}" alt="">
                                 <span>HeyBean</span>
                             </div>
-                            <div class="hb-subscribe-kicker">7-day free trial</div>
+                            <div class="hb-subscribe-kicker">14-day free trial</div>
                             <h1>${confirmed ? 'Your subscription is ready' : 'Choose your Bean subscription'}</h1>
                             <p>${confirmed ? subscriptionConfirmationCopy(liveConfirmed, selectedPlan) : 'Your account is created. Pick the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.'}</p>
                             ${subscriptionProgressMarkup(confirmed ? 4 : 2)}
@@ -1519,18 +1550,21 @@ if (mount) {
     }
 
     function subscriptionPlanSelectionMarkup(selectedPlan) {
+        const billingInterval = normalizedBillingInterval(state.selectedBillingInterval);
         return `
+            ${billingIntervalToggleMarkup(billingInterval, 'subscribe-billing-interval')}
             <div class="hb-subscribe-grid">
                 ${Object.entries(subscriptionPlans).map(([key, plan]) => subscriptionPlanCardMarkup(key, plan, key === selectedPlan)).join('')}
             </div>
             <div class="hb-subscribe-footer">
-                <p>Payment is handled securely through Stripe. Billing starts on day 8 and renews monthly until canceled.</p>
+                <p>Payment is handled securely through Stripe. Your 14-day free trial starts today, then renews ${billingInterval === 'yearly' ? 'yearly' : 'monthly'} until canceled.</p>
                 <button class="hb-button-ghost" type="button" data-subscribe-logout>Use a different account</button>
             </div>`;
     }
 
     function subscriptionPlanCardMarkup(key, plan, selected) {
         const busy = state.busy && state.selectedPlan === key;
+        const billingInterval = normalizedBillingInterval(state.selectedBillingInterval);
         return `
             <article class="hb-subscribe-plan ${plan.popular ? 'hb-subscribe-plan-popular' : ''} ${selected ? 'hb-subscribe-plan-selected' : ''}">
                 ${plan.popular ? '<span class="hb-subscribe-badge">Most popular</span>' : ''}
@@ -1539,9 +1573,9 @@ if (mount) {
                         <h2>${escapeHtml(plan.label)}</h2>
                         <p>${escapeHtml(plan.bestFor)}</p>
                     </div>
-                    <div class="hb-subscribe-price"><strong>${escapeHtml(plan.price)}</strong><span>/mo</span></div>
+                    <div class="hb-subscribe-price"><strong>${escapeHtml(planDisplayPrice(plan, billingInterval))}</strong><span>${escapeHtml(planDisplaySuffix(billingInterval))}</span></div>
                 </div>
-                <div class="hb-subscribe-trial">7-day free trial, then billed monthly</div>
+                <div class="hb-subscribe-trial">14-day free trial, then billed ${billingInterval === 'yearly' ? 'yearly' : 'monthly'}</div>
                 <ul>
                     ${normalizeList(plan.features).map((feature) => `<li>${icons.checkCircle}<span>${escapeHtml(feature)}</span></li>`).join('')}
                 </ul>
@@ -1549,6 +1583,27 @@ if (mount) {
                     ${busy ? '<span class="hb-spinner"></span> Opening payment…' : `Start ${escapeHtml(plan.label)} trial`}
                 </button>
             </article>`;
+    }
+
+    function normalizedBillingInterval(value) {
+        return value === 'yearly' ? 'yearly' : 'monthly';
+    }
+
+    function planDisplayPrice(plan, billingInterval = 'monthly') {
+        return normalizedBillingInterval(billingInterval) === 'yearly' ? (plan.yearlyPrice || plan.price) : plan.price;
+    }
+
+    function planDisplaySuffix(billingInterval = 'monthly') {
+        return normalizedBillingInterval(billingInterval) === 'yearly' ? '/yr' : '/mo';
+    }
+
+    function billingIntervalToggleMarkup(selected, dataPrefix) {
+        const current = normalizedBillingInterval(selected);
+        return `
+            <div class="hb-billing-interval-toggle" role="group" aria-label="Billing interval">
+                <button type="button" class="${current === 'monthly' ? 'active' : ''}" data-${dataPrefix}="monthly" aria-pressed="${current === 'monthly' ? 'true' : 'false'}">Monthly</button>
+                <button type="button" class="${current === 'yearly' ? 'active' : ''}" data-${dataPrefix}="yearly" aria-pressed="${current === 'yearly' ? 'true' : 'false'}">Yearly <span>Save up to 17%</span></button>
+            </div>`;
     }
 
     function subscriptionConfirmationCopy(liveConfirmed, selectedPlan) {
@@ -1561,6 +1616,7 @@ if (mount) {
 
     function subscriptionConfirmationMarkup(selectedPlan, subscription, liveConfirmed) {
         const plan = subscriptionPlans[selectedPlan] || subscriptionPlans.premium;
+        const billingInterval = normalizedBillingInterval(subscription.billing_interval || subscription.billingInterval || state.selectedBillingInterval);
         const trialEndsAt = subscription.trial_ends_at || subscription.trialEndsAt || state.user?.subscription_trial_ends_at || state.user?.subscriptionTrialEndsAt || '';
         const currentPeriodEnd = subscription.current_period_end || subscription.currentPeriodEnd || '';
         return `
@@ -1571,9 +1627,9 @@ if (mount) {
                 </div>
                 <div class="hb-subscribe-summary-grid">
                     <div><span>Plan</span><strong>${escapeHtml(plan.label)}</strong></div>
-                    <div><span>Monthly price</span><strong>${escapeHtml(plan.price)}/mo</strong></div>
-                    <div><span>Trial</span><strong>7 days</strong></div>
-                    <div><span>Billing cycle</span><strong>Monthly</strong></div>
+                    <div><span>${billingInterval === 'yearly' ? 'Yearly' : 'Monthly'} price</span><strong>${escapeHtml(planDisplayPrice(plan, billingInterval))}${escapeHtml(planDisplaySuffix(billingInterval))}</strong></div>
+                    <div><span>Trial</span><strong>14 days</strong></div>
+                    <div><span>Billing cycle</span><strong>${billingInterval === 'yearly' ? 'Yearly' : 'Monthly'}</strong></div>
                 </div>
                 <div class="hb-subscribe-actions">
                     <button class="hb-button" type="button" data-subscribe-dashboard>Go to dashboard</button>
@@ -1583,9 +1639,10 @@ if (mount) {
     }
 
     function subscriptionBillingSummary(plan, trialEndsAt, currentPeriodEnd) {
-        if (trialEndsAt) return `${plan.label} starts with a free trial through ${formatDateTime(trialEndsAt)}. After that, billing continues monthly until canceled.`;
-        if (currentPeriodEnd) return `${plan.label} is billed monthly. Your current billing cycle renews around ${formatDateTime(currentPeriodEnd)}.`;
-        return `${plan.label} starts with a 7-day free trial. Billing begins on day 8 and continues monthly until canceled.`;
+        const billingInterval = normalizedBillingInterval(state.selectedBillingInterval);
+        if (trialEndsAt) return `${plan.label} starts with a free trial through ${formatDateTime(trialEndsAt)}. After that, billing continues ${billingInterval} until canceled.`;
+        if (currentPeriodEnd) return `${plan.label} is billed ${billingInterval}. Your current billing cycle renews around ${formatDateTime(currentPeriodEnd)}.`;
+        return `${plan.label} starts with a 14-day free trial. Billing begins on day 15 and continues ${billingInterval} until canceled.`;
     }
 
     function signedInMarkup() {
@@ -1667,12 +1724,18 @@ if (mount) {
             </div>`;
     }
 
+    function dashboardLoadingMarkup(label) {
+        return `<div class="hb-inline-loading hb-surface-soft" role="status" aria-live="polite"><span class="hb-spinner hb-spinner-tiny" aria-hidden="true"></span><span>${escapeHtml(label)}</span></div>`;
+    }
+
     function todayMarkup() {
         const selected = parseLocalDate(state.selectedDay);
         const visibleDays = visibleCalendarDays(selected);
+        const loadingCalendar = state.dashboardDataLoading && !state.calendar.length;
         return `
             <section class="hb-card hb-card-pad hb-calendar-card">
                 <div class="hb-calendar">
+                    ${loadingCalendar ? dashboardLoadingMarkup('Loading calendar...') : ''}
                     ${state.showMonth ? monthGridMarkup(selected) : ''}
                     ${state.showMonth ? '' : timelineMarkup(visibleDays)}
                 </div>
@@ -1691,7 +1754,7 @@ if (mount) {
                     <button class="hb-chip" type="button" data-task-filter="active" aria-pressed="${!completed}">Active</button>
                     <button class="hb-chip" type="button" data-task-filter="done" aria-pressed="${completed}">Done</button>
                 </div>
-                ${dayBoardMarkup(items, 'task', completed ? 'No completed tasks' : 'No active tasks')}
+                ${state.dashboardDataLoading && !items.length ? dashboardLoadingMarkup('Loading tasks...') : dayBoardMarkup(items, 'task', completed ? 'No completed tasks' : 'No active tasks')}
             </section>`;
     }
 
@@ -1705,7 +1768,7 @@ if (mount) {
                     <button class="hb-chip" type="button" data-reminder-filter="pending" aria-pressed="${!completed}">Pending</button>
                     <button class="hb-chip" type="button" data-reminder-filter="completed" aria-pressed="${completed}">Completed</button>
                 </div>
-                ${dayBoardMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No pending reminders')}
+                ${state.dashboardDataLoading && !items.length ? dashboardLoadingMarkup('Loading reminders...') : dayBoardMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No pending reminders')}
             </section>`;
     }
 
@@ -1759,7 +1822,7 @@ if (mount) {
                         <button class="hb-icon-button hb-notes-new-button" type="button" data-create-note aria-label="New note" title="New note">${icons.add}</button>
                     </div>
                     <div class="hb-notes-list" role="listbox" aria-label="Notes list">
-                        ${sections.length ? sections.map(noteListSectionMarkup).join('') : `<div class="hb-notes-empty">No notes</div>`}
+                        ${sections.length ? sections.map(noteListSectionMarkup).join('') : state.dashboardDataLoading ? dashboardLoadingMarkup('Loading notes...') : `<div class="hb-notes-empty">No notes</div>`}
                     </div>
                 </aside>
                 <article class="hb-notes-editor-pane">
@@ -1914,7 +1977,7 @@ if (mount) {
                         </form>
                         <section class="hb-memory-panel">
                             <strong>Recent recall</strong>
-                            ${history.length ? history.map(memoryHistoryItemMarkup).join('') : '<div class="hb-empty">No recent requests loaded yet.</div>'}
+                            ${history.length ? history.map(memoryHistoryItemMarkup).join('') : state.dashboardDataLoading ? dashboardLoadingMarkup('Loading recent recall...') : '<div class="hb-empty">No recent requests loaded yet.</div>'}
                         </section>
                     </aside>
                     <main class="hb-memory-main">
@@ -1927,11 +1990,11 @@ if (mount) {
                             <button class="hb-button-secondary" type="button" data-refresh-memory>Refresh</button>
                         </div>
                         <div class="hb-memory-list">
-                            ${items.length ? items.map(memoryItemMarkup).join('') : '<div class="hb-memory-empty">No matching knowledge yet.</div>'}
+                            ${items.length ? items.map(memoryItemMarkup).join('') : state.dashboardDataLoading ? dashboardLoadingMarkup('Loading knowledge...') : '<div class="hb-memory-empty">No matching knowledge yet.</div>'}
                         </div>
                         <section class="hb-memory-summaries">
                             <h2>Summaries</h2>
-                            ${summaries.length ? summaries.map(memorySummaryMarkup).join('') : '<div class="hb-empty">Summaries will appear as Bean builds history.</div>'}
+                            ${summaries.length ? summaries.map(memorySummaryMarkup).join('') : state.dashboardDataLoading ? dashboardLoadingMarkup('Loading summaries...') : '<div class="hb-empty">Summaries will appear as Bean builds history.</div>'}
                         </section>
                     </main>
                 </div>
@@ -3225,6 +3288,7 @@ if (mount) {
         const trialEndsAt = subscription.trial_ends_at || subscription.trialEndsAt || user.subscription_trial_ends_at || user.subscriptionTrialEndsAt || '';
         const currentPeriodEnd = subscription.current_period_end || subscription.currentPeriodEnd || '';
         const accessEndsAt = subscription.access_ends_at || subscription.accessEndsAt || (cancelAtPeriodEnd ? currentPeriodEnd : '');
+        const billingInterval = normalizedBillingInterval(subscription.billing_interval || subscription.billingInterval || state.billingPlanInterval);
         const paymentMethod = state.billingPaymentMethod;
         const selectedPlan = subscriptionPlans[tier] ? tier : 'base';
         const canCancel = subscription.can_cancel === true || subscription.canCancel === true;
@@ -3249,7 +3313,13 @@ if (mount) {
                 <div class="hb-billing-plan-row">
                     <label class="hb-label">Change plan
                         <select class="hb-select" data-billing-plan-select ${state.billingBusy ? 'disabled' : ''}>
-                            ${Object.entries(subscriptionPlans).map(([key, plan]) => `<option value="${escapeAttr(key)}" ${key === selectedPlan ? 'selected' : ''}>${escapeHtml(plan.label)} ${escapeHtml(plan.price)}/mo</option>`).join('')}
+                            ${Object.entries(subscriptionPlans).map(([key, plan]) => `<option value="${escapeAttr(key)}" ${key === selectedPlan ? 'selected' : ''}>${escapeHtml(plan.label)} ${escapeHtml(planDisplayPrice(plan, billingInterval))}${escapeHtml(planDisplaySuffix(billingInterval))}</option>`).join('')}
+                        </select>
+                    </label>
+                    <label class="hb-label">Billing
+                        <select class="hb-select" data-billing-interval-select ${state.billingBusy ? 'disabled' : ''}>
+                            <option value="monthly" ${billingInterval === 'monthly' ? 'selected' : ''}>Monthly</option>
+                            <option value="yearly" ${billingInterval === 'yearly' ? 'selected' : ''}>Yearly - save up to 17%</option>
                         </select>
                     </label>
                     <button class="hb-button" type="button" data-billing-change-plan ${state.billingBusy ? 'disabled' : ''}>${state.billingBusy ? 'Working...' : 'Change plan'}</button>
@@ -3358,20 +3428,21 @@ if (mount) {
                 <div class="hb-section-action-row">
                     ${sectionTitle(icons.tasks, 'Tasks for today', `${tasks.length} tasks`)}
                 </div>
-                ${itemListMarkup(tasks, 'task', 'No tasks scheduled for today')}
+                ${state.dashboardDataLoading && !tasks.length ? dashboardLoadingMarkup('Loading today tasks...') : itemListMarkup(tasks, 'task', 'No tasks scheduled for today')}
             </section>`;
     }
 
     function atAGlanceMarkup() {
         const days = [new Date(), addDays(new Date(), 1), addDays(new Date(), 2)];
         const eventCount = eventsForDays(days).length;
+        const loadingEvents = state.dashboardDataLoading && !eventCount;
         return `
             <section class="hb-card hb-card-pad hb-glance-card">
                 <div class="hb-section-action-row">
                     ${sectionTitle(icons.calendar, 'At a glance', `${eventCount} upcoming ${eventCount === 1 ? 'event' : 'events'}`)}
                 </div>
                 <div class="hb-glance-list">
-                    ${days.map((day) => glanceDayMarkup(day)).join('')}
+                    ${loadingEvents ? dashboardLoadingMarkup('Loading upcoming events...') : days.map((day) => glanceDayMarkup(day)).join('')}
                 </div>
             </section>`;
     }
@@ -3426,22 +3497,34 @@ if (mount) {
     }
 
     function googleCalendarMarkup() {
-        const status = state.googleStatus;
+        const googleConnected = state.googleStatus?.connected === true;
+        const outlookConnected = state.outlookStatus?.connected === true;
+        return `
+            <strong>External Calendar Sync</strong>
+            <p class="hb-item-meta">${googleConnected || outlookConnected ? 'Sync now pulls selected external calendar events into Bean. Bean events push outward only when that event has a writable external calendar checked.' : 'Connect Google Calendar or Microsoft Outlook to import events into HeyBean.'}</p>
+            ${externalCalendarProviderMarkup('google', 'Google Calendar', state.googleStatus)}
+            ${externalCalendarProviderMarkup('outlook', 'Microsoft Outlook', state.outlookStatus)}
+            <div class="hb-account-actions">
+                <button class="hb-button-secondary" type="button" data-external-calendar-connect>${googleConnected || outlookConnected ? 'Connect another calendar' : 'Connect Calendar'}</button>
+            </div>`;
+    }
+
+    function externalCalendarProviderMarkup(provider, label, status) {
         const connected = status?.connected === true;
         const calendars = normalizeList(status?.calendars);
         const selected = new Set(normalizeList(status?.selected_calendar_ids));
+        const authUrl = provider === 'outlook' ? state.outlookAuthUrl : state.googleAuthUrl;
         return `
-            <strong>Calendar sync</strong>
-            <p class="hb-item-meta">${connected ? `Connected${status?.last_synced_at ? ` · last sync ${formatDateTime(status.last_synced_at)}` : ''}` : 'Connect your calendar to import events into HeyBean.'}</p>
-            ${status?.last_error ? `<div class="hb-error">${escapeHtml(status.last_error)}</div>` : ''}
-            ${calendars.length ? `<div class="hb-list hb-google-list">${calendars.map((calendar) => `
-                <label class="hb-switch-row"><input type="checkbox" data-google-calendar value="${escapeAttr(calendar.id)}" ${selected.has(calendar.id) || calendar.selected ? 'checked' : ''}> <span><strong>${escapeHtml(calendar.summary || calendar.name || calendar.id)}</strong><small>${escapeHtml(calendar.access_role || calendar.accessRole || 'reader')}</small></span></label>
-            `).join('')}</div>` : ''}
-            <div class="hb-account-actions">
-                <button class="hb-button-secondary" type="button" data-google-action="connect">${connected ? 'Reconnect' : 'Connect calendar'}</button>
-                ${state.googleAuthUrl ? `<button class="hb-button-secondary" type="button" data-google-action="copy">Copy auth link</button><button class="hb-button-secondary" type="button" data-google-action="check">Check connection</button>` : ''}
-                <button class="hb-button-secondary" type="button" data-google-action="sync" ${connected ? '' : 'disabled'}>Sync</button>
-                <button class="hb-button-ghost" type="button" data-google-action="disconnect" ${connected ? '' : 'disabled'}>Disconnect</button>
+            <div class="hb-list hb-google-list">
+                <div class="hb-switch-row">
+                    <span><strong>${escapeHtml(label)} ${connected ? 'connected' : 'not connected'}</strong><small>${connected && status?.last_synced_at ? `Last sync ${formatDateTime(status.last_synced_at)}` : 'Use Connect Calendar to authorize this provider.'}</small></span>
+                </div>
+                ${status?.last_error ? `<div class="hb-error">${escapeHtml(status.last_error)}</div>` : ''}
+                ${authUrl ? `<div class="hb-account-actions"><button class="hb-button-secondary" type="button" data-external-calendar-action="${provider}:copy">Copy auth link</button><button class="hb-button-secondary" type="button" data-external-calendar-action="${provider}:check">Check connection</button></div>` : ''}
+                ${connected && calendars.length ? calendars.map((calendar) => `
+                    <label class="hb-switch-row"><input type="checkbox" data-${provider}-calendar value="${escapeAttr(calendar.id)}" ${selected.has(calendar.id) || calendar.selected ? 'checked' : ''}> <span><strong>${escapeHtml(calendar.summary || calendar.name || calendar.id)}</strong><small>${escapeHtml(calendar.access_role || calendar.accessRole || 'reader')}</small></span></label>
+                `).join('') : ''}
+                ${connected ? `<div class="hb-account-actions"><button class="hb-button-secondary" type="button" data-external-calendar-action="${provider}:sync">Sync now</button><button class="hb-button-ghost" type="button" data-external-calendar-action="${provider}:disconnect">Disconnect</button></div>` : ''}
             </div>`;
     }
 
@@ -3952,12 +4035,26 @@ if (mount) {
         if (modal.type === 'issue-report-success') return issueReportSuccessModalMarkup();
         if (modal.type === 'admin-usage-log') return adminUsageLogModalMarkup(modal.log);
         if (modal.type === 'admin-command-run') return adminCommandRunModalMarkup(modal);
+        if (modal.type === 'external-calendar-connect') return externalCalendarConnectModalMarkup();
         if (modal.type === 'profile') return profileModalMarkup();
         if (modal.type === 'agent') return agentModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
         if (modal.type === 'categories') return categoriesModalMarkup();
         if (modal.type === 'recurring-delete') return recurringDeleteModalMarkup(modal.item);
         return itemModalMarkup(modal.type, modal.item, modal.parentTask);
+    }
+
+    function externalCalendarConnectModalMarkup() {
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Connect external calendar">
+                <section class="hb-card hb-modal hb-form">
+                    <h3>Connect Calendar</h3>
+                    <p class="hb-item-meta">Choose a provider. You will sign in with that provider, approve calendar access, then return here and tap Check connection if needed.</p>
+                    <button class="hb-button-secondary" type="button" data-external-calendar-provider="google">Google Calendar</button>
+                    <button class="hb-button-secondary" type="button" data-external-calendar-provider="outlook">Microsoft Outlook</button>
+                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-close-modal>Cancel</button></div>
+                </section>
+            </div>`;
     }
 
     function registerEarlyAccessSuccessModalMarkup() {
@@ -4293,7 +4390,7 @@ if (mount) {
                 ${editing ? `<input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}"><p class="hb-item-meta">Saved in ${escapeHtml(sourceWorkspace?.name || 'this workspace')}.</p>` : ''}
                 <div data-sync-workspace-options>${workspaceSyncOptionsMarkup(sourceWorkspaceId, linked)}</div>
                 ${kind === 'reminder' ? `<div data-reminder-recipient-options>${reminderRecipientOptionsMarkup(sourceWorkspaceId, linked, item)}</div>` : ''}
-                ${kind === 'event' ? `<div data-google-export-options>${googleEventConnectionMarkup(item, sourceWorkspace)}</div>` : ''}
+                ${kind === 'event' ? `<div data-google-export-options>${googleEventConnectionMarkup(item, sourceWorkspace)}</div><div data-outlook-export-options>${outlookEventConnectionMarkup(item, sourceWorkspace)}</div>` : ''}
                 </div>
             </section>`;
     }
@@ -4374,8 +4471,27 @@ if (mount) {
         const selected = new Set(defaultGoogleCalendarExportIds(item, workspace));
         return `
             <div class="hb-label">Export to Google Calendar
+                <small>Select external calendars for this event. Leave every option unchecked to keep it only in Bean.</small>
                 <div class="hb-option-list">
                     ${calendars.map((calendar) => `<label class="hb-switch-row"><input type="checkbox" name="googleCalendarIds" value="${escapeAttr(calendar.id)}" ${selected.has(String(calendar.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(calendar.summary || calendar.name || calendar.id)}</strong><small>${escapeHtml(calendar.access_role || calendar.accessRole || 'writer')}</small></span></label>`).join('')}
+                </div>
+            </div>`;
+    }
+
+    function outlookEventConnectionMarkup(item, workspace) {
+        if (state.outlookStatus?.connected !== true) {
+            return '<p class="hb-item-meta">Microsoft Outlook is not connected.</p>';
+        }
+        const calendars = writableOutlookCalendars();
+        if (!calendars.length) {
+            return '<p class="hb-item-meta">No writable Outlook calendars are available.</p>';
+        }
+        const selected = new Set(defaultOutlookCalendarExportIds(item, workspace));
+        return `
+            <div class="hb-label">Export to Microsoft Outlook
+                <small>Select external calendars for this event. Leave every option unchecked to keep it only in Bean.</small>
+                <div class="hb-option-list">
+                    ${calendars.map((calendar) => `<label class="hb-switch-row"><input type="checkbox" name="outlookCalendarIds" value="${escapeAttr(calendar.id)}" ${selected.has(String(calendar.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(calendar.summary || calendar.name || calendar.id)}</strong><small>${escapeHtml(calendar.access_role || calendar.accessRole || 'writer')}</small></span></label>`).join('')}
                 </div>
             </div>`;
     }
@@ -4384,19 +4500,26 @@ if (mount) {
         return normalizeList(state.googleStatus?.calendars).filter((calendar) => ['owner', 'writer'].includes(String(calendar.access_role || calendar.accessRole || 'reader')));
     }
 
+    function writableOutlookCalendars() {
+        return normalizeList(state.outlookStatus?.calendars).filter((calendar) => ['owner', 'writer'].includes(String(calendar.access_role || calendar.accessRole || 'reader')));
+    }
+
     function defaultGoogleCalendarExportIds(item = null, workspace = null) {
         const metadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
         const existingIds = normalizeList(metadata.google_calendar_ids || metadata.googleCalendarIds);
         if (existingIds.length) return existingIds.map(String);
         const existingSingle = item?.google_calendar_id || item?.googleCalendarId || metadata.google_calendar_id || metadata.googleCalendarId;
         if (existingSingle) return [String(existingSingle)];
+        return [];
+    }
 
-        const mappings = normalizeList(workspace?.google_calendar_mappings || workspace?.googleCalendarMappings);
-        const defaultMapping = mappings.find((mapping) => mapping.is_default_export || mapping.isDefaultExport);
-        if (defaultMapping) return [String(defaultMapping.google_calendar_id || defaultMapping.googleCalendarId)];
-        if (mappings.length) return mappings.map((mapping) => String(mapping.google_calendar_id || mapping.googleCalendarId)).filter(Boolean);
-        const fallback = state.googleStatus?.default_calendar_id || state.googleStatus?.calendar_id;
-        return fallback ? [String(fallback)] : [];
+    function defaultOutlookCalendarExportIds(item = null, workspace = null) {
+        const metadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
+        const existingIds = normalizeList(metadata.outlook_calendar_ids || metadata.outlookCalendarIds);
+        if (existingIds.length) return existingIds.map(String);
+        const existingSingle = item?.outlook_calendar_id || item?.outlookCalendarId || metadata.outlook_calendar_id || metadata.outlookCalendarId;
+        if (existingSingle) return [String(existingSingle)];
+        return [];
     }
 
     function profileModalMarkup() {
@@ -4577,6 +4700,10 @@ if (mount) {
 
     function bindSubscriptionActions() {
         mount.querySelectorAll('[data-subscribe-plan]').forEach((button) => button.addEventListener('click', () => startSubscriptionCheckout(button.dataset.subscribePlan)));
+        mount.querySelectorAll('[data-subscribe-billing-interval]').forEach((button) => button.addEventListener('click', () => {
+            state.selectedBillingInterval = normalizedBillingInterval(button.dataset.subscribeBillingInterval);
+            render();
+        }));
         mount.querySelectorAll('[data-subscribe-dashboard]').forEach((button) => button.addEventListener('click', () => {
             history.pushState({}, '', '/app');
             state.selected = 'today';
@@ -4606,7 +4733,7 @@ if (mount) {
                 return;
             }
             const payload = action === 'register'
-                ? { name: data.name, email: data.email, password: data.password, password_confirmation: data.password_confirmation, ...(data.plan ? { plan: data.plan } : {}) }
+                ? { name: data.name, email: data.email, password: data.password, password_confirmation: data.password_confirmation, ...(data.plan ? { plan: data.plan } : {}), billing_interval: normalizedBillingInterval(data.billing_interval || state.selectedBillingInterval) }
                 : { email: data.email, password: data.password };
             const result = await api(`/auth/${action}`, { method: 'POST', body: payload });
             if (action === 'register') {
@@ -4638,7 +4765,7 @@ if (mount) {
         try {
             const checkout = await api('/billing/checkout-sessions', {
                 method: 'POST',
-                body: { plan, source: 'subscribe' },
+                body: { plan, billing_interval: normalizedBillingInterval(state.selectedBillingInterval), source: 'subscribe' },
             });
             if (!checkout?.url) throw new Error('Stripe did not return a payment page.');
             window.location.href = checkout.url;
@@ -4875,13 +5002,21 @@ if (mount) {
         mount.querySelector('[data-theme-select]')?.addEventListener('change', updateThemePreference);
         mount.querySelector('[data-home-city-form]')?.addEventListener('submit', updateHomeCityPreference);
         mount.querySelector('[data-clear-home-city]')?.addEventListener('click', clearHomeCityPreference);
+        mount.querySelector('[data-billing-interval-select]')?.addEventListener('change', (event) => {
+            state.billingPlanInterval = normalizedBillingInterval(event.currentTarget.value);
+            render();
+        });
         mount.querySelector('[data-billing-change-plan]')?.addEventListener('click', changeBillingPlan);
         mount.querySelector('[data-billing-update-payment]')?.addEventListener('click', startBillingPaymentUpdate);
         mount.querySelector('[data-billing-refresh]')?.addEventListener('click', () => refreshBillingSettings({ user: true }));
         mount.querySelector('[data-billing-cancel-renewal]')?.addEventListener('click', cancelBillingRenewal);
         mount.querySelector('[data-billing-resume-subscription]')?.addEventListener('click', resumeBillingSubscription);
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
+        mount.querySelector('[data-external-calendar-connect]')?.addEventListener('click', () => { state.modal = { type: 'external-calendar-connect' }; render(); });
+        mount.querySelectorAll('[data-external-calendar-provider]').forEach((button) => button.addEventListener('click', () => connectExternalCalendar(button.dataset.externalCalendarProvider)));
+        mount.querySelectorAll('[data-external-calendar-action]').forEach((button) => button.addEventListener('click', () => externalCalendarAction(button.dataset.externalCalendarAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
+        mount.querySelectorAll('[data-outlook-calendar]').forEach((input) => input.addEventListener('change', updateOutlookCalendarSelection));
         mount.querySelectorAll('[data-approval-approve]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalApprove, false)));
         mount.querySelectorAll('[data-approval-deny]').forEach((button) => button.addEventListener('click', () => denyApproval(button.dataset.approvalDeny)));
         mount.querySelectorAll('[data-calendar-pref]').forEach((input) => input.addEventListener('change', () => localStorage.setItem(`heybean.calendar.${input.dataset.calendarPref}`, input.value)));
@@ -5546,6 +5681,8 @@ if (mount) {
         const workspace = findWorkspace(sourceWorkspaceId);
         const googleContainer = picker.querySelector('[data-google-export-options]');
         if (googleContainer) googleContainer.innerHTML = googleEventConnectionMarkup(null, workspace);
+        const outlookContainer = picker.querySelector('[data-outlook-export-options]');
+        if (outlookContainer) outlookContainer.innerHTML = outlookEventConnectionMarkup(null, workspace);
         refreshReminderRecipientOptions(select.closest('form'));
         syncContainer?.querySelectorAll('input[name="syncWorkspaceIds"]').forEach((input) => input.addEventListener('change', handleSyncWorkspaceChange));
     }
@@ -6162,10 +6299,15 @@ if (mount) {
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const generatedOccurrence = eventIsGeneratedOccurrence(item);
             const recurrence = generatedOccurrence ? { value: null, metadata: {} } : recurrenceFormData(form, data);
+            const googleCalendarIds = selectedGoogleCalendarIds(form);
+            const outlookCalendarIds = selectedOutlookCalendarIds(form);
             const metadata = {
                 ...existingMetadata,
                 ...recurrence.metadata,
-                google_calendar_ids: selectedGoogleCalendarIds(form),
+                google_calendar_ids: googleCalendarIds,
+                google_calendar_id: googleCalendarIds[0] || null,
+                outlook_calendar_ids: outlookCalendarIds,
+                outlook_calendar_id: outlookCalendarIds[0] || null,
                 all_day: allDay,
             };
             if (generatedOccurrence) {
@@ -6196,7 +6338,7 @@ if (mount) {
             return {
                 body,
                 eventReminderMinutesBefore: form.elements.createEventReminder?.checked ? Number(data.eventReminderMinutesBefore || 15) : null,
-                path: item ? `/calendar-events/${item.id}?sync_google_now=1` : '/calendar-events?sync_google_now=1',
+                path: item ? `/calendar-events/${item.id}?sync_external_calendars_now=1` : '/calendar-events?sync_external_calendars_now=1',
                 options: { method: item ? 'PATCH' : 'POST', body },
             };
         }
@@ -6468,6 +6610,13 @@ if (mount) {
     function selectedGoogleCalendarIds(form) {
         if (state.googleStatus?.connected !== true) return [];
         return Array.from(form.querySelectorAll('input[name="googleCalendarIds"]:checked'))
+            .map((input) => String(input.value))
+            .filter(Boolean);
+    }
+
+    function selectedOutlookCalendarIds(form) {
+        if (state.outlookStatus?.connected !== true) return [];
+        return Array.from(form.querySelectorAll('input[name="outlookCalendarIds"]:checked'))
             .map((input) => String(input.value))
             .filter(Boolean);
     }
@@ -10843,9 +10992,9 @@ if (mount) {
     async function refreshOnly(shouldRender = true, options = {}) {
         const generation = ++dashboardRefreshGeneration;
         try {
-            const calendarPath = options.skipCalendarSync === false ? '/calendar-events' : '/calendar-events?skip_google_sync=1';
+            const calendarPath = options.skipCalendarSync === false ? '/calendar-events' : '/calendar-events?skip_google_sync=1&skip_outlook_sync=1';
             const workspaceId = currentWorkspaceId();
-            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, memoryItems, memorySummaries, memoryHistory, categories, googleStatus] = await Promise.all([
+            const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, memoryItems, memorySummaries, memoryHistory, categories, googleStatus, outlookStatus] = await Promise.all([
                 api(workspaceScopedPath('/today', workspaceId)),
                 api(workspaceScopedPath('/tasks', workspaceId)),
                 api(workspaceScopedPath('/tasks/past', workspaceId)),
@@ -10858,6 +11007,7 @@ if (mount) {
                 api(workspaceScopedPath('/memory/request-history?limit=10', workspaceId)),
                 api(workspaceScopedPath('/event-categories', workspaceId)),
                 api('/google-calendar/status?cached=1').catch(() => state.googleStatus),
+                api('/outlook-calendar/status?cached=1').catch(() => state.outlookStatus),
             ]);
             if (generation !== dashboardRefreshGeneration) return;
             state.summary = summary;
@@ -10871,6 +11021,8 @@ if (mount) {
             state.memorySummaries = normalizeList(memorySummaries);
             state.memoryHistory = normalizeList(memoryHistory);
             state.categories = normalizeList(categories);
+            state.googleStatus = googleStatus;
+            state.outlookStatus = outlookStatus;
             state.approvals = normalizeList(summary?.approvals);
             state.blockers = normalizeList(summary?.blockers);
             state.activity = normalizeList(summary?.activity_events);
@@ -10978,7 +11130,7 @@ if (mount) {
 
     function refreshCalendarAfterEventSave() {
         const generation = ++dashboardRefreshGeneration;
-        api(workspaceScopedPath('/calendar-events?skip_google_sync=1'))
+        api(workspaceScopedPath('/calendar-events?skip_google_sync=1&skip_outlook_sync=1'))
             .then((calendar) => {
                 if (generation !== dashboardRefreshGeneration) return;
                 state.calendar = reconcileCalendarRefresh(calendar);
@@ -11025,12 +11177,14 @@ if (mount) {
         state.error = '';
         render();
         try {
-            const [calendar, googleStatus] = await Promise.all([
+            const [calendar, googleStatus, outlookStatus] = await Promise.all([
                 api(workspaceScopedPath('/calendar-events')),
                 api('/google-calendar/status').catch(() => state.googleStatus),
+                api('/outlook-calendar/status').catch(() => state.outlookStatus),
             ]);
             state.calendar = reconcileCalendarRefresh(calendar);
             state.googleStatus = googleStatus;
+            state.outlookStatus = outlookStatus;
             state.notice = 'Calendar refreshed.';
         } catch (error) {
             state.error = friendlyError(error, 'refresh the calendar');
@@ -11182,6 +11336,7 @@ if (mount) {
             if (user) requests.push(api('/auth/me'));
             const [subscription, payment, freshUser] = await Promise.all(requests);
             state.subscriptionSummary = subscription;
+            state.billingPlanInterval = normalizedBillingInterval(subscription?.billing_interval || subscription?.billingInterval || state.billingPlanInterval);
             state.billingPaymentMethod = payment?.payment_method || payment?.paymentMethod || null;
             if (freshUser) state.user = freshUser;
             state.billingMessage = message;
@@ -11196,9 +11351,11 @@ if (mount) {
     async function changeBillingPlan() {
         if (state.billingBusy) return;
         const plan = mount.querySelector('[data-billing-plan-select]')?.value || '';
+        const billingInterval = normalizedBillingInterval(mount.querySelector('[data-billing-interval-select]')?.value || state.billingPlanInterval);
         if (!subscriptionPlans[plan]) return;
         const currentPlan = String(state.subscriptionSummary?.tier || state.user?.subscription_tier || state.user?.subscriptionTier || 'base').toLowerCase();
-        if (plan === currentPlan) {
+        const currentInterval = normalizedBillingInterval(state.subscriptionSummary?.billing_interval || state.subscriptionSummary?.billingInterval || state.billingPlanInterval);
+        if (plan === currentPlan && billingInterval === currentInterval) {
             state.notice = 'That plan is already active.';
             state.error = '';
             render();
@@ -11213,16 +11370,17 @@ if (mount) {
         try {
             const result = await api('/billing/subscription/change-plan', {
                 method: 'POST',
-                body: { plan },
+                body: { plan, billing_interval: billingInterval },
             });
             if (result?.url) {
                 window.location.href = result.url;
                 return;
             }
             state.subscriptionSummary = result?.subscription || state.subscriptionSummary;
+            state.billingPlanInterval = normalizedBillingInterval(result?.billing_interval || result?.billingInterval || state.subscriptionSummary?.billing_interval || state.subscriptionSummary?.billingInterval || billingInterval);
             const freshUser = await api('/auth/me').catch(() => null);
             if (freshUser) state.user = freshUser;
-            state.billingMessage = `Plan changed to ${subscriptionPlans[plan].label}.`;
+            state.billingMessage = `Plan changed to ${subscriptionPlans[plan].label} ${billingInterval === 'yearly' ? 'yearly' : 'monthly'}.`;
         } catch (error) {
             state.billingError = friendlyError(error, 'change your subscription');
         } finally {
@@ -11360,6 +11518,42 @@ if (mount) {
         }
     }
 
+    async function connectExternalCalendar(provider) {
+        state.modal = null;
+        await externalCalendarAction(`${provider}:connect`);
+    }
+
+    async function externalCalendarAction(actionKey) {
+        const [provider, action] = String(actionKey || '').split(':');
+        const isOutlook = provider === 'outlook';
+        const label = isOutlook ? 'Microsoft Outlook' : 'Google Calendar';
+        const authUrlKey = isOutlook ? 'outlookAuthUrl' : 'googleAuthUrl';
+        const statusKey = isOutlook ? 'outlookStatus' : 'googleStatus';
+        const basePath = isOutlook ? '/outlook-calendar' : '/google-calendar';
+        try {
+            if (action === 'connect') {
+                const result = await api(`${basePath}/auth-url`, { method: 'POST' });
+                state[authUrlKey] = result.auth_url;
+                window.open(result.auth_url, '_blank', 'noopener,noreferrer');
+                state.notice = `Finish approving ${label} access in the browser, then tap Check connection.`;
+            } else if (action === 'copy') {
+                await navigator.clipboard.writeText(state[authUrlKey]);
+                state.notice = `${label} authorization link copied.`;
+            } else if (action === 'check' || action === 'sync') {
+                const result = await api(`${basePath}/sync`, { method: 'POST' });
+                state[statusKey] = result.status;
+                state.notice = `${label} sync pulled ${result.imported || 0} external event${(result.imported || 0) === 1 ? '' : 's'} into Bean. Bean events push outward only when that event has a writable external calendar checked.`;
+            } else if (action === 'disconnect') {
+                state[statusKey] = await api(basePath, { method: 'DELETE' });
+                state.notice = `${label} sync disconnected.`;
+            }
+            render();
+        } catch (error) {
+            state.error = friendlyError(error, `update ${label} sync`);
+            render();
+        }
+    }
+
     async function updateGoogleCalendarSelection() {
         const selected = Array.from(mount.querySelectorAll('[data-google-calendar]:checked')).map((input) => input.value);
         try {
@@ -11371,6 +11565,21 @@ if (mount) {
             render();
         } catch (error) {
             state.error = friendlyError(error, 'save calendar choices');
+            render();
+        }
+    }
+
+    async function updateOutlookCalendarSelection() {
+        const selected = Array.from(mount.querySelectorAll('[data-outlook-calendar]:checked')).map((input) => input.value);
+        try {
+            state.outlookStatus = await api('/outlook-calendar/calendars', {
+                method: 'PATCH',
+                body: { selected_calendar_ids: selected, default_calendar_id: selected[0] || null },
+            });
+            state.notice = 'Outlook calendar choices saved.';
+            render();
+        } catch (error) {
+            state.error = friendlyError(error, 'save Outlook calendar choices');
             render();
         }
     }

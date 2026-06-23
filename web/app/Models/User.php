@@ -132,6 +132,11 @@ class User extends Authenticatable
         return $this->hasOne(GoogleCalendarConnection::class);
     }
 
+    public function outlookCalendarConnection(): HasOne
+    {
+        return $this->hasOne(OutlookCalendarConnection::class);
+    }
+
     public function approvals(): HasMany
     {
         return $this->hasMany(Approval::class);

@@ -1705,6 +1705,42 @@
     margin: 0;
 }
 
+.hb-billing-interval-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    width: min(100%, 360px);
+    margin: 0 auto 16px;
+    padding: 4px;
+    border: 1px solid var(--hb-border);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .84);
+}
+
+.hb-billing-interval-toggle button {
+    min-height: 40px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--hb-muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.hb-billing-interval-toggle button.active {
+    background: var(--hb-accent);
+    color: var(--hb-accent-ink);
+}
+
+.hb-billing-interval-toggle span {
+    display: block;
+    font-size: 10px;
+    font-weight: 900;
+    opacity: .8;
+}
+
 .hb-subscribe-confirmation {
     display: grid;
     gap: 16px;
@@ -1805,6 +1841,25 @@
     text-align: center;
     font-size: 14px;
     font-weight: 700;
+}
+
+.hb-inline-loading {
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    margin: 8px;
+    padding: 12px 14px;
+    color: var(--hb-muted);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.hb-list > .hb-inline-loading,
+.hb-memory-list > .hb-inline-loading,
+.hb-notes-list > .hb-inline-loading {
+    margin: 0;
 }
 
 .hb-tabs {

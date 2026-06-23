@@ -1400,6 +1400,7 @@ const _dashboardChangePollInterval = Duration(seconds: 15);
 const _pendingCalendarEventWriteTtl = Duration(minutes: 2);
 const _pendingDashboardWriteTtl = Duration(minutes: 2);
 const _onboardingTourSeenPreferencePrefix = 'heybean.onboarding_tour_seen';
+const _dashboardSnapshotPreferencePrefix = 'heybean.dashboard_snapshot.v2';
 
 class _DashboardSnapshot {
   const _DashboardSnapshot({
@@ -1416,6 +1417,7 @@ class _DashboardSnapshot {
     required this.approvals,
     required this.events,
     this.googleCalendarStatus,
+    this.outlookCalendarStatus,
   });
 
   final List<HermesTask> tasks;
@@ -1431,7 +1433,109 @@ class _DashboardSnapshot {
   final List<HermesApproval> approvals;
   final List<HermesActivityEvent> events;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
 }
+
+List<Map<String, Object?>> _snapshotObjectList(Object? raw) {
+  if (raw is! List) return const [];
+  return raw
+      .whereType<Map>()
+      .map((item) => Map<String, Object?>.from(item))
+      .toList(growable: false);
+}
+
+Map<String, Object?> _taskCacheJson(HermesTask task) => {
+  'id': task.id,
+  'title': task.title,
+  'status': task.status,
+  'due_at': task.dueAt,
+  'notes': task.notes,
+  'category': task.category,
+  'color': task.color,
+  'is_critical': task.isCritical,
+  'completed_at': task.completedAt,
+  'metadata': task.metadata,
+  'workspace_id': task.workspaceId,
+  'linked_workspace_ids': task.linkedWorkspaceIds,
+};
+
+Map<String, Object?> _reminderCacheJson(HermesReminder reminder) => {
+  'id': reminder.id,
+  'title': reminder.title,
+  'due_at': reminder.dueAt,
+  'category': reminder.category,
+  'color': reminder.color,
+  'is_critical': reminder.isCritical,
+  'status': reminder.status,
+  'completed_at': reminder.completedAt,
+  'calendar_event_id': reminder.calendarEventId,
+  'metadata': reminder.metadata,
+  'workspace_id': reminder.workspaceId,
+  'linked_workspace_ids': reminder.linkedWorkspaceIds,
+};
+
+Map<String, Object?> _calendarEventCacheJson(HermesCalendarEvent event) => {
+  'id': event.id,
+  'title': event.title,
+  'workspace_id': event.workspaceId,
+  'linked_workspace_ids': event.linkedWorkspaceIds,
+  'starts_at': event.startsAt,
+  'ends_at': event.endsAt,
+  'description': event.notes,
+  'location': event.location,
+  'status': event.status,
+  'category': event.category,
+  'color': event.color,
+  'is_critical': event.isCritical,
+  'recurrence': event.recurrence,
+  'metadata': event.metadata,
+};
+
+Map<String, Object?> _eventCategoryCacheJson(HermesEventCategory category) => {
+  'id': category.id,
+  'name': category.name,
+  'color': category.color,
+  'workspace_id': category.workspaceId,
+  'linked_workspace_ids': category.linkedWorkspaceIds,
+};
+
+Map<String, Object?> _dashboardSnapshotCacheJson(_DashboardSnapshot snapshot) =>
+    {
+      'cached_at': DateTime.now().toIso8601String(),
+      'tasks': snapshot.tasks.map(_taskCacheJson).toList(),
+      'past_tasks': snapshot.pastTasks.map(_taskCacheJson).toList(),
+      'reminders': snapshot.reminders.map(_reminderCacheJson).toList(),
+      'calendar': snapshot.calendar.map(_calendarEventCacheJson).toList(),
+      'event_categories': snapshot.eventCategories
+          .map(_eventCategoryCacheJson)
+          .toList(),
+    };
+
+_DashboardSnapshot _dashboardSnapshotFromCache(Map<String, Object?> json) =>
+    _DashboardSnapshot(
+      tasks: _snapshotObjectList(
+        json['tasks'],
+      ).map(HermesTask.fromJson).toList(growable: false),
+      pastTasks: _snapshotObjectList(
+        json['past_tasks'],
+      ).map(HermesTask.fromJson).toList(growable: false),
+      reminders: _snapshotObjectList(
+        json['reminders'],
+      ).map(HermesReminder.fromJson).toList(growable: false),
+      calendar: _snapshotObjectList(
+        json['calendar'],
+      ).map(HermesCalendarEvent.fromJson).toList(growable: false),
+      noteFolders: const [],
+      notes: const [],
+      memoryItems: const [],
+      memorySummaries: const [],
+      memoryHistory: const [],
+      eventCategories: _snapshotObjectList(
+        json['event_categories'],
+      ).map(HermesEventCategory.fromJson).toList(growable: false),
+      approvals: const [],
+      events: const [],
+    );
 
 class _PendingCalendarEventWrite {
   const _PendingCalendarEventWrite({
@@ -1522,6 +1626,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   List<HermesRequestHistoryItem> _memoryHistory = const [];
   List<HermesEventCategory> _eventCategories = const [];
   GoogleCalendarSyncStatus? _googleCalendarStatus;
+  GoogleCalendarSyncStatus? _outlookCalendarStatus;
   List<HermesApproval> _approvals = const [];
   List<HermesActivityEvent> _events = const [];
   final List<HermesMessage> _messages = const [
@@ -2831,6 +2936,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
+  Future<GoogleCalendarSyncStatus> _outlookCalendarStatusOrFallback({
+    GoogleCalendarSyncStatus? fallback,
+  }) async {
+    try {
+      return await widget.apiClient.outlookCalendarStatus();
+    } catch (_) {
+      return fallback ??
+          _outlookCalendarStatus ??
+          const GoogleCalendarSyncStatus(
+            connected: false,
+            status: 'not_connected',
+          );
+    }
+  }
+
   Future<void> _loadSignedIn({
     HermesUser? knownUser,
     bool launchedFromRememberedToken = false,
@@ -2856,7 +2976,20 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       }
     }
 
+    final emptySummary = HermesTodaySummary(
+      tasks: const [],
+      reminders: const [],
+      calendarEvents: const [],
+      activityEvents: const [],
+      approvals: const [],
+      blockers: const [],
+    );
+
     try {
+      final summaryFuture = recover<HermesTodaySummary>(
+        widget.apiClient.todaySummary(),
+        emptySummary,
+      );
       final user = knownUser ?? await widget.apiClient.me();
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _applyUserTheme(user);
@@ -2874,6 +3007,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _memorySummaries = const [];
           _memoryHistory = const [];
           _eventCategories = const [];
+          _googleCalendarStatus = null;
+          _outlookCalendarStatus = null;
           _approvals = const [];
           _events = const [];
           _phase = _AuthPhase.planSelection;
@@ -2884,53 +3019,69 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         });
         return;
       }
+      final workspaceId = _workspaceIdForUser(user);
+      final cachedSnapshot = workspaceId == null
+          ? null
+          : _workspaceSnapshots[workspaceId] ??
+                await _loadPersistedDashboardSnapshot(user);
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       setState(() {
         _user = user;
         _session = null;
-        _tasks = const [];
-        _pastTasks = const [];
-        _reminders = const [];
-        _calendar = const [];
-        _noteFolders = const [];
-        _notes = const [];
-        _memoryItems = const [];
-        _memorySummaries = const [];
-        _memoryHistory = const [];
-        _eventCategories = const [];
-        _approvals = const [];
-        _events = const [];
+        if (cachedSnapshot == null) {
+          _clearDashboardData();
+        } else {
+          _restoreDashboardSnapshot(cachedSnapshot);
+        }
         _phase = _AuthPhase.signedIn;
         _loadingStatusText = null;
-        _dashboardDataLoading = true;
+        _dashboardDataLoading = cachedSnapshot == null;
       });
 
-      final sessionDetails = await recover<HermesSessionDetails?>(
+      final sessionDetailsFuture = recover<HermesSessionDetails?>(
         _loadDailySessionForUser(user, source: 'bootstrap'),
         null,
       );
-      final session = sessionDetails?.session;
-      final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
-        fallback:
-            _googleCalendarStatus ??
+      final googleCalendarStatusFuture = recover<GoogleCalendarSyncStatus>(
+        _syncGoogleCalendarIfConnected(
+          fallback:
+              _googleCalendarStatus ??
+              const GoogleCalendarSyncStatus(
+                connected: false,
+                status: 'not_connected',
+              ),
+          syncConnected: false,
+        ),
+        _googleCalendarStatus ??
             const GoogleCalendarSyncStatus(
               connected: false,
               status: 'not_connected',
             ),
-        syncConnected: false,
       );
-      final emptySummary = HermesTodaySummary(
-        tasks: const [],
-        reminders: const [],
-        calendarEvents: const [],
-        activityEvents: const [],
-        approvals: const [],
-        blockers: const [],
-      );
-      final results = await Future.wait<Object>([
-        recover<HermesTodaySummary>(
-          widget.apiClient.todaySummary(),
-          emptySummary,
+      final outlookCalendarStatusFuture = recover<GoogleCalendarSyncStatus>(
+        _outlookCalendarStatusOrFallback(
+          fallback:
+              _outlookCalendarStatus ??
+              const GoogleCalendarSyncStatus(
+                connected: false,
+                status: 'not_connected',
+              ),
         ),
+        _outlookCalendarStatus ??
+            const GoogleCalendarSyncStatus(
+              connected: false,
+              status: 'not_connected',
+            ),
+      );
+      unawaited(
+        _applyCalendarStatusesWhenReady(
+          authGeneration: authGeneration,
+          googleCalendarStatusFuture: googleCalendarStatusFuture,
+          outlookCalendarStatusFuture: outlookCalendarStatusFuture,
+        ),
+      );
+      final primaryResultsFuture = Future.wait<Object>([
+        summaryFuture,
         recover<List<HermesTask>>(
           widget.apiClient.listTasks(),
           const <HermesTask>[],
@@ -2940,55 +3091,28 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           const <HermesReminder>[],
         ),
         recover<List<HermesCalendarEvent>>(
-          widget.apiClient.listCalendarEvents(),
+          widget.apiClient.listCalendarEvents(skipExternalSync: true),
           const <HermesCalendarEvent>[],
-        ),
-        recover<List<HermesNoteFolder>>(
-          widget.apiClient.listNoteFolders(),
-          const <HermesNoteFolder>[],
-        ),
-        recover<List<HermesNote>>(
-          widget.apiClient.listNotes(),
-          const <HermesNote>[],
-        ),
-        recover<List<HermesMemoryItem>>(
-          widget.apiClient.listMemoryItems(),
-          const <HermesMemoryItem>[],
-        ),
-        recover<List<HermesMemorySummary>>(
-          widget.apiClient.listMemorySummaries(),
-          const <HermesMemorySummary>[],
-        ),
-        recover<List<HermesRequestHistoryItem>>(
-          widget.apiClient.listRequestHistory(),
-          const <HermesRequestHistoryItem>[],
-        ),
-        recover<List<HermesTask>>(
-          widget.apiClient.listPastTasks(),
-          const <HermesTask>[],
         ),
         recover<List<HermesEventCategory>>(
           widget.apiClient.listEventCategories(),
           const <HermesEventCategory>[],
         ),
-        session == null
-            ? Future<Object>.value(const <HermesActivityEvent>[])
-            : recover<List<HermesActivityEvent>>(
-                widget.apiClient.pollActivityEvents(session.id),
-                const <HermesActivityEvent>[],
-              ),
       ]);
-      final summary = results[0] as HermesTodaySummary;
+      final primaryResults = await primaryResultsFuture;
+      final sessionDetails = await sessionDetailsFuture;
+      final session = sessionDetails?.session;
+      final summary = primaryResults[0] as HermesTodaySummary;
       final listedTasks = _tasksWithPendingWrites(
-        results[1] as List<HermesTask>,
+        primaryResults[1] as List<HermesTask>,
       );
       final summaryTasks = _tasksWithPendingWrites(summary.tasks);
       final listedReminders = _remindersWithPendingWrites(
-        results[2] as List<HermesReminder>,
+        primaryResults[2] as List<HermesReminder>,
       );
       final summaryReminders = _remindersWithPendingWrites(summary.reminders);
       final listedCalendarEvents = _calendarEventsForDashboardState(
-        listed: results[3] as List<HermesCalendarEvent>,
+        listed: primaryResults[3] as List<HermesCalendarEvent>,
         summary: summary.calendarEvents,
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return;
@@ -2998,20 +3122,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _session = session;
         _replaceMessagesFromSession(sessionDetails, user: user);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
-        _noteFolders = _sortedNoteFolders(results[4] as List<HermesNoteFolder>);
-        _notes = _sortedNotes(results[5] as List<HermesNote>);
-        _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
-        _memorySummaries = results[7] as List<HermesMemorySummary>;
-        _memoryHistory = results[8] as List<HermesRequestHistoryItem>;
-        _pastTasks = _tasksWithPendingWrites(results[9] as List<HermesTask>);
-        _eventCategories = results[10] as List<HermesEventCategory>;
-        _googleCalendarStatus = googleCalendarStatus;
+        _eventCategories = primaryResults[4] as List<HermesEventCategory>;
         _reminders = listedReminders.isEmpty
             ? summaryReminders
             : listedReminders;
         _calendar = listedCalendarEvents;
         _approvals = summary.approvals;
-        _events = results[11] as List<HermesActivityEvent>;
+        _events = summary.activityEvents;
         _phase = _AuthPhase.signedIn;
         _loadingStatusText = null;
         _dashboardDataLoading = false;
@@ -3023,6 +3140,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       unawaited(_pushNotifications.registerForUser(widget.apiClient));
       _cacheCurrentDashboardSnapshot();
       _startDashboardChangePolling(resetCursor: true);
+      unawaited(
+        _loadSecondarySignedInData(
+          authGeneration: authGeneration,
+          sessionId: session?.id,
+        ),
+      );
     } catch (error) {
       _stopDashboardChangePolling();
       if (!_isCurrentAuthGeneration(authGeneration)) return;
@@ -3051,12 +3174,84 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _memoryHistory = const [];
         _eventCategories = const [];
         _googleCalendarStatus = null;
+        _outlookCalendarStatus = null;
         _approvals = const [];
         _events = const [];
         _phase = _AuthPhase.signedOut;
         _loadingStatusText = null;
         _dashboardDataLoading = false;
       });
+    }
+  }
+
+  Future<void> _applyCalendarStatusesWhenReady({
+    required int authGeneration,
+    required Future<GoogleCalendarSyncStatus> googleCalendarStatusFuture,
+    required Future<GoogleCalendarSyncStatus> outlookCalendarStatusFuture,
+  }) async {
+    final statuses = await Future.wait<GoogleCalendarSyncStatus>([
+      googleCalendarStatusFuture,
+      outlookCalendarStatusFuture,
+    ]);
+    if (!_isCurrentAuthGeneration(authGeneration) ||
+        _phase != _AuthPhase.signedIn) {
+      return;
+    }
+    setState(() {
+      _googleCalendarStatus = statuses[0];
+      _outlookCalendarStatus = statuses[1];
+    });
+    _cacheCurrentDashboardSnapshot();
+  }
+
+  Future<void> _loadSecondarySignedInData({
+    required int authGeneration,
+    int? sessionId,
+  }) async {
+    final dataVersion = _dashboardDataVersion;
+    try {
+      final results = await Future.wait<Object>([
+        widget.apiClient.listNoteFolders().catchError(
+          (_) => const <HermesNoteFolder>[],
+        ),
+        widget.apiClient.listNotes().catchError((_) => const <HermesNote>[]),
+        widget.apiClient.listMemoryItems().catchError(
+          (_) => const <HermesMemoryItem>[],
+        ),
+        widget.apiClient.listMemorySummaries().catchError(
+          (_) => const <HermesMemorySummary>[],
+        ),
+        widget.apiClient.listRequestHistory().catchError(
+          (_) => const <HermesRequestHistoryItem>[],
+        ),
+        widget.apiClient.listPastTasks().catchError(
+          (_) => const <HermesTask>[],
+        ),
+        sessionId == null
+            ? Future<Object>.value(const <HermesActivityEvent>[])
+            : widget.apiClient
+                  .pollActivityEvents(sessionId)
+                  .catchError((_) => const <HermesActivityEvent>[]),
+      ]);
+      if (!mounted ||
+          _phase != _AuthPhase.signedIn ||
+          authGeneration != _authGeneration ||
+          dataVersion != _dashboardDataVersion) {
+        return;
+      }
+      setState(() {
+        _noteFolders = _sortedNoteFolders(results[0] as List<HermesNoteFolder>);
+        _notes = _sortedNotes(results[1] as List<HermesNote>);
+        _memoryItems = _sortedMemoryItems(results[2] as List<HermesMemoryItem>);
+        _memorySummaries = results[3] as List<HermesMemorySummary>;
+        _memoryHistory = results[4] as List<HermesRequestHistoryItem>;
+        _pastTasks = _tasksWithPendingWrites(results[5] as List<HermesTask>);
+        final events = results[6] as List<HermesActivityEvent>;
+        if (events.isNotEmpty) _events = events;
+      });
+      _cacheCurrentDashboardSnapshot();
+    } catch (_) {
+      // Secondary panels can retry on navigation or the next dashboard refresh.
     }
   }
 
@@ -3128,7 +3323,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  Future<void> _startTrialCheckout(String plan) async {
+  Future<void> _startTrialCheckoutForInterval(
+    String plan,
+    String billingInterval,
+  ) async {
     if (_checkoutBusyPlan != null) return;
     setState(() {
       _checkoutBusyPlan = plan;
@@ -3137,6 +3335,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     try {
       final setup = await widget.apiClient.createMobileSubscriptionSetup(
         plan: plan,
+        billingInterval: billingInterval,
       );
       await widget.stripePaymentHandler.preparePaymentSheet(
         setup,
@@ -3146,6 +3345,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       await widget.stripePaymentHandler.presentPaymentSheet();
       await widget.apiClient.confirmMobileSubscription(
         plan: plan,
+        billingInterval: billingInterval,
         setupIntentId: setup.setupIntentId,
       );
       if (!mounted) return;
@@ -3711,7 +3911,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         (_) => _user!,
       );
       final refreshedCalendar = await widget.apiClient
-          .listCalendarEvents()
+          .listCalendarEvents(skipExternalSync: true)
           .catchError((_) => _calendar);
       final refreshedTasks = await widget.apiClient.listTasks().catchError(
         (_) => refreshedSummary.tasks,
@@ -4143,10 +4343,22 @@ ${_truncateDiagnostic(stack, 2200)}
   int? _activeWorkspaceId() =>
       _user?.activeWorkspace?.numericId ?? _user?.defaultWorkspaceId;
 
+  int? _workspaceIdForUser(HermesUser user) =>
+      user.activeWorkspace?.numericId ?? user.defaultWorkspaceId;
+
+  String? _dashboardSnapshotPreferenceKeyForUser(
+    HermesUser user, {
+    int? workspaceId,
+  }) {
+    final id = workspaceId ?? _workspaceIdForUser(user);
+    if (id == null || id <= 0) return null;
+    return '$_dashboardSnapshotPreferencePrefix.${user.id}.$id';
+  }
+
   void _cacheCurrentDashboardSnapshot({int? workspaceId}) {
     final id = workspaceId ?? _activeWorkspaceId();
     if (id == null || id <= 0) return;
-    _workspaceSnapshots[id] = _DashboardSnapshot(
+    final snapshot = _DashboardSnapshot(
       tasks: List<HermesTask>.unmodifiable(_tasks),
       pastTasks: List<HermesTask>.unmodifiable(_pastTasks),
       reminders: List<HermesReminder>.unmodifiable(_reminders),
@@ -4162,7 +4374,53 @@ ${_truncateDiagnostic(stack, 2200)}
       approvals: List<HermesApproval>.unmodifiable(_approvals),
       events: List<HermesActivityEvent>.unmodifiable(_events),
       googleCalendarStatus: _googleCalendarStatus,
+      outlookCalendarStatus: _outlookCalendarStatus,
     );
+    _workspaceSnapshots[id] = snapshot;
+    final user = _user;
+    if (user != null) {
+      unawaited(
+        _persistDashboardSnapshot(snapshot, user: user, workspaceId: id),
+      );
+    }
+  }
+
+  Future<void> _persistDashboardSnapshot(
+    _DashboardSnapshot snapshot, {
+    required HermesUser user,
+    required int workspaceId,
+  }) async {
+    final key = _dashboardSnapshotPreferenceKeyForUser(
+      user,
+      workspaceId: workspaceId,
+    );
+    if (key == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        key,
+        jsonEncode(_dashboardSnapshotCacheJson(snapshot)),
+      );
+    } catch (_) {
+      // Launch cache is opportunistic; the network refresh remains authoritative.
+    }
+  }
+
+  Future<_DashboardSnapshot?> _loadPersistedDashboardSnapshot(
+    HermesUser user,
+  ) async {
+    final key = _dashboardSnapshotPreferenceKeyForUser(user);
+    if (key == null) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(key);
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return _dashboardSnapshotFromCache(Map<String, Object?>.from(decoded));
+    } catch (_) {
+      return null;
+    }
   }
 
   void _restoreDashboardSnapshot(_DashboardSnapshot snapshot) {
@@ -4179,6 +4437,7 @@ ${_truncateDiagnostic(stack, 2200)}
     _approvals = snapshot.approvals;
     _events = snapshot.events;
     _googleCalendarStatus = snapshot.googleCalendarStatus;
+    _outlookCalendarStatus = snapshot.outlookCalendarStatus;
   }
 
   void _clearDashboardData() {
@@ -4192,6 +4451,8 @@ ${_truncateDiagnostic(stack, 2200)}
     _memorySummaries = const [];
     _memoryHistory = const [];
     _eventCategories = const [];
+    _googleCalendarStatus = null;
+    _outlookCalendarStatus = null;
     _approvals = const [];
     _events = const [];
   }
@@ -4276,16 +4537,21 @@ ${_truncateDiagnostic(stack, 2200)}
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
     try {
-      final googleCalendarStatus = await _syncGoogleCalendarIfConnected();
+      final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
+        syncConnected: false,
+      );
+      final outlookCalendarStatus = await _outlookCalendarStatusOrFallback(
+        fallback: _outlookCalendarStatus,
+      );
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
         widget.apiClient.listTasks().catchError((_) => const <HermesTask>[]),
         widget.apiClient.listReminders().catchError(
           (_) => const <HermesReminder>[],
         ),
-        widget.apiClient.listCalendarEvents().catchError(
-          (_) => const <HermesCalendarEvent>[],
-        ),
+        widget.apiClient
+            .listCalendarEvents(skipExternalSync: true)
+            .catchError((_) => const <HermesCalendarEvent>[]),
         widget.apiClient.listNoteFolders().catchError(
           (_) => const <HermesNoteFolder>[],
         ),
@@ -4337,6 +4603,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _pastTasks = _tasksWithPendingWrites(results[9] as List<HermesTask>);
         _eventCategories = results[10] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
+        _outlookCalendarStatus = outlookCalendarStatus;
         _reminders = listedReminders.isEmpty
             ? summaryReminders
             : listedReminders;
@@ -4389,15 +4656,18 @@ ${_truncateDiagnostic(stack, 2200)}
             ),
         syncConnected: syncConnectedCalendar,
       );
+      final outlookCalendarStatus = await _outlookCalendarStatusOrFallback(
+        fallback: _outlookCalendarStatus,
+      );
       final results = await Future.wait<Object>([
         widget.apiClient.todaySummary(),
         widget.apiClient.listTasks().catchError((_) => const <HermesTask>[]),
         widget.apiClient.listReminders().catchError(
           (_) => const <HermesReminder>[],
         ),
-        widget.apiClient.listCalendarEvents().catchError(
-          (_) => const <HermesCalendarEvent>[],
-        ),
+        widget.apiClient
+            .listCalendarEvents(skipExternalSync: !syncConnectedCalendar)
+            .catchError((_) => const <HermesCalendarEvent>[]),
         widget.apiClient.listNoteFolders().catchError(
           (_) => const <HermesNoteFolder>[],
         ),
@@ -4458,6 +4728,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _pastTasks = _tasksWithPendingWrites(results[9] as List<HermesTask>);
         _eventCategories = results[10] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
+        _outlookCalendarStatus = outlookCalendarStatus;
         _reminders = listedReminders.isEmpty
             ? summaryReminders
             : listedReminders;
@@ -6076,6 +6347,7 @@ ${_truncateDiagnostic(stack, 2200)}
       draft,
       eventCategories: _eventCategories,
       googleCalendarStatus: _googleCalendarStatus,
+      outlookCalendarStatus: _outlookCalendarStatus,
       workspaces: _user?.workspaces ?? const [],
       activeWorkspaceId: _user?.activeWorkspace?.id,
       onSave:
@@ -6618,7 +6890,7 @@ ${_truncateDiagnostic(stack, 2200)}
         user: _user!,
         busyPlan: _checkoutBusyPlan,
         error: _checkoutError,
-        onSelectPlan: _startTrialCheckout,
+        onSelectPlan: _startTrialCheckoutForInterval,
         onContactEnterprise: () {
           widget.launchExternalUrl(_enterpriseContactUrl);
         },
@@ -6738,6 +7010,7 @@ ${_truncateDiagnostic(stack, 2200)}
     memoryHistory: _memoryHistory,
     eventCategories: _eventCategories,
     googleCalendarStatus: _googleCalendarStatus,
+    outlookCalendarStatus: _outlookCalendarStatus,
     events: _events,
     messages: _messages,
     busy: _busy,
@@ -6987,9 +7260,10 @@ const List<_SignupPlanOption> _signupPlanOptions = [
     key: 'base',
     label: 'Base',
     price: r'$4.99',
+    yearlyPrice: r'$49.99',
     priceSuffix: '/mo',
     description: 'For getting your personal day into one organized place.',
-    trialText: '7-day free trial, then billed monthly',
+    trialText: '14-day free trial, then billed monthly',
     actionLabel: 'Start Base trial',
     finePrint: 'A simple place to begin with Bean.',
     features: [
@@ -7006,12 +7280,13 @@ const List<_SignupPlanOption> _signupPlanOptions = [
     key: 'premium',
     label: 'Premium',
     price: r'$19.99',
+    yearlyPrice: r'$199.99',
     priceSuffix: '/mo',
     description:
         'For families and power users who want Bean woven into the daily routine.',
-    trialText: '7-day free trial, then billed on day 8',
+    trialText: '14-day free trial, then billed monthly',
     actionLabel: 'Start Premium trial',
-    finePrint: 'Cancel before day 8 to avoid being billed.',
+    finePrint: 'Cancel before day 15 to avoid being billed.',
     features: [
       '5 workspaces for home, work, school, and projects',
       'Expanded Bean capacity for everyday planning',
@@ -7027,10 +7302,11 @@ const List<_SignupPlanOption> _signupPlanOptions = [
     key: 'pro',
     label: 'Pro',
     price: r'$49.99',
+    yearlyPrice: r'$499.99',
     priceSuffix: '/mo',
     description:
         'For people who want Bean to run across every workspace, account, and recurring workflow.',
-    trialText: '7-day free trial, then billed on day 8',
+    trialText: '14-day free trial, then billed monthly',
     actionLabel: 'Start Pro trial',
     finePrint:
         'Built for users who want Bean available across the whole operating system of their day.',
@@ -7077,6 +7353,32 @@ String _subscriptionPlanLabel(String plan) =>
 bool _isStripePaymentCanceled(Object error) =>
     error.toString().toLowerCase().contains('cancel');
 
+String _normalizedBillingInterval(String value) =>
+    value.trim().toLowerCase() == 'yearly' ? 'yearly' : 'monthly';
+
+String _planDisplayPrice(_SignupPlanOption plan, String billingInterval) =>
+    _normalizedBillingInterval(billingInterval) == 'yearly'
+    ? plan.yearlyPrice ?? plan.price
+    : plan.price;
+
+String? _planDisplayPriceSuffix(
+  _SignupPlanOption plan,
+  String billingInterval,
+) {
+  if (plan.priceSuffix == null && plan.yearlyPrice == null) return null;
+  return _normalizedBillingInterval(billingInterval) == 'yearly'
+      ? '/yr'
+      : '/mo';
+}
+
+String _planTrialText(String billingInterval) =>
+    '14-day free trial, then billed ${_normalizedBillingInterval(billingInterval) == 'yearly' ? 'yearly' : 'monthly'}';
+
+String _billingIntervalLabel(String billingInterval) =>
+    _normalizedBillingInterval(billingInterval) == 'yearly'
+    ? 'yearly'
+    : 'monthly';
+
 class _SignupPlanOption {
   const _SignupPlanOption({
     required this.key,
@@ -7087,6 +7389,7 @@ class _SignupPlanOption {
     required this.actionLabel,
     required this.finePrint,
     required this.features,
+    this.yearlyPrice,
     this.priceSuffix,
     this.popular = false,
     this.startsCheckout = true,
@@ -7095,6 +7398,7 @@ class _SignupPlanOption {
   final String key;
   final String label;
   final String price;
+  final String? yearlyPrice;
   final String description;
   final String trialText;
   final String actionLabel;
@@ -7105,7 +7409,7 @@ class _SignupPlanOption {
   final bool startsCheckout;
 }
 
-class _SignupPaywallScreen extends StatelessWidget {
+class _SignupPaywallScreen extends StatefulWidget {
   const _SignupPaywallScreen({
     required this.user,
     required this.busyPlan,
@@ -7119,12 +7423,19 @@ class _SignupPaywallScreen extends StatelessWidget {
   final HermesUser user;
   final String? busyPlan;
   final String? error;
-  final Future<void> Function(String plan) onSelectPlan;
+  final Future<void> Function(String plan, String billingInterval) onSelectPlan;
   final VoidCallback onContactEnterprise;
   final Future<void> Function() onContinue;
   final Future<void> Function() onSignOut;
 
-  bool get _busy => busyPlan != null;
+  @override
+  State<_SignupPaywallScreen> createState() => _SignupPaywallScreenState();
+}
+
+class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
+  String _billingInterval = 'monthly';
+
+  bool get _busy => widget.busyPlan != null;
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
@@ -7139,7 +7450,7 @@ class _SignupPaywallScreen extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 4, bottom: 8),
               child: Text(
-                'Account created for ${user.name}.',
+                'Account created for ${widget.user.name}.',
                 style: const TextStyle(
                   color: HeyBeanTheme.muted,
                   fontWeight: FontWeight.w700,
@@ -7181,7 +7492,7 @@ class _SignupPaywallScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
                   const Text(
-                    'Start your free 7-day trial today! Pick the plan that best fits your needs.',
+                    '14-day free trial - cancel anytime. Pick the plan that best fits your needs.',
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
                       height: 1.45,
@@ -7192,18 +7503,28 @@ class _SignupPaywallScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            if (error != null) ...[
-              _InlinePlanLimitError(message: error!),
+            _BillingIntervalToggle(
+              selected: _billingInterval,
+              onChanged: (value) {
+                setState(
+                  () => _billingInterval = _normalizedBillingInterval(value),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            if (widget.error != null) ...[
+              _InlinePlanLimitError(message: widget.error!),
               const SizedBox(height: 12),
             ],
             for (final plan in _signupPlanOptions) ...[
               _SignupPlanCard(
                 plan: plan,
-                busy: busyPlan == plan.key,
-                disabled: _busy && busyPlan != plan.key,
+                billingInterval: _billingInterval,
+                busy: widget.busyPlan == plan.key,
+                disabled: _busy && widget.busyPlan != plan.key,
                 onPressed: plan.startsCheckout
-                    ? () => onSelectPlan(plan.key)
-                    : onContactEnterprise,
+                    ? () => widget.onSelectPlan(plan.key, _billingInterval)
+                    : widget.onContactEnterprise,
               ),
               const SizedBox(height: 12),
             ],
@@ -7229,13 +7550,13 @@ class _SignupPaywallScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     key: const Key('signup-paywall-refresh-action'),
-                    onPressed: _busy ? null : onContinue,
+                    onPressed: _busy ? null : widget.onContinue,
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('Refresh subscription status'),
                   ),
                   TextButton(
                     key: const Key('signup-paywall-sign-out-action'),
-                    onPressed: _busy ? null : onSignOut,
+                    onPressed: _busy ? null : widget.onSignOut,
                     child: const Text('Use a different account'),
                   ),
                 ],
@@ -7251,12 +7572,14 @@ class _SignupPaywallScreen extends StatelessWidget {
 class _SignupPlanCard extends StatelessWidget {
   const _SignupPlanCard({
     required this.plan,
+    required this.billingInterval,
     required this.busy,
     required this.disabled,
     required this.onPressed,
   });
 
   final _SignupPlanOption plan;
+  final String billingInterval;
   final bool busy;
   final bool disabled;
   final VoidCallback onPressed;
@@ -7352,16 +7675,16 @@ class _SignupPlanCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    plan.price,
+                    _planDisplayPrice(plan, billingInterval),
                     style: TextStyle(
                       color: foreground,
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  if (plan.priceSuffix != null)
+                  if (_planDisplayPriceSuffix(plan, billingInterval) != null)
                     Text(
-                      plan.priceSuffix!,
+                      _planDisplayPriceSuffix(plan, billingInterval)!,
                       style: TextStyle(
                         color: muted,
                         fontWeight: FontWeight.w800,
@@ -7373,7 +7696,9 @@ class _SignupPlanCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            plan.trialText,
+            plan.startsCheckout
+                ? _planTrialText(billingInterval)
+                : plan.trialText,
             style: TextStyle(
               color: prominent
                   ? const Color(0xFFBBF7D0)
@@ -7454,6 +7779,86 @@ class _SignupPlanCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _BillingIntervalToggle extends StatelessWidget {
+  const _BillingIntervalToggle({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final String selected;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = _normalizedBillingInterval(selected);
+    return Container(
+      key: const Key('billing-interval-toggle'),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .84),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Row(
+        children: [
+          _BillingIntervalButton(
+            label: 'Monthly',
+            selected: current == 'monthly',
+            onPressed: () => onChanged('monthly'),
+          ),
+          _BillingIntervalButton(
+            label: 'Yearly',
+            detail: 'Save up to 17%',
+            selected: current == 'yearly',
+            onPressed: () => onChanged('yearly'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BillingIntervalButton extends StatelessWidget {
+  const _BillingIntervalButton({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+    this.detail,
+  });
+
+  final String label;
+  final String? detail;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: TextButton(
+      onPressed: selected ? null : onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: selected ? HeyBeanTheme.accentInk : HeyBeanTheme.muted,
+        backgroundColor: selected ? HeyBeanTheme.accent : Colors.transparent,
+        disabledForegroundColor: selected
+            ? HeyBeanTheme.accentInk
+            : HeyBeanTheme.muted,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+          if (detail != null)
+            Text(
+              detail!,
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900),
+            ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _AgentPersonalityOption {
@@ -8380,6 +8785,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.memoryHistory,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     required this.events,
     required this.messages,
     required this.busy,
@@ -8452,6 +8858,7 @@ class _CommandCenterContent extends StatelessWidget {
   final List<HermesRequestHistoryItem> memoryHistory;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesActivityEvent> events;
   final List<HermesMessage> messages;
   final bool busy;
@@ -8645,6 +9052,7 @@ class _CommandCenterContent extends StatelessWidget {
             loading: dashboardDataLoading,
             eventCategories: eventCategories,
             googleCalendarStatus: googleCalendarStatus,
+            outlookCalendarStatus: outlookCalendarStatus,
             selectedDay: selectedCalendarDay,
             showMonth: showCalendarMonth,
             startHour: calendarStartHour,
@@ -8684,6 +9092,19 @@ class _CommandCenterContent extends StatelessWidget {
             chat: beanPanel,
             chatCollapsed: beanChatCollapsed,
             onChatCollapsedChanged: onBeanChatCollapsedChanged,
+            eventCategories: eventCategories,
+            googleCalendarStatus: googleCalendarStatus,
+            outlookCalendarStatus: outlookCalendarStatus,
+            workspaces: user.workspaces,
+            activeWorkspaceId: user.activeWorkspace?.id,
+            onTaskSaved: onTaskSaved,
+            onTaskDeleted: onTaskDeleted,
+            onReminderSaved: onReminderSaved,
+            onReminderDeleted: onReminderDeleted,
+            onCalendarEventEdited: onCalendarEventEdited,
+            onCalendarEventDeleted: onCalendarEventDeleted,
+            onEventCategorySaved: onEventCategorySaved,
+            onEventCategoryDeleted: onEventCategoryDeleted,
           ),
           _HomeDestination.reminders => _ReminderListCard(
             reminders: reminders,
@@ -8788,6 +9209,7 @@ class _CommandCenterContent extends StatelessWidget {
                 calendar: calendar,
                 eventCategories: eventCategories,
                 googleCalendarStatus: googleCalendarStatus,
+                outlookCalendarStatus: outlookCalendarStatus,
                 workspaces: user.workspaces,
                 activeWorkspaceId: user.activeWorkspace?.id,
                 onEventTap: onCalendarEventEdited,
@@ -8828,6 +9250,19 @@ class _CommandCenterHome extends StatefulWidget {
     required this.chat,
     required this.chatCollapsed,
     required this.onChatCollapsedChanged,
+    required this.eventCategories,
+    required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
+    required this.workspaces,
+    required this.activeWorkspaceId,
+    required this.onTaskSaved,
+    required this.onTaskDeleted,
+    required this.onReminderSaved,
+    required this.onReminderDeleted,
+    required this.onCalendarEventEdited,
+    required this.onCalendarEventDeleted,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
   });
 
   final List<HermesTask> tasks;
@@ -8837,6 +9272,87 @@ class _CommandCenterHome extends StatefulWidget {
   final Widget chat;
   final bool chatCollapsed;
   final ValueChanged<bool> onChatCollapsedChanged;
+  final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
+  final Future<void> Function(
+    HermesTask? task, {
+    required String title,
+    String? dueAt,
+    String? notes,
+    String? category,
+    String? color,
+    bool? isCritical,
+    int? parentTaskId,
+    int? workspaceId,
+    Map<String, Object?>? recurrenceMetadata,
+    List<Object> syncToWorkspaceIds,
+    List<String> googleCalendarIds,
+  })
+  onTaskSaved;
+  final Future<void> Function(
+    HermesTask task, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onTaskDeleted;
+  final Future<void> Function(
+    HermesReminder? reminder, {
+    required String title,
+    required String remindAt,
+    String status,
+    String? category,
+    String? color,
+    int? workspaceId,
+    Map<String, Object?>? recurrenceMetadata,
+    List<Object> syncToWorkspaceIds,
+    List<String> googleCalendarIds,
+  })
+  onReminderSaved;
+  final Future<void> Function(
+    HermesReminder reminder, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onReminderDeleted;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds,
+  })
+  onCalendarEventEdited;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onCalendarEventDeleted;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventCategoryDeleted;
 
   @override
   State<_CommandCenterHome> createState() => _CommandCenterHomeState();
@@ -8892,6 +9408,7 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
               child: _CommandCenterAgendaList(
                 items: items,
                 loading: widget.loading,
+                onItemTap: _openAgendaItem,
               ),
             ),
             _CommandCenterSplitDivider(
@@ -8917,6 +9434,253 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
           ],
         );
       },
+    );
+  }
+
+  Future<void> _openAgendaItem(_CommandCenterAgendaItem item) async {
+    switch (item.kind) {
+      case _CommandCenterAgendaKind.event:
+        final event = item.event;
+        if (event == null) return;
+        await _showCalendarEventDetails(
+          context,
+          event,
+          eventCategories: widget.eventCategories,
+          googleCalendarStatus: widget.googleCalendarStatus,
+          outlookCalendarStatus: widget.outlookCalendarStatus,
+          workspaces: widget.workspaces,
+          activeWorkspaceId: widget.activeWorkspaceId,
+          onSave: widget.onCalendarEventEdited,
+          onDelete: widget.onCalendarEventDeleted,
+          onEventCategorySaved: widget.onEventCategorySaved,
+          onEventCategoryDeleted: widget.onEventCategoryDeleted,
+        );
+      case _CommandCenterAgendaKind.task:
+        final task = item.task;
+        if (task == null) return;
+        await _showTaskEditor(task);
+      case _CommandCenterAgendaKind.reminder:
+        final reminder = item.reminder;
+        if (reminder == null) return;
+        await _showReminderEditor(reminder);
+    }
+  }
+
+  Future<void> _showTaskEditor(HermesTask task) async {
+    var savedInsideEditor = false;
+    final result = await _showTitleTimeEditor(
+      context,
+      title: 'Edit task',
+      titleLabel: 'Task title',
+      timeLabel: 'Due date',
+      initialTitle: task.title,
+      initialTime: _formatCalendarEventDateTime(task.dueAt),
+      initialNotes: task.notes ?? '',
+      allowEmptyTime: true,
+      showNotes: true,
+      categories: widget.eventCategories,
+      initialCategory: task.category,
+      initialColor: task.color,
+      initialCritical: task.isCritical,
+      deleteLabel: 'Delete task',
+      showRecurrence: true,
+      recurrenceTitle: 'Task recurrence',
+      recurrenceSubtitle: 'Repeat this task when needed.',
+      recurrenceInfoTitle: 'Task recurrence',
+      initialMetadata: task.metadata,
+      onEventCategorySaved: widget.onEventCategorySaved,
+      workspaces: widget.workspaces,
+      activeWorkspaceId: widget.activeWorkspaceId,
+      initialGoogleCalendarIds: task.googleCalendarIds,
+      initialSyncWorkspaceIds: _initialSyncWorkspaceIds(
+        linkedWorkspaceIds: task.linkedWorkspaceIds,
+        workspaceId: task.workspaceId,
+        activeWorkspaceId: widget.activeWorkspaceId,
+      ),
+      onSave: (result) async {
+        final title = (result['title'] as String).trim();
+        if (title.isEmpty) return;
+        await widget.onTaskSaved(
+          task,
+          title: title,
+          dueAt: result['time'] as String?,
+          notes: result['notes'] as String?,
+          category: result['category'] as String?,
+          color: result['color'] as String?,
+          isCritical: result['isCritical'] as bool?,
+          workspaceId: result['workspaceId'] as int?,
+          recurrenceMetadata:
+              result['recurrenceMetadata'] as Map<String, Object?>?,
+          syncToWorkspaceIds:
+              (result['syncToWorkspaceIds'] as List?)
+                  ?.whereType<Object>()
+                  .toList() ??
+              const [],
+          googleCalendarIds:
+              (result['googleCalendarIds'] as List?)
+                  ?.map((value) => value.toString())
+                  .toList() ??
+              const [],
+        );
+        savedInsideEditor = true;
+      },
+    );
+    if (result == null || !mounted) return;
+    if (result['delete'] == true) {
+      final deleteFromWorkspaceIds = await _confirmWorkspaceDeleteSelection(
+        context,
+        itemTitle: task.title,
+        itemType: 'task',
+        workspaces: widget.workspaces,
+        activeWorkspaceId: widget.activeWorkspaceId,
+        workspaceId: task.workspaceId,
+        linkedWorkspaceIds: task.linkedWorkspaceIds,
+      );
+      if (!mounted || deleteFromWorkspaceIds == null) return;
+      await widget.onTaskDeleted(
+        task,
+        deleteFromWorkspaceIds: deleteFromWorkspaceIds,
+      );
+      return;
+    }
+    if (savedInsideEditor) return;
+    final title = (result['title'] as String).trim();
+    if (title.isEmpty) return;
+    await widget.onTaskSaved(
+      task,
+      title: title,
+      dueAt: result['time'] as String?,
+      notes: result['notes'] as String?,
+      category: result['category'] as String?,
+      color: result['color'] as String?,
+      isCritical: result['isCritical'] as bool?,
+      workspaceId: result['workspaceId'] as int?,
+      recurrenceMetadata: result['recurrenceMetadata'] as Map<String, Object?>?,
+      syncToWorkspaceIds:
+          (result['syncToWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
+      googleCalendarIds:
+          (result['googleCalendarIds'] as List?)
+              ?.map((value) => value.toString())
+              .toList() ??
+          const [],
+    );
+  }
+
+  Future<void> _showReminderEditor(HermesReminder reminder) async {
+    var savedInsideEditor = false;
+    final result = await _showTitleTimeEditor(
+      context,
+      title: 'Edit reminder',
+      titleLabel: 'Reminder title',
+      timeLabel: 'Remind me at',
+      initialTitle: reminder.title,
+      initialTime: _formatCalendarEventDateTime(reminder.dueAt),
+      editorIcon: Icons.notifications_active_outlined,
+      editorSubtitle: 'Time-sensitive nudge with optional repeat',
+      primarySectionTitle: 'Reminder basics',
+      primarySectionSubtitle: 'Title and required reminder time',
+      allowEmptyTime: false,
+      categories: widget.eventCategories,
+      initialCategory: reminder.category,
+      initialColor: reminder.color,
+      showCritical: false,
+      showTimeTextField: false,
+      showRecurrence: true,
+      recurrenceTitle: 'Reminder repeats',
+      recurrenceSubtitle: 'Repeat this reminder when needed.',
+      recurrenceInfoTitle: 'Reminder recurrence',
+      initialMetadata: reminder.metadata,
+      onEventCategorySaved: widget.onEventCategorySaved,
+      deleteLabel: 'Delete reminder',
+      completeLabel: _reminderIsCompleted(reminder)
+          ? 'Mark pending'
+          : 'Mark complete',
+      workspaces: widget.workspaces,
+      activeWorkspaceId: widget.activeWorkspaceId,
+      initialGoogleCalendarIds: reminder.googleCalendarIds,
+      initialSyncWorkspaceIds: _initialSyncWorkspaceIds(
+        linkedWorkspaceIds: reminder.linkedWorkspaceIds,
+        workspaceId: reminder.workspaceId,
+        activeWorkspaceId: widget.activeWorkspaceId,
+      ),
+      onSave: (result) async {
+        final title = (result['title'] as String).trim();
+        final time = (result['time'] as String?)?.trim() ?? '';
+        if (title.isEmpty || time.isEmpty) return;
+        final status = result['complete'] == true
+            ? (_reminderIsCompleted(reminder) ? 'pending' : 'completed')
+            : (reminder.status ?? 'pending');
+        await widget.onReminderSaved(
+          reminder,
+          title: title,
+          remindAt: time,
+          status: status,
+          category: result['category'] as String?,
+          color: result['color'] as String?,
+          workspaceId: result['workspaceId'] as int?,
+          recurrenceMetadata:
+              result['recurrenceMetadata'] as Map<String, Object?>?,
+          syncToWorkspaceIds:
+              (result['syncToWorkspaceIds'] as List?)
+                  ?.whereType<Object>()
+                  .toList() ??
+              const [],
+          googleCalendarIds:
+              (result['googleCalendarIds'] as List?)
+                  ?.map((value) => value.toString())
+                  .toList() ??
+              const [],
+        );
+        savedInsideEditor = true;
+      },
+    );
+    if (result == null || !mounted) return;
+    if (result['delete'] == true) {
+      final deleteFromWorkspaceIds = await _confirmWorkspaceDeleteSelection(
+        context,
+        itemTitle: reminder.title,
+        itemType: 'reminder',
+        workspaces: widget.workspaces,
+        activeWorkspaceId: widget.activeWorkspaceId,
+        workspaceId: reminder.workspaceId,
+        linkedWorkspaceIds: reminder.linkedWorkspaceIds,
+      );
+      if (!mounted || deleteFromWorkspaceIds == null) return;
+      await widget.onReminderDeleted(
+        reminder,
+        deleteFromWorkspaceIds: deleteFromWorkspaceIds,
+      );
+      return;
+    }
+    if (savedInsideEditor) return;
+    final title = (result['title'] as String).trim();
+    final time = (result['time'] as String?)?.trim() ?? '';
+    if (title.isEmpty || time.isEmpty) return;
+    final status = result['complete'] == true
+        ? (_reminderIsCompleted(reminder) ? 'pending' : 'completed')
+        : (reminder.status ?? 'pending');
+    await widget.onReminderSaved(
+      reminder,
+      title: title,
+      remindAt: time,
+      status: status,
+      category: result['category'] as String?,
+      color: result['color'] as String?,
+      workspaceId: result['workspaceId'] as int?,
+      recurrenceMetadata: result['recurrenceMetadata'] as Map<String, Object?>?,
+      syncToWorkspaceIds:
+          (result['syncToWorkspaceIds'] as List?)
+              ?.whereType<Object>()
+              .toList() ??
+          const [],
+      googleCalendarIds:
+          (result['googleCalendarIds'] as List?)
+              ?.map((value) => value.toString())
+              .toList() ??
+          const [],
     );
   }
 }
@@ -8973,10 +9737,15 @@ class _CommandCenterSplitDivider extends StatelessWidget {
 }
 
 class _CommandCenterAgendaList extends StatelessWidget {
-  const _CommandCenterAgendaList({required this.items, required this.loading});
+  const _CommandCenterAgendaList({
+    required this.items,
+    required this.loading,
+    required this.onItemTap,
+  });
 
   final List<_CommandCenterAgendaItem> items;
   final bool loading;
+  final ValueChanged<_CommandCenterAgendaItem> onItemTap;
 
   @override
   Widget build(BuildContext context) {
@@ -9012,15 +9781,16 @@ class _CommandCenterAgendaList extends StatelessWidget {
       itemCount: items.length,
       separatorBuilder: (context, index) => const SizedBox(height: 6),
       itemBuilder: (context, index) =>
-          _CommandCenterAgendaRow(item: items[index]),
+          _CommandCenterAgendaRow(item: items[index], onTap: onItemTap),
     );
   }
 }
 
 class _CommandCenterAgendaRow extends StatelessWidget {
-  const _CommandCenterAgendaRow({required this.item});
+  const _CommandCenterAgendaRow({required this.item, required this.onTap});
 
   final _CommandCenterAgendaItem item;
+  final ValueChanged<_CommandCenterAgendaItem> onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -9041,71 +9811,79 @@ class _CommandCenterAgendaRow extends StatelessWidget {
     };
     final timeWidth = item.kind == _CommandCenterAgendaKind.event ? 78.0 : 58.0;
 
-    return Container(
+    return Material(
       key: Key('command-center-agenda-${item.key}'),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface.withValues(alpha: .82),
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HeyBeanTheme.border),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: timeWidth,
-            child: _CommandCenterAgendaTimeLabel(
-              label: item.timeLabel,
-              allowStackedRange: item.kind == _CommandCenterAgendaKind.event,
-            ),
+        onTap: () => onTap(item),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            color: HeyBeanTheme.surface.withValues(alpha: .82),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: HeyBeanTheme.border),
           ),
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: .12),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Icon(icon, color: color, size: 16),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: HeyBeanTheme.text,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                  ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: timeWidth,
+                child: _CommandCenterAgendaTimeLabel(
+                  label: item.timeLabel,
+                  allowStackedRange:
+                      item.kind == _CommandCenterAgendaKind.event,
                 ),
-                if (item.subtitle.isNotEmpty)
-                  Text(
-                    item.subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: HeyBeanTheme.muted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+              ),
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Icon(icon, color: color, size: 16),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: HeyBeanTheme.text,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
-                  )
-                else
-                  Text(
-                    kindLabel,
-                    style: const TextStyle(
-                      color: HeyBeanTheme.muted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-              ],
-            ),
+                    if (item.subtitle.isNotEmpty)
+                      Text(
+                        item.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: HeyBeanTheme.muted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    else
+                      Text(
+                        kindLabel,
+                        style: const TextStyle(
+                          color: HeyBeanTheme.muted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -9179,6 +9957,9 @@ class _CommandCenterAgendaItem {
     required this.time,
     required this.timeLabel,
     this.subtitle = '',
+    this.event,
+    this.task,
+    this.reminder,
   });
 
   final String key;
@@ -9187,6 +9968,9 @@ class _CommandCenterAgendaItem {
   final DateTime time;
   final String timeLabel;
   final String subtitle;
+  final HermesCalendarEvent? event;
+  final HermesTask? task;
+  final HermesReminder? reminder;
 }
 
 class _HeroChatCard extends StatefulWidget {
@@ -10271,6 +11055,7 @@ class _TodayHomeView extends StatelessWidget {
     required this.loading,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     required this.selectedDay,
     required this.showMonth,
     required this.startHour,
@@ -10296,6 +11081,7 @@ class _TodayHomeView extends StatelessWidget {
   final bool loading;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final DateTime selectedDay;
   final bool showMonth;
   final int startHour;
@@ -10427,6 +11213,7 @@ class _TodayHomeView extends StatelessWidget {
                 calendar: calendar,
                 eventCategories: eventCategories,
                 googleCalendarStatus: googleCalendarStatus,
+                outlookCalendarStatus: outlookCalendarStatus,
                 workspaces: user.workspaces,
                 activeWorkspaceId: user.activeWorkspace?.id,
                 selectedDay: selectedDay,
@@ -10763,6 +11550,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     required this.calendar,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.selectedDay,
@@ -10780,6 +11568,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final DateTime selectedDay;
@@ -11026,6 +11815,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
             calendar: widget.calendar,
             eventCategories: widget.eventCategories,
             googleCalendarStatus: widget.googleCalendarStatus,
+            outlookCalendarStatus: widget.outlookCalendarStatus,
             workspaces: widget.workspaces,
             activeWorkspaceId: widget.activeWorkspaceId,
             visibleStartDay: visibleStartDay,
@@ -11070,6 +11860,8 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                               calendar: widget.calendar,
                               eventCategories: widget.eventCategories,
                               googleCalendarStatus: widget.googleCalendarStatus,
+                              outlookCalendarStatus:
+                                  widget.outlookCalendarStatus,
                               workspaces: widget.workspaces,
                               activeWorkspaceId: widget.activeWorkspaceId,
                               selectedDay: _dateForPage(page),
@@ -11152,6 +11944,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     required this.calendar,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.selectedDay,
@@ -11167,6 +11960,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final DateTime selectedDay;
@@ -11250,6 +12044,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
               timelineWidth: constraints.maxWidth,
               eventCategories: eventCategories,
               googleCalendarStatus: googleCalendarStatus,
+              outlookCalendarStatus: outlookCalendarStatus,
               workspaces: workspaces,
               activeWorkspaceId: activeWorkspaceId,
               onTap: onEventTap,
@@ -11269,6 +12064,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
               timelineWidth: constraints.maxWidth,
               eventCategories: eventCategories,
               googleCalendarStatus: googleCalendarStatus,
+              outlookCalendarStatus: outlookCalendarStatus,
               workspaces: workspaces,
               activeWorkspaceId: activeWorkspaceId,
               onTap: onEventTap,
@@ -11471,6 +12267,7 @@ class _PinnedTimelineRows extends StatelessWidget {
     required this.calendar,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.visibleStartDay,
@@ -11487,6 +12284,7 @@ class _PinnedTimelineRows extends StatelessWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final DateTime visibleStartDay;
@@ -11570,6 +12368,7 @@ class _PinnedTimelineRows extends StatelessWidget {
                       .toList(),
                   eventCategories: eventCategories,
                   googleCalendarStatus: googleCalendarStatus,
+                  outlookCalendarStatus: outlookCalendarStatus,
                   workspaces: workspaces,
                   activeWorkspaceId: activeWorkspaceId,
                   onEventTap: onEventTap,
@@ -11587,6 +12386,7 @@ class _PinnedTimelineRows extends StatelessWidget {
                 calendar: calendar,
                 eventCategories: eventCategories,
                 googleCalendarStatus: googleCalendarStatus,
+                outlookCalendarStatus: outlookCalendarStatus,
                 workspaces: workspaces,
                 activeWorkspaceId: activeWorkspaceId,
                 onEventTap: onEventTap,
@@ -11649,6 +12449,7 @@ class _ScrollableAllDayEventRows extends StatelessWidget {
     required this.calendar,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.onEventTap,
@@ -11663,6 +12464,7 @@ class _ScrollableAllDayEventRows extends StatelessWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final Future<void> Function(
@@ -11752,6 +12554,7 @@ class _ScrollableAllDayEventRows extends StatelessWidget {
                           events: events,
                           eventCategories: eventCategories,
                           googleCalendarStatus: googleCalendarStatus,
+                          outlookCalendarStatus: outlookCalendarStatus,
                           workspaces: workspaces,
                           activeWorkspaceId: activeWorkspaceId,
                           onEventTap: onEventTap,
@@ -11846,6 +12649,7 @@ class _MultiDayEventSpanRow extends StatelessWidget {
     required this.events,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.onEventTap,
@@ -11860,6 +12664,7 @@ class _MultiDayEventSpanRow extends StatelessWidget {
   final List<HermesCalendarEvent> events;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final Future<void> Function(
@@ -11971,6 +12776,7 @@ class _MultiDayEventSpanRow extends StatelessWidget {
                             columnWidth: columnWidth,
                             eventCategories: eventCategories,
                             googleCalendarStatus: googleCalendarStatus,
+                            outlookCalendarStatus: outlookCalendarStatus,
                             workspaces: workspaces,
                             activeWorkspaceId: activeWorkspaceId,
                             onEventTap: onEventTap,
@@ -11999,6 +12805,7 @@ class _MultiDayEventSpan extends StatelessWidget {
     required this.columnWidth,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.onEventTap,
@@ -12013,6 +12820,7 @@ class _MultiDayEventSpan extends StatelessWidget {
   final double columnWidth;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final Future<void> Function(
@@ -12065,6 +12873,7 @@ class _MultiDayEventSpan extends StatelessWidget {
         event,
         eventCategories: eventCategories,
         googleCalendarStatus: googleCalendarStatus,
+        outlookCalendarStatus: outlookCalendarStatus,
         workspaces: workspaces,
         activeWorkspaceId: activeWorkspaceId,
         onSave:
@@ -12206,6 +13015,7 @@ class _AllDayEventRow extends StatelessWidget {
     required this.events,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.onEventTap,
@@ -12218,6 +13028,7 @@ class _AllDayEventRow extends StatelessWidget {
   final List<HermesCalendarEvent> events;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final Future<void> Function(
@@ -12286,6 +13097,7 @@ class _AllDayEventRow extends StatelessWidget {
                 : null,
             eventCategories: eventCategories,
             googleCalendarStatus: googleCalendarStatus,
+            outlookCalendarStatus: outlookCalendarStatus,
             workspaces: workspaces,
             activeWorkspaceId: activeWorkspaceId,
             onSave:
@@ -12403,6 +13215,7 @@ class _TimelineEventBlock extends StatelessWidget {
     required this.timelineWidth,
     required this.eventCategories,
     required this.googleCalendarStatus,
+    required this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.onTap,
@@ -12421,6 +13234,7 @@ class _TimelineEventBlock extends StatelessWidget {
   final double timelineWidth;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final Future<void> Function(
@@ -12510,6 +13324,7 @@ class _TimelineEventBlock extends StatelessWidget {
               : null,
           eventCategories: eventCategories,
           googleCalendarStatus: googleCalendarStatus,
+          outlookCalendarStatus: outlookCalendarStatus,
           workspaces: workspaces,
           activeWorkspaceId: activeWorkspaceId,
           onSave:
@@ -12661,6 +13476,7 @@ Future<void> _showCalendarEventDetails(
   HermesCalendarEvent event, {
   required List<HermesEventCategory> eventCategories,
   GoogleCalendarSyncStatus? googleCalendarStatus,
+  GoogleCalendarSyncStatus? outlookCalendarStatus,
   String? occurrenceDate,
   required _CalendarEventSaveCallback onSave,
   required Future<HermesEventCategory> Function({
@@ -12691,6 +13507,7 @@ Future<void> _showCalendarEventDetails(
         occurrenceDate: occurrenceDate,
         eventCategories: eventCategories,
         googleCalendarStatus: googleCalendarStatus,
+        outlookCalendarStatus: outlookCalendarStatus,
         workspaces: workspaces,
         activeWorkspaceId: activeWorkspaceId,
         onSave: onSave,
@@ -12738,6 +13555,7 @@ class _CalendarEventDetailPage extends StatefulWidget {
     this.occurrenceDate,
     required this.eventCategories,
     this.googleCalendarStatus,
+    this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     required this.onSave,
@@ -12751,6 +13569,7 @@ class _CalendarEventDetailPage extends StatefulWidget {
   final String? occurrenceDate;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final _CalendarEventSaveCallback onSave;
@@ -12793,6 +13612,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   String _eventIntervalUnit = 'days';
   Object? _primaryWorkspaceId;
   final Set<String> _googleCalendarIds = <String>{};
+  final Set<String> _outlookCalendarIds = <String>{};
   final Set<Object> _syncWorkspaceIds = <Object>{};
   String? _validationError;
   late bool _isCritical;
@@ -12887,7 +13707,11 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     final writableGoogleCalendars =
         widget.googleCalendarStatus?.writableCalendars ??
         const <GoogleCalendarInfo>[];
+    final writableOutlookCalendars =
+        widget.outlookCalendarStatus?.writableCalendars ??
+        const <GoogleCalendarInfo>[];
     _googleCalendarIds.addAll(event.googleCalendarIds);
+    _outlookCalendarIds.addAll(event.outlookCalendarIds);
     _syncWorkspaceIds.addAll(
       _initialSyncWorkspaceIds(
         linkedWorkspaceIds: event.linkedWorkspaceIds,
@@ -12895,20 +13719,19 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         activeWorkspaceId: widget.activeWorkspaceId,
       ),
     );
-    if (_googleCalendarIds.isEmpty &&
-        widget.googleCalendarStatus?.defaultCalendarId != null) {
-      _googleCalendarIds.add(widget.googleCalendarStatus!.defaultCalendarId!);
-    }
     if (writableGoogleCalendars.isNotEmpty) {
       _googleCalendarIds.removeWhere(
         (calendarId) => !writableGoogleCalendars.any(
           (calendar) => calendar.id == calendarId,
         ),
       );
-      if (_googleCalendarIds.isEmpty &&
-          widget.googleCalendarStatus?.defaultCalendarId != null) {
-        _googleCalendarIds.add(widget.googleCalendarStatus!.defaultCalendarId!);
-      }
+    }
+    if (writableOutlookCalendars.isNotEmpty) {
+      _outlookCalendarIds.removeWhere(
+        (calendarId) => !writableOutlookCalendars.any(
+          (calendar) => calendar.id == calendarId,
+        ),
+      );
     }
     _isCritical = event.isCritical;
     final matchingCategoryColor = _categories
@@ -13020,6 +13843,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
 
     final eventInterval = int.tryParse(_eventInterval.text.trim()) ?? 1;
     final sortedGoogleCalendarIds = _googleCalendarIds.toList()..sort();
+    final sortedOutlookCalendarIds = _outlookCalendarIds.toList()..sort();
     final syncToWorkspaceIds = _syncWorkspaceIds.toList();
     Object? primaryWorkspaceId = _primaryWorkspaceId;
     if (widget.event.id == 0 && widget.workspaces.isNotEmpty) {
@@ -13041,10 +13865,10 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
           (widget.event.metadata?.containsKey('all_day') ?? false) ||
           (widget.event.metadata?.containsKey('allDay') ?? false))
         'all_day': _allDay,
-      if (sortedGoogleCalendarIds.isNotEmpty)
-        'google_calendar_ids': sortedGoogleCalendarIds,
-      if (sortedGoogleCalendarIds.isNotEmpty)
-        'google_calendar_id': sortedGoogleCalendarIds.first,
+      'google_calendar_ids': sortedGoogleCalendarIds,
+      'google_calendar_id': sortedGoogleCalendarIds.firstOrNull,
+      'outlook_calendar_ids': sortedOutlookCalendarIds,
+      'outlook_calendar_id': sortedOutlookCalendarIds.firstOrNull,
       if (_recurrence == 'specific_days')
         'days': _eventSpecificDays.toList()..sort(),
       if (_recurrence == 'specific_days' || _recurrence == 'interval')
@@ -13850,7 +14674,20 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             decoration: _longFormInputDecoration(
                               labelText: 'Description',
                               hintText: 'Add event description',
-                              prefixIcon: const _BeanNotesIcon(size: 20),
+                              prefixIcon: const SizedBox(
+                                width: 52,
+                                child: Align(
+                                  alignment: Alignment.topCenter,
+                                  heightFactor: 1,
+                                  child: Padding(
+                                    padding: EdgeInsets.only(top: 18),
+                                    child: Icon(
+                                      Icons.description_outlined,
+                                      size: 24,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -14114,13 +14951,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           key: const Key('event-google-calendar-field'),
                           title: 'External Calendar Sync',
                           subtitle:
-                              'Add or update this event on selected writable external calendars.',
+                              'Choose any writable external calendars for this event.',
                           icon: Icons.calendar_month_rounded,
                           infoKey: const Key('event-google-calendars-info'),
                           infoTitle: 'External Calendar Sync',
                           infoBullets: const [
                             'Checked external calendars receive a copy of this local Bean event.',
                             'Only writable connected external calendars are shown here.',
+                            'Leave every calendar unchecked to keep this event only in Bean.',
                             'Changing this list affects this event, not your whole account.',
                           ],
                           children: [
@@ -14147,7 +14985,59 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                         widget
                                             .googleCalendarStatus!
                                             .defaultCalendarId
-                                    ? const Text('Default for new local events')
+                                    ? const Text('Default external calendar')
+                                    : null,
+                              ),
+                          ],
+                        ),
+                      ],
+                      if ((widget
+                              .outlookCalendarStatus
+                              ?.writableCalendars
+                              .isNotEmpty ??
+                          false)) ...[
+                        const SizedBox(height: 14),
+                        _MobileFormSection(
+                          key: const Key('event-outlook-calendar-field'),
+                          title: 'Microsoft Outlook Sync',
+                          subtitle:
+                              'Choose any writable Outlook calendars for this event.',
+                          icon: Icons.mail_outline_rounded,
+                          infoKey: const Key('event-outlook-calendars-info'),
+                          infoTitle: 'Microsoft Outlook Sync',
+                          infoBullets: const [
+                            'Checked Outlook calendars receive a copy of this local Bean event.',
+                            'Only writable connected Outlook calendars are shown here.',
+                            'Leave every calendar unchecked to keep this event only in Bean.',
+                            'Changing this list affects this event, not your whole account.',
+                          ],
+                          children: [
+                            for (final calendar
+                                in widget
+                                    .outlookCalendarStatus!
+                                    .writableCalendars)
+                              CheckboxListTile(
+                                key: Key(
+                                  'event-outlook-calendar-${calendar.id}',
+                                ),
+                                contentPadding: EdgeInsets.zero,
+                                value: _outlookCalendarIds.contains(
+                                  calendar.id,
+                                ),
+                                onChanged: (value) => setState(() {
+                                  if (value ?? false) {
+                                    _outlookCalendarIds.add(calendar.id);
+                                  } else {
+                                    _outlookCalendarIds.remove(calendar.id);
+                                  }
+                                }),
+                                title: Text(calendar.summary),
+                                subtitle:
+                                    calendar.id ==
+                                        widget
+                                            .outlookCalendarStatus!
+                                            .defaultCalendarId
+                                    ? const Text('Default Outlook calendar')
                                     : null,
                               ),
                           ],
@@ -16002,6 +16892,7 @@ class _CalendarAgenda extends StatelessWidget {
     required this.calendar,
     required this.eventCategories,
     this.googleCalendarStatus,
+    this.outlookCalendarStatus,
     this.workspaces = const [],
     this.activeWorkspaceId,
     this.onEventTap,
@@ -16012,6 +16903,7 @@ class _CalendarAgenda extends StatelessWidget {
   final List<HermesCalendarEvent> calendar;
   final List<HermesEventCategory> eventCategories;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final GoogleCalendarSyncStatus? outlookCalendarStatus;
   final List<HermesWorkspace> workspaces;
   final String? activeWorkspaceId;
   final Future<void> Function(
@@ -16077,6 +16969,7 @@ class _CalendarAgenda extends StatelessWidget {
                     event,
                     eventCategories: eventCategories,
                     googleCalendarStatus: googleCalendarStatus,
+                    outlookCalendarStatus: outlookCalendarStatus,
                     workspaces: workspaces,
                     activeWorkspaceId: activeWorkspaceId,
                     onSave:
@@ -21782,7 +22675,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
     }
   }
 
-  Future<void> _subscribeToPlan(String plan) async {
+  Future<void> _subscribeToPlan(String plan, String billingInterval) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -21792,6 +22685,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
     try {
       final setup = await widget.apiClient.createMobileSubscriptionSetup(
         plan: plan,
+        billingInterval: billingInterval,
       );
       await widget.stripePaymentHandler.preparePaymentSheet(
         setup,
@@ -21801,6 +22695,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
       await widget.stripePaymentHandler.presentPaymentSheet();
       final result = await widget.apiClient.confirmMobileSubscription(
         plan: plan,
+        billingInterval: billingInterval,
         setupIntentId: setup.setupIntentId,
       );
       if (!mounted) return;
@@ -21822,14 +22717,18 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
   }
 
   Future<void> _choosePlan() async {
-    final plan = await showModalBottomSheet<String>(
+    final choice = await showModalBottomSheet<_PlanBillingChoice>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) =>
-          _PlanManagementSheet(currentPlan: widget.user.subscriptionTier),
+      builder: (context) => _PlanManagementSheet(
+        currentPlan: widget.user.subscriptionTier,
+        currentBillingInterval: _currentSubscription.billingInterval,
+      ),
     );
-    if (plan != null) await _subscribeToPlan(plan);
+    if (choice != null) {
+      await _subscribeToPlan(choice.plan, choice.billingInterval);
+    }
   }
 
   Future<void> _cancelSubscription() async {
@@ -21901,10 +22800,10 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
     final status = subscription.status;
     final canceled = subscription.cancelAtPeriodEnd;
     final statusLine = status == null || status.isEmpty
-        ? 'Current plan: $_planLabel'
+        ? 'Current plan: $_planLabel • ${_billingIntervalLabel(subscription.billingInterval)}'
         : canceled
         ? 'Current plan: $_planLabel • renewal canceled'
-        : 'Current plan: $_planLabel • ${status.replaceAll('_', ' ')}';
+        : 'Current plan: $_planLabel • ${_billingIntervalLabel(subscription.billingInterval)} • ${status.replaceAll('_', ' ')}';
     final paymentLine = _loadingPaymentMethod
         ? 'Loading payment method...'
         : _paymentMethod?.displayLine ?? 'No saved payment method yet';
@@ -22105,14 +23004,43 @@ String? _formatBillingDate(String? value) {
   return parsed == null ? null : _formatCalendarDateLabel(parsed);
 }
 
-class _PlanManagementSheet extends StatelessWidget {
-  const _PlanManagementSheet({required this.currentPlan});
+class _PlanBillingChoice {
+  const _PlanBillingChoice({required this.plan, required this.billingInterval});
+
+  final String plan;
+  final String billingInterval;
+}
+
+class _PlanManagementSheet extends StatefulWidget {
+  const _PlanManagementSheet({
+    required this.currentPlan,
+    required this.currentBillingInterval,
+  });
 
   final String currentPlan;
+  final String currentBillingInterval;
+
+  @override
+  State<_PlanManagementSheet> createState() => _PlanManagementSheetState();
+}
+
+class _PlanManagementSheetState extends State<_PlanManagementSheet> {
+  late String _billingInterval;
+
+  @override
+  void initState() {
+    super.initState();
+    _billingInterval = _normalizedBillingInterval(
+      widget.currentBillingInterval,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final current = currentPlan.trim().toLowerCase();
+    final current = widget.currentPlan.trim().toLowerCase();
+    final currentInterval = _normalizedBillingInterval(
+      widget.currentBillingInterval,
+    );
     final plans = _signupPlanOptions.where((plan) => plan.startsCheckout);
     return SafeArea(
       child: SingleChildScrollView(
@@ -22137,13 +23065,28 @@ class _PlanManagementSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
+            _BillingIntervalToggle(
+              selected: _billingInterval,
+              onChanged: (value) => setState(
+                () => _billingInterval = _normalizedBillingInterval(value),
+              ),
+            ),
+            const SizedBox(height: 14),
             for (final plan in plans) ...[
               _PlanManagementTile(
                 plan: plan,
-                selected: plan.key == current,
-                onTap: plan.key == current
+                billingInterval: _billingInterval,
+                selected:
+                    plan.key == current && _billingInterval == currentInterval,
+                onTap:
+                    plan.key == current && _billingInterval == currentInterval
                     ? null
-                    : () => Navigator.of(context).pop(plan.key),
+                    : () => Navigator.of(context).pop(
+                        _PlanBillingChoice(
+                          plan: plan.key,
+                          billingInterval: _billingInterval,
+                        ),
+                      ),
               ),
               const SizedBox(height: 10),
             ],
@@ -22157,11 +23100,13 @@ class _PlanManagementSheet extends StatelessWidget {
 class _PlanManagementTile extends StatelessWidget {
   const _PlanManagementTile({
     required this.plan,
+    required this.billingInterval,
     required this.selected,
     required this.onTap,
   });
 
   final _SignupPlanOption plan;
+  final String billingInterval;
   final bool selected;
   final VoidCallback? onTap;
 
@@ -22206,7 +23151,7 @@ class _PlanManagementTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${plan.price}${plan.priceSuffix ?? ''} • ${plan.trialText}',
+                  '${_planDisplayPrice(plan, billingInterval)}${_planDisplayPriceSuffix(plan, billingInterval) ?? ''} • ${_planTrialText(billingInterval)}',
                   style: const TextStyle(
                     color: HeyBeanTheme.muted,
                     fontWeight: FontWeight.w700,
@@ -23510,17 +24455,18 @@ class _GoogleCalendarSyncCard extends StatefulWidget {
 
 class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     with WidgetsBindingObserver {
-  late Future<GoogleCalendarSyncStatus> _statusFuture;
+  late Future<List<GoogleCalendarSyncStatus>> _statusFuture;
   String? _message;
   String? _googleAuthUrl;
+  String? _outlookAuthUrl;
   bool _busy = false;
-  bool _waitingForGoogleReturn = false;
+  String? _waitingForProviderReturn;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _statusFuture = widget.apiClient.googleCalendarStatus();
+    _statusFuture = _loadStatuses();
   }
 
   @override
@@ -23531,26 +24477,78 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _waitingForGoogleReturn) {
-      _syncAfterGoogleReturn();
+    if (state == AppLifecycleState.resumed &&
+        _waitingForProviderReturn != null) {
+      _syncAfterProviderReturn(_waitingForProviderReturn!);
     }
   }
 
+  Future<List<GoogleCalendarSyncStatus>> _loadStatuses() async => Future.wait([
+    widget.apiClient.googleCalendarStatus(),
+    widget.apiClient.outlookCalendarStatus(),
+  ]);
+
   void _reload() {
     setState(() {
-      _statusFuture = widget.apiClient.googleCalendarStatus();
+      _statusFuture = _loadStatuses();
     });
   }
 
-  Future<void> _connect() async {
+  Future<void> _showConnectOptions() async {
+    final provider = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        margin: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: HeyBeanTheme.border),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                key: const Key('external-calendar-connect-google'),
+                leading: const Icon(Icons.calendar_month_rounded),
+                title: const Text('Google Calendar'),
+                subtitle: const Text('Connect with Google OAuth'),
+                onTap: () => Navigator.of(context).pop('google'),
+              ),
+              ListTile(
+                key: const Key('external-calendar-connect-outlook'),
+                leading: const Icon(Icons.mail_outline_rounded),
+                title: const Text('Microsoft Outlook'),
+                subtitle: const Text('Connect with Microsoft sign-in'),
+                onTap: () => Navigator.of(context).pop('outlook'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (provider != null) {
+      await _connect(provider);
+    }
+  }
+
+  Future<void> _connect(String provider) async {
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      final rawUrl = await widget.apiClient.googleCalendarAuthUrl();
+      final rawUrl = provider == 'outlook'
+          ? await widget.apiClient.outlookCalendarAuthUrl()
+          : await widget.apiClient.googleCalendarAuthUrl();
       final url = Uri.parse(rawUrl);
-      _googleAuthUrl = rawUrl;
+      if (provider == 'outlook') {
+        _outlookAuthUrl = rawUrl;
+      } else {
+        _googleAuthUrl = rawUrl;
+      }
       var launched = false;
       try {
         launched = await widget.launchExternalUrl(url);
@@ -23562,10 +24560,10 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       }
       if (!mounted) return;
       setState(() {
-        _waitingForGoogleReturn = launched;
+        _waitingForProviderReturn = launched ? provider : null;
         _message = launched
-            ? 'Finish approving calendar access in the browser. If a QR prompt appears in the simulator, tap Copy auth link, finish it in your browser, then tap Check connection here.'
-            : 'Could not open calendar authorization automatically. Tap Copy auth link, finish it in any browser, then tap Check connection here.';
+            ? 'Finish approving ${_providerLabel(provider)} access in the browser. If a QR prompt appears in the simulator, tap Copy auth link, finish it in your browser, then tap Check connection here.'
+            : 'Could not open ${_providerLabel(provider)} authorization automatically. Tap Copy auth link, finish it in any browser, then tap Check connection here.';
       });
       _reload();
     } catch (error) {
@@ -23582,30 +24580,38 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     }
   }
 
-  Future<void> _syncAfterGoogleReturn() async {
+  Future<void> _syncAfterProviderReturn(String provider) async {
     setState(() {
       _busy = true;
       _message = 'Checking calendar connection…';
     });
     try {
-      final status = await widget.apiClient.googleCalendarStatus();
+      final status = provider == 'outlook'
+          ? await widget.apiClient.outlookCalendarStatus()
+          : await widget.apiClient.googleCalendarStatus();
       if (!mounted) return;
       if (!status.connected) {
         setState(() {
-          _statusFuture = Future.value(status);
+          _statusFuture = _loadStatuses();
           _message =
               'Calendar sync is not connected yet. Finish approval in the browser, then return to HeyBean.';
         });
         return;
       }
-      final result = await widget.apiClient.syncGoogleCalendar();
+      final result = provider == 'outlook'
+          ? await widget.apiClient.syncOutlookCalendar()
+          : await widget.apiClient.syncGoogleCalendar();
       if (!mounted) return;
       setState(() {
-        _waitingForGoogleReturn = false;
-        _googleAuthUrl = null;
+        _waitingForProviderReturn = null;
+        if (provider == 'outlook') {
+          _outlookAuthUrl = null;
+        } else {
+          _googleAuthUrl = null;
+        }
         _message =
-            'Calendar sync connected and synced ${result.imported} event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
-        _statusFuture = Future.value(result.status);
+            '${_providerLabel(provider)} connected and synced ${result.imported} event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
+        _statusFuture = _loadStatuses();
       });
     } catch (error) {
       if (mounted) {
@@ -23621,32 +24627,39 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     }
   }
 
-  Future<void> _copyGoogleAuthLink() async {
-    final rawUrl = _googleAuthUrl;
+  Future<void> _copyAuthLink(String provider) async {
+    final rawUrl = provider == 'outlook' ? _outlookAuthUrl : _googleAuthUrl;
     if (rawUrl == null) return;
     await Clipboard.setData(ClipboardData(text: rawUrl));
     if (!mounted) return;
     setState(() {
       _message =
-          'Copied calendar authorization link. Open it in your browser, approve calendar access, then tap Check connection here.';
+          'Copied ${_providerLabel(provider)} authorization link. Open it in your browser, approve calendar access, then tap Check connection here.';
     });
   }
 
-  Future<void> _checkGoogleConnection() => _syncAfterGoogleReturn();
+  Future<void> _checkConnection(String provider) =>
+      _syncAfterProviderReturn(provider);
 
-  Future<void> _sync() async {
+  Future<void> _sync(String provider) async {
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      final result = await widget.apiClient.syncGoogleCalendar();
+      final result = provider == 'outlook'
+          ? await widget.apiClient.syncOutlookCalendar()
+          : await widget.apiClient.syncGoogleCalendar();
       if (!mounted) return;
       setState(() {
         _message =
-            'Synced ${result.imported} connected event${result.imported == 1 ? '' : 's'}${result.deleted > 0 ? ', removed ${result.deleted}' : ''}.';
-        _googleAuthUrl = null;
-        _statusFuture = Future.value(result.status);
+            '${_providerLabel(provider)} sync pulled ${result.imported} external event${result.imported == 1 ? '' : 's'} into Bean${result.deleted > 0 ? ' and removed ${result.deleted}' : ''}. Bean events are pushed outward only when that event has a writable external calendar checked.';
+        if (provider == 'outlook') {
+          _outlookAuthUrl = null;
+        } else {
+          _googleAuthUrl = null;
+        }
+        _statusFuture = _loadStatuses();
       });
     } catch (error) {
       if (mounted) {
@@ -23662,17 +24675,21 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     }
   }
 
-  Future<void> _disconnect() async {
+  Future<void> _disconnect(String provider) async {
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      final status = await widget.apiClient.disconnectGoogleCalendar();
+      if (provider == 'outlook') {
+        await widget.apiClient.disconnectOutlookCalendar();
+      } else {
+        await widget.apiClient.disconnectGoogleCalendar();
+      }
       if (!mounted) return;
       setState(() {
-        _message = 'Calendar sync disconnected.';
-        _statusFuture = Future.value(status);
+        _message = '${_providerLabel(provider)} sync disconnected.';
+        _statusFuture = _loadStatuses();
       });
     } catch (error) {
       if (mounted) {
@@ -23688,12 +24705,64 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
     }
   }
 
+  Future<void> _updateSelection(
+    String provider,
+    List<String> selectedCalendarIds,
+  ) async {
+    if (selectedCalendarIds.isEmpty) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      if (provider == 'outlook') {
+        await widget.apiClient.updateOutlookCalendarSelection(
+          selectedCalendarIds: selectedCalendarIds,
+          defaultCalendarId: selectedCalendarIds.first,
+        );
+      } else {
+        await widget.apiClient.updateGoogleCalendarSelection(
+          selectedCalendarIds: selectedCalendarIds,
+          defaultCalendarId: selectedCalendarIds.first,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _message = '${_providerLabel(provider)} calendar choices saved.';
+        _statusFuture = _loadStatuses();
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = beanFriendlyErrorMessage(
+            error,
+            action: 'save calendar choices',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _providerLabel(String provider) =>
+      provider == 'outlook' ? 'Microsoft Outlook' : 'Google Calendar';
+
   @override
-  Widget build(BuildContext context) => FutureBuilder<GoogleCalendarSyncStatus>(
+  Widget build(
+    BuildContext context,
+  ) => FutureBuilder<List<GoogleCalendarSyncStatus>>(
     future: _statusFuture,
     builder: (context, snapshot) {
-      final status = snapshot.data;
-      final connected = status?.connected ?? false;
+      final googleStatus = snapshot.data?.isNotEmpty == true
+          ? snapshot.data![0]
+          : null;
+      final outlookStatus = (snapshot.data?.length ?? 0) > 1
+          ? snapshot.data![1]
+          : null;
+      final connected =
+          (googleStatus?.connected ?? false) ||
+          (outlookStatus?.connected ?? false);
       return Container(
         key: const Key('google-calendar-sync-settings'),
         margin: const EdgeInsets.only(bottom: 10),
@@ -23715,13 +24784,13 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Calendar sync',
+                        'External Calendar Sync',
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
                       Text(
                         connected
-                            ? 'Connected${status?.lastSyncedAt == null ? '' : ' · last sync ${_formatCalendarEventDateTime(status?.lastSyncedAt)}'}'
-                            : 'Connect your calendar to import events into HeyBean.',
+                            ? 'Connected calendars pull external events into Bean. Bean events push out only when selected on that event.'
+                            : 'Connect Google Calendar or Microsoft Outlook.',
                         style: const TextStyle(color: HeyBeanTheme.muted),
                       ),
                     ],
@@ -23730,19 +24799,28 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                 const SizedBox(width: 8),
                 const _InfoIconButton(
                   key: Key('google-calendar-sync-info'),
-                  title: 'Calendar sync',
+                  title: 'External Calendar Sync',
                   bullets: [
-                    'Connecting imports your calendar events so Bean can plan around them.',
+                    'Sync now pulls selected external calendar events into Bean.',
                     'Writable calendars can also receive local Bean events when you choose them on an item.',
                     'Disconnecting stops future sync. It does not delete your external account or calendar.',
                   ],
                 ),
               ],
             ),
-            if (status?.lastError != null && status!.lastError!.isNotEmpty) ...[
+            if (googleStatus?.lastError != null &&
+                googleStatus!.lastError!.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                status.lastError!,
+                googleStatus.lastError!,
+                style: const TextStyle(color: Colors.redAccent),
+              ),
+            ],
+            if (outlookStatus?.lastError != null &&
+                outlookStatus!.lastError!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                outlookStatus.lastError!,
                 style: const TextStyle(color: Colors.redAccent),
               ),
             ],
@@ -23751,48 +24829,44 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
               _InlinePlanLimitError(message: _message!),
             ],
             const SizedBox(height: 12),
+            _ExternalCalendarProviderTile(
+              provider: 'google',
+              label: 'Google Calendar',
+              status: googleStatus,
+              busy: _busy,
+              authUrl: _googleAuthUrl,
+              onCopyLink: () => _copyAuthLink('google'),
+              onCheckConnection: () => _checkConnection('google'),
+              onSync: () => _sync('google'),
+              onDisconnect: () => _disconnect('google'),
+              onSelectionChanged: (ids) => _updateSelection('google', ids),
+            ),
+            const SizedBox(height: 10),
+            _ExternalCalendarProviderTile(
+              provider: 'outlook',
+              label: 'Microsoft Outlook',
+              status: outlookStatus,
+              busy: _busy,
+              authUrl: _outlookAuthUrl,
+              onCopyLink: () => _copyAuthLink('outlook'),
+              onCheckConnection: () => _checkConnection('outlook'),
+              onSync: () => _sync('outlook'),
+              onDisconnect: () => _disconnect('outlook'),
+              onSelectionChanged: (ids) => _updateSelection('outlook', ids),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 OutlinedButton.icon(
                   key: const Key('google-calendar-connect-action'),
-                  onPressed: _busy ? null : _connect,
+                  onPressed: _busy ? null : _showConnectOptions,
                   icon: const Icon(Icons.login_rounded),
-                  label: Text(connected ? 'Reconnect' : 'Connect calendar'),
+                  label: Text(
+                    connected ? 'Connect another calendar' : 'Connect Calendar',
+                  ),
                 ),
-                if (_googleAuthUrl != null) ...[
-                  OutlinedButton.icon(
-                    key: const Key('google-calendar-copy-link-action'),
-                    onPressed: _busy ? null : _copyGoogleAuthLink,
-                    icon: const Icon(Icons.copy_rounded),
-                    label: const Text('Copy auth link'),
-                  ),
-                  OutlinedButton.icon(
-                    key: const Key('google-calendar-check-connection-action'),
-                    onPressed: _busy ? null : _checkGoogleConnection,
-                    icon: const Icon(Icons.verified_rounded),
-                    label: const Text('Check connection'),
-                  ),
-                ],
-                FilledButton.icon(
-                  key: const Key('google-calendar-sync-action'),
-                  onPressed: _busy || !connected ? null : _sync,
-                  icon: _busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh_rounded),
-                  label: const Text('Sync now'),
-                ),
-                if (connected)
-                  TextButton(
-                    key: const Key('google-calendar-disconnect-action'),
-                    onPressed: _busy ? null : _disconnect,
-                    child: const Text('Disconnect'),
-                  ),
               ],
             ),
           ],
@@ -23800,6 +24874,153 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       );
     },
   );
+}
+
+class _ExternalCalendarProviderTile extends StatelessWidget {
+  const _ExternalCalendarProviderTile({
+    required this.provider,
+    required this.label,
+    required this.status,
+    required this.busy,
+    required this.authUrl,
+    required this.onCopyLink,
+    required this.onCheckConnection,
+    required this.onSync,
+    required this.onDisconnect,
+    required this.onSelectionChanged,
+  });
+
+  final String provider;
+  final String label;
+  final GoogleCalendarSyncStatus? status;
+  final bool busy;
+  final String? authUrl;
+  final VoidCallback onCopyLink;
+  final VoidCallback onCheckConnection;
+  final VoidCallback onSync;
+  final VoidCallback onDisconnect;
+  final ValueChanged<List<String>> onSelectionChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = status?.connected ?? false;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: HeyBeanTheme.border),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  provider == 'outlook'
+                      ? Icons.mail_outline_rounded
+                      : Icons.calendar_month_rounded,
+                  color: HeyBeanTheme.accentStrong,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    connected
+                        ? '$label connected${status?.lastSyncedAt == null ? '' : ' · last sync ${_formatCalendarEventDateTime(status?.lastSyncedAt)}'}'
+                        : '$label not connected',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            if (authUrl != null) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    key: Key('$provider-calendar-copy-link-action'),
+                    onPressed: busy ? null : onCopyLink,
+                    icon: const Icon(Icons.copy_rounded),
+                    label: const Text('Copy auth link'),
+                  ),
+                  OutlinedButton.icon(
+                    key: Key('$provider-calendar-check-connection-action'),
+                    onPressed: busy ? null : onCheckConnection,
+                    icon: const Icon(Icons.verified_rounded),
+                    label: const Text('Check connection'),
+                  ),
+                ],
+              ),
+            ],
+            if (connected) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Sync now pulls selected external events into Bean. Bean events push outward only when that event has this provider checked.',
+                style: TextStyle(color: HeyBeanTheme.muted),
+              ),
+              if ((status?.calendars ?? const <GoogleCalendarInfo>[])
+                  .isNotEmpty) ...[
+                const SizedBox(height: 6),
+                for (final calendar in status!.calendars)
+                  CheckboxListTile(
+                    key: Key(
+                      provider == 'google'
+                          ? 'google-calendar-source-${calendar.id}'
+                          : 'outlook-calendar-source-${calendar.id}',
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    value: calendar.selected,
+                    onChanged: busy
+                        ? null
+                        : (value) {
+                            final selected = {...status!.selectedCalendarIds};
+                            if (value ?? false) {
+                              selected.add(calendar.id);
+                            } else {
+                              selected.remove(calendar.id);
+                            }
+                            if (selected.isEmpty) {
+                              selected.add(calendar.id);
+                            }
+                            onSelectionChanged(selected.toList()..sort());
+                          },
+                    title: Text(calendar.summary),
+                    subtitle: Text(calendar.accessRole),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+              ],
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    key: Key('$provider-calendar-sync-action'),
+                    onPressed: busy ? null : onSync,
+                    icon: busy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded),
+                    label: const Text('Sync now'),
+                  ),
+                  TextButton(
+                    key: Key('$provider-calendar-disconnect-action'),
+                    onPressed: busy ? null : onDisconnect,
+                    child: const Text('Disconnect'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _TaskItemTile extends StatefulWidget {
@@ -24862,6 +26083,7 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
         time: displayTime,
         timeLabel: allDay ? 'All day' : _eventTimeRangeShort(event),
         subtitle: (event.location ?? '').trim(),
+        event: event,
       ),
     );
   }
@@ -24880,6 +26102,7 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
         time: dateOnly ? endOfToday.subtract(const Duration(minutes: 1)) : due,
         timeLabel: dateOnly ? 'Today' : _naturalTimeLabel(due),
         subtitle: (task.category ?? '').trim(),
+        task: task,
       ),
     );
   }
@@ -24898,6 +26121,7 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
         time: dateOnly ? endOfToday.subtract(const Duration(minutes: 1)) : due,
         timeLabel: dateOnly ? 'Today' : _naturalTimeLabel(due),
         subtitle: (reminder.category ?? '').trim(),
+        reminder: reminder,
       ),
     );
   }

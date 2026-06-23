@@ -32,6 +32,7 @@ class BillingController extends Controller
     {
         $data = $request->validate([
             'plan' => ['required', Rule::in(['base', 'premium', 'pro'])],
+            'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
             'source' => ['sometimes', 'nullable', 'string', 'max:50'],
         ]);
 
@@ -39,6 +40,7 @@ class BillingController extends Controller
             return response()->json(['data' => $this->billing->createCheckoutSession(
                 $request->user(),
                 $data['plan'],
+                $data['billing_interval'] ?? 'monthly',
                 $data['source'] ?? null,
             )], 201);
         } catch (RuntimeException|InvalidArgumentException $exception) {
@@ -50,12 +52,14 @@ class BillingController extends Controller
     {
         $data = $request->validate([
             'plan' => ['required', Rule::in(['base', 'premium', 'pro'])],
+            'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
         ]);
 
         try {
             return response()->json(['data' => $this->billing->createMobileSubscriptionSetup(
                 $request->user(),
                 $data['plan'],
+                $data['billing_interval'] ?? 'monthly',
             )], 201);
         } catch (RuntimeException|InvalidArgumentException $exception) {
             return $this->billingError($exception);
@@ -66,6 +70,7 @@ class BillingController extends Controller
     {
         $data = $request->validate([
             'plan' => ['required', Rule::in(['base', 'premium', 'pro'])],
+            'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
             'setup_intent_id' => ['required', 'string', 'max:255'],
         ]);
 
@@ -73,6 +78,7 @@ class BillingController extends Controller
             return response()->json(['data' => $this->billing->confirmMobileSubscription(
                 $request->user(),
                 $data['plan'],
+                $data['billing_interval'] ?? 'monthly',
                 $data['setup_intent_id'],
             )]);
         } catch (RuntimeException|InvalidArgumentException $exception) {
@@ -118,10 +124,11 @@ class BillingController extends Controller
     {
         $data = $request->validate([
             'plan' => ['required', Rule::in(['premium', 'pro'])],
+            'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
         ]);
 
         try {
-            return response()->json(['data' => $this->billing->upgradeSubscription($request->user(), $data['plan'])]);
+            return response()->json(['data' => $this->billing->upgradeSubscription($request->user(), $data['plan'], $data['billing_interval'] ?? 'monthly')]);
         } catch (RuntimeException|InvalidArgumentException $exception) {
             return $this->billingError($exception);
         }
@@ -131,10 +138,11 @@ class BillingController extends Controller
     {
         $data = $request->validate([
             'plan' => ['required', Rule::in(['base', 'premium', 'pro'])],
+            'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
         ]);
 
         try {
-            return response()->json(['data' => $this->billing->changeSubscriptionPlan($request->user(), $data['plan'])]);
+            return response()->json(['data' => $this->billing->changeSubscriptionPlan($request->user(), $data['plan'], $data['billing_interval'] ?? 'monthly')]);
         } catch (RuntimeException|InvalidArgumentException $exception) {
             return $this->billingError($exception);
         }
