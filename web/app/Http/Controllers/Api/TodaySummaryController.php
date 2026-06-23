@@ -64,7 +64,9 @@ class TodaySummaryController extends Controller
                 }
             });
         }
-        $calendarEvents = $history->filterCalendarEvents($calendarEventsQuery->orderBy('starts_at')->get(), $user);
+        $calendarEvents = $history->filterCalendarEvents($calendarEventsQuery->orderBy('starts_at')->get(), $user)
+            ->reject(fn (CalendarEvent $event): bool => (bool) (($event->metadata ?? [])['recurrence_source_hidden'] ?? false))
+            ->values();
         $activityEvents = $history->filterActivityEvents(ActivityEvent::where('user_id', $user->id)->orderBy('id')->get(), $user);
         $approvals = $history->filterApprovals(Approval::where('user_id', $user->id)->latest('updated_at')->get(), $user);
         $blockers = $history->filterBlockers(Blocker::where('user_id', $user->id)->latest('updated_at')->get(), $user);

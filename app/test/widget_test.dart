@@ -3957,6 +3957,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
 
     final today = DateTime.now();
     final tomorrow = today.add(const Duration(days: 1));
@@ -3972,6 +3974,54 @@ void main() {
       find.byKey(
         Key(
           'calendar-event-block-daily-standup-${tomorrow.year}-${tomorrow.month}-${tomorrow.day}',
+        ),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('calendar uses summary events while full event list is empty', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _SummaryOnlyCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('calendar-event-block-summary-workout')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('materialized recurring occurrences render once per day', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _MaterializedRecurringCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
+
+    final today = DateTime.now();
+    final tomorrow = today.add(const Duration(days: 1));
+    expect(
+      find.byKey(const Key('calendar-event-block-workout')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        Key(
+          'calendar-event-block-workout-${tomorrow.year}-${tomorrow.month}-${tomorrow.day}',
         ),
       ),
       findsOneWidget,
@@ -5318,6 +5368,8 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
 
     await tester.ensureVisible(
       find.byKey(const Key('calendar-event-block-design-review')),
@@ -5855,6 +5907,8 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
 
     await tester.ensureVisible(
       find.byKey(const Key('calendar-event-block-design-review')),
@@ -5874,7 +5928,7 @@ void main() {
       find.byKey(const Key('event-start-field')),
       dateLabel,
     );
-    await tester.enterText(find.byKey(const Key('event-end-field')), dateLabel);
+    expect(find.byKey(const Key('event-end-field')), findsNothing);
     await tester.tap(find.byKey(const Key('event-save-action')));
     await tester.pumpAndSettle();
 
@@ -5908,16 +5962,47 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('calendar-all-day-label')), findsOneWidget);
     expect(find.byKey(const Key('calendar-all-day-event-901')), findsOneWidget);
     expect(find.byKey(const Key('calendar-multi-day-label')), findsNothing);
     expect(find.text('All Day'), findsOneWidget);
     expect(find.text('Google holiday'), findsOneWidget);
+    final allDayRowTop = tester
+        .getTopLeft(find.byKey(const Key('calendar-all-day-event-901')))
+        .dy;
+    await tester.drag(
+      find.byKey(const Key('apple-style-day-timeline-scroll')),
+      const Offset(0, -420),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byKey(const Key('calendar-all-day-event-901'))).dy,
+      closeTo(allDayRowTop, 1),
+    );
     expect(
       find.byKey(const Key('calendar-event-block-google-holiday')),
       findsNothing,
     );
+  });
+
+  testWidgets('all day UTC midnight events stay on their stored date', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _UtcMidnightAllDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('calendar-all-day-event-905')), findsOneWidget);
+    expect(find.text('Moving out of shop'), findsOneWidget);
   });
 
   testWidgets('multi-day timed events render in the multi-day row only', (
@@ -8714,6 +8799,115 @@ class _TwoDayCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
           11,
         ).toIso8601String(),
         recurrence: 'daily',
+      ),
+    ];
+  }
+}
+
+class _SummaryOnlyCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async => const [];
+
+  @override
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
+    final today = DateTime.now();
+    return HermesTodaySummary(
+      tasks: const [],
+      reminders: const [],
+      calendarEvents: [
+        HermesCalendarEvent(
+          id: 8101,
+          title: 'Summary workout',
+          startsAt: DateTime(
+            today.year,
+            today.month,
+            today.day,
+            5,
+          ).toIso8601String(),
+          endsAt: DateTime(
+            today.year,
+            today.month,
+            today.day,
+            6,
+          ).toIso8601String(),
+        ),
+      ],
+      activityEvents: const [],
+      approvals: const [],
+      blockers: const [],
+    );
+  }
+}
+
+class _MaterializedRecurringCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final today = DateTime.now();
+    return [
+      HermesCalendarEvent(
+        id: 8199,
+        title: 'Workout',
+        startsAt: DateTime(
+          today.year,
+          today.month,
+          today.day,
+          5,
+        ).toIso8601String(),
+        endsAt: DateTime(
+          today.year,
+          today.month,
+          today.day,
+          6,
+        ).toIso8601String(),
+        recurrence: 'daily',
+      ),
+      for (var offset = 1; offset < 5; offset++)
+        HermesCalendarEvent(
+          id: 8200 + offset,
+          title: 'Workout',
+          startsAt: DateTime(
+            today.year,
+            today.month,
+            today.day + offset,
+            5,
+          ).toIso8601String(),
+          endsAt: DateTime(
+            today.year,
+            today.month,
+            today.day + offset,
+            6,
+          ).toIso8601String(),
+          recurrence: 'daily',
+          metadata: {
+            'recurrence': 'daily',
+            'recurrence_generated': true,
+            'recurrence_parent_event_id': 8199,
+            'recurrence_occurrence_date': DateTime(
+              today.year,
+              today.month,
+              today.day + offset,
+            ).toIso8601String().substring(0, 10),
+          },
+        ),
+    ];
+  }
+}
+
+class _UtcMidnightAllDayCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents() async {
+    final today = DateTime.now();
+    final startUtc = DateTime.utc(today.year, today.month, today.day);
+    return [
+      HermesCalendarEvent(
+        id: 905,
+        title: 'Moving out of shop',
+        startsAt: startUtc.toIso8601String(),
+        endsAt: startUtc.add(const Duration(days: 1)).toIso8601String(),
+        metadata: const {'all_day': true},
       ),
     ];
   }

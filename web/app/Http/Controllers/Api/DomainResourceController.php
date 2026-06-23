@@ -353,6 +353,7 @@ class DomainResourceController extends Controller
         if (! $request->boolean('skip_google_sync')) {
             $this->googleCalendar->syncIfConnected($request->user(), $workspace);
         }
+        $this->materializeRecurringCalendarEventsForWorkspace($request, $workspace);
 
         $query = $this->scoped(CalendarEvent::query(), $request);
         $this->scopeVisibleGoogleCalendars($query, $request, $workspace);
@@ -649,6 +650,21 @@ class DomainResourceController extends Controller
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
+        if ($this->recurringCalendarEvents->isGeneratedOccurrence($model)) {
+            $validated['recurrence'] = null;
+            $metadata = (array) ($validated['metadata'] ?? $model->metadata ?? []);
+            $metadata['recurrence'] = 'none';
+            unset(
+                $metadata['specific_days'],
+                $metadata['specificDays'],
+                $metadata['days'],
+                $metadata['interval'],
+                $metadata['interval_unit'],
+                $metadata['intervalUnit'],
+                $metadata['unit']
+            );
+            $validated['metadata'] = $metadata;
+        }
         if (array_key_exists('recurrence', $validated) && $this->calendarRecurrenceRequested($validated['recurrence']) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
             return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
         }
@@ -1158,6 +1174,17 @@ class DomainResourceController extends Controller
         $this->linkedCalendarEventsByWorkspace($event, $accessibleWorkspaceIds)
             ->values()
             ->each(fn (CalendarEvent $calendarEvent): int => $this->recurringCalendarEvents->refreshMaterializedOccurrences($calendarEvent));
+    }
+
+    private function materializeRecurringCalendarEventsForWorkspace(Request $request, Workspace $workspace): void
+    {
+        CalendarEvent::query()
+            ->where('user_id', $request->user()->id)
+            ->where('workspace_id', $workspace->id)
+            ->whereNotNull('recurrence')
+            ->orderBy('id')
+            ->get()
+            ->each(fn (CalendarEvent $event): int => $this->recurringCalendarEvents->materialize($event));
     }
 
     private function accessibleWorkspaceIds(Request $request): array

@@ -107,6 +107,97 @@ class RecurringCalendarEventExpansionTest extends TestCase
         CarbonImmutable::setTestNow();
     }
 
+    public function test_editing_generated_occurrence_cannot_promote_it_to_recurring_source(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-06-22 12:00:00', 'UTC'));
+        $token = $this->premiumApiToken('recurring-occurrence-edit@example.com');
+        $user = User::where('email', 'recurring-occurrence-edit@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+
+        $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspaceId,
+            'title' => 'Daily workout',
+            'starts_at' => '2026-06-22T05:00:00Z',
+            'ends_at' => '2026-06-22T06:00:00Z',
+            'recurrence' => 'daily',
+            'metadata' => ['recurrence' => 'daily'],
+        ])->assertCreated()->json('data.id');
+
+        $occurrence = CalendarEvent::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('starts_at', '2026-06-23 05:00:00')
+            ->firstOrFail();
+
+        $response = $this->withToken($token)->patchJson('/api/calendar-events/'.$occurrence->id, [
+            'title' => 'Daily workout',
+            'starts_at' => '2026-06-24T05:00:00Z',
+            'ends_at' => '2026-06-24T06:00:00Z',
+            'recurrence' => 'daily',
+            'metadata' => [
+                ...$occurrence->metadata,
+                'recurrence' => 'daily',
+                'specific_days' => ['mon', 'tue'],
+                'interval' => 2,
+            ],
+        ])->assertOk();
+
+        $response->assertJsonPath('data.recurrence', null);
+        $occurrence->refresh();
+
+        $this->assertNull($occurrence->recurrence);
+        $this->assertSame('2026-06-24 05:00:00', $occurrence->starts_at->format('Y-m-d H:i:s'));
+        $this->assertSame('none', $occurrence->metadata['recurrence']);
+        $this->assertSame($sourceId, $occurrence->metadata['recurrence_parent_event_id']);
+        $this->assertArrayNotHasKey('specific_days', $occurrence->metadata);
+        $this->assertArrayNotHasKey('interval', $occurrence->metadata);
+        $this->assertSame(1, CalendarEvent::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('title', 'Daily workout')
+            ->whereNotNull('recurrence')
+            ->count());
+
+        CarbonImmutable::setTestNow();
+    }
+
+    public function test_listing_calendar_repairs_missing_generated_occurrences(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-06-22 12:00:00', 'UTC'));
+        $token = $this->premiumApiToken('recurring-list-repair@example.com');
+        $user = User::where('email', 'recurring-list-repair@example.com')->firstOrFail();
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+
+        $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspaceId,
+            'title' => 'Daily workout',
+            'starts_at' => '2026-06-22T05:00:00Z',
+            'ends_at' => '2026-06-22T06:00:00Z',
+            'recurrence' => 'daily',
+            'metadata' => ['recurrence' => 'daily'],
+        ])->assertCreated()->json('data.id');
+
+        CalendarEvent::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('title', 'Daily workout')
+            ->whereNull('recurrence')
+            ->delete();
+
+        $this->assertSame(1, CalendarEvent::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('title', 'Daily workout')
+            ->count());
+
+        $listed = $this->withToken($token)->getJson('/api/calendar-events?workspace_id='.$workspaceId.'&skip_google_sync=1')
+            ->assertOk()
+            ->json('data');
+
+        $this->assertTrue(collect($listed)->contains(fn (array $event): bool => (int) $event['id'] === (int) $sourceId));
+        $this->assertTrue(collect($listed)->contains(fn (array $event): bool => $event['title'] === 'Daily workout'
+            && ($event['starts_at'] ?? null) === '2026-06-23T05:00:00.000000Z'
+            && ($event['recurrence'] ?? null) === null));
+
+        CarbonImmutable::setTestNow();
+    }
+
     public function test_deleting_a_generated_occurrence_can_remove_only_that_event(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-26 12:00:00', 'UTC'));

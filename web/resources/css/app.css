@@ -2684,6 +2684,8 @@
 
 .hb-timeline {
     --hb-hour-height: 88px;
+    --hb-timeline-head-height: 0px;
+    --hb-multi-day-row-height: 0px;
     display: grid;
     gap: 0;
     border: 1px solid var(--hb-border);
@@ -2764,11 +2766,27 @@
 .hb-multi-day-row,
 .hb-all-day-row {
     border-bottom: 1px solid var(--hb-border);
-    background: rgba(255, 255, 255, .46);
+    background: rgba(255, 255, 255, .94);
 }
 
 .hb-multi-day-row {
-    background: rgba(var(--hb-accent-rgb), .06);
+    position: sticky;
+    top: var(--hb-timeline-head-height);
+    z-index: 7;
+    background: rgba(var(--hb-accent-rgb), .08);
+    backdrop-filter: blur(12px);
+}
+
+.hb-all-day-row {
+    position: sticky;
+    top: var(--hb-timeline-head-height);
+    z-index: 7;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 1px 0 rgba(16, 24, 40, .04);
+}
+
+.hb-timeline-visible-multi-day .hb-all-day-row {
+    top: calc(var(--hb-timeline-head-height) + var(--hb-multi-day-row-height));
 }
 
 .hb-multi-day-row-collapsed {

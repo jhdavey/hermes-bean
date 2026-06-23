@@ -2756,6 +2756,13 @@ class HermesCalendarEvent {
 
   factory HermesCalendarEvent.fromJson(Map<String, Object?> json) {
     final parsedMetadata = _expectMapOrNull(json['metadata']);
+    final isGeneratedOccurrence =
+        _readBool(
+          parsedMetadata?['recurrence_generated'] ??
+              parsedMetadata?['recurrenceGenerated'],
+        ) ||
+        parsedMetadata?['recurrence_parent_event_id'] != null ||
+        parsedMetadata?['recurrenceParentEventId'] != null;
     final googleCalendarId = json['google_calendar_id']?.toString();
     final metadata = googleCalendarId == null
         ? parsedMetadata
@@ -2784,8 +2791,10 @@ class HermesCalendarEvent {
             metadata?['is_critical'] ??
             metadata?['isCritical'],
       ),
-      recurrence:
-          json['recurrence'] as String? ?? (metadata?['recurrence'] as String?),
+      recurrence: isGeneratedOccurrence
+          ? null
+          : json['recurrence'] as String? ??
+                (metadata?['recurrence'] as String?),
       metadata: metadata,
     );
   }

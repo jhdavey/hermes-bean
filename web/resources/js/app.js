@@ -432,6 +432,14 @@ if (mount) {
         state.token = '';
     }
 
+    function isUnauthenticatedError(error) {
+        const code = String(error?.payload?.error?.code || error?.payload?.code || '').toLowerCase();
+        const message = String(error?.message || '').toLowerCase();
+        return Number(error?.status) === 401
+            || code === 'unauthenticated'
+            || message === 'unauthenticated.';
+    }
+
     function initialSelectedView() {
         return window.location.pathname === '/admin' ? 'admin' : 'today';
     }
@@ -650,8 +658,14 @@ if (mount) {
         } catch (error) {
             stopDashboardChangeFeed();
             stopKioskVoiceMode();
-            clearToken();
-            state.phase = 'signedOut';
+            if (isUnauthenticatedError(error)) {
+                clearToken();
+                state.phase = 'signedOut';
+            } else if (state.user) {
+                state.phase = 'signedIn';
+            } else {
+                state.phase = 'signedOut';
+            }
             state.error = friendlyError(error, 'load your account');
         }
         render();
@@ -4205,7 +4219,6 @@ if (mount) {
         const allDay = eventAllDay(item);
         const startSource = item?.starts_at || item?.startsAt || when || defaultEventStart();
         const startDate = allDay ? storedDateOnly(startSource) : dateOnly(startSource);
-        const endDate = allDayEndDateInputValue(item, startDate);
         return `
             <label class="hb-switch-row hb-form-switch hb-all-day-toggle"><input type="checkbox" name="allDay" data-all-day-toggle ${allDay ? 'checked' : ''}> <span><strong>All day</strong><small>Use dates instead of specific start and end times.</small></span></label>
             <div class="hb-field-row" data-timed-fields ${allDay ? 'hidden' : ''}>
@@ -4213,8 +4226,7 @@ if (mount) {
                 ${labelInput('Ends at', 'endsAt', 'datetime-local', end, allDay ? 'disabled' : '')}
             </div>
             <div class="hb-field-row" data-all-day-fields ${allDay ? '' : 'hidden'}>
-                ${labelInput('Start date', 'allDayStart', 'date', startDate, allDay ? 'required' : 'disabled')}
-                ${labelInput('End date', 'allDayEnd', 'date', endDate, allDay ? 'required' : 'disabled')}
+                ${labelInput('Date', 'allDayStart', 'date', startDate, allDay ? 'required' : 'disabled')}
             </div>`;
     }
 
@@ -4476,6 +4488,7 @@ if (mount) {
     }
 
     function itemRecurrenceValue(item = null) {
+        if (eventIsGeneratedOccurrence(item)) return 'none';
         return normalizeRecurrenceValue(item?.recurrence ?? item?.metadata?.recurrence);
     }
 
@@ -5677,7 +5690,6 @@ if (mount) {
         const startInput = form.querySelector('input[name="time"]');
         const endInput = form.querySelector('input[name="endsAt"]');
         const allDayStart = form.querySelector('input[name="allDayStart"]');
-        const allDayEnd = form.querySelector('input[name="allDayEnd"]');
         if (startInput) {
             startInput.dataset.previousValue = startInput.value;
             startInput.addEventListener('change', () => syncEventEndWithStart(form));
@@ -5690,9 +5702,6 @@ if (mount) {
                 }
             });
         }
-        allDayStart?.addEventListener('change', () => {
-            if (allDayEnd && (!allDayEnd.value || allDayEnd.value < allDayStart.value)) allDayEnd.value = allDayStart.value;
-        });
     }
 
     function syncEventEndWithStart(form, force = false) {
@@ -5785,7 +5794,11 @@ if (mount) {
             refreshOnlyInBackground({ skipCalendarSync: true });
         } catch (error) {
             state.error = friendlyError(error, 'save that change');
-            state.modal = null;
+            if (['task', 'reminder', 'event'].includes(kind)) {
+                form.dataset.saving = 'false';
+            } else {
+                state.modal = null;
+            }
             render();
         }
     }
@@ -6147,31 +6160,43 @@ if (mount) {
             const syncTo = selectedSyncWorkspaceIds(form);
             const allDay = form.elements.allDay?.checked || false;
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
-            const recurrence = recurrenceFormData(form, data);
+            const generatedOccurrence = eventIsGeneratedOccurrence(item);
+            const recurrence = generatedOccurrence ? { value: null, metadata: {} } : recurrenceFormData(form, data);
+            const metadata = {
+                ...existingMetadata,
+                ...recurrence.metadata,
+                google_calendar_ids: selectedGoogleCalendarIds(form),
+                all_day: allDay,
+            };
+            if (generatedOccurrence) {
+                metadata.recurrence = 'none';
+                delete metadata.specific_days;
+                delete metadata.specificDays;
+                delete metadata.days;
+                delete metadata.interval;
+                delete metadata.interval_unit;
+                delete metadata.intervalUnit;
+                delete metadata.unit;
+            }
             const body = {
                 title: data.title,
                 description: data.description || null,
                 location: data.location || null,
                 starts_at: allDay ? fromDateInputStart(data.allDayStart) : fromDatetimeLocal(data.time),
-                ends_at: allDay ? fromDateInputEndInclusive(data.allDayEnd || data.allDayStart) : fromDatetimeLocal(data.endsAt),
+                ends_at: allDay ? fromDateInputEndInclusive(data.allDayStart) : fromDatetimeLocal(data.endsAt),
                 category: data.category || null,
                 color,
                 is_critical: form.elements.critical?.checked || false,
                 recurrence: recurrence.value,
                 status: data.status || 'confirmed',
                 sync_to_workspace_ids: syncTo,
-                metadata: {
-                    ...existingMetadata,
-                    ...recurrence.metadata,
-                    google_calendar_ids: selectedGoogleCalendarIds(form),
-                    all_day: allDay,
-                },
+                metadata,
             };
             if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
             return {
                 body,
                 eventReminderMinutesBefore: form.elements.createEventReminder?.checked ? Number(data.eventReminderMinutesBefore || 15) : null,
-                path: item ? `/calendar-events/${item.id}` : '/calendar-events',
+                path: item ? `/calendar-events/${item.id}?sync_google_now=1` : '/calendar-events?sync_google_now=1',
                 options: { method: item ? 'PATCH' : 'POST', body },
             };
         }
@@ -6647,7 +6672,12 @@ if (mount) {
         const metadata = typeof event?.metadata === 'object' && event?.metadata ? event.metadata : {};
         const recurrence = event?.recurrence || metadata.recurrence || 'none';
         return (recurrence && recurrence !== 'none')
-            || metadata.recurrence_generated === true
+            || eventIsGeneratedOccurrence(event);
+    }
+
+    function eventIsGeneratedOccurrence(event = null) {
+        const metadata = typeof event?.metadata === 'object' && event?.metadata ? event.metadata : {};
+        return metadata.recurrence_generated === true
             || metadata.recurrence_generated === 1
             || metadata.recurrence_generated === 'true'
             || Boolean(metadata.recurrence_parent_event_id);
@@ -6670,10 +6700,8 @@ if (mount) {
         if (allDay) {
             const startInput = form.querySelector('input[name="time"]');
             const allDayStart = form.querySelector('input[name="allDayStart"]');
-            const allDayEnd = form.querySelector('input[name="allDayEnd"]');
             if (startInput?.value && allDayStart) {
                 allDayStart.value = dateOnly(startInput.value);
-                if (allDayEnd && (!allDayEnd.value || allDayEnd.value < allDayStart.value)) allDayEnd.value = allDayStart.value;
             }
         } else {
             const startInput = form.querySelector('input[name="time"]');
@@ -6697,7 +6725,7 @@ if (mount) {
         group.hidden = !enabled;
         group.querySelectorAll('input, select, textarea').forEach((field) => {
             field.disabled = !enabled;
-            if (field.name === 'time' || field.name === 'allDayStart' || field.name === 'allDayEnd') {
+            if (field.name === 'time' || field.name === 'allDayStart') {
                 field.required = enabled && field.name !== 'endsAt';
             }
         });
@@ -12393,7 +12421,10 @@ if (mount) {
         timeline.addEventListener('click', handleTimelineClick, true);
         timeline.addEventListener('scroll', handleTimelineScroll, { passive: true });
         timeline.addEventListener('wheel', handleTimelineWheel, { passive: false });
-        requestAnimationFrame(() => updateMultiDayRowVisibility(timeline));
+        requestAnimationFrame(() => {
+            updateTimelineStickyOffsets(timeline);
+            updateMultiDayRowVisibility(timeline);
+        });
     }
 
     function handleTimelinePointerDown(event) {
@@ -12476,6 +12507,18 @@ if (mount) {
         maybeExtendTimelineWindow(event.currentTarget);
     }
 
+    function updateTimelineStickyOffsets(timeline) {
+        if (!timeline) return;
+        const head = timeline.querySelector('.hb-timeline-head');
+        const multiDayRow = timeline.querySelector('[data-multi-day-row]');
+        const hasVisibleMultiDay = multiDayRow && !multiDayRow.classList.contains('hb-multi-day-row-collapsed');
+        const headHeight = head?.getBoundingClientRect().height || 0;
+        const multiDayHeight = hasVisibleMultiDay ? multiDayRow.getBoundingClientRect().height || 0 : 0;
+        timeline.style.setProperty('--hb-timeline-head-height', `${headHeight}px`);
+        timeline.style.setProperty('--hb-multi-day-row-height', `${multiDayHeight}px`);
+        timeline.classList.toggle('hb-timeline-visible-multi-day', Boolean(hasVisibleMultiDay));
+    }
+
     function maybeExtendTimelineWindow(timeline, direction = 'auto') {
         if (state.selected !== 'today' || state.showMonth || !timelineCanScrollHorizontally(timeline)) return false;
         if (direction === 'auto' && timelineDrag?.active) return false;
@@ -12534,6 +12577,7 @@ if (mount) {
 
         row.classList.toggle('hb-multi-day-row-collapsed', !hasVisibleMultiDayEvent);
         row.setAttribute('aria-hidden', hasVisibleMultiDayEvent ? 'false' : 'true');
+        updateTimelineStickyOffsets(timeline);
     }
 
     function updateCurrentTimeMarker() {

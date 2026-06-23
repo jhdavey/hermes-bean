@@ -1949,6 +1949,19 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return merged;
   }
 
+  List<HermesCalendarEvent> _calendarEventsForDashboardState({
+    required List<HermesCalendarEvent> listed,
+    required List<HermesCalendarEvent> summary,
+  }) {
+    final listedEvents = _normalizeCalendarEventsForDisplay(
+      _calendarEventsWithPendingWrites(listed),
+    );
+    if (listedEvents.isNotEmpty) return listedEvents;
+    return _normalizeCalendarEventsForDisplay(
+      _calendarEventsWithPendingWrites(summary),
+    );
+  }
+
   bool _calendarEventMatchesPendingWrite(
     HermesCalendarEvent refreshed,
     HermesCalendarEvent pending,
@@ -2974,8 +2987,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         results[2] as List<HermesReminder>,
       );
       final summaryReminders = _remindersWithPendingWrites(summary.reminders);
-      final listedCalendarEvents = _calendarEventsWithPendingWrites(
-        results[3] as List<HermesCalendarEvent>,
+      final listedCalendarEvents = _calendarEventsForDashboardState(
+        listed: results[3] as List<HermesCalendarEvent>,
+        summary: summary.calendarEvents,
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _applyUserTheme(user);
@@ -3748,7 +3762,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         };
         _tasks = _tasksWithPendingWrites(refreshedTasks);
         _reminders = _remindersWithPendingWrites(refreshedSummary.reminders);
-        _calendar = refreshedCalendar;
+        _calendar = _calendarEventsForDashboardState(
+          listed: refreshedCalendar,
+          summary: refreshedSummary.calendarEvents,
+        );
         _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
         _applyBeanWorkEvents(_events);
@@ -4299,8 +4316,9 @@ ${_truncateDiagnostic(stack, 2200)}
         results[2] as List<HermesReminder>,
       );
       final summaryReminders = _remindersWithPendingWrites(summary.reminders);
-      final listedCalendarEvents = _calendarEventsWithPendingWrites(
-        results[3] as List<HermesCalendarEvent>,
+      final listedCalendarEvents = _calendarEventsForDashboardState(
+        listed: results[3] as List<HermesCalendarEvent>,
+        summary: summary.calendarEvents,
       );
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
@@ -4414,8 +4432,9 @@ ${_truncateDiagnostic(stack, 2200)}
         results[2] as List<HermesReminder>,
       );
       final summaryReminders = _remindersWithPendingWrites(summary.reminders);
-      final listedCalendarEvents = _calendarEventsWithPendingWrites(
-        results[3] as List<HermesCalendarEvent>,
+      final listedCalendarEvents = _calendarEventsForDashboardState(
+        listed: results[3] as List<HermesCalendarEvent>,
+        summary: summary.calendarEvents,
       );
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
@@ -9020,10 +9039,11 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       _CommandCenterAgendaKind.task => 'Task',
       _CommandCenterAgendaKind.reminder => 'Reminder',
     };
+    final timeWidth = item.kind == _CommandCenterAgendaKind.event ? 78.0 : 58.0;
 
     return Container(
       key: Key('command-center-agenda-${item.key}'),
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: HeyBeanTheme.surface.withValues(alpha: .82),
         borderRadius: BorderRadius.circular(18),
@@ -9032,16 +9052,10 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 58,
-            child: Text(
-              item.timeLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: HeyBeanTheme.muted,
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-              ),
+            width: timeWidth,
+            child: _CommandCenterAgendaTimeLabel(
+              label: item.timeLabel,
+              allowStackedRange: item.kind == _CommandCenterAgendaKind.event,
             ),
           ),
           Container(
@@ -9093,6 +9107,64 @@ class _CommandCenterAgendaRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CommandCenterAgendaTimeLabel extends StatelessWidget {
+  const _CommandCenterAgendaTimeLabel({
+    required this.label,
+    required this.allowStackedRange,
+  });
+
+  final String label;
+  final bool allowStackedRange;
+
+  @override
+  Widget build(BuildContext context) {
+    final rangeParts = allowStackedRange
+        ? label.split(RegExp(r'\s+[–-]\s+'))
+        : const <String>[];
+    final canStack =
+        rangeParts.length == 2 &&
+        rangeParts.every((part) => part.trim().isNotEmpty);
+    const style = TextStyle(
+      color: HeyBeanTheme.muted,
+      fontSize: 12,
+      fontWeight: FontWeight.w900,
+      height: 1.05,
+    );
+    if (canStack) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            rangeParts[0].trim(),
+            maxLines: 1,
+            overflow: TextOverflow.visible,
+            softWrap: false,
+            style: style,
+          ),
+          Text(
+            rangeParts[1].trim(),
+            maxLines: 1,
+            overflow: TextOverflow.visible,
+            softWrap: false,
+            style: style.copyWith(
+              color: HeyBeanTheme.muted.withValues(alpha: .82),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.visible,
+      softWrap: false,
+      style: style,
     );
   }
 }
@@ -10902,19 +10974,17 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
       widget.startHour,
       widget.endHour,
     );
-    final timelineContentHeight =
+    final pinnedRowsHeight =
         (showMultiDayRow ? _calendarMultiDayRowHeight : 0) +
-        _calendarAllDayRowHeight +
-        (visibleHours.length * _calendarHourHeight);
+        _calendarAllDayRowHeight;
+    final timelineContentHeight = visibleHours.length * _calendarHourHeight;
     final timelineHeight = 1 + timelineContentHeight;
     final markerOffset =
-        (showMultiDayRow ? _calendarMultiDayRowHeight : 0) +
-        _calendarAllDayRowHeight +
         ((now.hour + (now.minute / 60)) - visibleHours.first).clamp(
-              0.0,
-              visibleHours.length.toDouble(),
-            ) *
-            _calendarHourHeight;
+          0.0,
+          visibleHours.length.toDouble(),
+        ) *
+        _calendarHourHeight;
     final currentTimeLabelTop = markerOffset
         .clamp(
           0.0,
@@ -10948,6 +11018,25 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
           today: today,
         ),
         SizedBox(
+          height: pinnedRowsHeight,
+          child: _PinnedTimelineRows(
+            pageController: _dayPageController,
+            initialDayPage: _initialDayPage,
+            pageAnchorDay: _pageAnchorDay,
+            calendar: widget.calendar,
+            eventCategories: widget.eventCategories,
+            googleCalendarStatus: widget.googleCalendarStatus,
+            workspaces: widget.workspaces,
+            activeWorkspaceId: widget.activeWorkspaceId,
+            visibleStartDay: visibleStartDay,
+            showMultiDayRow: showMultiDayRow,
+            onEventTap: widget.onEventTap,
+            onEventDeleted: widget.onEventDeleted,
+            onEventCategorySaved: widget.onEventCategorySaved,
+            onEventCategoryDeleted: widget.onEventCategoryDeleted,
+          ),
+        ),
+        SizedBox(
           height: timelineViewportHeight,
           child: SingleChildScrollView(
             key: const Key('apple-style-day-timeline-scroll'),
@@ -10965,78 +11054,34 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                     height: timelineContentHeight,
                     child: Row(
                       children: [
-                        _FixedTimelineHoursColumn(
-                          visibleHours: visibleHours,
-                          showMultiDayRow: showMultiDayRow,
-                        ),
+                        _FixedTimelineHoursColumn(visibleHours: visibleHours),
                         Expanded(
-                          child: Column(
-                            children: [
-                              if (showMultiDayRow)
-                                SizedBox(
-                                  height: _calendarMultiDayRowHeight,
-                                  child: _MultiDayEventSpanRow(
-                                    key: Key(
-                                      'calendar-multi-day-row-${visibleStartDay.toIso8601String()}',
-                                    ),
-                                    pageController: _dayPageController,
-                                    initialDayPage: _initialDayPage,
-                                    pageAnchorDay: _pageAnchorDay,
-                                    events: widget.calendar
-                                        .where(
-                                          (event) =>
-                                              _eventIsTimedMultiDay(event),
-                                        )
-                                        .toList(),
-                                    eventCategories: widget.eventCategories,
-                                    googleCalendarStatus:
-                                        widget.googleCalendarStatus,
-                                    workspaces: widget.workspaces,
-                                    activeWorkspaceId: widget.activeWorkspaceId,
-                                    onEventTap: widget.onEventTap,
-                                    onEventDeleted: widget.onEventDeleted,
-                                    onEventCategorySaved:
-                                        widget.onEventCategorySaved,
-                                    onEventCategoryDeleted:
-                                        widget.onEventCategoryDeleted,
-                                  ),
-                                ),
-                              Expanded(
-                                child: PageView.builder(
-                                  key: const PageStorageKey<String>(
-                                    'apple-style-day-page-view',
-                                  ),
-                                  controller: _dayPageController,
-                                  pageSnapping: false,
-                                  physics: const BouncingScrollPhysics(),
-                                  allowImplicitScrolling: true,
-                                  onPageChanged: _handlePageChanged,
-                                  itemBuilder: (context, page) =>
-                                      _TwoDayTimelinePage(
-                                        key: ValueKey(
-                                          'two-day-timeline-page-$page',
-                                        ),
-                                        calendar: widget.calendar,
-                                        eventCategories: widget.eventCategories,
-                                        googleCalendarStatus:
-                                            widget.googleCalendarStatus,
-                                        workspaces: widget.workspaces,
-                                        activeWorkspaceId:
-                                            widget.activeWorkspaceId,
-                                        selectedDay: _dateForPage(page),
-                                        startHour: visibleHours.first,
-                                        endHour: visibleHours.last,
-                                        visibleHours: visibleHours,
-                                        onEventTap: widget.onEventTap,
-                                        onEventDeleted: widget.onEventDeleted,
-                                        onEventCategorySaved:
-                                            widget.onEventCategorySaved,
-                                        onEventCategoryDeleted:
-                                            widget.onEventCategoryDeleted,
-                                      ),
-                                ),
-                              ),
-                            ],
+                          child: PageView.builder(
+                            key: const PageStorageKey<String>(
+                              'apple-style-day-page-view',
+                            ),
+                            controller: _dayPageController,
+                            pageSnapping: false,
+                            physics: const BouncingScrollPhysics(),
+                            allowImplicitScrolling: true,
+                            onPageChanged: _handlePageChanged,
+                            itemBuilder: (context, page) => _TwoDayTimelinePage(
+                              key: ValueKey('two-day-timeline-page-$page'),
+                              calendar: widget.calendar,
+                              eventCategories: widget.eventCategories,
+                              googleCalendarStatus: widget.googleCalendarStatus,
+                              workspaces: widget.workspaces,
+                              activeWorkspaceId: widget.activeWorkspaceId,
+                              selectedDay: _dateForPage(page),
+                              startHour: visibleHours.first,
+                              endHour: visibleHours.last,
+                              visibleHours: visibleHours,
+                              onEventTap: widget.onEventTap,
+                              onEventDeleted: widget.onEventDeleted,
+                              onEventCategorySaved: widget.onEventCategorySaved,
+                              onEventCategoryDeleted:
+                                  widget.onEventCategoryDeleted,
+                            ),
                           ),
                         ),
                       ],
@@ -11170,18 +11215,6 @@ class _TwoDayTimelinePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selectedNextDay = selectedDay.add(const Duration(days: 1));
-    final selectedAllDayEvents = calendar
-        .where(
-          (event) =>
-              _eventIsAllDay(event) && _eventFallsOnDay(event, selectedDay),
-        )
-        .toList();
-    final nextAllDayEvents = calendar
-        .where(
-          (event) =>
-              _eventIsAllDay(event) && _eventFallsOnDay(event, selectedNextDay),
-        )
-        .toList();
     final selectedTimedEventLayouts = _timelineEventLayoutsForDay(
       calendar,
       selectedDay,
@@ -11195,103 +11228,56 @@ class _TwoDayTimelinePage extends StatelessWidget {
       endHour,
     );
 
-    return Column(
-      children: [
-        SizedBox(
-          height: _calendarAllDayRowHeight,
-          child: Row(
+    return LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Column(
             children: [
-              Expanded(
-                child: _AllDayEventRow(
-                  key: Key(
-                    'calendar-all-day-row-${selectedDay.toIso8601String()}',
-                  ),
-                  day: selectedDay,
-                  events: selectedAllDayEvents,
-                  eventCategories: eventCategories,
-                  googleCalendarStatus: googleCalendarStatus,
-                  workspaces: workspaces,
-                  activeWorkspaceId: activeWorkspaceId,
-                  onEventTap: onEventTap,
-                  onEventDeleted: onEventDeleted,
-                  onEventCategorySaved: onEventCategorySaved,
-                  onEventCategoryDeleted: onEventCategoryDeleted,
-                ),
-              ),
-              Expanded(
-                child: _AllDayEventRow(
-                  key: Key(
-                    'calendar-all-day-row-${selectedNextDay.toIso8601String()}',
-                  ),
-                  day: selectedNextDay,
-                  events: nextAllDayEvents,
-                  eventCategories: eventCategories,
-                  googleCalendarStatus: googleCalendarStatus,
-                  workspaces: workspaces,
-                  activeWorkspaceId: activeWorkspaceId,
-                  onEventTap: onEventTap,
-                  onEventDeleted: onEventDeleted,
-                  onEventCategorySaved: onEventCategorySaved,
-                  onEventCategoryDeleted: onEventCategoryDeleted,
-                ),
-              ),
+              for (var index = 0; index < visibleHours.length; index++)
+                const _TimelineDayGridRow(),
             ],
           ),
-        ),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) => Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Column(
-                  children: [
-                    for (var index = 0; index < visibleHours.length; index++)
-                      const _TimelineDayGridRow(),
-                  ],
-                ),
-                for (final layout in selectedTimedEventLayouts)
-                  _TimelineEventBlock(
-                    event: layout.event,
-                    day: selectedDay,
-                    startHour: startHour,
-                    endHour: endHour,
-                    columnIndex: 0,
-                    laneIndex: layout.laneIndex,
-                    laneCount: layout.laneCount,
-                    timelineWidth: constraints.maxWidth,
-                    eventCategories: eventCategories,
-                    googleCalendarStatus: googleCalendarStatus,
-                    workspaces: workspaces,
-                    activeWorkspaceId: activeWorkspaceId,
-                    onTap: onEventTap,
-                    onDelete: onEventDeleted,
-                    onEventCategorySaved: onEventCategorySaved,
-                    onEventCategoryDeleted: onEventCategoryDeleted,
-                  ),
-                for (final layout in nextTimedEventLayouts)
-                  _TimelineEventBlock(
-                    event: layout.event,
-                    day: selectedNextDay,
-                    startHour: startHour,
-                    endHour: endHour,
-                    columnIndex: 1,
-                    laneIndex: layout.laneIndex,
-                    laneCount: layout.laneCount,
-                    timelineWidth: constraints.maxWidth,
-                    eventCategories: eventCategories,
-                    googleCalendarStatus: googleCalendarStatus,
-                    workspaces: workspaces,
-                    activeWorkspaceId: activeWorkspaceId,
-                    onTap: onEventTap,
-                    onDelete: onEventDeleted,
-                    onEventCategorySaved: onEventCategorySaved,
-                    onEventCategoryDeleted: onEventCategoryDeleted,
-                  ),
-              ],
+          for (final layout in selectedTimedEventLayouts)
+            _TimelineEventBlock(
+              event: layout.event,
+              day: selectedDay,
+              startHour: startHour,
+              endHour: endHour,
+              columnIndex: 0,
+              laneIndex: layout.laneIndex,
+              laneCount: layout.laneCount,
+              timelineWidth: constraints.maxWidth,
+              eventCategories: eventCategories,
+              googleCalendarStatus: googleCalendarStatus,
+              workspaces: workspaces,
+              activeWorkspaceId: activeWorkspaceId,
+              onTap: onEventTap,
+              onDelete: onEventDeleted,
+              onEventCategorySaved: onEventCategorySaved,
+              onEventCategoryDeleted: onEventCategoryDeleted,
             ),
-          ),
-        ),
-      ],
+          for (final layout in nextTimedEventLayouts)
+            _TimelineEventBlock(
+              event: layout.event,
+              day: selectedNextDay,
+              startHour: startHour,
+              endHour: endHour,
+              columnIndex: 1,
+              laneIndex: layout.laneIndex,
+              laneCount: layout.laneCount,
+              timelineWidth: constraints.maxWidth,
+              eventCategories: eventCategories,
+              googleCalendarStatus: googleCalendarStatus,
+              workspaces: workspaces,
+              activeWorkspaceId: activeWorkspaceId,
+              onTap: onEventTap,
+              onDelete: onEventDeleted,
+              onEventCategorySaved: onEventCategorySaved,
+              onEventCategoryDeleted: onEventCategoryDeleted,
+            ),
+        ],
+      ),
     );
   }
 }
@@ -11477,6 +11463,314 @@ class _DayColumnHeading extends StatelessWidget {
   );
 }
 
+class _PinnedTimelineRows extends StatelessWidget {
+  const _PinnedTimelineRows({
+    required this.pageController,
+    required this.initialDayPage,
+    required this.pageAnchorDay,
+    required this.calendar,
+    required this.eventCategories,
+    required this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
+    required this.visibleStartDay,
+    required this.showMultiDayRow,
+    required this.onEventTap,
+    required this.onEventDeleted,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
+  });
+
+  final PageController pageController;
+  final int initialDayPage;
+  final DateTime pageAnchorDay;
+  final List<HermesCalendarEvent> calendar;
+  final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
+  final DateTime visibleStartDay;
+  final bool showMultiDayRow;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds,
+  })
+  onEventTap;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventDeleted;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventCategoryDeleted;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      SizedBox(
+        width: _calendarTimeColumnWidth,
+        child: Column(
+          children: [
+            if (showMultiDayRow)
+              const _PinnedTimelineLabel(
+                key: Key('calendar-multi-day-label'),
+                height: _calendarMultiDayRowHeight,
+                label: 'Multi-Day',
+                accent: true,
+              ),
+            const _PinnedTimelineLabel(
+              key: Key('calendar-all-day-label'),
+              height: _calendarAllDayRowHeight,
+              label: 'All Day',
+            ),
+          ],
+        ),
+      ),
+      Expanded(
+        child: Column(
+          children: [
+            if (showMultiDayRow)
+              SizedBox(
+                height: _calendarMultiDayRowHeight,
+                child: _MultiDayEventSpanRow(
+                  key: Key(
+                    'calendar-multi-day-row-${visibleStartDay.toIso8601String()}',
+                  ),
+                  pageController: pageController,
+                  initialDayPage: initialDayPage,
+                  pageAnchorDay: pageAnchorDay,
+                  events: calendar
+                      .where((event) => _eventIsTimedMultiDay(event))
+                      .toList(),
+                  eventCategories: eventCategories,
+                  googleCalendarStatus: googleCalendarStatus,
+                  workspaces: workspaces,
+                  activeWorkspaceId: activeWorkspaceId,
+                  onEventTap: onEventTap,
+                  onEventDeleted: onEventDeleted,
+                  onEventCategorySaved: onEventCategorySaved,
+                  onEventCategoryDeleted: onEventCategoryDeleted,
+                ),
+              ),
+            SizedBox(
+              height: _calendarAllDayRowHeight,
+              child: _ScrollableAllDayEventRows(
+                pageController: pageController,
+                initialDayPage: initialDayPage,
+                pageAnchorDay: pageAnchorDay,
+                calendar: calendar,
+                eventCategories: eventCategories,
+                googleCalendarStatus: googleCalendarStatus,
+                workspaces: workspaces,
+                activeWorkspaceId: activeWorkspaceId,
+                onEventTap: onEventTap,
+                onEventDeleted: onEventDeleted,
+                onEventCategorySaved: onEventCategorySaved,
+                onEventCategoryDeleted: onEventCategoryDeleted,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+class _PinnedTimelineLabel extends StatelessWidget {
+  const _PinnedTimelineLabel({
+    super.key,
+    required this.height,
+    required this.label,
+    this.accent = false,
+  });
+
+  final double height;
+  final String label;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: height,
+    decoration: BoxDecoration(
+      color: accent
+          ? HeyBeanTheme.accent.withValues(alpha: .06)
+          : Colors.transparent,
+      border: const Border(bottom: BorderSide(color: HeyBeanTheme.border)),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.only(top: 10, right: 6),
+      child: Align(
+        alignment: Alignment.topRight,
+        child: Text(
+          label,
+          textAlign: TextAlign.right,
+          style: const TextStyle(
+            color: HeyBeanTheme.muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _ScrollableAllDayEventRows extends StatelessWidget {
+  const _ScrollableAllDayEventRows({
+    required this.pageController,
+    required this.initialDayPage,
+    required this.pageAnchorDay,
+    required this.calendar,
+    required this.eventCategories,
+    required this.googleCalendarStatus,
+    this.workspaces = const [],
+    this.activeWorkspaceId,
+    required this.onEventTap,
+    required this.onEventDeleted,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
+  });
+
+  final PageController pageController;
+  final int initialDayPage;
+  final DateTime pageAnchorDay;
+  final List<HermesCalendarEvent> calendar;
+  final List<HermesEventCategory> eventCategories;
+  final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<HermesWorkspace> workspaces;
+  final String? activeWorkspaceId;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    required String title,
+    required String startsAt,
+    String? endsAt,
+    String? notes,
+    String? location,
+    String? status,
+    String? category,
+    String? color,
+    String? recurrence,
+    Map<String, Object?>? metadata,
+    bool? isCritical,
+    int? reminderMinutesBefore,
+    String? reminderRecurrence,
+    List<String>? reminderSpecificDays,
+    int? reminderInterval,
+    String? reminderIntervalUnit,
+    int? workspaceId,
+    List<Object> syncToWorkspaceIds,
+  })
+  onEventTap;
+  final Future<void> Function(
+    HermesCalendarEvent event, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventDeleted;
+  final Future<HermesEventCategory> Function({
+    HermesEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(
+    HermesEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventCategoryDeleted;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: const BoxDecoration(
+      border: Border(bottom: BorderSide(color: HeyBeanTheme.border)),
+    ),
+    child: ClipRect(
+      child: LayoutBuilder(
+        builder: (context, constraints) => AnimatedBuilder(
+          animation: pageController,
+          builder: (context, _) {
+            final dayOffset = _timelineDayOffset(
+              pageController,
+              initialDayPage,
+            );
+            final columnWidth = constraints.maxWidth / 2;
+            final firstRenderedDayOffset = dayOffset.floor() - 1;
+            return Stack(
+              children: [
+                for (
+                  var dayOffsetIndex = firstRenderedDayOffset;
+                  dayOffsetIndex <= firstRenderedDayOffset + 4;
+                  dayOffsetIndex++
+                )
+                  Positioned(
+                    left: (dayOffsetIndex - dayOffset) * columnWidth,
+                    top: 0,
+                    bottom: 0,
+                    width: columnWidth,
+                    child: Builder(
+                      builder: (context) {
+                        final day = pageAnchorDay.add(
+                          Duration(days: dayOffsetIndex),
+                        );
+                        final events = calendar
+                            .where(
+                              (event) =>
+                                  _eventIsAllDay(event) &&
+                                  _eventFallsOnDay(event, day),
+                            )
+                            .toList();
+                        return _AllDayEventRow(
+                          key: Key(
+                            'calendar-all-day-row-${day.toIso8601String()}',
+                          ),
+                          day: day,
+                          events: events,
+                          eventCategories: eventCategories,
+                          googleCalendarStatus: googleCalendarStatus,
+                          workspaces: workspaces,
+                          activeWorkspaceId: activeWorkspaceId,
+                          onEventTap: onEventTap,
+                          onEventDeleted: onEventDeleted,
+                          onEventCategorySaved: onEventCategorySaved,
+                          onEventCategoryDeleted: onEventCategoryDeleted,
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    ),
+  );
+}
+
 double _timelineDayOffset(PageController controller, int initialDayPage) {
   final page = controller.hasClients
       ? controller.page ?? initialDayPage.toDouble()
@@ -11485,13 +11779,9 @@ double _timelineDayOffset(PageController controller, int initialDayPage) {
 }
 
 class _FixedTimelineHoursColumn extends StatelessWidget {
-  const _FixedTimelineHoursColumn({
-    required this.visibleHours,
-    required this.showMultiDayRow,
-  });
+  const _FixedTimelineHoursColumn({required this.visibleHours});
 
   final List<int> visibleHours;
-  final bool showMultiDayRow;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -11499,45 +11789,6 @@ class _FixedTimelineHoursColumn extends StatelessWidget {
     width: _calendarTimeColumnWidth,
     child: Column(
       children: [
-        if (showMultiDayRow)
-          SizedBox(
-            key: const Key('calendar-multi-day-label'),
-            height: _calendarMultiDayRowHeight,
-            child: const Padding(
-              padding: EdgeInsets.only(top: 10, right: 6),
-              child: Align(
-                alignment: Alignment.topRight,
-                child: Text(
-                  'Multi-Day',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: HeyBeanTheme.muted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        SizedBox(
-          key: const Key('calendar-all-day-label'),
-          height: _calendarAllDayRowHeight,
-          child: const Padding(
-            padding: EdgeInsets.only(top: 10, right: 6),
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Text(
-                'All Day',
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  color: HeyBeanTheme.muted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-        ),
         for (final hour in visibleHours)
           SizedBox(
             height: _calendarHourHeight,
@@ -12618,12 +12869,12 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _title = TextEditingController(text: event.title);
     _startsAt = TextEditingController(
       text: _allDay
-          ? _formatCalendarEventDate(event.startsAt)
+          ? _formatCalendarAllDayEventDate(event.startsAt)
           : _formatCalendarEventDateTime(event.startsAt),
     );
     _endsAt = TextEditingController(
       text: _allDay
-          ? _formatCalendarEventEndDate(event.startsAt, event.endsAt)
+          ? _formatCalendarAllDayEventEndDate(event.startsAt, event.endsAt)
           : _formatCalendarEventDateTime(event.endsAt),
     );
     _notes = TextEditingController(text: event.notes ?? '');
@@ -12715,37 +12966,15 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         _startsAt.text,
         originalValue: widget.event.startsAt,
       );
-      final endDate = _endsAt.text.trim().isEmpty
-          ? startDate
-          : _calendarEventDateInputToDate(
-              _endsAt.text,
-              originalValue: widget.event.endsAt,
-              referenceValue: startDate,
-            );
       if (startDate == null) {
-        setState(
-          () => _validationError = 'Enter a valid start date, like May 18.',
-        );
-        return;
-      }
-      if (endDate == null) {
-        setState(
-          () => _validationError = 'Enter a valid end date or leave it blank.',
-        );
-        return;
-      }
-      if (endDate.isBefore(startDate)) {
-        setState(
-          () =>
-              _validationError = 'End date must be on or after the start date.',
-        );
+        setState(() => _validationError = 'Enter a valid date, like May 18.');
         return;
       }
       parsedStart = DateTime(startDate.year, startDate.month, startDate.day);
       parsedEnd = DateTime(
-        endDate.year,
-        endDate.month,
-        endDate.day,
+        startDate.year,
+        startDate.month,
+        startDate.day,
       ).add(const Duration(days: 1));
       startsAt = parsedStart.toUtc().toIso8601String();
       endsAt = parsedEnd.toUtc().toIso8601String();
@@ -13348,17 +13577,10 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
           _parseCalendarEventDateTime(_startsAt.text, widget.event.startsAt) ??
           _parseCalendarEventDateTime(widget.event.startsAt) ??
           DateTime.now();
-      final end =
-          _parseCalendarEventDateTime(_endsAt.text, widget.event.endsAt) ??
-          _parseCalendarEventDateTime(
-            widget.event.endsAt,
-            widget.event.startsAt,
-          );
 
       if (value) {
         _startsAt.text = _formatCalendarDateLabel(start);
-        final endDate = _displayEndDateForAllDay(start, end);
-        _endsAt.text = _formatCalendarDateLabel(endDate);
+        _endsAt.text = _formatCalendarDateLabel(start);
       } else {
         final startDate =
             _calendarEventDateInputToDate(_startsAt.text) ?? start;
@@ -13546,33 +13768,41 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           TextField(
                             key: const Key('event-start-field'),
                             controller: _startsAt,
-                            onChanged: (_) =>
-                                setState(_setEndOneHourAfterStart),
+                            onChanged: (_) {
+                              if (!_allDay) {
+                                setState(_setEndOneHourAfterStart);
+                              }
+                            },
                             onTap: () => _showTimeDock(
                               _startsAt,
                               originalValue: widget.event.startsAt,
-                              updateEndFromStart: true,
+                              updateEndFromStart: !_allDay,
                             ),
                             decoration: InputDecoration(
-                              labelText: _allDay ? 'Start date' : 'Start time',
-                              prefixIcon: const Icon(Icons.play_arrow_rounded),
+                              labelText: _allDay ? 'Date' : 'Start time',
+                              prefixIcon: Icon(
+                                _allDay
+                                    ? Icons.event_rounded
+                                    : Icons.play_arrow_rounded,
+                              ),
                               suffixIcon: const Icon(Icons.expand_less_rounded),
                             ),
                           ),
-                          TextField(
-                            key: const Key('event-end-field'),
-                            controller: _endsAt,
-                            onTap: () => _showTimeDock(
-                              _endsAt,
-                              originalValue: widget.event.endsAt,
-                              referenceValue: _startsAt.text,
+                          if (!_allDay)
+                            TextField(
+                              key: const Key('event-end-field'),
+                              controller: _endsAt,
+                              onTap: () => _showTimeDock(
+                                _endsAt,
+                                originalValue: widget.event.endsAt,
+                                referenceValue: _startsAt.text,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: 'End time',
+                                prefixIcon: Icon(Icons.stop_rounded),
+                                suffixIcon: Icon(Icons.expand_less_rounded),
+                              ),
                             ),
-                            decoration: InputDecoration(
-                              labelText: _allDay ? 'End date' : 'End time',
-                              prefixIcon: const Icon(Icons.stop_rounded),
-                              suffixIcon: const Icon(Icons.expand_less_rounded),
-                            ),
-                          ),
                         ],
                       ),
                       const SizedBox(height: 14),
@@ -14599,8 +14829,10 @@ String _calendarEventBlockKey(HermesCalendarEvent event) {
 
 String _calendarEventBlockKeyForDay(HermesCalendarEvent event, DateTime day) {
   final base = _calendarEventBlockKey(event);
-  final recurrence = (event.recurrence ?? 'none').toLowerCase();
-  if (recurrence == 'none' || recurrence.isEmpty) return base;
+  if (!_eventIsRecurring(event) &&
+      !_calendarEventIsGeneratedOccurrence(event)) {
+    return base;
+  }
   return '$base-${day.year}-${day.month}-${day.day}';
 }
 
@@ -14754,8 +14986,7 @@ List<_TimelineEventLayout> _timelineEventLayoutsForDay(
   }
 
   final dayStart = DateTime(day.year, day.month, day.day);
-  final recurrence = (event.recurrence ?? 'none').toLowerCase();
-  if (recurrence != 'none' && recurrence.isNotEmpty) {
+  if (_eventIsRecurring(event)) {
     if (!_eventFallsOnDay(event, dayStart)) return null;
     final duration = end.difference(start);
     final occurrenceStart = DateTime(
@@ -14886,11 +15117,31 @@ String _formatCalendarEventDate(String? value) {
   return parsed == null ? '' : _formatCalendarDateLabel(parsed);
 }
 
+String _formatCalendarAllDayEventDate(String? value) {
+  final parsed = _calendarEventStoredDate(value);
+  if (parsed != null) return _formatCalendarDateLabel(parsed);
+  return _formatCalendarEventDate(value);
+}
+
 String _formatCalendarEventEndDate(String? startsAt, String? endsAt) {
   final start = _parseCalendarEventDateTime(startsAt);
   final end = _parseCalendarEventDateTime(endsAt, startsAt);
   if (end == null) return start == null ? '' : _formatCalendarDateLabel(start);
   return _formatCalendarDateLabel(_displayEndDateForAllDay(start, end));
+}
+
+String _formatCalendarAllDayEventEndDate(String? startsAt, String? endsAt) {
+  final start = _calendarEventStoredDate(startsAt);
+  final end = _calendarEventStoredDate(endsAt);
+  if (end == null) {
+    return start == null
+        ? _formatCalendarEventEndDate(startsAt, endsAt)
+        : _formatCalendarDateLabel(start);
+  }
+  if (start != null && end.isAfter(start)) {
+    return _formatCalendarDateLabel(end.subtract(const Duration(days: 1)));
+  }
+  return _formatCalendarDateLabel(end);
 }
 
 DateTime _displayEndDateForAllDay(DateTime? start, DateTime? end) {
@@ -15195,8 +15446,130 @@ DateTime? _parseCalendarDateKey(String? value) {
 }
 
 bool _eventIsRecurring(HermesCalendarEvent event) {
+  if (_calendarEventIsGeneratedOccurrence(event) ||
+      _calendarEventRecurrenceExpansionDisabled(event)) {
+    return false;
+  }
   final recurrence = (event.recurrence ?? 'none').toLowerCase();
   return recurrence.isNotEmpty && recurrence != 'none';
+}
+
+bool _metadataTruthy(Object? value) {
+  if (value == true) return true;
+  if (value is num) return value != 0;
+  final normalized = value?.toString().trim().toLowerCase();
+  return normalized == 'true' || normalized == '1' || normalized == 'yes';
+}
+
+bool _calendarEventIsGeneratedOccurrence(HermesCalendarEvent event) {
+  final metadata = event.metadata;
+  return _metadataTruthy(
+        metadata?['recurrence_generated'] ?? metadata?['recurrenceGenerated'],
+      ) ||
+      metadata?['recurrence_parent_event_id'] != null ||
+      metadata?['recurrenceParentEventId'] != null;
+}
+
+bool _calendarEventSourceHidden(HermesCalendarEvent event) => _metadataTruthy(
+  event.metadata?['recurrence_source_hidden'] ??
+      event.metadata?['recurrenceSourceHidden'],
+);
+
+bool _calendarEventRecurrenceExpansionDisabled(HermesCalendarEvent event) =>
+    _metadataTruthy(event.metadata?['_display_disable_recurrence_expansion']);
+
+String? _calendarGeneratedOccurrenceKey(HermesCalendarEvent event) {
+  final metadata = event.metadata;
+  final parentId =
+      metadata?['recurrence_parent_event_id'] ??
+      metadata?['recurrenceParentEventId'];
+  if (parentId == null) return null;
+  final occurrenceDate =
+      metadata?['recurrence_occurrence_date'] ??
+      metadata?['recurrenceOccurrenceDate'];
+  final parsedStart = _parseCalendarEventDateTime(event.startsAt);
+  final occurrenceKey =
+      occurrenceDate?.toString() ??
+      (parsedStart == null
+          ? event.id.toString()
+          : _calendarDateKey(parsedStart));
+  return 'generated:$parentId:$occurrenceKey';
+}
+
+String _calendarDisplayDedupKey(HermesCalendarEvent event) {
+  final generatedKey = _calendarGeneratedOccurrenceKey(event);
+  if (generatedKey != null) return generatedKey;
+  final googleIds = event.googleCalendarIds;
+  if (googleIds.isNotEmpty) {
+    final sortedGoogleIds = [...googleIds]..sort();
+    return 'google:${sortedGoogleIds.join(',')}:${event.startsAt}:${event.endsAt}';
+  }
+  return 'event:${event.id}';
+}
+
+List<HermesCalendarEvent> _normalizeCalendarEventsForDisplay(
+  List<HermesCalendarEvent> events,
+) {
+  final normalized = <HermesCalendarEvent>[];
+  final seen = <String>{};
+  final materializedSeriesParentIds = events
+      .map(
+        (event) =>
+            event.metadata?['recurrence_parent_event_id'] ??
+            event.metadata?['recurrenceParentEventId'],
+      )
+      .whereType<Object>()
+      .map((value) => value.toString())
+      .toSet();
+  for (final event in events) {
+    if (_calendarEventSourceHidden(event)) continue;
+    final displayEvent =
+        _eventIsRecurring(event) &&
+            materializedSeriesParentIds.contains(event.id.toString())
+        ? event.copyWith(
+            metadata: {
+              ...?event.metadata,
+              '_display_disable_recurrence_expansion': true,
+            },
+          )
+        : event;
+    final key = _calendarDisplayDedupKey(event);
+    if (seen.add(key)) normalized.add(displayEvent);
+  }
+  return normalized;
+}
+
+DateTime? _calendarEventStoredDate(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) return null;
+  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(trimmed);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final day = int.tryParse(match.group(3)!);
+  if (year == null || month == null || day == null) return null;
+  return DateTime(year, month, day);
+}
+
+DateTime? _calendarEventDisplayStartDay(HermesCalendarEvent event) {
+  if (_eventIsAllDay(event)) {
+    final parsed = _parseCalendarEventDateTime(event.startsAt);
+    return _calendarEventStoredDate(event.startsAt) ??
+        (parsed == null ? null : _dateOnly(parsed));
+  }
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  return start == null ? null : _dateOnly(start);
+}
+
+DateTime? _calendarEventDisplayEndExclusiveDay(HermesCalendarEvent event) {
+  if (_eventIsAllDay(event)) {
+    final start = _calendarEventDisplayStartDay(event);
+    final end = _calendarEventStoredDate(event.endsAt);
+    if (end == null) return start?.add(const Duration(days: 1));
+    return end.isAfter(start ?? end) ? end : end.add(const Duration(days: 1));
+  }
+  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  return end == null ? null : _dateOnly(end);
 }
 
 Set<String> _recurringExceptionDates(HermesCalendarEvent event) {
@@ -15231,6 +15604,15 @@ Map<String, Object?> _metadataAfterRecurringDelete(
 }
 
 bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
+  final dayStart = DateTime(day.year, day.month, day.day);
+  if (_eventIsAllDay(event)) {
+    final startDay = _calendarEventDisplayStartDay(event);
+    if (startDay == null) return false;
+    final endExclusive =
+        _calendarEventDisplayEndExclusiveDay(event) ??
+        startDay.add(const Duration(days: 1));
+    return !dayStart.isBefore(startDay) && dayStart.isBefore(endExclusive);
+  }
   final start = _parseCalendarEventDateTime(event.startsAt);
   if (start == null) return false;
   var end =
@@ -15239,10 +15621,8 @@ bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
   if (!end.isAfter(start)) {
     end = start.add(const Duration(minutes: 30));
   }
-  final dayStart = DateTime(day.year, day.month, day.day);
   final dayEnd = dayStart.add(const Duration(days: 1));
-  final recurrence = (event.recurrence ?? 'none').toLowerCase();
-  if (recurrence != 'none' && recurrence.isNotEmpty) {
+  if (_eventIsRecurring(event)) {
     return _recurringEventFallsOnDay(event, start, end, dayStart, dayEnd);
   }
   return end.isAfter(dayStart) && start.isBefore(dayEnd);

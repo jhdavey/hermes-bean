@@ -955,6 +955,28 @@ void main() {
     },
   );
 
+  test(
+    'ignores source recurrence metadata on generated calendar occurrences',
+    () {
+      final event = HermesCalendarEvent.fromJson({
+        'id': 4,
+        'title': 'Workout',
+        'starts_at': '2026-06-22T05:00:00Z',
+        'ends_at': '2026-06-22T06:00:00Z',
+        'recurrence': null,
+        'metadata': {
+          'recurrence': 'daily',
+          'recurrence_generated': true,
+          'recurrence_parent_event_id': 3,
+          'recurrence_occurrence_date': '2026-06-22',
+        },
+      });
+
+      expect(event.recurrence, isNull);
+      expect(event.metadata?['recurrence'], 'daily');
+    },
+  );
+
   test('parses and saves Google Calendar selection metadata', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
