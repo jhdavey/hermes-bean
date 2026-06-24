@@ -182,6 +182,16 @@ class _BeanWorkItem {
   );
 }
 
+double _beanWorkDockStripHeight(List<_BeanWorkItem> items, bool active) {
+  if (!active) return 0;
+  final count = math.min(
+    items.where((item) => item.label.trim().isNotEmpty).length,
+    4,
+  );
+  if (count == 0) return 48;
+  return math.min(150, 48 + (count * 24));
+}
+
 class _BeanResponsePreview {
   const _BeanResponsePreview({
     required this.key,
@@ -1399,7 +1409,6 @@ enum _HomeDestination { today, tasks, bean, reminders, notes, memory, settings }
 const _dashboardChangePollInterval = Duration(seconds: 15);
 const _pendingCalendarEventWriteTtl = Duration(minutes: 2);
 const _pendingDashboardWriteTtl = Duration(minutes: 2);
-const _assistantQueuedRunDeadline = Duration(seconds: 10);
 const _onboardingTourSeenPreferencePrefix = 'heybean.onboarding_tour_seen';
 const _dashboardSnapshotPreferencePrefix = 'heybean.dashboard_snapshot.v2';
 
@@ -2614,16 +2623,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               _chatRunState = 'working...';
               _ensureBeanRequestWorkItem(userContent, freshRequest: true);
             });
-            unawaited(
-              _pollQueuedRun(
-                runId,
-                _chatRunToken,
-                deadline:
-                    _beanRequestNeedsFastExternalLookupDeadline(userContent)
-                    ? _assistantQueuedRunDeadline
-                    : null,
-              ),
-            );
+            unawaited(_pollQueuedRun(runId, _chatRunToken));
             unawaited(_pollDashboardChanges());
           },
         );
@@ -3913,15 +3913,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             _activeAssistantRunId = run.id;
             _ensureBeanRequestWorkItem(trimmed);
           });
-          unawaited(
-            _pollQueuedRun(
-              run.id,
-              runToken,
-              deadline: _beanRequestNeedsFastExternalLookupDeadline(trimmed)
-                  ? _assistantQueuedRunDeadline
-                  : null,
-            ),
-          );
+          unawaited(_pollQueuedRun(run.id, runToken));
         }
         return;
       }
@@ -4054,22 +4046,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         normalized.contains('help set up');
   }
 
-  bool _beanRequestNeedsFastExternalLookupDeadline(String content) {
-    final command = _normalizedVoiceCommand(content);
-    if (command.isEmpty) return false;
-    final targetsAppData = RegExp(
-      r'\b(calendar|event|events|task|tasks|todo|to do|reminder|reminders|note|notes)\b',
-    ).hasMatch(command);
-    final changesAppData = RegExp(
-      r'\b(add|create|schedule|delete|remove|cancel|update|change|move|reschedule|complete|mark|write|save)\b',
-    ).hasMatch(command);
-    if (targetsAppData && changesAppData) return false;
-
-    return RegExp(
-      r'\b(nearest|closest|near me|nearby|local|store|restaurant|business|address|directions|open now|hours|price|prices|available|availability|weather|forecast|traffic|news|stock|stocks|sports|score|scores|flight|flights|hotel|hotels|wawa)\b',
-    ).hasMatch(command);
-  }
-
   bool _isConversationDecline(String content) {
     final normalized = _normalizeChatRoutingText(content);
     return RegExp(
@@ -4166,39 +4142,10 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
-  Future<void> _pollQueuedRun(
-    int runId,
-    int runToken, {
-    Duration? deadline,
-  }) async {
-    final startedAt = DateTime.now();
+  Future<void> _pollQueuedRun(int runId, int runToken) async {
     for (var attempt = 0; attempt < 30; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 2));
       if (!mounted || runToken != _chatRunToken) return;
-      if (deadline != null &&
-          DateTime.now().difference(startedAt) >= deadline) {
-        try {
-          await widget.apiClient.cancelAssistantRun(runId);
-        } catch (_) {
-          // A completed run can race the deadline; the next refresh will pick it up.
-        }
-        if (!mounted || runToken != _chatRunToken) return;
-        setState(() {
-          if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
-          _busy = false;
-          _chatRunState = 'Timed out';
-          _beanWorkItems = const [];
-          _messages.add(
-            HermesMessage(
-              id: _messages.length + 1,
-              role: 'assistant',
-              content:
-                  'I could not get that live lookup back quickly enough. Please try again in a moment, or include the city and zip code so I can narrow it down faster.',
-            ),
-          );
-        });
-        return;
-      }
       try {
         final run = await widget.apiClient.getAssistantRun(runId);
         if (!mounted || runToken != _chatRunToken) return;
@@ -4254,10 +4201,12 @@ ${_truncateDiagnostic(stack, 2200)}
   }
 
   HermesMessage _displayableAssistantMessage(HermesMessage message) {
+    final content = _naturalLanguageContent(message.content);
     return HermesMessage(
       id: message.id,
       role: message.role,
-      content: _naturalLanguageContent(message.content),
+      content:
+          content ?? (message.metadata['runtime'] == 'tools' ? 'Done.' : null),
       metadata: message.metadata,
     );
   }
@@ -4278,6 +4227,9 @@ ${_truncateDiagnostic(stack, 2200)}
           if (value is String && value.trim().isNotEmpty) {
             return value.trim();
           }
+        }
+        if (decoded.containsKey('role') || decoded.containsKey('content')) {
+          return null;
         }
       }
     } catch (_) {
@@ -6776,6 +6728,13 @@ ${_truncateDiagnostic(stack, 2200)}
     final criticalItemCount = _criticalItemCountForToday();
     final showBeanIntroSpotlight = _showBeanIntroSpotlight;
     final beanResponsePreview = _beanCollapsedResponsePreview;
+    final beanDockStatusLift = _selectedDestination == _HomeDestination.bean
+        ? _beanChatComposerReservedHeight +
+              _beanWorkDockStripHeight(
+                _beanVisibleWorkItems,
+                _beanStatusTagVisible,
+              )
+        : 0.0;
     _syncBeanResponsePreviewTimer(beanResponsePreview);
     _scheduleAppIconBadgeSync(criticalItemCount);
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -6867,6 +6826,11 @@ ${_truncateDiagnostic(stack, 2200)}
                   ? _SignedInBottomDock(
                       showComposer:
                           _selectedDestination == _HomeDestination.bean,
+                      beanWorkItems: _beanVisibleWorkItems,
+                      beanWorkStatus: _beanStatusTagLabel,
+                      beanWorkActive:
+                          _selectedDestination == _HomeDestination.bean &&
+                          _beanStatusTagVisible,
                       composer: _DockedBeanChatComposer(
                         controller: _chatInputController,
                         focusNode: _chatInputFocusNode,
@@ -6882,11 +6846,9 @@ ${_truncateDiagnostic(stack, 2200)}
                         beanListening: _beanVoiceListening,
                         beanWorkItems: _beanVisibleWorkItems,
                         beanWorkStatus: _beanStatusTagLabel,
-                        beanWorkActive: _beanStatusTagVisible,
-                        statusLift:
-                            _selectedDestination == _HomeDestination.bean
-                            ? _beanChatComposerReservedHeight
-                            : 0,
+                        beanWorkActive:
+                            _selectedDestination != _HomeDestination.bean &&
+                            _beanStatusTagVisible,
                         onSelected: _selectDestination,
                         onMorePressed: _openMoreMenu,
                         onBeanLongPressStart: () =>
@@ -6907,7 +6869,7 @@ ${_truncateDiagnostic(stack, 2200)}
                         ? MediaQuery.paddingOf(context).bottom + 2
                         : 6) +
                     (_selectedDestination == _HomeDestination.bean
-                        ? _beanChatComposerReservedHeight
+                        ? beanDockStatusLift
                         : 0),
                 child: Center(
                   child: _BeanResponsePreviewTag(
@@ -27558,11 +27520,17 @@ class _BeanIntroArrowPainter extends CustomPainter {
 class _SignedInBottomDock extends StatelessWidget {
   const _SignedInBottomDock({
     required this.showComposer,
+    required this.beanWorkItems,
+    required this.beanWorkStatus,
+    required this.beanWorkActive,
     required this.composer,
     required this.menu,
   });
 
   final bool showComposer;
+  final List<_BeanWorkItem> beanWorkItems;
+  final String beanWorkStatus;
+  final bool beanWorkActive;
   final Widget composer;
   final Widget menu;
 
@@ -27573,22 +27541,35 @@ class _SignedInBottomDock extends StatelessWidget {
     final dockBottomPadding = bottomInset > 0 ? bottomInset + 2 : 6.0;
     final menuHeight = 78.0 + dockBottomPadding;
 
-    return SizedBox(
+    return Stack(
       key: const Key('signed-in-bottom-dock'),
-      height:
-          _beanChatComposerReservedHeight +
-          menuHeight -
-          _beanBottomMenuSurfaceInset,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(left: 0, right: 0, bottom: 0, child: menu),
-          Positioned(
-            key: const Key('bean-chat-composer-dock'),
-            left: 0,
-            right: 0,
-            bottom: menuHeight - _beanBottomMenuSurfaceInset,
-            child: Align(
+      clipBehavior: Clip.none,
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              transitionBuilder: (child, animation) => SizeTransition(
+                sizeFactor: animation,
+                axisAlignment: -1,
+                child: FadeTransition(opacity: animation, child: child),
+              ),
+              child: beanWorkActive
+                  ? _BeanWorkDockStrip(
+                      key: const Key('bean-work-dock-strip'),
+                      status: beanWorkStatus,
+                      items: beanWorkItems,
+                    )
+                  : const SizedBox(
+                      key: Key('bean-work-dock-strip-empty'),
+                      height: 0,
+                    ),
+            ),
+            Align(
+              key: const Key('bean-chat-composer-dock'),
               alignment: Alignment.bottomCenter,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(
@@ -27598,9 +27579,11 @@ class _SignedInBottomDock extends StatelessWidget {
                 child: composer,
               ),
             ),
-          ),
-        ],
-      ),
+            SizedBox(height: menuHeight - _beanBottomMenuSurfaceInset),
+          ],
+        ),
+        Positioned(left: 0, right: 0, bottom: 0, child: menu),
+      ],
     );
   }
 }
@@ -27613,7 +27596,6 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.beanWorkItems,
     required this.beanWorkStatus,
     required this.beanWorkActive,
-    this.statusLift = 0,
     required this.onMorePressed,
     required this.onBeanLongPressStart,
     required this.onBeanLongPressEnd,
@@ -27625,7 +27607,6 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   final List<_BeanWorkItem> beanWorkItems;
   final String beanWorkStatus;
   final bool beanWorkActive;
-  final double statusLift;
   final VoidCallback onMorePressed;
   final VoidCallback onBeanLongPressStart;
   final VoidCallback onBeanLongPressEnd;
@@ -27722,7 +27703,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             ),
           ),
           Positioned(
-            bottom: 86 + dockBottomPadding + statusLift,
+            bottom: 86 + dockBottomPadding,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
               switchInCurve: Curves.easeOut,
@@ -27751,6 +27732,136 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BeanWorkDockStrip extends StatelessWidget {
+  const _BeanWorkDockStrip({
+    super.key,
+    required this.status,
+    required this.items,
+  });
+
+  final String status;
+  final List<_BeanWorkItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = _compactBeanStatusLabel(status);
+    final displayItems = items
+        .where((item) => item.label.trim().isNotEmpty)
+        .take(4)
+        .toList();
+    final completed = displayItems.where((item) => item.done).length;
+    final statusLooksDone = RegExp(
+      r'\b(done|updated|completed|stopped|cancelled|failed)\b',
+      caseSensitive: false,
+    ).hasMatch(title);
+    final hasActiveWork =
+        displayItems.any((item) => !item.done) ||
+        (displayItems.isEmpty && !statusLooksDone);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface.withValues(alpha: .98),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .24)),
+          boxShadow: [
+            BoxShadow(
+              color: HeyBeanTheme.accent.withValues(alpha: .10),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: hasActiveWork
+                        ? CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              HeyBeanTheme.accentStrong,
+                            ),
+                          )
+                        : Icon(
+                            Icons.check_circle_rounded,
+                            size: 18,
+                            color: HeyBeanTheme.accentStrong,
+                          ),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: HeyBeanTheme.accentStrong,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  if (displayItems.isNotEmpty)
+                    Text(
+                      '$completed/${displayItems.length}',
+                      style: const TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                ],
+              ),
+              if (displayItems.isNotEmpty) const SizedBox(height: 7),
+              for (final item in displayItems)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Row(
+                    children: [
+                      Icon(
+                        item.done
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded,
+                        size: 16,
+                        color: item.done
+                            ? HeyBeanTheme.accentStrong
+                            : HeyBeanTheme.muted,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          item.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: item.done
+                                ? HeyBeanTheme.muted
+                                : HeyBeanTheme.text,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

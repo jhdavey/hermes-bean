@@ -174,7 +174,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 $toolCalls = is_array($message) && is_array($message['tool_calls'] ?? null) ? $message['tool_calls'] : [];
 
                 if ($toolCalls === []) {
-                    $assistantContent = trim((string) data_get($message, 'content', ''));
+                    $assistantContent = $this->normalizedAssistantContent(data_get($message, 'content', ''));
                     break;
                 }
 
@@ -214,7 +214,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     $responses[] = $response;
                     $finalResponse = $response;
                     $modelRoute['model'] = (string) data_get($response, 'model', $modelRoute['model']);
-                    $assistantContent = trim((string) data_get($response, 'choices.0.message.content', ''));
+                    $assistantContent = $this->normalizedAssistantContent(data_get($response, 'choices.0.message.content', ''));
                 } catch (\Throwable $exception) {
                     Log::warning('Hermes final response call failed after successful tool execution.', [
                         'session_id' => $session->id,
@@ -1759,6 +1759,37 @@ PROMPT;
             'event_category.create' => $name !== '' ? "I created {$name}." : 'I created that.',
             default => 'Done.',
         };
+    }
+
+    private function normalizedAssistantContent(mixed $content): string
+    {
+        $trimmed = trim((string) $content);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        try {
+            $decoded = json_decode($trimmed, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            return $trimmed;
+        }
+
+        if (! is_array($decoded)) {
+            return $trimmed;
+        }
+
+        foreach (['message', 'content', 'assistant_message', 'response'] as $key) {
+            $value = $decoded[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+        }
+
+        if (array_key_exists('role', $decoded) || array_key_exists('content', $decoded)) {
+            return '';
+        }
+
+        return $trimmed;
     }
 
     private function nativeReadFallbackContent(array $toolOutputs): string

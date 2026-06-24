@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
+use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
@@ -522,6 +523,61 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertNotNull(Task::findOrFail($familyCopy->id)->completed_at);
 
         Http::assertSentCount(2);
+    }
+
+    public function test_tool_runtime_falls_back_when_final_assistant_json_envelope_is_blank(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-note-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_note',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_note',
+                                'arguments' => json_encode([
+                                    'title' => 'Directions to boil an egg',
+                                    'body' => "1. Bring water to a boil.\n2. Add the egg.\n3. Cook, cool, and peel.",
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-note-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => json_encode([
+                            'role' => 'assistant',
+                            'content' => "\n",
+                        ], JSON_THROW_ON_ERROR),
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-note-envelope@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'create a note with directions to boil an egg',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I created the note Directions to boil an egg.');
+
+        $this->assertDatabaseHas('notes', [
+            'title' => 'Directions to boil an egg',
+        ]);
+        $this->assertSame(1, Note::where('title', 'Directions to boil an egg')->count());
     }
 
     public function test_tool_runtime_executes_external_lookup_tool_call(): void
