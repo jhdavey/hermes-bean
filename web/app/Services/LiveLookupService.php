@@ -220,11 +220,15 @@ class LiveLookupService
             }
 
             $features = collect((array) data_get($places->json(), 'features'))
-                ->map(fn ($feature): array => $this->normalizeGeoapifyPlace(is_array($feature) ? $feature : []))
+                ->map(fn ($feature): array => $this->normalizeGeoapifyPlace(is_array($feature) ? $feature : [], $lat, $lon))
                 ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
                 ->take(5)
                 ->values()
                 ->all();
+
+            if ($features === []) {
+                $features = $this->geoapifyGeocodePlaceFallback($placeName, $locationQuery, $lat, $lon);
+            }
 
             if ($features === []) {
                 return $this->providerFailure($user, $session, 'geoapify_places', 'geoapify-places', $query, 'places_not_found', 'Geoapify did not find a matching place nearby.', $startedAt, null, ['stage' => 'places', 'location_query' => $locationQuery]);
@@ -240,6 +244,7 @@ class LiveLookupService
                 'place_name' => $placeName,
                 'location_query' => $locationQuery,
                 'result_count' => count($features),
+                'fallback_endpoint' => data_get($features, '0.source_endpoint'),
                 'latency_ms' => $latencyMs,
             ], ['external_lookup', 'geoapify_places']);
 
@@ -569,22 +574,70 @@ class LiveLookupService
         return '';
     }
 
-    private function normalizeGeoapifyPlace(array $feature): array
+    private function geoapifyGeocodePlaceFallback(string $placeName, string $locationQuery, float $originLat, float $originLon): array
+    {
+        $response = Http::acceptJson()
+            ->connectTimeout((float) config('services.hermes_runtime.geoapify_places_connect_timeout', 2))
+            ->timeout((float) config('services.hermes_runtime.geoapify_places_timeout', 6))
+            ->get('https://api.geoapify.com/v1/geocode/search', [
+                'text' => trim("{$placeName} {$locationQuery}"),
+                'lang' => 'en',
+                'limit' => 5,
+                'apiKey' => $this->geoapifyApiKey(),
+            ]);
+
+        if (! $response->successful()) {
+            return [];
+        }
+
+        return collect((array) data_get($response->json(), 'features'))
+            ->map(fn ($feature): array => [
+                ...$this->normalizeGeoapifyPlace(is_array($feature) ? $feature : [], $originLat, $originLon),
+                'source_endpoint' => 'geocode_search',
+            ])
+            ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
+            ->filter(fn (array $place): bool => str_contains(mb_strtolower((string) $place['name']), mb_strtolower($placeName)))
+            ->sortBy(fn (array $place): float => (float) ($place['distance_meters'] ?? PHP_FLOAT_MAX))
+            ->take(5)
+            ->values()
+            ->all();
+    }
+
+    private function normalizeGeoapifyPlace(array $feature, ?float $originLat = null, ?float $originLon = null): array
     {
         $properties = (array) ($feature['properties'] ?? []);
         $name = trim((string) ($properties['name'] ?? $properties['address_line1'] ?? ''));
         $address = trim((string) ($properties['formatted'] ?? trim((string) (($properties['address_line1'] ?? '').' '.($properties['address_line2'] ?? '')))));
+        $lat = isset($properties['lat']) ? (float) $properties['lat'] : null;
+        $lon = isset($properties['lon']) ? (float) $properties['lon'] : null;
+        $distanceMeters = isset($properties['distance']) ? (int) $properties['distance'] : null;
+        if ($distanceMeters === null && $originLat !== null && $originLon !== null && $lat !== null && $lon !== null) {
+            $distanceMeters = $this->distanceMeters($originLat, $originLon, $lat, $lon);
+        }
 
         return [
             'name' => $name,
             'address' => $address !== '' ? $address : null,
-            'distance_meters' => isset($properties['distance']) ? (int) $properties['distance'] : null,
-            'distance_miles' => isset($properties['distance']) ? round(((int) $properties['distance']) / 1609.344, 1) : null,
-            'lat' => isset($properties['lat']) ? (float) $properties['lat'] : null,
-            'lon' => isset($properties['lon']) ? (float) $properties['lon'] : null,
+            'distance_meters' => $distanceMeters,
+            'distance_miles' => $distanceMeters !== null ? round($distanceMeters / 1609.344, 1) : null,
+            'lat' => $lat,
+            'lon' => $lon,
             'categories' => array_values((array) ($properties['categories'] ?? [])),
             'place_id' => $properties['place_id'] ?? null,
         ];
+    }
+
+    private function distanceMeters(float $fromLat, float $fromLon, float $toLat, float $toLon): int
+    {
+        $earthRadiusMeters = 6371000;
+        $fromLatRad = deg2rad($fromLat);
+        $toLatRad = deg2rad($toLat);
+        $deltaLat = deg2rad($toLat - $fromLat);
+        $deltaLon = deg2rad($toLon - $fromLon);
+        $a = sin($deltaLat / 2) ** 2
+            + cos($fromLatRad) * cos($toLatRad) * sin($deltaLon / 2) ** 2;
+
+        return (int) round($earthRadiusMeters * 2 * atan2(sqrt($a), sqrt(1 - $a)));
     }
 
     private function geoapifyPlacesText(array $places, string $placeName, string $locationQuery): string
