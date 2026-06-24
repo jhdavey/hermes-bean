@@ -29,7 +29,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         config()->set('services.hermes_runtime.api_key', 'test-key');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         config()->set('services.hermes_runtime.tavily_api_key', '');
-        config()->set('services.hermes_runtime.geoapify_api_key', '');
+        config()->set('services.hermes_runtime.google_maps_api_key', '');
         Cache::flush();
     }
 
@@ -739,107 +739,9 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(3);
     }
 
-    public function test_external_lookup_routes_nearby_places_to_geoapify(): void
+    public function test_external_lookup_routes_nearby_places_to_google_places(): void
     {
-        config()->set('services.hermes_runtime.geoapify_api_key', 'geoapify-test-key');
-
-        $chatCalls = 0;
-        $capturedLookupResult = [];
-        Http::fake(function ($request) use (&$chatCalls, &$capturedLookupResult) {
-            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
-                $chatCalls++;
-
-                if ($chatCalls === 1) {
-                    return Http::response([
-                        'id' => 'chatcmpl-places-tool',
-                        'model' => 'gpt-test-tools',
-                        'choices' => [[
-                            'finish_reason' => 'tool_calls',
-                            'message' => [
-                                'role' => 'assistant',
-                                'content' => null,
-                                'tool_calls' => [[
-                                    'id' => 'call_places',
-                                    'type' => 'function',
-                                    'function' => [
-                                        'name' => 'external_lookup',
-                                        'arguments' => json_encode([
-                                            'query' => 'nearest Wawa',
-                                            'location' => '08080',
-                                        ], JSON_THROW_ON_ERROR),
-                                    ],
-                                ]],
-                            ],
-                        ]],
-                    ], 200);
-                }
-
-                $messages = $request->data()['messages'] ?? [];
-                $toolOutput = collect($messages)->firstWhere('role', 'tool');
-                $capturedLookupResult = json_decode((string) data_get($toolOutput, 'content'), true) ?: [];
-
-                return Http::response([
-                    'id' => 'chatcmpl-places-final',
-                    'model' => 'gpt-test-tools',
-                    'choices' => [[
-                        'finish_reason' => 'stop',
-                        'message' => [
-                            'role' => 'assistant',
-                            'content' => data_get($capturedLookupResult, 'text'),
-                        ],
-                    ]],
-                ], 200);
-            }
-
-            if (str_starts_with($request->url(), 'https://api.geoapify.com/v1/geocode/search')) {
-                return Http::response([
-                    'features' => [[
-                        'properties' => [
-                            'lat' => 39.7391,
-                            'lon' => -75.1051,
-                            'formatted' => 'Sewell, NJ 08080, United States',
-                        ],
-                    ]],
-                ], 200);
-            }
-
-            if (str_starts_with($request->url(), 'https://api.geoapify.com/v2/places')) {
-                return Http::response([
-                    'features' => [[
-                        'properties' => [
-                            'name' => 'Wawa',
-                            'formatted' => '123 Example Road, Sewell, NJ 08080, United States',
-                            'lat' => 39.741,
-                            'lon' => -75.11,
-                            'distance' => 1400,
-                            'categories' => ['commercial.convenience'],
-                            'place_id' => 'geo-place-1',
-                        ],
-                    ]],
-                ], 200);
-            }
-
-            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
-        });
-
-        $token = $this->apiToken('tool-places@example.com');
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'where is the nearest wawa to 08080',
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed');
-
-        $this->assertSame('geoapify_places', data_get($capturedLookupResult, 'provider'));
-        $this->assertStringContainsString('Wawa', (string) data_get($capturedLookupResult, 'text'));
-        $this->assertSame('08080', data_get($capturedLookupResult, 'location'));
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
-    }
-
-    public function test_external_lookup_uses_geoapify_text_fallback_when_places_misses_brand(): void
-    {
-        config()->set('services.hermes_runtime.geoapify_api_key', 'geoapify-test-key');
+        config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
 
         $chatCalls = 0;
         $geocodeCalls = 0;
@@ -890,42 +792,43 @@ class HermesToolRuntimeServiceTest extends TestCase
                 ], 200);
             }
 
-            if (str_starts_with($request->url(), 'https://api.geoapify.com/v1/geocode/search')) {
+            if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
                 $geocodeCalls++;
 
-                if ($geocodeCalls === 1) {
-                    return Http::response([
-                        'features' => [[
-                            'properties' => [
-                                'lat' => 28.56,
-                                'lon' => -81.10,
-                                'formatted' => 'Orlando, FL 32820, United States',
-                            ],
-                        ]],
-                    ], 200);
-                }
-
                 return Http::response([
-                    'features' => [[
-                        'properties' => [
-                            'name' => 'Wawa',
-                            'formatted' => 'Wawa, 6500 Lee Vista Boulevard, Orlando, FL 32820, United States of America',
-                            'lat' => 28.4696185,
-                            'lon' => -81.3110147,
-                            'result_type' => 'amenity',
+                    'status' => 'OK',
+                    'results' => [[
+                        'formatted_address' => 'Orlando, FL 32820, USA',
+                        'geometry' => [
+                            'location' => ['lat' => 28.568, 'lng' => -81.105],
                         ],
+                        'address_components' => [[
+                            'long_name' => '32820',
+                            'short_name' => '32820',
+                            'types' => ['postal_code'],
+                        ]],
                     ]],
                 ], 200);
             }
 
-            if (str_starts_with($request->url(), 'https://api.geoapify.com/v2/places')) {
-                return Http::response(['features' => []], 200);
+            if ($request->url() === 'https://places.googleapis.com/v1/places:searchText') {
+                return Http::response([
+                    'places' => [[
+                        'id' => 'google-place-1',
+                        'displayName' => ['text' => 'Wawa'],
+                        'formattedAddress' => '16959 E Colonial Dr, Orlando, FL 32820, USA',
+                        'location' => ['latitude' => 28.5687, 'longitude' => -81.1072],
+                        'googleMapsUri' => 'https://maps.google.com/?cid=1',
+                        'businessStatus' => 'OPERATIONAL',
+                        'types' => ['convenience_store', 'gas_station', 'point_of_interest'],
+                    ]],
+                ], 200);
             }
 
             return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
         });
 
-        $token = $this->apiToken('tool-places-fallback@example.com');
+        $token = $this->apiToken('tool-places-google@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
@@ -933,10 +836,123 @@ class HermesToolRuntimeServiceTest extends TestCase
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed');
 
-        $this->assertSame('geoapify_places', data_get($capturedLookupResult, 'provider'));
-        $this->assertStringContainsString('6500 Lee Vista Boulevard', (string) data_get($capturedLookupResult, 'text'));
-        $this->assertSame('geocode_search', data_get($capturedLookupResult, 'places.0.source_endpoint'));
-        $this->assertSame(2, $geocodeCalls);
+        $this->assertSame('google_places', data_get($capturedLookupResult, 'provider'));
+        $this->assertStringContainsString('16959 E Colonial Dr', (string) data_get($capturedLookupResult, 'text'));
+        $this->assertTrue((bool) data_get($capturedLookupResult, 'places.0.postal_code_match'));
+        $this->assertSame(1, $geocodeCalls);
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://places.googleapis.com/v1/places:searchText'
+                && $request->hasHeader('X-Goog-Api-Key', 'google-test-key')
+                && str_contains((string) $request->header('X-Goog-FieldMask')[0], 'places.formattedAddress');
+        });
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
+    }
+
+    public function test_google_places_ranks_requested_postal_code_before_farther_non_matching_zip(): void
+    {
+        config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
+
+        $chatCalls = 0;
+        $capturedLookupResult = [];
+        Http::fake(function ($request) use (&$chatCalls, &$capturedLookupResult) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-places-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_places',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'nearest Wawa',
+                                            'location' => '32820',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $capturedLookupResult = json_decode((string) data_get($toolOutput, 'content'), true) ?: [];
+
+                return Http::response([
+                    'id' => 'chatcmpl-places-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($capturedLookupResult, 'text'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'results' => [[
+                        'formatted_address' => 'Orlando, FL 32820, USA',
+                        'geometry' => [
+                            'location' => ['lat' => 28.568, 'lng' => -81.105],
+                        ],
+                        'address_components' => [[
+                            'long_name' => '32820',
+                            'short_name' => '32820',
+                            'types' => ['postal_code'],
+                        ]],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://places.googleapis.com/v1/places:searchText') {
+                return Http::response([
+                    'places' => [
+                        [
+                            'id' => 'lee-vista-wawa',
+                            'displayName' => ['text' => 'Wawa'],
+                            'formattedAddress' => '6500 Lee Vista Blvd, Orlando, FL 32822, USA',
+                            'location' => ['latitude' => 28.4696, 'longitude' => -81.3110],
+                            'googleMapsUri' => 'https://maps.google.com/?cid=2',
+                        ],
+                        [
+                            'id' => 'colonial-wawa',
+                            'displayName' => ['text' => 'Wawa'],
+                            'formattedAddress' => '16959 E Colonial Dr, Orlando, FL 32820, USA',
+                            'location' => ['latitude' => 28.5687, 'longitude' => -81.1072],
+                            'googleMapsUri' => 'https://maps.google.com/?cid=1',
+                        ],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-places-google-ranking@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'where is the nearest wawa to 32820',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertSame('google_places', data_get($capturedLookupResult, 'provider'));
+        $this->assertSame('16959 E Colonial Dr, Orlando, FL 32820, USA', data_get($capturedLookupResult, 'places.0.address'));
+        $this->assertSame('6500 Lee Vista Blvd, Orlando, FL 32822, USA', data_get($capturedLookupResult, 'places.1.address'));
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
     }

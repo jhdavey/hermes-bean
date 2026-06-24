@@ -94,8 +94,8 @@ class LiveLookupService
             }
         }
 
-        if ($this->shouldUseGeoapifyPlaces($query, $context, $location)) {
-            $placesResult = $this->geoapifyPlacesLookup($session, $user, $query, $context, $location, $startedAt, $cacheKey);
+        if ($this->shouldUsePlaceLookup($query, $context, $location)) {
+            $placesResult = $this->googlePlacesLookup($session, $user, $query, $context, $location, $startedAt, $cacheKey);
             if ($this->shouldReturnProviderResult($placesResult)) {
                 return $placesResult;
             }
@@ -125,14 +125,14 @@ class LiveLookupService
                 'notes' => 'Used for current weather and forecast-style requests before web search.',
             ],
             [
-                'key' => 'geoapify_places',
-                'label' => 'Geoapify Places',
+                'key' => 'google_places',
+                'label' => 'Google Places',
                 'category' => 'Places',
-                'connected' => (bool) config('services.hermes_runtime.geoapify_places_enabled', true) && $this->geoapifyApiKey() !== '',
-                'configured' => $this->geoapifyApiKey() !== '',
-                'mode' => 'Direct API',
-                'timeout_ms' => (int) ((float) config('services.hermes_runtime.geoapify_places_timeout', 6) * 1000),
-                'notes' => 'Used for nearby businesses, addresses, geocoding, and local place questions before web search.',
+                'connected' => (bool) config('services.hermes_runtime.google_places_enabled', true) && $this->googleMapsApiKey() !== '',
+                'configured' => $this->googleMapsApiKey() !== '',
+                'mode' => 'Places Text Search + Geocoding',
+                'timeout_ms' => (int) ((float) config('services.hermes_runtime.google_places_timeout', 6) * 1000),
+                'notes' => 'Primary provider for nearby businesses, addresses, branded places, and local place questions before web search.',
             ],
             [
                 'key' => 'tavily_search',
@@ -166,9 +166,9 @@ class LiveLookupService
         ];
     }
 
-    private function geoapifyPlacesLookup(ConversationSession $session, User $user, string $query, string $context, string $location, float $startedAt, string $cacheKey): ?array
+    private function googlePlacesLookup(ConversationSession $session, User $user, string $query, string $context, string $location, float $startedAt, string $cacheKey): ?array
     {
-        if (! (bool) config('services.hermes_runtime.geoapify_places_enabled', true) || $this->geoapifyApiKey() === '') {
+        if (! (bool) config('services.hermes_runtime.google_places_enabled', true) || $this->googleMapsApiKey() === '') {
             return null;
         }
 
@@ -179,87 +179,82 @@ class LiveLookupService
         }
 
         try {
-            $geocode = Http::acceptJson()
-                ->connectTimeout((float) config('services.hermes_runtime.geoapify_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.geoapify_places_timeout', 6))
-                ->get('https://api.geoapify.com/v1/geocode/search', [
-                    'text' => $locationQuery,
-                    'lang' => 'en',
-                    'limit' => 1,
-                    'apiKey' => $this->geoapifyApiKey(),
-                ]);
-
-            if (! $geocode->successful()) {
-                return $this->providerFailure($user, $session, 'geoapify_places', 'geoapify-geocoding', $query, 'places_lookup_failed', 'Geoapify could not geocode the location hint.', $startedAt, $geocode->status(), ['stage' => 'geocode']);
+            $origin = $this->googleGeocodeLocation($locationQuery);
+            if ($origin === null) {
+                return $this->providerFailure($user, $session, 'google_places', 'google-geocoding', $query, 'places_location_not_found', 'Google could not identify that location.', $startedAt, null, ['stage' => 'geocode']);
             }
 
-            $geocodeFeature = collect((array) data_get($geocode->json(), 'features'))->first();
-            $lat = (float) data_get($geocodeFeature, 'properties.lat', 0);
-            $lon = (float) data_get($geocodeFeature, 'properties.lon', 0);
-            if ($lat === 0.0 || $lon === 0.0) {
-                return $this->providerFailure($user, $session, 'geoapify_places', 'geoapify-geocoding', $query, 'places_location_not_found', 'Geoapify could not identify that location.', $startedAt, null, ['stage' => 'geocode']);
-            }
-
-            $radius = max(1000, (int) config('services.hermes_runtime.geoapify_places_radius_meters', 25000));
-            $places = Http::acceptJson()
-                ->connectTimeout((float) config('services.hermes_runtime.geoapify_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.geoapify_places_timeout', 6))
-                ->get('https://api.geoapify.com/v2/places', [
-                    'categories' => 'commercial,catering,accommodation,activity',
-                    'name' => $placeName,
-                    'filter' => "circle:{$lon},{$lat},{$radius}",
-                    'bias' => "proximity:{$lon},{$lat}",
-                    'limit' => 5,
-                    'lang' => 'en',
-                    'apiKey' => $this->geoapifyApiKey(),
+            $radius = max(1000, (int) config('services.hermes_runtime.google_places_radius_meters', 50000));
+            $response = Http::acceptJson()
+                ->asJson()
+                ->withHeaders([
+                    'X-Goog-Api-Key' => $this->googleMapsApiKey(),
+                    'X-Goog-FieldMask' => 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.businessStatus,places.types',
+                ])
+                ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
+                ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+                ->post('https://places.googleapis.com/v1/places:searchText', [
+                    'textQuery' => trim("{$placeName} {$locationQuery}"),
+                    'pageSize' => 10,
+                    'locationBias' => [
+                        'circle' => [
+                            'center' => [
+                                'latitude' => $origin['lat'],
+                                'longitude' => $origin['lon'],
+                            ],
+                            'radius' => $radius,
+                        ],
+                    ],
                 ]);
 
             $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
-            if (! $places->successful()) {
-                return $this->providerFailure($user, $session, 'geoapify_places', 'geoapify-places', $query, 'places_lookup_failed', 'Geoapify could not return place results.', $startedAt, $places->status(), ['stage' => 'places']);
+            if (! $response->successful()) {
+                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, 'places_lookup_failed', 'Google Places could not return place results.', $startedAt, $response->status(), ['stage' => 'text_search']);
             }
 
-            $features = collect((array) data_get($places->json(), 'features'))
-                ->map(fn ($feature): array => $this->normalizeGeoapifyPlace(is_array($feature) ? $feature : [], $lat, $lon))
+            $requestedPostalCode = $this->postalCodeFromLocation($locationQuery);
+            $places = collect((array) data_get($response->json(), 'places'))
+                ->map(fn ($place): array => $this->normalizeGooglePlace(is_array($place) ? $place : [], $origin, $requestedPostalCode))
                 ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
+                ->filter(fn (array $place): bool => $this->placeMatchesSearchName($place, $placeName))
+                ->sortBy([
+                    ['postal_code_match', 'desc'],
+                    ['distance_meters', 'asc'],
+                ])
                 ->take(5)
                 ->values()
                 ->all();
 
-            if ($features === []) {
-                $features = $this->geoapifyGeocodePlaceFallback($placeName, $locationQuery, $lat, $lon);
+            if ($places === []) {
+                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, 'places_not_found', 'Google Places did not find a matching place nearby.', $startedAt, null, ['stage' => 'text_search', 'location_query' => $locationQuery]);
             }
 
-            if ($features === []) {
-                return $this->providerFailure($user, $session, 'geoapify_places', 'geoapify-places', $query, 'places_not_found', 'Geoapify did not find a matching place nearby.', $startedAt, null, ['stage' => 'places', 'location_query' => $locationQuery]);
-            }
-
-            $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', 'geoapify-places', [
+            $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', 'google-places', [
                 'tool_call_count' => 2,
             ], [
                 'conversation_session_id' => $session->id,
-                'provider' => 'geoapify',
-                'live_lookup_provider' => 'geoapify_places',
+                'provider' => 'google',
+                'live_lookup_provider' => 'google_places',
                 'query' => $query,
                 'place_name' => $placeName,
                 'location_query' => $locationQuery,
-                'result_count' => count($features),
-                'fallback_endpoint' => data_get($features, '0.source_endpoint'),
+                'result_count' => count($places),
+                'postal_code_match' => data_get($places, '0.postal_code_match'),
                 'latency_ms' => $latencyMs,
-            ], ['external_lookup', 'geoapify_places']);
+            ], ['external_lookup', 'google_places']);
 
             $result = [
                 'ok' => true,
                 'tool' => 'external_lookup',
-                'provider' => 'geoapify_places',
+                'provider' => 'google_places',
                 'query' => $query,
                 'context' => $context !== '' ? $context : null,
                 'location' => $locationQuery,
-                'text' => $this->geoapifyPlacesText($features, $placeName, $locationQuery),
-                'places' => $features,
+                'text' => $this->placesText($places, $placeName, $locationQuery),
+                'places' => $places,
                 'sources' => [[
-                    'title' => 'Geoapify Places',
-                    'url' => 'https://www.geoapify.com/places-api/',
+                    'title' => 'Google Places',
+                    'url' => 'https://developers.google.com/maps/documentation/places/web-service/text-search',
                 ]],
                 'latency_ms' => $latencyMs,
             ];
@@ -267,12 +262,12 @@ class LiveLookupService
 
             return $result;
         } catch (ConnectionException $exception) {
-            Log::warning('Live lookup Geoapify transport failed.', [
+            Log::warning('Live lookup Google Places transport failed.', [
                 'session_id' => $session->id,
                 'exception' => $exception->getMessage(),
             ]);
 
-            return $this->providerFailure($user, $session, 'geoapify_places', 'geoapify-places', $query, 'places_lookup_timeout', 'The places lookup timed out before it could return local information.', $startedAt);
+            return $this->providerFailure($user, $session, 'google_places', 'google-places', $query, 'places_lookup_timeout', 'The places lookup timed out before it could return local information.', $startedAt);
         }
     }
 
@@ -525,7 +520,7 @@ class LiveLookupService
         return ($result['ok'] ?? false) === true || ($result['fallback_allowed'] ?? false) !== true;
     }
 
-    private function shouldUseGeoapifyPlaces(string $query, string $context, string $location): bool
+    private function shouldUsePlaceLookup(string $query, string $context, string $location): bool
     {
         if ($location !== '') {
             if ((bool) preg_match('/\b(nearest|closest|nearby|near me|near|around|local|store|restaurant|coffee|gas|pharmacy|address|location|hours|open|closed)\b/i', $query.' '.$context)) {
@@ -574,57 +569,105 @@ class LiveLookupService
         return '';
     }
 
-    private function geoapifyGeocodePlaceFallback(string $placeName, string $locationQuery, float $originLat, float $originLon): array
+    private function googleGeocodeLocation(string $locationQuery): ?array
     {
-        $response = Http::acceptJson()
-            ->connectTimeout((float) config('services.hermes_runtime.geoapify_places_connect_timeout', 2))
-            ->timeout((float) config('services.hermes_runtime.geoapify_places_timeout', 6))
-            ->get('https://api.geoapify.com/v1/geocode/search', [
-                'text' => trim("{$placeName} {$locationQuery}"),
-                'lang' => 'en',
-                'limit' => 5,
-                'apiKey' => $this->geoapifyApiKey(),
-            ]);
-
-        if (! $response->successful()) {
-            return [];
+        $params = [
+            'address' => $this->googleLocationAddress($locationQuery),
+            'key' => $this->googleMapsApiKey(),
+            'region' => 'us',
+        ];
+        $postalCode = $this->postalCodeFromLocation($locationQuery);
+        if ($postalCode !== null) {
+            $params['components'] = "postal_code:{$postalCode}|country:US";
         }
 
-        return collect((array) data_get($response->json(), 'features'))
-            ->map(fn ($feature): array => [
-                ...$this->normalizeGeoapifyPlace(is_array($feature) ? $feature : [], $originLat, $originLon),
-                'source_endpoint' => 'geocode_search',
-            ])
-            ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
-            ->filter(fn (array $place): bool => str_contains(mb_strtolower((string) $place['name']), mb_strtolower($placeName)))
-            ->sortBy(fn (array $place): float => (float) ($place['distance_meters'] ?? PHP_FLOAT_MAX))
-            ->take(5)
-            ->values()
-            ->all();
+        $response = Http::acceptJson()
+            ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
+            ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+            ->get('https://maps.googleapis.com/maps/api/geocode/json', $params);
+
+        if (! $response->successful() || data_get($response->json(), 'status') !== 'OK') {
+            return null;
+        }
+
+        $result = collect((array) data_get($response->json(), 'results'))->first();
+        $lat = data_get($result, 'geometry.location.lat');
+        $lon = data_get($result, 'geometry.location.lng');
+        if (! is_numeric($lat) || ! is_numeric($lon)) {
+            return null;
+        }
+
+        return [
+            'lat' => (float) $lat,
+            'lon' => (float) $lon,
+            'formatted_address' => data_get($result, 'formatted_address'),
+            'postal_code' => $this->postalCodeFromAddressComponents((array) data_get($result, 'address_components', [])),
+        ];
     }
 
-    private function normalizeGeoapifyPlace(array $feature, ?float $originLat = null, ?float $originLon = null): array
+    private function googleLocationAddress(string $locationQuery): string
     {
-        $properties = (array) ($feature['properties'] ?? []);
-        $name = trim((string) ($properties['name'] ?? $properties['address_line1'] ?? ''));
-        $address = trim((string) ($properties['formatted'] ?? trim((string) (($properties['address_line1'] ?? '').' '.($properties['address_line2'] ?? '')))));
-        $lat = isset($properties['lat']) ? (float) $properties['lat'] : null;
-        $lon = isset($properties['lon']) ? (float) $properties['lon'] : null;
-        $distanceMeters = isset($properties['distance']) ? (int) $properties['distance'] : null;
-        if ($distanceMeters === null && $originLat !== null && $originLon !== null && $lat !== null && $lon !== null) {
-            $distanceMeters = $this->distanceMeters($originLat, $originLon, $lat, $lon);
+        if ($this->postalCodeFromLocation($locationQuery) !== null) {
+            return "{$locationQuery}, USA";
         }
+
+        return $locationQuery;
+    }
+
+    private function normalizeGooglePlace(array $place, array $origin, ?string $requestedPostalCode): array
+    {
+        $name = trim((string) data_get($place, 'displayName.text', ''));
+        $address = trim((string) data_get($place, 'formattedAddress', ''));
+        $lat = data_get($place, 'location.latitude');
+        $lon = data_get($place, 'location.longitude');
+        $distanceMeters = is_numeric($lat) && is_numeric($lon)
+            ? $this->distanceMeters((float) $origin['lat'], (float) $origin['lon'], (float) $lat, (float) $lon)
+            : null;
 
         return [
             'name' => $name,
             'address' => $address !== '' ? $address : null,
             'distance_meters' => $distanceMeters,
             'distance_miles' => $distanceMeters !== null ? round($distanceMeters / 1609.344, 1) : null,
-            'lat' => $lat,
-            'lon' => $lon,
-            'categories' => array_values((array) ($properties['categories'] ?? [])),
-            'place_id' => $properties['place_id'] ?? null,
+            'lat' => is_numeric($lat) ? (float) $lat : null,
+            'lon' => is_numeric($lon) ? (float) $lon : null,
+            'categories' => array_values((array) data_get($place, 'types', [])),
+            'place_id' => data_get($place, 'id'),
+            'google_maps_url' => data_get($place, 'googleMapsUri'),
+            'business_status' => data_get($place, 'businessStatus'),
+            'postal_code_match' => $requestedPostalCode !== null && str_contains($address, $requestedPostalCode),
         ];
+    }
+
+    private function placeMatchesSearchName(array $place, string $placeName): bool
+    {
+        $needle = mb_strtolower($placeName);
+        if ($needle === '') {
+            return true;
+        }
+
+        return str_contains(mb_strtolower((string) ($place['name'] ?? '')), $needle)
+            || str_contains(mb_strtolower((string) ($place['address'] ?? '')), $needle);
+    }
+
+    private function postalCodeFromLocation(string $locationQuery): ?string
+    {
+        if (preg_match('/\b\d{5}(?:-\d{4})?\b/', $locationQuery, $matches)) {
+            return $matches[0];
+        }
+
+        return null;
+    }
+
+    private function postalCodeFromAddressComponents(array $components): ?string
+    {
+        foreach ($components as $component) {
+            if (in_array('postal_code', (array) data_get($component, 'types', []), true)) {
+                return (string) data_get($component, 'long_name');
+            }
+        }
+
+        return null;
     }
 
     private function distanceMeters(float $fromLat, float $fromLon, float $toLat, float $toLon): int
@@ -640,7 +683,7 @@ class LiveLookupService
         return (int) round($earthRadiusMeters * 2 * atan2(sqrt($a), sqrt(1 - $a)));
     }
 
-    private function geoapifyPlacesText(array $places, string $placeName, string $locationQuery): string
+    private function placesText(array $places, string $placeName, string $locationQuery): string
     {
         $first = $places[0];
         $distance = isset($first['distance_miles']) ? " about {$first['distance_miles']} miles away" : '';
@@ -836,9 +879,9 @@ class LiveLookupService
         return (string) config('services.hermes_runtime.tavily_api_key', '');
     }
 
-    private function geoapifyApiKey(): string
+    private function googleMapsApiKey(): string
     {
-        return (string) config('services.hermes_runtime.geoapify_api_key', '');
+        return (string) config('services.hermes_runtime.google_maps_api_key', '');
     }
 
     private function extractResponseText(array $response): string

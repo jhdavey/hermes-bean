@@ -174,7 +174,7 @@ SH);
     {
         config()->set('services.hermes_runtime.api_key', 'test-openai-key');
         config()->set('services.hermes_runtime.tavily_api_key', 'test-tavily-key');
-        config()->set('services.hermes_runtime.geoapify_api_key', 'test-geoapify-key');
+        config()->set('services.hermes_runtime.google_maps_api_key', 'test-google-key');
         config()->set('services.hermes_runtime.weather_lookup_enabled', true);
 
         $adminToken = $this->apiToken('lookup-admin@example.com');
@@ -197,15 +197,15 @@ SH);
 
         AiUsageLog::create([
             'user_id' => $admin->id,
-            'provider' => 'geoapify',
-            'model' => 'geoapify-places',
+            'provider' => 'google',
+            'model' => 'google-places',
             'route_tier' => 'external_lookup',
             'request_type' => 'external_lookup',
             'status' => 'completed',
             'tool_call_count' => 2,
             'estimated_cost_usd' => 0,
-            'action_types' => ['external_lookup', 'geoapify_places'],
-            'metadata' => ['live_lookup_provider' => 'geoapify_places', 'latency_ms' => 350],
+            'action_types' => ['external_lookup', 'google_places'],
+            'metadata' => ['live_lookup_provider' => 'google_places', 'latency_ms' => 350],
         ]);
 
         AiUsageLog::create([
@@ -243,7 +243,7 @@ SH);
             ->assertJsonPath('data.providers.0.connected', true)
             ->assertJsonPath('data.providers.0.usage.requests', 1)
             ->assertJsonPath('data.providers.0.usage.avg_latency_ms', 240)
-            ->assertJsonPath('data.providers.1.key', 'geoapify_places')
+            ->assertJsonPath('data.providers.1.key', 'google_places')
             ->assertJsonPath('data.providers.1.connected', true)
             ->assertJsonPath('data.providers.1.usage.requests', 1)
             ->assertJsonPath('data.providers.2.key', 'tavily_search')
