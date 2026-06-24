@@ -1123,6 +1123,126 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertSame('weekly', $event->metadata['recurrence'] ?? null);
     }
 
+    public function test_affirmative_follow_up_does_not_recreate_recent_calendar_events(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-initial-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_event',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_calendar_event',
+                                'arguments' => json_encode([
+                                    'title' => 'Breakfast',
+                                    'starts_at' => '2026-06-25T09:00:00-04:00',
+                                    'ends_at' => '2026-06-25T10:00:00-04:00',
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-initial-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I added breakfast. Do you want a reminder for it?',
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-follow-up-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [
+                            [
+                                'id' => 'call_duplicate_event',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_calendar_event',
+                                    'arguments' => json_encode([
+                                        'title' => 'Breakfast',
+                                        'starts_at' => '2026-06-25T09:00:00-04:00',
+                                        'ends_at' => '2026-06-25T10:00:00-04:00',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                            [
+                                'id' => 'call_reminder',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_reminder',
+                                    'arguments' => json_encode([
+                                        'title' => 'Breakfast reminder',
+                                        'remind_at' => '2026-06-25T08:45:00-04:00',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                        ],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-follow-up-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I set the reminder.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-follow-up-duplicate@example.com');
+        $user = User::where('email', 'tool-follow-up-duplicate@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'add breakfast tomorrow at 9am',
+        ])->assertCreated()
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $event = CalendarEvent::where('user_id', $user->id)->where('title', 'Breakfast')->firstOrFail();
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'yes',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.duplicate_skipped'])
+            ->assertJsonFragment(['event_type' => 'assistant.reminder.created']);
+
+        $this->assertSame(1, CalendarEvent::where('user_id', $user->id)->where('title', 'Breakfast')->count());
+        $this->assertDatabaseHas('reminders', [
+            'user_id' => $user->id,
+            'title' => 'Breakfast reminder',
+            'calendar_event_id' => $event->id,
+        ]);
+        $this->assertDatabaseHas('activity_events', [
+            'conversation_session_id' => $sessionId,
+            'event_type' => 'assistant.calendar_event.duplicate_skipped',
+            'status' => 'skipped',
+        ]);
+        $this->assertDatabaseHas('calendar_events', [
+            'id' => $event->id,
+            'title' => 'Breakfast',
+        ]);
+    }
+
     public function test_base_plan_blocks_recurring_resources_from_bean_tool_calls(): void
     {
         Http::fakeSequence()

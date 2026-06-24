@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\ActivityEventController;
 use App\Http\Controllers\Api\AdminCommandRunController;
 use App\Http\Controllers\Api\AdminHermesController;
+use App\Http\Controllers\Api\AdminLiveLookupController;
 use App\Http\Controllers\Api\AdminPlanLimitController;
 use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminUsageController;
@@ -155,6 +156,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
             Route::delete('/plan-limits/enterprise-customers/{enterpriseCustomerLimit}', [AdminPlanLimitController::class, 'destroyEnterpriseCustomer']);
             Route::get('/hermes/status', [AdminHermesController::class, 'show']);
             Route::post('/hermes/update', [AdminHermesController::class, 'update']);
+            Route::get('/live-lookup/providers', [AdminLiveLookupController::class, 'index']);
             Route::get('/command-runs/{commandRun}', [AdminCommandRunController::class, 'show']);
             Route::get('/usage/summary', [AdminUsageController::class, 'summary']);
             Route::get('/usage/logs', [AdminUsageController::class, 'logs']);

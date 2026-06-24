@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AdminCommandRun;
 use App\Models\AdminSetting;
 use App\Models\AgentProfile;
+use App\Models\AiUsageLog;
 use App\Models\User;
 use App\Services\AdminCommandRunService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -167,6 +168,56 @@ SH);
             ->assertJsonPath('data.metadata.cwd', $runtimeRoot)
             ->assertJsonPath('data.metadata.command_line', $script.' update --yes')
             ->assertJsonPath('data.output', 'updated users at '.$runtimeRoot.'/users'."\n");
+    }
+
+    public function test_admin_can_view_live_lookup_provider_status_and_usage(): void
+    {
+        config()->set('services.hermes_runtime.api_key', 'test-openai-key');
+        config()->set('services.hermes_runtime.weather_lookup_enabled', true);
+
+        $adminToken = $this->apiToken('lookup-admin@example.com');
+        $userToken = $this->apiToken('lookup-user@example.com');
+        $admin = User::where('email', 'lookup-admin@example.com')->firstOrFail();
+        $admin->forceFill(['is_admin' => true])->save();
+
+        AiUsageLog::create([
+            'user_id' => $admin->id,
+            'provider' => 'open_meteo',
+            'model' => 'open-meteo',
+            'route_tier' => 'external_lookup',
+            'request_type' => 'external_lookup',
+            'status' => 'completed',
+            'tool_call_count' => 1,
+            'estimated_cost_usd' => 0,
+            'action_types' => ['external_lookup', 'open_meteo_weather'],
+            'metadata' => ['live_lookup_provider' => 'open_meteo', 'latency_ms' => 240],
+        ]);
+
+        AiUsageLog::create([
+            'user_id' => $admin->id,
+            'provider' => 'openai',
+            'model' => 'gpt-5-mini',
+            'route_tier' => 'web_search',
+            'request_type' => 'web_search',
+            'status' => 'failed',
+            'tool_call_count' => 1,
+            'estimated_cost_usd' => 0.0123,
+            'action_types' => ['external_lookup', 'web_search'],
+            'metadata' => ['live_lookup_provider' => 'openai_web_search', 'latency_ms' => 8100],
+        ]);
+
+        $this->withToken($userToken)->getJson('/api/admin/live-lookup/providers')
+            ->assertForbidden();
+
+        $this->withToken($adminToken)->getJson('/api/admin/live-lookup/providers')
+            ->assertOk()
+            ->assertJsonPath('data.providers.0.key', 'open_meteo')
+            ->assertJsonPath('data.providers.0.connected', true)
+            ->assertJsonPath('data.providers.0.usage.requests', 1)
+            ->assertJsonPath('data.providers.0.usage.avg_latency_ms', 240)
+            ->assertJsonPath('data.providers.1.key', 'openai_web_search')
+            ->assertJsonPath('data.providers.1.connected', true)
+            ->assertJsonPath('data.providers.1.usage.failed', 1);
     }
 
     private function settingsPayload(array $models = [], array $usageLimits = [], bool $apply = false, array $killSwitches = []): array

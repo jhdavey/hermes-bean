@@ -165,6 +165,7 @@ if (mount) {
         blockers: [],
         activity: [],
         adminUsage: null,
+        adminLiveLookup: null,
         adminPlanLimits: null,
         adminUsageLoading: false,
         adminModelRegistry: null,
@@ -313,6 +314,7 @@ if (mount) {
     const kioskRealtimeTransientStatusMs = 2500;
     const kioskRealtimeTurnDebounceMs = 2200;
     const kioskRealtimeWakeContinuationMs = 5500;
+    const kioskRealtimeRunDeadlineMs = 12000;
     const kioskRealtimeProcessedCalls = new Set();
     const kioskRealtimeRunWatchTimers = new Map();
     const kioskRealtimeDeferredFunctionOutputTimers = new Set();
@@ -2096,6 +2098,7 @@ if (mount) {
                 </div>
                 ${adminHermesMaintenanceMarkup()}
                 ${adminSettingsMarkup(settings)}
+                ${adminLiveLookupProvidersMarkup(state.adminLiveLookup)}
                 ${adminPlanLimitsMarkup(state.adminPlanLimits)}
                 <div class="hb-admin-grid">
                     ${adminIssueReportsBlockMarkup(issueReports, archivedIssueReports)}
@@ -2240,6 +2243,57 @@ if (mount) {
                     <span>Apply main model to existing workspace Bean profiles</span>
                 </label>
             </form>`;
+    }
+
+    function adminLiveLookupProvidersMarkup(liveLookup) {
+        const providers = normalizeList(liveLookup?.providers);
+        const cacheSeconds = Number(liveLookup?.cache_seconds ?? liveLookup?.cacheSeconds ?? 0);
+        return `
+            <section class="hb-admin-settings hb-admin-live-lookup">
+                <div class="hb-section-action-row">
+                    <div>
+                        <strong>Live lookup providers</strong>
+                        <small>Connected external data sources, monthly usage, and response speed</small>
+                    </div>
+                    <span class="hb-item-meta">${cacheSeconds > 0 ? `Cache ${Math.round(cacheSeconds / 60)} min` : 'No cache'}</span>
+                </div>
+                <div class="hb-admin-provider-grid">
+                    ${providers.length ? providers.map(adminLiveLookupProviderMarkup).join('') : '<div class="hb-empty">No live lookup providers configured yet.</div>'}
+                </div>
+            </section>`;
+    }
+
+    function adminLiveLookupProviderMarkup(provider) {
+        const usage = provider.usage || {};
+        const connected = provider.connected === true;
+        const configured = provider.configured !== false;
+        const statusLabel = connected ? 'Connected' : configured ? 'Configured' : 'Needs setup';
+        const statusClass = connected ? 'hb-admin-status-ok' : configured ? 'hb-admin-status-warning' : 'hb-admin-status-danger';
+        const latency = usage.avg_latency_ms ?? usage.avgLatencyMs;
+        const lastUsed = usage.last_used_at || usage.lastUsedAt;
+        return `
+            <article class="hb-admin-provider-card">
+                <div class="hb-admin-provider-head">
+                    <div>
+                        <strong>${escapeHtml(provider.label || provider.key || 'Provider')}</strong>
+                        <small>${escapeHtml(`${provider.category || 'External'} · ${provider.mode || 'API'}`)}</small>
+                    </div>
+                    <mark class="hb-admin-status ${statusClass}">${escapeHtml(statusLabel)}</mark>
+                </div>
+                <p>${escapeHtml(provider.notes || '')}</p>
+                <div class="hb-admin-provider-stats">
+                    <span><strong>${escapeHtml(usage.requests ?? 0)}</strong><small>Requests</small></span>
+                    <span><strong>${escapeHtml(usage.completed ?? 0)}</strong><small>Completed</small></span>
+                    <span><strong>${escapeHtml((usage.failed ?? 0) + (usage.blocked ?? 0))}</strong><small>Failed/blocked</small></span>
+                    <span><strong>${escapeHtml(latency ? `${latency}ms` : '—')}</strong><small>Avg latency</small></span>
+                    <span><strong>${escapeHtml(formatCurrency(usage.cost || 0))}</strong><small>Cost</small></span>
+                    <span><strong>${escapeHtml(provider.timeout_ms || provider.timeoutMs ? `${provider.timeout_ms || provider.timeoutMs}ms` : '—')}</strong><small>Timeout</small></span>
+                </div>
+                <div class="hb-admin-provider-foot">
+                    <span>${escapeHtml(provider.key || '')}</span>
+                    <span>${escapeHtml(lastUsed ? `Last used ${formatDateTime(lastUsed)}` : 'No usage this month')}</span>
+                </div>
+            </article>`;
     }
 
     function adminPlanLimitsMarkup(planLimits) {
@@ -2837,6 +2891,7 @@ if (mount) {
         if (type === 'runtime.run_started' || type === 'runtime.run_completed') return null;
         if (type === 'runtime.run_failed') return { id, label: 'Finish request', status: 'failed' };
         if (!type.startsWith('assistant.')) return null;
+        if (type.includes('.duplicate_skipped')) return null;
         const label = beanWorkEventLabel(type, payload);
         if (!label) return null;
         return { id, label, status: beanWorkEventStatus(status) };
@@ -9396,8 +9451,13 @@ if (mount) {
     function watchRealtimeAssistantRun(runId, context = {}, attempt = 0) {
         const id = Number(runId || 0);
         if (!id || kioskRealtimeRunWatchTimers.has(id)) return;
+        const watchContext = {
+            ...context,
+            startedAt: Number(context.startedAt || context.started_at || Date.now()),
+        };
+        const fastLookupDeadline = realtimeRunNeedsFastLookupDeadline(watchContext.userContent || watchContext.user_content || '');
         if (!kioskRealtimeBackgroundWorkActive) {
-            setRealtimeBackgroundWorkActive(true, context);
+            setRealtimeBackgroundWorkActive(true, watchContext);
         } else {
             showRealtimeWorkingInBackgroundWhenReady();
         }
@@ -9408,18 +9468,27 @@ if (mount) {
             try {
                 const run = await api(`/assistant/runs/${id}`);
                 const status = String(run?.status || '').toLowerCase();
+                if (fastLookupDeadline && ['queued', 'running'].includes(status) && Date.now() - watchContext.startedAt >= kioskRealtimeRunDeadlineMs) {
+                    try {
+                        await api(`/assistant/runs/${id}/cancel`, { method: 'POST' });
+                    } catch (_) {}
+                    markActiveBeanWorkItems('cancelled');
+                    setRealtimeBackgroundWorkActive(false);
+                    deliverRealtimeBackgroundResult('I could not get that live lookup back quickly enough. Please try again in a moment, or include the city and zip code so I can narrow it down faster.', id);
+                    return;
+                }
                 if (['queued', 'running'].includes(status) && attempt < 45) {
                     if (!kioskRealtimeBackgroundWorkActive) {
-                        setRealtimeBackgroundWorkActive(true, context);
+                        setRealtimeBackgroundWorkActive(true, watchContext);
                     } else {
                         showRealtimeWorkingInBackgroundWhenReady();
                     }
-                    watchRealtimeAssistantRun(id, context, attempt + 1);
+                    watchRealtimeAssistantRun(id, watchContext, attempt + 1);
                     return;
                 }
                 if (status === 'completed') {
                     completeActiveBeanWorkItems();
-                    handleRealtimeAssistantRunCompleted(run, context);
+                    handleRealtimeAssistantRunCompleted(run, watchContext);
                     return;
                 }
                 if (status === 'failed') {
@@ -9435,10 +9504,19 @@ if (mount) {
                     deliverRealtimeBackgroundResult('That request was cancelled.', id);
                 }
             } catch (_) {
-                if (attempt < 8) watchRealtimeAssistantRun(id, context, attempt + 1);
+                if (attempt < 8) watchRealtimeAssistantRun(id, watchContext, attempt + 1);
             }
         }, delay);
         kioskRealtimeRunWatchTimers.set(id, timer);
+    }
+
+    function realtimeRunNeedsFastLookupDeadline(content) {
+        const command = normalizedVoiceCommand(content);
+        if (!command) return false;
+        const targetsAppData = /\b(calendar|event|events|task|tasks|todo|to do|reminder|reminders|note|notes)\b/.test(command);
+        const changesAppData = /\b(add|create|schedule|delete|remove|cancel|update|change|move|reschedule|complete|mark|write|save)\b/.test(command);
+        if (targetsAppData && changesAppData) return false;
+        return /\b(nearest|closest|near me|nearby|local|store|restaurant|business|address|directions|open now|hours|price|prices|available|availability|weather|forecast|traffic|news|stock|stocks|sports|score|scores|flight|flights|hotel|hotels|wawa)\b/.test(command);
     }
 
     function handleRealtimeAssistantRunCompleted(run, context = {}) {
@@ -11149,7 +11227,7 @@ if (mount) {
         render();
         try {
             const growthRange = encodeURIComponent(state.adminUserGrowthRange || 'last_30_days');
-            const [usage, modelRegistry, hermesStatus, planLimits] = await Promise.all([
+            const [usage, modelRegistry, hermesStatus, liveLookup, planLimits] = await Promise.all([
                 api(`/admin/usage/summary?user_growth_range=${growthRange}`),
                 api('/admin/settings/models'),
                 api('/admin/hermes/status').catch((error) => ({
@@ -11157,11 +11235,13 @@ if (mount) {
                     version: 'Unavailable',
                     error: friendlyError(error, 'check Hermes status'),
                 })),
+                api('/admin/live-lookup/providers'),
                 api('/admin/plan-limits'),
             ]);
             state.adminUsage = usage;
             state.adminModelRegistry = modelRegistry;
             state.adminHermesStatus = hermesStatus;
+            state.adminLiveLookup = liveLookup;
             state.adminPlanLimits = planLimits;
         } catch (error) {
             state.error = friendlyError(error, 'load admin metrics');

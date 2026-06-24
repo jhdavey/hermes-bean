@@ -12,7 +12,6 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -27,8 +26,8 @@ class HermesToolRuntimeService implements HermesRuntimeService
         private readonly WorkspaceService $workspaceService,
         private readonly AiUsageService $usageService,
         private readonly AdminSettingsService $adminSettings,
-        private readonly OpenMeteoWeatherService $weatherService,
         private readonly BeanMemoryService $memoryService,
+        private readonly LiveLookupService $liveLookup,
     ) {}
 
     public function startSession(array $attributes = []): ConversationSession
@@ -193,7 +192,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     if (! is_array($toolCall)) {
                         continue;
                     }
-                    [$toolActions, $toolEvents, $toolOutput] = $this->executeNativeToolCall($session, $toolCall);
+                    [$toolActions, $toolEvents, $toolOutput] = $this->executeNativeToolCall($session, $userMessage, $toolCall);
                     $actions = array_merge($actions, $toolActions);
                     $toolOutputs[] = $toolOutput;
                     $domainEvents = $domainEvents->concat($toolEvents);
@@ -339,7 +338,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $decoded;
     }
 
-    private function executeNativeToolCall(ConversationSession $session, array $toolCall): array
+    private function executeNativeToolCall(ConversationSession $session, ConversationMessage $userMessage, array $toolCall): array
     {
         $name = (string) data_get($toolCall, 'function.name', '');
         $arguments = $this->decodeToolArguments((string) data_get($toolCall, 'function.arguments', '{}'));
@@ -369,11 +368,50 @@ class HermesToolRuntimeService implements HermesRuntimeService
             ]];
         }
 
+        if ($actionType === 'reminder.create' && $this->messageIsAffirmativeOnly($userMessage) && empty($arguments['calendar_event_id'])) {
+            $linkedEvent = $this->recentCalendarEventForReminderConfirmation($session, $userMessage, $arguments);
+            if ($linkedEvent instanceof CalendarEvent) {
+                $arguments['calendar_event_id'] = $linkedEvent->id;
+            }
+        }
+
         $action = [
             'type' => $actionType,
             'risk' => 'low',
             'parameters' => $arguments,
         ];
+
+        if ($actionType === 'calendar_event.create' && $this->messageIsAffirmativeOnly($userMessage)) {
+            $duplicate = $this->duplicateCalendarCreateForConfirmation($session, $arguments);
+            if ($duplicate instanceof CalendarEvent) {
+                $event = $this->recordEvent($session, 'assistant.calendar_event.duplicate_skipped', [
+                    'calendar_event_id' => $duplicate->id,
+                    'title' => $duplicate->title,
+                    'starts_at' => $duplicate->starts_at?->toIso8601String(),
+                    'ends_at' => $duplicate->ends_at?->toIso8601String(),
+                    'reason' => 'matching event already created in this conversation',
+                ], 'calendar.create', 'skipped');
+
+                return [[], collect([$event]), [
+                    'ok' => true,
+                    'skipped' => true,
+                    'action_type' => $actionType,
+                    'message' => 'Skipped duplicate calendar event create; the matching event already exists in this conversation.',
+                    'existing_event' => [
+                        'id' => $duplicate->id,
+                        'title' => $duplicate->title,
+                        'starts_at' => $duplicate->starts_at?->toIso8601String(),
+                        'ends_at' => $duplicate->ends_at?->toIso8601String(),
+                    ],
+                    'events' => [[
+                        'event_type' => $event->event_type,
+                        'tool_name' => $event->tool_name,
+                        'status' => $event->status,
+                        'payload' => $event->payload,
+                    ]],
+                ]];
+            }
+        }
 
         $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
         $failed = $events->contains(fn (ActivityEvent $event): bool => $event->status === 'failed');
@@ -439,6 +477,130 @@ class HermesToolRuntimeService implements HermesRuntimeService
     private function isNativeReadTool(string $name): bool
     {
         return in_array($name, ['search_tasks', 'search_reminders', 'search_calendar_events', 'search_notes', 'search_memory', 'get_request_history', 'get_activity_timeline', 'get_day_context', 'external_lookup'], true);
+    }
+
+    private function messageIsAffirmativeOnly(ConversationMessage $message): bool
+    {
+        $content = str((string) $message->content)
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($content === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/^(yes|yeah|yep|yup|sure|ok|okay|please do|do it|go ahead|that works|sounds good|correct|right|exactly|affirmative|yes please|sure please)$/', $content);
+    }
+
+    private function duplicateCalendarCreateForConfirmation(ConversationSession $session, array $arguments): ?CalendarEvent
+    {
+        $title = $this->normalizedComparisonText($arguments['title'] ?? null);
+        $startsAt = $this->toolArgumentDateTime($arguments['starts_at'] ?? $arguments['start_at'] ?? null);
+        if ($title === '' || ! $startsAt) {
+            return null;
+        }
+
+        $endsAt = $this->toolArgumentDateTime($arguments['ends_at'] ?? $arguments['end_at'] ?? null);
+        $recurrence = $this->normalizedComparisonText($arguments['recurrence'] ?? data_get($arguments, 'metadata.recurrence') ?? 'none') ?: 'none';
+
+        return CalendarEvent::query()
+            ->where('conversation_session_id', $session->id)
+            ->where('user_id', $session->user_id)
+            ->where('workspace_id', $session->workspace_id)
+            ->where('created_at', '>=', now()->subHours(2))
+            ->latest('id')
+            ->limit(25)
+            ->get()
+            ->first(function (CalendarEvent $event) use ($title, $startsAt, $endsAt, $recurrence): bool {
+                if ($this->normalizedComparisonText($event->title) !== $title) {
+                    return false;
+                }
+
+                if (! $event->starts_at || ! $event->starts_at->copy()->utc()->equalTo($startsAt)) {
+                    return false;
+                }
+
+                $eventEndsAt = $event->ends_at?->copy()->utc();
+                if (($eventEndsAt === null) !== ($endsAt === null)) {
+                    return false;
+                }
+
+                if ($eventEndsAt !== null && $endsAt !== null && ! $eventEndsAt->equalTo($endsAt)) {
+                    return false;
+                }
+
+                $eventRecurrence = $this->normalizedComparisonText($event->recurrence ?: data_get($event->metadata ?? [], 'recurrence') ?: 'none') ?: 'none';
+
+                return $eventRecurrence === $recurrence;
+            });
+    }
+
+    private function recentCalendarEventForReminderConfirmation(ConversationSession $session, ConversationMessage $userMessage, array $arguments): ?CalendarEvent
+    {
+        $events = CalendarEvent::query()
+            ->where('conversation_session_id', $session->id)
+            ->where('user_id', $session->user_id)
+            ->where('workspace_id', $session->workspace_id)
+            ->where('created_at', '>=', now()->subHours(2))
+            ->latest('id')
+            ->limit(10)
+            ->get();
+
+        if ($events->isEmpty()) {
+            return null;
+        }
+
+        $lastAssistantText = (string) $session->messages()
+            ->where('id', '<', $userMessage->id)
+            ->where('role', 'assistant')
+            ->latest('id')
+            ->value('content');
+
+        $hint = $this->normalizedComparisonText(implode(' ', [
+            $arguments['title'] ?? '',
+            $arguments['notes'] ?? '',
+            $lastAssistantText,
+        ]));
+
+        $matched = $events->first(function (CalendarEvent $event) use ($hint): bool {
+            $title = $this->normalizedComparisonText($event->title);
+
+            return $title !== '' && str_contains($hint, $title);
+        });
+
+        if ($matched instanceof CalendarEvent) {
+            return $matched;
+        }
+
+        return $events->count() === 1 ? $events->first() : null;
+    }
+
+    private function toolArgumentDateTime(mixed $value): ?Carbon
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value)->utc();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function normalizedComparisonText(mixed $value): string
+    {
+        if (is_array($value)) {
+            $value = data_get($value, 'type') ?? data_get($value, 'frequency') ?? data_get($value, 'recurrence') ?? json_encode($value);
+        }
+
+        return str((string) $value)
+            ->lower()
+            ->replaceMatches('/\s+/', ' ')
+            ->trim()
+            ->toString();
     }
 
     private function executeNativeReadTool(ConversationSession $session, string $name, array $arguments): array
@@ -702,278 +864,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     private function externalLookupForTool(ConversationSession $session, array $arguments): array
     {
-        $query = trim((string) ($arguments['query'] ?? ''));
-        if ($query === '') {
-            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'missing_query', 'message' => 'A lookup query is required.'];
-        }
-
-        $user = User::findOrFail($session->user_id);
-        $context = trim((string) ($arguments['context'] ?? ''));
-        $location = trim((string) ($arguments['location'] ?? ''));
-        $externalPreflight = $this->usageService->preflightDirect(
-            $user,
-            $session->workspace_id,
-            $this->adminSettings->externalLookupModel(),
-            $this->usageService->estimateTokens($query.' '.$context.' '.$location),
-            500,
-            null,
-            'external_lookup',
-            ['session' => $session],
-        );
-        if (! $externalPreflight['allowed']) {
-            $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', $this->adminSettings->externalLookupModel(), [], [
-                'conversation_session_id' => $session->id,
-                'reason' => $externalPreflight['reason'],
-                'query' => $query,
-            ], ['external_lookup'], 'blocked');
-
-            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'external_lookup_limit', 'message' => $externalPreflight['reason']];
-        }
-
-        if ((bool) config('services.hermes_runtime.weather_lookup_enabled', true)) {
-            $weatherResult = $this->weatherService->currentWeatherForQuery($query, $context, $location, [
-                'source' => 'hermes_tool_runtime',
-                'session_id' => $session->id,
-                'workspace_id' => $session->workspace_id,
-            ]);
-            if ($weatherResult !== null) {
-                $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', 'open-meteo', [
-                    'tool_call_count' => 1,
-                ], [
-                    'conversation_session_id' => $session->id,
-                    'provider' => 'open_meteo',
-                    'query' => $query,
-                    'kind' => $weatherResult['kind'] ?? null,
-                ], ['external_lookup', 'open_meteo_weather'], ($weatherResult['ok'] ?? false) ? 'completed' : 'failed');
-                return $weatherResult;
-            }
-        }
-
-        $toolType = (string) config('services.hermes_runtime.external_lookup_tool', 'web_search');
-        $webSearchPreflight = $this->usageService->preflightDirect(
-            $user,
-            $session->workspace_id,
-            $this->adminSettings->externalLookupModel(),
-            $this->usageService->estimateTokens($query.' '.$context.' '.$location),
-            800,
-            null,
-            'web_search',
-            ['session' => $session],
-        );
-        if (! $webSearchPreflight['allowed']) {
-            $this->usageService->recordDirectCall($user, $session->workspace_id, 'web_search', $this->adminSettings->externalLookupModel(), [], [
-                'conversation_session_id' => $session->id,
-                'reason' => $webSearchPreflight['reason'],
-                'query' => $query,
-                'tool_type' => $toolType,
-            ], ['external_lookup', 'web_search'], 'blocked');
-
-            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'web_search_limit', 'message' => $webSearchPreflight['reason']];
-        }
-
-        $payload = [
-            'model' => $this->adminSettings->externalLookupModel(),
-            'tools' => [
-                ['type' => $toolType],
-            ],
-            'tool_choice' => 'auto',
-            'instructions' => 'You are a concise live lookup helper for Bean. Search the web when needed, answer only from current external results, and include citations in the response annotations when available. If results are incomplete or uncertain, say so plainly.',
-            'input' => $this->externalLookupPrompt($session, $query, $context, $location),
-        ];
-
-        $attempts = max(1, (int) config('services.hermes_runtime.external_lookup_attempts', 2));
-        $response = null;
-        $lastException = null;
-        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
-            try {
-                $response = Http::withToken($this->providerApiKey())
-                    ->acceptJson()
-                    ->asJson()
-                    ->connectTimeout((float) config('services.hermes_runtime.external_lookup_connect_timeout', 8))
-                    ->timeout((float) config('services.hermes_runtime.external_lookup_timeout', 45))
-                    ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/responses', $payload);
-                $lastException = null;
-                break;
-            } catch (ConnectionException $exception) {
-                $lastException = $exception;
-
-                Log::warning('Hermes external lookup transport failed.', [
-                    'session_id' => $session->id,
-                    'attempt' => $attempt,
-                    'attempts' => $attempts,
-                    'exception' => $exception->getMessage(),
-                    'key_source' => config('services.hermes_runtime.api_key_source'),
-                    'api_base' => config('services.hermes_runtime.api_base'),
-                    'model' => $this->adminSettings->externalLookupModel(),
-                    'tool_type' => $toolType,
-                ]);
-            }
-        }
-
-        if ($lastException !== null || $response === null) {
-            return [
-                'ok' => false,
-                'tool' => 'external_lookup',
-                'error_code' => 'external_lookup_timeout',
-                'message' => 'The live lookup timed out before it could return current information.',
-            ];
-        }
-
-        if (! $response->successful()) {
-            Log::warning('Hermes external lookup failed.', [
-                'session_id' => $session->id,
-                'status' => $response->status(),
-                'body' => mb_substr($response->body(), 0, 1000),
-                'key_source' => config('services.hermes_runtime.api_key_source'),
-                'api_base' => config('services.hermes_runtime.api_base'),
-                'model' => $this->adminSettings->externalLookupModel(),
-                'tool_type' => $toolType,
-            ]);
-
-            return [
-                'ok' => false,
-                'tool' => 'external_lookup',
-                'error_code' => 'external_lookup_failed',
-                'status' => $response->status(),
-                'message' => 'The external lookup failed.',
-            ];
-        }
-
-        $decoded = $response->json();
-        if (! is_array($decoded)) {
-            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'external_lookup_non_json', 'message' => 'The external lookup returned an unreadable response.'];
-        }
-
-        $text = $this->extractResponseText($decoded);
-        if ($text === '') {
-            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'external_lookup_empty', 'message' => 'The external lookup did not return an answer.'];
-        }
-
-        $this->usageService->recordDirectCall($user, $session->workspace_id, 'web_search', (string) data_get($decoded, 'model', $this->adminSettings->externalLookupModel()), [
-            ...$this->usageService->usageFromOpenAiResponse($decoded),
-            'tool_call_count' => 1,
-        ], [
-            'conversation_session_id' => $session->id,
-            'query' => $query,
-            'tool_type' => $toolType,
-            'response_id' => data_get($decoded, 'id'),
-        ], ['external_lookup', 'web_search']);
-
-        return [
-            'ok' => true,
-            'tool' => 'external_lookup',
-            'query' => $query,
-            'context' => $context !== '' ? $context : null,
-            'location' => $location !== '' ? $location : null,
-            'text' => $text,
-            'citations' => $this->extractResponseCitations($decoded),
-            'sources' => $this->extractResponseSources($decoded),
-            'model' => data_get($decoded, 'model'),
-        ];
-    }
-
-    private function externalLookupPrompt(ConversationSession $session, string $query, string $context, string $location): string
-    {
-        $user = User::find($session->user_id);
-        $profile = $this->profileForSession($session);
-        $profileSettings = $profile?->settings ?? [];
-        $timezone = (string) data_get($profileSettings, 'timezone', config('app.timezone'));
-        $now = now($timezone);
-        $parts = [
-            "Lookup query: {$query}",
-            'Current date/time: '.$now->toIso8601String(),
-            'Timezone: '.$timezone,
-        ];
-        if ($location !== '') {
-            $parts[] = "User/location hint: {$location}";
-        }
-        if ($context !== '') {
-            $parts[] = "Additional context: {$context}";
-        }
-        if ($user?->name) {
-            $parts[] = "User name: {$user->name}";
-        }
-
-        return implode("\n", $parts);
-    }
-
-    private function extractResponseText(array $response): string
-    {
-        $outputText = trim((string) data_get($response, 'output_text', ''));
-        if ($outputText !== '') {
-            return $outputText;
-        }
-
-        $segments = [];
-        foreach ((array) data_get($response, 'output', []) as $item) {
-            foreach ((array) data_get($item, 'content', []) as $content) {
-                $text = trim((string) data_get($content, 'text', ''));
-                if ($text !== '') {
-                    $segments[] = $text;
-                }
-            }
-        }
-
-        return trim(implode("\n\n", $segments));
-    }
-
-    private function extractResponseCitations(array $response): array
-    {
-        $citations = [];
-        $this->collectUrlReferences($response, $citations, true);
-
-        return collect($citations)
-            ->unique('url')
-            ->take(8)
-            ->values()
-            ->all();
-    }
-
-    private function extractResponseSources(array $response): array
-    {
-        $sources = [];
-        foreach ((array) data_get($response, 'output', []) as $item) {
-            foreach ((array) data_get($item, 'action.sources', []) as $source) {
-                if (is_array($source)) {
-                    $url = trim((string) ($source['url'] ?? ''));
-                    if ($url !== '') {
-                        $sources[] = [
-                            'url' => $url,
-                            'title' => trim((string) ($source['title'] ?? '')) ?: null,
-                        ];
-                    }
-                }
-            }
-        }
-        $this->collectUrlReferences($response, $sources, false);
-
-        return collect($sources)
-            ->unique('url')
-            ->take(12)
-            ->values()
-            ->all();
-    }
-
-    private function collectUrlReferences(mixed $value, array &$references, bool $citationsOnly): void
-    {
-        if (! is_array($value)) {
-            return;
-        }
-
-        $type = (string) ($value['type'] ?? '');
-        $url = trim((string) ($value['url'] ?? ''));
-        if ($url !== '' && (! $citationsOnly || $type === 'url_citation')) {
-            $references[] = [
-                'url' => $url,
-                'title' => trim((string) ($value['title'] ?? '')) ?: null,
-            ];
-        }
-
-        foreach ($value as $child) {
-            if (is_array($child)) {
-                $this->collectUrlReferences($child, $references, $citationsOnly);
-            }
-        }
+        return $this->liveLookup->lookup($session, $arguments);
     }
 
     private function readToolResult(string $tool, array $items, int $workspaceId, ?string $timezone = null): array
@@ -1303,6 +1194,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 ],
             ] : null,
             'memory_context' => $memoryContext,
+            'recent_assistant_actions' => $this->recentAssistantActionsForContext($session),
             'temporal_context' => [
                 'server_now_utc' => now()->utc()->toIso8601String(),
                 'server_today' => now()->toDateString(),
@@ -1317,6 +1209,27 @@ class HermesToolRuntimeService implements HermesRuntimeService
         ];
     }
 
+    private function recentAssistantActionsForContext(ConversationSession $session): array
+    {
+        return $session->activityEvents()
+            ->where('event_type', 'like', 'assistant.%')
+            ->whereIn('status', ['succeeded', 'recorded'])
+            ->latest('id')
+            ->limit(10)
+            ->get()
+            ->sortBy('id')
+            ->map(fn (ActivityEvent $event): array => [
+                'id' => $event->id,
+                'event_type' => $event->event_type,
+                'tool_name' => $event->tool_name,
+                'status' => $event->status,
+                'payload' => $event->payload,
+                'created_at' => $event->created_at?->toIso8601String(),
+            ])
+            ->values()
+            ->all();
+    }
+
     private function toolSystemInstructions(): string
     {
         return <<<'PROMPT'
@@ -1325,6 +1238,7 @@ You are Bean, a capable human-like assistant inside the Hey Bean app.
 You own intent and conversation. Interpret the user's message naturally, including messy wording, typos, shorthand, and voice transcription errors. Decide whether to answer directly, call read tools, call write tools, or ask one concise follow-up.
 
 Use recent conversation turns to resolve follow-ups, corrections, and pronouns. If the user corrects the entity type, such as "task, not reminder", apply that correction to the prior request and search/use the corrected tool type.
+Use runtime_context.recent_assistant_actions to resolve follow-up confirmations. If the user says only "yes", "sure", or another short confirmation after Bean asked about an additional related action, perform only the unresolved related action. Do not recreate tasks, reminders, notes, or events that recent_assistant_actions shows were already created or updated. When creating a reminder for an event that was just created, pass that event's calendar_event_id from recent_assistant_actions.
 When a user asks what/when/where about an item and the type is ambiguous, search the relevant app records before saying it is not found. For task-like words or chores, search tasks; for reminder-like alarms, search reminders; for note, list, idea, writing, or saved text requests, search notes; if unclear, search the likely record types.
 
 Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded.

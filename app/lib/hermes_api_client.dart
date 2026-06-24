@@ -1286,6 +1286,11 @@ class HermesApiClient {
     return HermesAssistantRun.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesAssistantRun> cancelAssistantRun(int runId) async {
+    final data = await _sendJson('POST', '/assistant/runs/$runId/cancel');
+    return HermesAssistantRun.fromJson(_expectMap(data['data']));
+  }
+
   Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async {
     final data = await _sendJson(
       'GET',

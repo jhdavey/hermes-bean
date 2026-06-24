@@ -1399,6 +1399,7 @@ enum _HomeDestination { today, tasks, bean, reminders, notes, memory, settings }
 const _dashboardChangePollInterval = Duration(seconds: 15);
 const _pendingCalendarEventWriteTtl = Duration(minutes: 2);
 const _pendingDashboardWriteTtl = Duration(minutes: 2);
+const _assistantQueuedRunDeadline = Duration(seconds: 10);
 const _onboardingTourSeenPreferencePrefix = 'heybean.onboarding_tour_seen';
 const _dashboardSnapshotPreferencePrefix = 'heybean.dashboard_snapshot.v2';
 
@@ -1645,6 +1646,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _dashboardDataLoading = false;
   String _chatRunState = 'Ready';
   int _chatRunToken = 0;
+  int? _activeAssistantRunId;
   List<_BeanWorkItem> _beanWorkItems = const [];
   int _beanWorkEventFloorId = 0;
   Timer? _beanWorkStatusClearTimer;
@@ -2475,6 +2477,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
     }
     if (!type.startsWith('assistant.')) return null;
+    if (type.contains('.duplicate_skipped')) return null;
     final label = _beanWorkEventLabel(type, payload);
     if (label == null) return null;
     return _BeanWorkItem(
@@ -2607,10 +2610,20 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           onRunQueued: (runId, userContent) {
             if (!mounted) return;
             setState(() {
+              _activeAssistantRunId = runId;
               _chatRunState = 'working...';
               _ensureBeanRequestWorkItem(userContent, freshRequest: true);
             });
-            unawaited(_pollQueuedRun(runId, _chatRunToken));
+            unawaited(
+              _pollQueuedRun(
+                runId,
+                _chatRunToken,
+                deadline:
+                    _beanRequestNeedsFastExternalLookupDeadline(userContent)
+                    ? _assistantQueuedRunDeadline
+                    : null,
+              ),
+            );
             unawaited(_pollDashboardChanges());
           },
         );
@@ -3729,10 +3742,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
 
     if (!_beanStopAvailable) return;
+    final activeRunId = _activeAssistantRunId;
     _chatRunToken++;
+    if (activeRunId != null) {
+      unawaited(() async {
+        try {
+          await widget.apiClient.cancelAssistantRun(activeRunId);
+        } catch (_) {
+          // The run may have finished before the cancel request arrives.
+        }
+      }());
+    }
     if (mounted) {
       setState(() {
         _busy = false;
+        _activeAssistantRunId = null;
         _editingChatMessageId = null;
         _chatRunState = 'Stopped';
         _beanWorkItems = const [];
@@ -3886,9 +3910,18 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         final run = result.run;
         if (run != null) {
           setState(() {
+            _activeAssistantRunId = run.id;
             _ensureBeanRequestWorkItem(trimmed);
           });
-          unawaited(_pollQueuedRun(run.id, runToken));
+          unawaited(
+            _pollQueuedRun(
+              run.id,
+              runToken,
+              deadline: _beanRequestNeedsFastExternalLookupDeadline(trimmed)
+                  ? _assistantQueuedRunDeadline
+                  : null,
+            ),
+          );
         }
         return;
       }
@@ -4021,6 +4054,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         normalized.contains('help set up');
   }
 
+  bool _beanRequestNeedsFastExternalLookupDeadline(String content) {
+    final command = _normalizedVoiceCommand(content);
+    if (command.isEmpty) return false;
+    final targetsAppData = RegExp(
+      r'\b(calendar|event|events|task|tasks|todo|to do|reminder|reminders|note|notes)\b',
+    ).hasMatch(command);
+    final changesAppData = RegExp(
+      r'\b(add|create|schedule|delete|remove|cancel|update|change|move|reschedule|complete|mark|write|save)\b',
+    ).hasMatch(command);
+    if (targetsAppData && changesAppData) return false;
+
+    return RegExp(
+      r'\b(nearest|closest|near me|nearby|local|store|restaurant|business|address|directions|open now|hours|price|prices|available|availability|weather|forecast|traffic|news|stock|stocks|sports|score|scores|flight|flights|hotel|hotels|wawa)\b',
+    ).hasMatch(command);
+  }
+
   bool _isConversationDecline(String content) {
     final normalized = _normalizeChatRoutingText(content);
     return RegExp(
@@ -4117,10 +4166,39 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
-  Future<void> _pollQueuedRun(int runId, int runToken) async {
+  Future<void> _pollQueuedRun(
+    int runId,
+    int runToken, {
+    Duration? deadline,
+  }) async {
+    final startedAt = DateTime.now();
     for (var attempt = 0; attempt < 30; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 2));
       if (!mounted || runToken != _chatRunToken) return;
+      if (deadline != null &&
+          DateTime.now().difference(startedAt) >= deadline) {
+        try {
+          await widget.apiClient.cancelAssistantRun(runId);
+        } catch (_) {
+          // A completed run can race the deadline; the next refresh will pick it up.
+        }
+        if (!mounted || runToken != _chatRunToken) return;
+        setState(() {
+          if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
+          _busy = false;
+          _chatRunState = 'Timed out';
+          _beanWorkItems = const [];
+          _messages.add(
+            HermesMessage(
+              id: _messages.length + 1,
+              role: 'assistant',
+              content:
+                  'I could not get that live lookup back quickly enough. Please try again in a moment, or include the city and zip code so I can narrow it down faster.',
+            ),
+          );
+        });
+        return;
+      }
       try {
         final run = await widget.apiClient.getAssistantRun(runId);
         if (!mounted || runToken != _chatRunToken) return;
@@ -4143,6 +4221,7 @@ ${_truncateDiagnostic(stack, 2200)}
           await _refreshSignedInViews();
           if (!mounted || runToken != _chatRunToken) return;
           setState(() {
+            if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
             _chatRunState = switch (run.status) {
               'completed' => 'Updated',
               'cancelled' => 'Stopped',
@@ -4165,6 +4244,13 @@ ${_truncateDiagnostic(stack, 2200)}
         // Background polling is opportunistic; dashboard polling still refreshes app state.
       }
     }
+    if (!mounted || runToken != _chatRunToken) return;
+    setState(() {
+      if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
+      _busy = false;
+      _chatRunState = 'Timed out';
+      _beanWorkItems = const [];
+    });
   }
 
   HermesMessage _displayableAssistantMessage(HermesMessage message) {
