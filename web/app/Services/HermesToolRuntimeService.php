@@ -174,7 +174,21 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 $toolCalls = is_array($message) && is_array($message['tool_calls'] ?? null) ? $message['tool_calls'] : [];
 
                 if ($toolCalls === []) {
-                    $assistantContent = $this->normalizedAssistantContent(data_get($message, 'content', ''));
+                    $candidateContent = $this->normalizedAssistantContent(data_get($message, 'content', ''));
+                    if ($this->shouldContinueAfterReadOnlyTerminal($userMessage, $candidateContent, $actions, $toolOutputs, $turn)) {
+                        $messages[] = [
+                            'role' => 'assistant',
+                            'content' => $candidateContent,
+                        ];
+                        $messages[] = [
+                            'role' => 'system',
+                            'content' => $this->readOnlyTerminalCorrectionPrompt(),
+                        ];
+
+                        continue;
+                    }
+
+                    $assistantContent = $candidateContent;
                     break;
                 }
 
@@ -492,6 +506,50 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         return (bool) preg_match('/^(yes|yeah|yep|yup|sure|ok|okay|please do|do it|go ahead|that works|sounds good|correct|right|exactly|affirmative|yes please|sure please)$/', $content);
+    }
+
+    private function shouldContinueAfterReadOnlyTerminal(ConversationMessage $userMessage, string $assistantContent, array $actions, array $toolOutputs, int $turn): bool
+    {
+        if ($turn >= 2 || $actions !== [] || trim($assistantContent) === '') {
+            return false;
+        }
+
+        if (! $this->messageAppearsToRequestAppWrite($userMessage)) {
+            return false;
+        }
+
+        return collect($toolOutputs)->contains(fn (mixed $output): bool => is_array($output)
+            && in_array((string) ($output['tool'] ?? ''), [
+                'search_tasks',
+                'search_reminders',
+                'search_calendar_events',
+                'search_notes',
+                'search_memory',
+                'get_day_context',
+            ], true));
+    }
+
+    private function messageAppearsToRequestAppWrite(ConversationMessage $message): bool
+    {
+        $content = str((string) $message->content)
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($content === '') {
+            return false;
+        }
+
+        $hasWriteVerb = (bool) preg_match('/\b(add|create|make|schedule|book|set|move|reschedule|change|update|edit|rename|delete|remove|cancel|clear|mark|complete|finish|pin|unpin|lock|unlock)\b/u', $content);
+        $hasAppTarget = (bool) preg_match('/\b(event|events|calendar|calendars|appointment|appointments|meeting|meetings|task|tasks|todo|to\s+do|reminder|reminders|note|notes|folder|folders|list|lists)\b/u', $content);
+
+        return $hasWriteVerb && $hasAppTarget;
+    }
+
+    private function readOnlyTerminalCorrectionPrompt(): string
+    {
+        return 'The user asked to change HeyBean app data, but only read tools have run so far. Use the read results already available in this conversation to call the necessary write tools now. If the target cannot be uniquely identified, ask one concise follow-up instead of ending with a lookup count. Do not say the work is complete until write tool results confirm it.';
     }
 
     private function duplicateCalendarCreateForConfirmation(ConversationSession $session, array $arguments): ?CalendarEvent

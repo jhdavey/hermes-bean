@@ -1613,6 +1613,167 @@ class HermesToolRuntimeServiceTest extends TestCase
         ]);
     }
 
+    public function test_read_only_lookup_cannot_end_mixed_app_change_request(): void
+    {
+        Carbon::setTestNow('2026-06-24T19:35:00Z');
+
+        $token = $this->premiumApiToken('tool-mixed-action-after-read@example.com');
+        $user = User::where('email', 'tool-mixed-action-after-read@example.com')->firstOrFail();
+        $workspace = app(WorkspaceService::class)->resolveWorkspace($user);
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $groceryEvent = CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Grocery shopping',
+            'starts_at' => Carbon::parse('2026-06-24 15:00:00', 'America/New_York')->utc(),
+            'ends_at' => Carbon::parse('2026-06-24 15:45:00', 'America/New_York')->utc(),
+            'status' => 'confirmed',
+        ]);
+        $reminder = Reminder::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'calendar_event_id' => $groceryEvent->id,
+            'title' => 'Reminder: Grocery shopping',
+            'status' => 'pending',
+            'remind_at' => Carbon::parse('2026-06-24 14:45:00', 'America/New_York')->utc(),
+        ]);
+
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-search-reminder',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_search_reminder',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'search_reminders',
+                                'arguments' => json_encode([
+                                    'query' => 'grocery shopping',
+                                    'date' => '2026-06-24',
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-premature-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I found 1 matching reminders.',
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-write-tools',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [
+                            [
+                                'id' => 'call_create_workout',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_calendar_event',
+                                    'arguments' => json_encode([
+                                        'title' => 'Workout',
+                                        'starts_at' => '2026-06-24T15:00:00-04:00',
+                                        'ends_at' => '2026-06-24T16:00:00-04:00',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                            [
+                                'id' => 'call_move_grocery',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'update_calendar_event',
+                                    'arguments' => json_encode([
+                                        'id' => $groceryEvent->id,
+                                        'starts_at' => '2026-06-24T16:15:00-04:00',
+                                        'ends_at' => '2026-06-24T17:00:00-04:00',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                            [
+                                'id' => 'call_delete_reminder',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'delete_reminder',
+                                    'arguments' => json_encode([
+                                        'id' => $reminder->id,
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                        ],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Done — I added the workout, moved grocery shopping, and deleted the reminder.',
+                    ],
+                ]],
+            ], 200);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'add workout to my calendar and move grocery shopping to be after that, and delete the reminder',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_context' => [
+                    'current_local_time' => '2026-06-24T15:35:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Done — I added the workout, moved grocery shopping, and deleted the reminder.')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.updated'])
+            ->assertJsonFragment(['event_type' => 'assistant.reminder.deleted']);
+
+        $this->assertDatabaseHas('calendar_events', [
+            'user_id' => $user->id,
+            'title' => 'Workout',
+        ]);
+        $groceryEvent->refresh();
+        $this->assertSame('2026-06-24T20:15:00+00:00', $groceryEvent->starts_at->utc()->toIso8601String());
+        $this->assertDatabaseMissing('reminders', [
+            'id' => $reminder->id,
+        ]);
+
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+            $messages = collect(is_array($payload) ? ($payload['messages'] ?? []) : []);
+
+            return $messages->contains(fn (mixed $message): bool => is_array($message)
+                && ($message['role'] ?? null) === 'system'
+                && str_contains((string) ($message['content'] ?? ''), 'only read tools have run so far'));
+        });
+    }
+
     public function test_base_plan_blocks_recurring_resources_from_bean_tool_calls(): void
     {
         Http::fakeSequence()

@@ -186,10 +186,10 @@ double _beanWorkDockStripHeight(List<_BeanWorkItem> items, bool active) {
   if (!active) return 0;
   final count = math.min(
     items.where((item) => item.label.trim().isNotEmpty).length,
-    4,
+    6,
   );
   if (count == 0) return 48;
-  return math.min(150, 48 + (count * 24));
+  return math.min(196, 48 + (count * 24));
 }
 
 class _BeanResponsePreview {
@@ -1640,11 +1640,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   List<HermesApproval> _approvals = const [];
   List<HermesActivityEvent> _events = const [];
   final List<HermesMessage> _messages = const [
-    HermesMessage(
-      id: 0,
-      role: 'assistant',
-      content: 'Hi — I can plan, schedule, remind, and follow up.',
-    ),
+    HermesMessage(id: 0, role: 'assistant', content: 'Bean is waking up…'),
   ].toList();
   String? _error;
   String? _authNotice;
@@ -1658,6 +1654,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int? _activeAssistantRunId;
   List<_BeanWorkItem> _beanWorkItems = const [];
   int _beanWorkEventFloorId = 0;
+  bool _beanWorkFinalized = false;
+  final Set<int> _beanWorkAppliedEventIds = <int>{};
+  final Set<String> _beanWorkStagedCompletionIds = <String>{};
   Timer? _beanWorkStatusClearTimer;
   Timer? _beanResponsePreviewTimer;
   DateTime? _beanWorkStatusHoldUntil;
@@ -1799,7 +1798,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
     final now = DateTime.now();
     final activeWorkspaceId = _activeWorkspaceId();
-    final sourceIds = tasks.map((task) => task.id).toSet();
     final merged = List<HermesTask>.from(tasks);
 
     for (final entry in _pendingTaskWrites.entries.toList()) {
@@ -1819,9 +1817,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
       if (pending.deleted) {
         merged.removeWhere((task) => task.id == entry.key);
-        if (!sourceIds.contains(entry.key)) {
-          _pendingTaskWrites.remove(entry.key);
-        }
         continue;
       }
 
@@ -1908,7 +1903,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
     final now = DateTime.now();
     final activeWorkspaceId = _activeWorkspaceId();
-    final sourceIds = reminders.map((reminder) => reminder.id).toSet();
     final merged = List<HermesReminder>.from(reminders);
 
     for (final entry in _pendingReminderWrites.entries.toList()) {
@@ -1929,9 +1923,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
       if (pending.deleted) {
         merged.removeWhere((reminder) => reminder.id == entry.key);
-        if (!sourceIds.contains(entry.key)) {
-          _pendingReminderWrites.remove(entry.key);
-        }
         continue;
       }
 
@@ -2020,7 +2011,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
     final now = DateTime.now();
     final activeWorkspaceId = _activeWorkspaceId();
-    final sourceIds = events.map((event) => event.id).toSet();
     final merged = List<HermesCalendarEvent>.from(events);
 
     for (final entry in _pendingCalendarEventWrites.entries.toList()) {
@@ -2041,9 +2031,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
       if (pending.deleted) {
         merged.removeWhere((event) => event.id == entry.key);
-        if (!sourceIds.contains(entry.key)) {
-          _pendingCalendarEventWrites.remove(entry.key);
-        }
         continue;
       }
 
@@ -2076,6 +2063,91 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return _normalizeCalendarEventsForDisplay(
       _calendarEventsWithPendingWrites(summary),
     );
+  }
+
+  List<T> _dashboardListForRefresh<T>(
+    List<T> refreshed,
+    List<T> current, {
+    required bool showLoading,
+  }) {
+    if (!showLoading && refreshed.isEmpty && current.isNotEmpty) {
+      return current;
+    }
+    return refreshed;
+  }
+
+  List<T> _dashboardListForMutationRefresh<T>({
+    required List<T> refreshed,
+    required List<T> current,
+    required bool showLoading,
+    required Set<int> deletedIds,
+    required int Function(T item) idFor,
+  }) {
+    if (showLoading || deletedIds.isEmpty) {
+      return _dashboardListForRefresh(
+        refreshed,
+        current,
+        showLoading: showLoading,
+      );
+    }
+
+    final merged = <int, T>{};
+    for (final item in refreshed) {
+      final id = idFor(item);
+      if (!deletedIds.contains(id)) merged[id] = item;
+    }
+    for (final item in current) {
+      final id = idFor(item);
+      if (!deletedIds.contains(id)) merged.putIfAbsent(id, () => item);
+    }
+    return merged.values.toList(growable: false);
+  }
+
+  Set<int> _activePendingTaskDeleteIds() => _activePendingDeleteIds(
+    _pendingTaskWrites.map((key, value) => MapEntry(key, value)),
+  );
+
+  Set<int> _activePendingReminderDeleteIds() => _activePendingDeleteIds(
+    _pendingReminderWrites.map((key, value) => MapEntry(key, value)),
+  );
+
+  Set<int> _activePendingCalendarEventDeleteIds() => _activePendingDeleteIds(
+    _pendingCalendarEventWrites.map((key, value) => MapEntry(key, value)),
+  );
+
+  Set<int> _activePendingDeleteIds(Map<int, dynamic> pendingWrites) {
+    final now = DateTime.now();
+    final activeWorkspaceId = _activeWorkspaceId();
+    final deletedIds = <int>{};
+    for (final entry in pendingWrites.entries) {
+      final pending = entry.value;
+      final deleted = pending.deleted == true;
+      final expiresAt = pending.expiresAt;
+      final workspaceId = pending.workspaceId;
+      if (!deleted ||
+          expiresAt is! DateTime ||
+          !expiresAt.isAfter(now) ||
+          (workspaceId != null &&
+              activeWorkspaceId != null &&
+              workspaceId != activeWorkspaceId)) {
+        continue;
+      }
+      deletedIds.add(entry.key);
+    }
+    return deletedIds;
+  }
+
+  bool _deleteSelectionAffectsVisibleWorkspace(
+    int? itemWorkspaceId,
+    List<Object> deleteFromWorkspaceIds,
+  ) {
+    if (deleteFromWorkspaceIds.isEmpty) return true;
+    final visibleWorkspaceId = itemWorkspaceId ?? _activeWorkspaceId();
+    if (visibleWorkspaceId == null) return true;
+    final selectedWorkspaceIds = deleteFromWorkspaceIds
+        .map((id) => id.toString())
+        .toSet();
+    return selectedWorkspaceIds.contains(visibleWorkspaceId.toString());
   }
 
   bool _calendarEventMatchesPendingWrite(
@@ -2208,6 +2280,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       for (final item in _beanWorkItems)
         item.done ? item : item.copyWith(status: status),
     ];
+    _beanWorkFinalized = true;
     _scheduleBeanWorkStatusClearIfDone();
   }
 
@@ -2215,13 +2288,19 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (_beanWorkItems.isEmpty || _beanWorkItems.any((item) => !item.done)) {
       return;
     }
-    _scheduleBeanWorkStatusClear();
+    if (_activeAssistantRunId != null && !_beanWorkFinalized) {
+      return;
+    }
+    _scheduleBeanWorkStatusClear(
+      _selectedDestination == _HomeDestination.bean
+          ? const Duration(seconds: 4)
+          : const Duration(seconds: 5),
+    );
   }
 
   void _scheduleBeanWorkStatusClear([
     Duration delay = const Duration(milliseconds: 1900),
   ]) {
-    if (_busy) return;
     _beanWorkStatusClearTimer?.cancel();
     final now = DateTime.now();
     var clearDelay = delay;
@@ -2233,7 +2312,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkStatusHoldUntil = now.add(clearDelay);
     _beanWorkStatusClearTimer = Timer(clearDelay, () {
       if (!mounted) return;
-      if (_busy) {
+      if (_busy || (_activeAssistantRunId != null && !_beanWorkFinalized)) {
         _scheduleBeanWorkStatusClear(delay);
         return;
       }
@@ -2241,6 +2320,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanWorkStatusHoldUntil = null;
         _beanWorkStatusMinUntil = null;
         _beanWorkItems = const [];
+        _beanWorkFinalized = false;
+        _beanWorkStagedCompletionIds.clear();
       });
     });
   }
@@ -2260,6 +2341,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkStatusHoldUntil = null;
     _beanWorkStatusMinUntil = null;
     _beanWorkItems = const [];
+    _beanWorkFinalized = false;
+    _beanWorkStagedCompletionIds.clear();
   }
 
   void _prepareBeanWorkForFreshRequest() {
@@ -2267,6 +2350,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       0,
       (maxId, event) => math.max(maxId, event.id),
     );
+    _beanWorkAppliedEventIds.clear();
+    _beanWorkFinalized = false;
+    _beanWorkStagedCompletionIds.clear();
     _clearCompletedBeanWorkItemsForFreshRequest();
   }
 
@@ -2280,16 +2366,47 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }.contains(status.toLowerCase());
 
   int _beanWorkPlaceholderIndex(String label) {
-    final eventCategory = _beanWorkCategoryForLabel(label);
+    final target = _beanWorkTargetForLabel(label);
+    final subjectKey = _beanWorkSubjectKeyForLabel(label);
     return _beanWorkItems.indexWhere((item) {
-      if (item.id != 'realtime-request' || item.resolvedByEvent || item.done) {
-        return false;
-      }
-      final placeholderCategory = _beanWorkCategoryForLabel(item.label);
-      return eventCategory.isEmpty ||
-          placeholderCategory.isEmpty ||
-          eventCategory == placeholderCategory;
+      return _beanWorkItemCanResolvePlaceholder(item, target, subjectKey);
     });
+  }
+
+  bool _beanWorkHasPendingPlaceholderForLabel(String label) {
+    final target = _beanWorkTargetForLabel(label);
+    final subjectKey = _beanWorkSubjectKeyForLabel(label);
+    return _beanWorkItems.any(
+      (item) => _beanWorkItemCanResolvePlaceholder(item, target, subjectKey),
+    );
+  }
+
+  bool _beanWorkItemCanResolvePlaceholder(
+    _BeanWorkItem item,
+    String target,
+    String subjectKey,
+  ) {
+    if ((!item.id.startsWith('request-') && item.id != 'realtime-request') ||
+        item.resolvedByEvent ||
+        item.done) {
+      return false;
+    }
+    final placeholderTarget = _beanWorkTargetForLabel(item.label);
+    final placeholderSubjectKey = _beanWorkSubjectKeyForLabel(item.label);
+    if (target.isNotEmpty &&
+        placeholderTarget.isNotEmpty &&
+        target != placeholderTarget) {
+      return false;
+    }
+    if (subjectKey.isNotEmpty && placeholderSubjectKey.isNotEmpty) {
+      return subjectKey == placeholderSubjectKey ||
+          subjectKey.contains(placeholderSubjectKey) ||
+          placeholderSubjectKey.contains(subjectKey);
+    }
+    if (subjectKey.isEmpty && placeholderSubjectKey.isNotEmpty) return false;
+    return target.isEmpty ||
+        placeholderTarget.isEmpty ||
+        target == placeholderTarget;
   }
 
   String _beanWorkCategoryForLabel(String label) {
@@ -2328,6 +2445,37 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return action.isNotEmpty || target.isNotEmpty ? '$action:$target' : '';
   }
 
+  String _beanWorkTargetForLabel(String label) {
+    final category = _beanWorkCategoryForLabel(label);
+    final separator = category.indexOf(':');
+    if (separator < 0 || separator == category.length - 1) return '';
+    return category.substring(separator + 1);
+  }
+
+  String _beanWorkSubjectKeyForLabel(String label) {
+    final separator = label.indexOf(':');
+    if (separator < 0 || separator == label.length - 1) return '';
+    var subject = label.substring(separator + 1).toLowerCase();
+    subject = subject
+        .replaceAll(RegExp(r'\([^)]*\)'), ' ')
+        .replaceAll(
+          RegExp(
+            r'\b(calendar|event|events|task|tasks|reminder|reminders|note|notes|create|creating|created|update|updating|updated|delete|deleting|deleted|save|saving|saved)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (subject == 'groceries' || subject == 'grocery store') {
+      subject = 'grocery shopping';
+    }
+    if (subject == 'cooking dinner' || subject == 'make dinner') {
+      subject = 'cook dinner';
+    }
+    return subject;
+  }
+
   bool _isGenericBeanWorkLabel(String label) => RegExp(
     r'^(finish|finished|background work|finish background work|bean started working|read request|follow up on voice request|working on request|work on request)$',
     caseSensitive: false,
@@ -2339,68 +2487,222 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     bool freshRequest = false,
   }) {
     if (_beanRequestIsCapabilityQuestion(content)) return;
-    final label = _beanWorkLabelForRequest(content);
-    if (label == null) return;
+    final labels = _beanWorkLabelsForTurn(content);
+    if (labels.isEmpty) return;
     if (freshRequest) {
       _prepareBeanWorkForFreshRequest();
     }
-    _BeanWorkItem? existing;
-    for (final item in _beanWorkItems) {
-      if (item.id == 'realtime-request') {
-        existing = item;
-        break;
-      }
+    for (var index = 0; index < labels.length; index++) {
+      _upsertBeanWorkItem('request-$index', labels[index], status: status);
     }
-    if (existing != null && existing.resolvedByEvent && !existing.done) return;
-    _upsertBeanWorkItem('realtime-request', label, status: status);
   }
 
-  String? _beanWorkLabelForRequest(String content) {
+  List<String> _beanWorkLabelsForTurn(String content) {
+    final directLabels = _beanWorkLabelsForRequest(content);
+    if (directLabels.isNotEmpty) return directLabels;
+    if (!_beanWorkIsAffirmativeFollowUp(content)) return const [];
+    final lastAssistant = _messages.reversed.where(
+      (message) =>
+          message.role == 'assistant' &&
+          (message.content ?? '').trim().isNotEmpty,
+    );
+    if (lastAssistant.isEmpty) return const [];
+    return _beanWorkLabelsForAssistantProposal(
+      lastAssistant.first.content ?? '',
+    );
+  }
+
+  List<String> _beanWorkLabelsForRequest(String content) {
     final command = _normalizedVoiceCommand(content);
+    if (command.isEmpty) return const [];
+    if (_beanCommandIsCapabilityQuestion(command)) return const [];
+    final inheritedTarget = _beanWorkTargetForClause(command);
+    final scheduleContext =
+        inheritedTarget == 'event' &&
+        RegExp(
+          r'\b(schedule|plan|organize)\b.*\b(day|calendar|events?)\b|\b(calendar|events?)\b.*\b(schedule|plan|organize)\b',
+        ).hasMatch(command);
+    final clauses = _beanWorkRequestClauses(command);
+    final labels = <String>[];
+    for (final clause in clauses) {
+      final label = _beanWorkLabelForClause(
+        clause,
+        inheritedTarget: inheritedTarget,
+        scheduleContext: scheduleContext,
+      );
+      if (label == null || _isGenericBeanWorkLabel(label)) continue;
+      if (labels.contains(label)) continue;
+      labels.add(label);
+    }
+    if (labels.isNotEmpty) return labels.take(6).toList();
+    final fallback = _beanWorkLabelForClause(
+      command,
+      inheritedTarget: inheritedTarget,
+      scheduleContext: scheduleContext,
+    );
+    return fallback == null || _isGenericBeanWorkLabel(fallback)
+        ? const []
+        : [fallback];
+  }
+
+  bool _beanWorkIsAffirmativeFollowUp(String content) {
+    final command = _normalizedVoiceCommand(content);
+    if (command.isEmpty) return false;
+    return RegExp(
+      r'^(yes|yeah|yep|yup|sure|ok|okay|please|yes please|sure please|do it|go ahead|that works|sounds good)$',
+    ).hasMatch(command);
+  }
+
+  List<String> _beanWorkLabelsForAssistantProposal(String content) {
+    final text = content.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return const [];
+    final normalized = _normalizedVoiceCommand(text);
+    final labels = <String>[];
+
+    final calendarMatch = RegExp(
+      r'\badd\s+(.+?)\s+to\s+(?:your\s+|my\s+)?calendar\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (calendarMatch != null) {
+      final eventNames = _beanWorkProposalItems(calendarMatch.group(1) ?? '');
+      for (final name in eventNames) {
+        labels.add('Creating calendar event: $name');
+      }
+      if (RegExp(r'\breminder(?:s)?\b.*\bfor each\b').hasMatch(normalized)) {
+        for (final name in eventNames) {
+          labels.add('Creating reminder: $name');
+        }
+      } else if (RegExp(r'\breminder(?:s)?\b').hasMatch(normalized) &&
+          eventNames.isNotEmpty) {
+        labels.add('Creating reminder: ${eventNames.first}');
+      }
+    }
+
+    final taskMatch = RegExp(
+      r'\badd\s+(.+?)\s+to\s+(?:your\s+|my\s+)?tasks\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (taskMatch != null) {
+      for (final name in _beanWorkProposalItems(taskMatch.group(1) ?? '')) {
+        labels.add('Creating task: $name');
+      }
+    }
+
+    final noteMatch = RegExp(
+      r'\b(?:create|add)\s+(.+?)\s+(?:as\s+)?(?:a\s+)?note\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (noteMatch != null) {
+      for (final name in _beanWorkProposalItems(noteMatch.group(1) ?? '')) {
+        labels.add('Creating note: $name');
+      }
+    }
+
+    return labels
+        .where((label) => label.trim().isNotEmpty)
+        .toSet()
+        .take(6)
+        .toList();
+  }
+
+  List<String> _beanWorkProposalItems(String raw) {
+    var text = raw
+        .replaceAll(RegExp(r'\([^)]*\)'), ' ')
+        .replaceAll(RegExp(r'\bnow\b', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    text = text.replaceAll(RegExp(r'^(the|a|an)\s+', caseSensitive: false), '');
+    if (text.isEmpty) return const [];
+    return text
+        .split(RegExp(r'\s*,\s*|\s+\band\b\s+', caseSensitive: false))
+        .map((item) => item.trim())
+        .where((item) => item.length >= 2)
+        .map((item) => item[0].toUpperCase() + item.substring(1))
+        .toList();
+  }
+
+  List<String> _beanWorkRequestClauses(String command) {
+    final normalized = command
+        .replaceAll(RegExp(r'\b(?:and then|then)\b'), ' and ')
+        .replaceAll(RegExp(r'\s*,\s*'), ' and ');
+    final clauses = normalized
+        .split(RegExp(r'\s+\band\b\s+'))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    return clauses.isEmpty ? [command] : clauses;
+  }
+
+  String? _beanWorkLabelForClause(
+    String clause, {
+    required String inheritedTarget,
+    bool scheduleContext = false,
+  }) {
+    final command = clause.trim();
     if (command.isEmpty) return null;
-    if (_beanCommandIsCapabilityQuestion(command)) return null;
-    final targetsEvent = RegExp(
-      r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
-    ).hasMatch(command);
-    final targetsTask = RegExp(
-      r'\b(task|tasks|todo|to do)\b',
-    ).hasMatch(command);
-    final targetsReminder = RegExp(
-      r'\b(reminder|reminders|remind)\b',
-    ).hasMatch(command);
-    final targetsNote = RegExp(
-      r'\b(note|notes|folder|folders|list|lists)\b',
-    ).hasMatch(command);
-    final targetsMemory = RegExp(
-      r'\b(remember|memory|forget|preference|preferences)\b',
-    ).hasMatch(command);
+    final clauseTarget = _beanWorkTargetForClause(command);
+    final effectiveTarget = clauseTarget.isEmpty
+        ? inheritedTarget
+        : clauseTarget;
+    final targetsEvent =
+        RegExp(
+          r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
+        ).hasMatch(command) ||
+        effectiveTarget == 'event';
+    final targetsTask =
+        RegExp(r'\b(task|tasks|todo|to-do)\b').hasMatch(command) ||
+        effectiveTarget == 'task';
+    final targetsReminder =
+        RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command) ||
+        effectiveTarget == 'reminder';
+    final targetsNote =
+        RegExp(
+          r'\b(note|notes|folder|folders|list|lists)\b',
+        ).hasMatch(command) ||
+        effectiveTarget == 'note';
+    final targetsMemory =
+        RegExp(
+          r'\b(remember|memory|forget|preference|preferences)\b',
+        ).hasMatch(command) ||
+        effectiveTarget == 'memory';
+    final subject = _beanWorkSubjectForClause(command);
+    String withSubject(String base) =>
+        subject == null ? base : '$base: $subject';
+    final scheduleActivityAsEvent =
+        scheduleContext &&
+        effectiveTarget == 'event' &&
+        _beanWorkLooksLikeSchedulableActivity(command);
     if (RegExp(r'\b(delete|remove|cancel)\b').hasMatch(command)) {
-      if (targetsMemory) return 'Forgetting knowledge';
-      if (targetsEvent) return 'Deleting event';
-      if (targetsReminder) return 'Deleting reminder';
-      if (targetsTask) return 'Deleting task';
-      if (targetsNote) return 'Deleting note';
+      if (targetsMemory) return withSubject('Forgetting knowledge');
+      if (targetsEvent) return withSubject('Deleting event');
+      if (targetsReminder) return withSubject('Deleting reminder');
+      if (targetsTask) return withSubject('Deleting task');
+      if (targetsNote) return withSubject('Deleting note');
       return 'Deleting item';
     }
     if (RegExp(r'\b(move|reschedule|update|change)\b').hasMatch(command)) {
-      if (targetsMemory) return 'Updating knowledge';
-      if (targetsEvent) return 'Updating event';
-      if (targetsReminder) return 'Updating reminder';
-      if (targetsTask) return 'Updating task';
-      if (targetsNote) return 'Updating note';
+      if (targetsMemory) return withSubject('Updating knowledge');
+      if (targetsEvent) return withSubject('Updating event');
+      if (targetsReminder) return withSubject('Updating reminder');
+      if (targetsTask) return withSubject('Updating task');
+      if (targetsNote) return withSubject('Updating note');
       return 'Updating item';
     }
-    if (RegExp(r'\b(add|create|put|schedule|write|save)\b').hasMatch(command)) {
-      if (targetsMemory) return 'Saving knowledge';
-      if (targetsEvent) return 'Creating event';
-      if (targetsReminder) return 'Creating reminder';
-      if (targetsTask) return 'Creating task';
-      if (targetsNote) return 'Creating note';
+    if (RegExp(r'\b(add|create|put|schedule|write|save)\b').hasMatch(command) ||
+        scheduleActivityAsEvent) {
+      if (subject == null && _beanWorkClauseReferencesPriorItems(command)) {
+        return null;
+      }
+      if (targetsMemory) return withSubject('Saving knowledge');
+      if (targetsEvent) return withSubject('Creating event');
+      if (targetsReminder) return withSubject('Creating reminder');
+      if (targetsTask) return withSubject('Creating task');
+      if (targetsNote) return withSubject('Creating note');
       return 'Creating item';
     }
     if (RegExp(r'\b(complete|finish|mark)\b').hasMatch(command)) {
-      if (targetsTask) return 'Updating task';
-      if (targetsReminder) return 'Updating reminder';
+      if (targetsTask) return withSubject('Updating task');
+      if (targetsReminder) return withSubject('Updating reminder');
       return 'Updating item';
     }
     if (RegExp(r'\b(remember|memory)\b').hasMatch(command)) {
@@ -2410,6 +2712,158 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       return 'Planning request';
     }
     return 'Working on request';
+  }
+
+  bool _beanWorkClauseReferencesPriorItems(String command) =>
+      RegExp(
+        r'\b(these|those|them|that|it|the above|all of that)\b',
+      ).hasMatch(command) &&
+      RegExp(r'\b(add|create|put|schedule|save|write)\b').hasMatch(command);
+
+  String _beanWorkTargetForClause(String command) {
+    if (RegExp(
+      r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
+    ).hasMatch(command)) {
+      return 'event';
+    }
+    if (RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command)) {
+      return 'reminder';
+    }
+    if (RegExp(r'\b(task|tasks|todo|to-do)\b').hasMatch(command)) {
+      return 'task';
+    }
+    if (RegExp(
+      r'\b(note|notes|folder|folders|list|lists)\b',
+    ).hasMatch(command)) {
+      return 'note';
+    }
+    if (RegExp(
+      r'\b(remember|memory|forget|preference|preferences)\b',
+    ).hasMatch(command)) {
+      return 'memory';
+    }
+    return '';
+  }
+
+  String? _beanWorkSubjectForClause(String clause) {
+    final semanticSubject = _beanWorkSemanticSubjectForClause(clause);
+    if (semanticSubject != null) return semanticSubject;
+    var text = _beanWorkExplicitSubjectForClause(clause) ?? clause;
+    text = text
+        .replaceAll(
+          RegExp(
+            r"\b(hey bean|can you|could you|would you|please|i need to|i want to|i need|i want|need to|want to|i have to|have to|lets|let's)\b",
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(add|create|make|put|schedule|write|save|move|reschedule|update|change|delete|remove|cancel|complete|finish|mark)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(to|on|in|from)?\s*(my|the|a|an)?\s*(calendar|event|events|appointment|appointments|meeting|meetings|task|tasks|todo|to-do|reminder|reminders|note|notes|folder|folders|list|lists)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(to be|be|after that|before that|for me|for that recipe|for the recipe|as a note|the rest of my day|rest of my day|these|this|that|it|today|tomorrow|tonight|later|soon|sometime|this morning|this afternoon|this evening|early morning|late morning|early afternoon|late afternoon|early evening|late evening)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b'), ' ')
+        .replaceAll(
+          RegExp(
+            r'\bfrom\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b',
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    text = text.replaceAll(RegExp(r'^(called|named|titled)\s+'), '').trim();
+    text = text
+        .replaceAll(RegExp(r'^(for|to|at|on|in|by|before|after|around)\s+'), '')
+        .replaceAll(RegExp(r'\s+(for|to|at|on|in|by|before|after|around)$'), '')
+        .trim();
+    if (text.length < 3 || RegExp(r'^(it|that|this|item)$').hasMatch(text)) {
+      return null;
+    }
+    if (text.length > 42) text = '${text.substring(0, 42).trim()}...';
+    return text;
+  }
+
+  bool _beanWorkLooksLikeSchedulableActivity(String clause) {
+    final text = clause.toLowerCase();
+    if (RegExp(
+      r'\b(recipe|grocery list|shopping list|note)\b',
+    ).hasMatch(text)) {
+      return false;
+    }
+    return RegExp(
+      r'\b(workout|exercise|gym|grocery store|grocery shopping|groceries|run to (?:the )?grocery|cook dinner|cooking dinner|make dinner|dinner)\b',
+    ).hasMatch(text);
+  }
+
+  String? _beanWorkSemanticSubjectForClause(String clause) {
+    final text = clause.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return null;
+    if (RegExp(
+      r'\b(grocery|shopping)\s+list\b|\blist\b.*\bgrocer',
+    ).hasMatch(text)) {
+      return 'Grocery list';
+    }
+    if (RegExp(r'\b(workout|exercise|gym)\b').hasMatch(text)) {
+      return 'Workout';
+    }
+    if (RegExp(
+      r'\b(grocery store|grocery shopping|groceries|run to (?:the )?grocery)\b',
+    ).hasMatch(text)) {
+      return 'Grocery shopping';
+    }
+    if (RegExp(
+      r'\b(cook dinner|cooking dinner|make dinner)\b',
+    ).hasMatch(text)) {
+      return 'Cook dinner';
+    }
+    return null;
+  }
+
+  String? _beanWorkExplicitSubjectForClause(String clause) {
+    final text = clause.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return null;
+    final titleMarker = RegExp(
+      r'\b(?:called|named|titled|labelled|labeled|that says|saying|with title|with the title)\s+(.+)$',
+    ).firstMatch(text);
+    if (titleMarker != null) {
+      final value = titleMarker.group(1)?.trim();
+      if (value != null && value.length >= 3) return value;
+    }
+
+    final toMatches = RegExp(r'\bto\s+(.+)$').allMatches(text).toList();
+    if (toMatches.isEmpty) return null;
+    final last = toMatches.last.group(1)?.trim();
+    if (last == null || last.length < 3) return null;
+    if (RegExp(
+      r'^(be\s+)?(?:after|before|at|on|in|by|around)\b',
+    ).hasMatch(last)) {
+      return null;
+    }
+    final before = text.substring(0, toMatches.last.start);
+    final looksLikeTaskTitle =
+        RegExp(r'\b(task|todo|to-do|reminder|note|list)\b').hasMatch(before) ||
+        RegExp(
+          r'\b(today|tomorrow|tonight|later|morning|afternoon|evening)\b',
+        ).hasMatch(before);
+    return looksLikeTaskTitle ? last : null;
   }
 
   bool _beanRequestIsCapabilityQuestion(String content) =>
@@ -2457,10 +2911,32 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   void _applyBeanWorkEvents(List<HermesActivityEvent> events) {
-    for (final event in events) {
-      if (event.id <= _beanWorkEventFloorId) continue;
+    if (_beanWorkFinalized) return;
+    final ordered = [...events]
+      ..sort((left, right) => left.id.compareTo(right.id));
+    for (final event in ordered) {
+      if (event.id <= _beanWorkEventFloorId ||
+          _beanWorkAppliedEventIds.contains(event.id)) {
+        continue;
+      }
       final item = _beanWorkItemFromEvent(event);
       if (item == null) continue;
+      _beanWorkAppliedEventIds.add(event.id);
+      _beanWorkEventFloorId = math.max(_beanWorkEventFloorId, event.id);
+      final shouldStageCompletion =
+          item.done &&
+          !_beanWorkItems.any((existing) => existing.id == item.id) &&
+          !_beanWorkHasPendingPlaceholderForLabel(item.label);
+      if (shouldStageCompletion) {
+        _upsertBeanWorkItem(
+          item.id,
+          item.label,
+          status: 'running',
+          resolvedByEvent: true,
+        );
+        _stageBeanWorkCompletion(item);
+        continue;
+      }
       _upsertBeanWorkItem(
         item.id,
         item.label,
@@ -2468,6 +2944,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         resolvedByEvent: true,
       );
     }
+  }
+
+  void _stageBeanWorkCompletion(_BeanWorkItem item) {
+    if (_beanWorkStagedCompletionIds.contains(item.id)) return;
+    _beanWorkStagedCompletionIds.add(item.id);
+    Timer(const Duration(milliseconds: 850), () {
+      if (!mounted || _beanWorkFinalized) return;
+      setState(() {
+        _upsertBeanWorkItem(
+          item.id,
+          item.label,
+          status: item.status,
+          resolvedByEvent: true,
+        );
+        _beanWorkStagedCompletionIds.remove(item.id);
+      });
+    });
   }
 
   _BeanWorkItem? _beanWorkItemFromEvent(HermesActivityEvent event) {
@@ -3048,7 +3541,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         }
         _phase = _AuthPhase.signedIn;
         _loadingStatusText = null;
-        _dashboardDataLoading = cachedSnapshot == null;
+        _dashboardDataLoading = true;
       });
 
       final sessionDetailsFuture = recover<HermesSessionDetails?>(
@@ -3610,6 +4103,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _ensureBeanIntroductionPrompt();
       }
     });
+    if (destination != _HomeDestination.bean &&
+        _beanWorkItems.isNotEmpty &&
+        _beanWorkItems.every((item) => item.done)) {
+      _scheduleBeanWorkStatusClear(const Duration(seconds: 5));
+    }
   }
 
   void _ensureBeanIntroductionPrompt() {
@@ -4165,10 +4663,19 @@ ${_truncateDiagnostic(stack, 2200)}
         if (run.status == 'completed' ||
             run.status == 'failed' ||
             run.status == 'cancelled') {
-          await _refreshSignedInViews();
+          final finalEvents = sessionId == null
+              ? const <HermesActivityEvent>[]
+              : await widget.apiClient
+                    .pollActivityEvents(sessionId)
+                    .catchError((_) => const <HermesActivityEvent>[]);
+          await _refreshSignedInViews(showLoading: false);
           if (!mounted || runToken != _chatRunToken) return;
           setState(() {
             if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
+            if (finalEvents.isNotEmpty) {
+              _events = _mergeEvents(finalEvents, _events);
+              _applyBeanWorkEvents(finalEvents);
+            }
             _chatRunState = switch (run.status) {
               'completed' => 'Updated',
               'cancelled' => 'Stopped',
@@ -4559,7 +5066,7 @@ ${_truncateDiagnostic(stack, 2200)}
           (feed.changes.isNotEmpty ||
               feed.latestId > previousLatestId ||
               (feed.latestId > 0 && feed.latestId < previousLatestId))) {
-        await _refreshSignedInViews();
+        await _refreshSignedInViews(showLoading: false);
       }
     } catch (_) {
       // Realtime refresh is opportunistic; manual pull-to-refresh still works.
@@ -4568,13 +5075,25 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
-  Future<void> _refreshSignedInViews() async {
+  Future<void> _refreshSignedInViews({bool showLoading = true}) async {
     final session = _session;
-    if (_phase != _AuthPhase.signedIn || session == null) return;
+    if (_phase != _AuthPhase.signedIn) return;
     final authGeneration = _authGeneration;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
+    final user = _user;
+    if (showLoading) {
+      setState(() {
+        _dashboardDataLoading = true;
+      });
+    }
     try {
+      final sessionDetailsFuture = session == null && user != null
+          ? _loadDailySessionForUser(
+              user,
+              source: 'refresh',
+            ).catchError((_) => null)
+          : Future<HermesSessionDetails?>.value(null);
       final googleCalendarStatus = await _syncGoogleCalendarIfConnected(
         syncConnected: false,
       );
@@ -4609,8 +5128,13 @@ ${_truncateDiagnostic(stack, 2200)}
         widget.apiClient.listEventCategories().catchError(
           (_) => const <HermesEventCategory>[],
         ),
-        widget.apiClient.pollActivityEvents(session.id),
+        session == null
+            ? Future<Object>.value(const <HermesActivityEvent>[])
+            : widget.apiClient
+                  .pollActivityEvents(session.id)
+                  .catchError((_) => const <HermesActivityEvent>[]),
       ]);
+      final sessionDetails = await sessionDetailsFuture;
       final summary = results[0] as HermesTodaySummary;
       final listedTasks = _tasksWithPendingWrites(
         results[1] as List<HermesTask>,
@@ -4624,6 +5148,10 @@ ${_truncateDiagnostic(stack, 2200)}
         listed: results[3] as List<HermesCalendarEvent>,
         summary: summary.calendarEvents,
       );
+      final refreshedTasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
+      final refreshedReminders = listedReminders.isEmpty
+          ? summaryReminders
+          : listedReminders;
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
           authGeneration != _authGeneration ||
@@ -4632,7 +5160,17 @@ ${_truncateDiagnostic(stack, 2200)}
         return;
       }
       setState(() {
-        _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
+        if (sessionDetails != null) {
+          _session = sessionDetails.session;
+          _replaceMessagesFromSession(sessionDetails, user: user);
+        }
+        _tasks = _dashboardListForMutationRefresh(
+          refreshed: refreshedTasks,
+          current: _tasks,
+          showLoading: showLoading,
+          deletedIds: _activePendingTaskDeleteIds(),
+          idFor: (task) => task.id,
+        );
         _noteFolders = _sortedNoteFolders(results[4] as List<HermesNoteFolder>);
         _notes = _sortedNotes(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
@@ -4642,10 +5180,20 @@ ${_truncateDiagnostic(stack, 2200)}
         _eventCategories = results[10] as List<HermesEventCategory>;
         _googleCalendarStatus = googleCalendarStatus;
         _outlookCalendarStatus = outlookCalendarStatus;
-        _reminders = listedReminders.isEmpty
-            ? summaryReminders
-            : listedReminders;
-        _calendar = listedCalendarEvents;
+        _reminders = _dashboardListForMutationRefresh(
+          refreshed: refreshedReminders,
+          current: _reminders,
+          showLoading: showLoading,
+          deletedIds: _activePendingReminderDeleteIds(),
+          idFor: (reminder) => reminder.id,
+        );
+        _calendar = _dashboardListForMutationRefresh(
+          refreshed: listedCalendarEvents,
+          current: _calendar,
+          showLoading: showLoading,
+          deletedIds: _activePendingCalendarEventDeleteIds(),
+          idFor: (event) => event.id,
+        );
         _approvals = summary.approvals;
         _events = results[11] as List<HermesActivityEvent>;
         _dashboardDataLoading = false;
@@ -4665,6 +5213,7 @@ ${_truncateDiagnostic(stack, 2200)}
           error,
           action: 'refresh your latest data',
         );
+        _dashboardDataLoading = false;
       });
     }
   }
@@ -4678,6 +5227,9 @@ ${_truncateDiagnostic(stack, 2200)}
     final generation = ++_workspaceRefreshGeneration;
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
+    setState(() {
+      _dashboardDataLoading = true;
+    });
     try {
       final user = await widget.apiClient.me();
       final sessionDetails = await _loadDailySessionForUser(
@@ -4774,6 +5326,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _approvals = summary.approvals;
         _events = results[11] as List<HermesActivityEvent>;
         _error = null;
+        _dashboardDataLoading = false;
       });
       _syncReminderNotifications();
       _cacheCurrentDashboardSnapshot();
@@ -4944,7 +5497,7 @@ ${_truncateDiagnostic(stack, 2200)}
         }
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingTaskWriteIsCurrent(
@@ -5131,7 +5684,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingTaskWriteIsCurrent(
@@ -5266,10 +5819,18 @@ ${_truncateDiagnostic(stack, 2200)}
     final previousPastTasks = _pastTasks;
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
-    _rememberPendingTaskDelete(task.id, mutationVersion);
+    final affectsVisibleCopy = _deleteSelectionAffectsVisibleWorkspace(
+      task.workspaceId,
+      deleteFromWorkspaceIds,
+    );
+    if (affectsVisibleCopy) {
+      _rememberPendingTaskDelete(task.id, mutationVersion);
+    }
     setState(() {
-      _tasks = _removeTask(_tasks, task.id);
-      _pastTasks = _removeTask(_pastTasks, task.id);
+      if (affectsVisibleCopy) {
+        _tasks = _removeTask(_tasks, task.id);
+        _pastTasks = _removeTask(_pastTasks, task.id);
+      }
       _error = null;
     });
     _cacheCurrentDashboardSnapshot();
@@ -5298,9 +5859,8 @@ ${_truncateDiagnostic(stack, 2200)}
         deleteFromWorkspaceIds: deleteFromWorkspaceIds,
       );
       if (!_canApplyBackgroundSave(mutationVersion)) return;
-      _forgetPendingTaskWrite(task.id);
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (_canApplyBackgroundSave(mutationVersion)) {
         _markDashboardDataMutated();
@@ -5459,7 +6019,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingReminderWriteIsCurrent(
@@ -5536,7 +6096,7 @@ ${_truncateDiagnostic(stack, 2200)}
             .toList();
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingReminderWriteIsCurrent(
@@ -5564,9 +6124,19 @@ ${_truncateDiagnostic(stack, 2200)}
     final previousReminders = _reminders;
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
-    _rememberPendingReminderDelete(reminder.id, mutationVersion);
+    final affectsVisibleCopy = _deleteSelectionAffectsVisibleWorkspace(
+      reminder.workspaceId,
+      deleteFromWorkspaceIds,
+    );
+    if (affectsVisibleCopy) {
+      _rememberPendingReminderDelete(reminder.id, mutationVersion);
+    }
     setState(() {
-      _reminders = _reminders.where((item) => item.id != reminder.id).toList();
+      if (affectsVisibleCopy) {
+        _reminders = _reminders
+            .where((item) => item.id != reminder.id)
+            .toList();
+      }
       _error = null;
     });
     _cacheCurrentDashboardSnapshot();
@@ -5593,9 +6163,8 @@ ${_truncateDiagnostic(stack, 2200)}
         deleteFromWorkspaceIds: deleteFromWorkspaceIds,
       );
       if (!_canApplyBackgroundSave(mutationVersion)) return;
-      _forgetPendingReminderWrite(reminder.id);
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (_canApplyBackgroundSave(mutationVersion)) {
         _markDashboardDataMutated();
@@ -5991,7 +6560,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingCalendarEventWriteIsCurrent(
@@ -6208,7 +6777,7 @@ ${_truncateDiagnostic(stack, 2200)}
             .toList();
       });
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion) ||
           !_pendingCalendarEventWriteIsCurrent(
@@ -6243,16 +6812,17 @@ ${_truncateDiagnostic(stack, 2200)}
         recurringDeleteMode != null &&
         recurringDeleteMode != 'all' &&
         recurringOccurrenceDate != null;
-    final deleteWorkspaceIdSet = deleteFromWorkspaceIds
-        .map((id) => id.toString())
-        .toSet();
+    final affectsVisibleCopy = _deleteSelectionAffectsVisibleWorkspace(
+      event.workspaceId,
+      deleteFromWorkspaceIds,
+    );
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
-    if (!isRecurringOccurrenceDelete) {
+    if (!isRecurringOccurrenceDelete && affectsVisibleCopy) {
       _rememberPendingCalendarEventDelete(event.id, mutationVersion);
     }
     setState(() {
-      if (isRecurringOccurrenceDelete) {
+      if (isRecurringOccurrenceDelete && affectsVisibleCopy) {
         _calendar = _calendar
             .map(
               (candidate) => candidate.id == event.id
@@ -6266,16 +6836,9 @@ ${_truncateDiagnostic(stack, 2200)}
                   : candidate,
             )
             .toList();
-      } else {
+      } else if (affectsVisibleCopy) {
         _calendar = _calendar
-            .where(
-              (candidate) =>
-                  candidate.id != event.id &&
-                  (candidate.workspaceId == null ||
-                      !deleteWorkspaceIdSet.contains(
-                        candidate.workspaceId.toString(),
-                      )),
-            )
+            .where((candidate) => candidate.id != event.id)
             .toList();
       }
       _error = null;
@@ -6310,9 +6873,8 @@ ${_truncateDiagnostic(stack, 2200)}
         recurringOccurrenceDate: recurringOccurrenceDate,
       );
       if (!_canApplyBackgroundSave(mutationVersion)) return;
-      _forgetPendingCalendarEventWrite(event.id);
       _cacheCurrentDashboardSnapshot();
-      unawaited(_refreshSignedInViews());
+      unawaited(_refreshSignedInViews(showLoading: false));
     } catch (error) {
       if (!_canApplyBackgroundSave(mutationVersion)) return;
       _markDashboardDataMutated();
@@ -6626,7 +7188,7 @@ ${_truncateDiagnostic(stack, 2200)}
       } else {
         _clearDashboardData();
       }
-      _dashboardDataLoading = cachedSnapshot == null;
+      _dashboardDataLoading = true;
       _busy = false;
       _error = null;
     });
@@ -6828,14 +7390,13 @@ ${_truncateDiagnostic(stack, 2200)}
                           _selectedDestination == _HomeDestination.bean,
                       beanWorkItems: _beanVisibleWorkItems,
                       beanWorkStatus: _beanStatusTagLabel,
-                      beanWorkActive:
-                          _selectedDestination == _HomeDestination.bean &&
-                          _beanStatusTagVisible,
+                      beanWorkActive: _beanStatusTagVisible,
                       composer: _DockedBeanChatComposer(
                         controller: _chatInputController,
                         focusNode: _chatInputFocusNode,
                         busy: _beanStopAvailable,
                         listening: _beanVoiceListening,
+                        attachedToWorkStrip: _beanStatusTagVisible,
                         voiceDraft: _beanVoiceDraft,
                         onChanged: _updateBeanVoiceDraft,
                         onSend: () => unawaited(_sendChatInputDraft()),
@@ -6844,11 +7405,6 @@ ${_truncateDiagnostic(stack, 2200)}
                       menu: _HeyBeanBottomMenu(
                         selected: _selectedDestination,
                         beanListening: _beanVoiceListening,
-                        beanWorkItems: _beanVisibleWorkItems,
-                        beanWorkStatus: _beanStatusTagLabel,
-                        beanWorkActive:
-                            _selectedDestination != _HomeDestination.bean &&
-                            _beanStatusTagVisible,
                         onSelected: _selectDestination,
                         onMorePressed: _openMoreMenu,
                         onBeanLongPressStart: () =>
@@ -9823,13 +10379,25 @@ class _CommandCenterAgendaList extends StatelessWidget {
       );
     }
 
-    return ListView.separated(
-      key: const Key('command-center-agenda-list'),
-      padding: EdgeInsets.zero,
-      itemCount: items.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 6),
-      itemBuilder: (context, index) =>
-          _CommandCenterAgendaRow(item: items[index], onTap: onItemTap),
+    return Stack(
+      key: const Key('command-center-agenda-stack'),
+      children: [
+        ListView.separated(
+          key: const Key('command-center-agenda-list'),
+          padding: EdgeInsets.zero,
+          itemCount: items.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 6),
+          itemBuilder: (context, index) =>
+              _CommandCenterAgendaRow(item: items[index], onTap: onItemTap),
+        ),
+        if (loading)
+          Positioned(
+            key: const Key('command-center-agenda-refreshing'),
+            top: 4,
+            right: 4,
+            child: _InlineLoadingBadge(label: 'Updating'),
+          ),
+      ],
     );
   }
 }
@@ -10135,6 +10703,7 @@ class _DockedBeanChatComposer extends StatefulWidget {
     required this.focusNode,
     required this.busy,
     required this.listening,
+    required this.attachedToWorkStrip,
     required this.voiceDraft,
     required this.onChanged,
     required this.onSend,
@@ -10145,6 +10714,7 @@ class _DockedBeanChatComposer extends StatefulWidget {
   final FocusNode focusNode;
   final bool busy;
   final bool listening;
+  final bool attachedToWorkStrip;
   final String? voiceDraft;
   final ValueChanged<String> onChanged;
   final VoidCallback onSend;
@@ -10184,6 +10754,7 @@ class _DockedBeanChatComposerState extends State<_DockedBeanChatComposer> {
     focusNode: widget.focusNode,
     busy: widget.busy,
     listening: widget.listening,
+    attachedToWorkStrip: widget.attachedToWorkStrip,
     onChanged: widget.listening ? widget.onChanged : null,
     onSend: widget.onSend,
     onStop: widget.onStop,
@@ -10196,6 +10767,7 @@ class _ChatInputDock extends StatelessWidget {
     required this.focusNode,
     required this.busy,
     required this.listening,
+    required this.attachedToWorkStrip,
     required this.onSend,
     required this.onStop,
     this.onChanged,
@@ -10205,6 +10777,7 @@ class _ChatInputDock extends StatelessWidget {
   final FocusNode focusNode;
   final bool busy;
   final bool listening;
+  final bool attachedToWorkStrip;
   final VoidCallback onSend;
   final Future<void> Function() onStop;
   final ValueChanged<String>? onChanged;
@@ -10215,9 +10788,9 @@ class _ChatInputDock extends StatelessWidget {
     padding: const EdgeInsets.all(8),
     decoration: BoxDecoration(
       color: HeyBeanTheme.surface,
-      borderRadius: const BorderRadius.only(
-        topLeft: Radius.circular(22),
-        topRight: Radius.circular(22),
+      borderRadius: BorderRadius.only(
+        topLeft: Radius.circular(attachedToWorkStrip ? 0 : 22),
+        topRight: Radius.circular(attachedToWorkStrip ? 0 : 22),
       ),
       border: Border.all(
         color: listening ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
@@ -25609,6 +26182,55 @@ class _InlineLoadingSurface extends StatelessWidget {
   }
 }
 
+class _InlineLoadingBadge extends StatelessWidget {
+  const _InlineLoadingBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface.withValues(alpha: .94),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: HeyBeanTheme.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox.square(
+              dimension: 13,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: HeyBeanTheme.accentStrong,
+                backgroundColor: HeyBeanTheme.accent.withValues(alpha: .14),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: const TextStyle(
+                color: HeyBeanTheme.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 List<HermesTask> _replaceTask(List<HermesTask> tasks, HermesTask replacement) =>
     tasks
         .map((task) => task.id == replacement.id ? replacement : task)
@@ -27536,7 +28158,6 @@ class _SignedInBottomDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!showComposer) return menu;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final dockBottomPadding = bottomInset > 0 ? bottomInset + 2 : 6.0;
     final menuHeight = 78.0 + dockBottomPadding;
@@ -27559,7 +28180,11 @@ class _SignedInBottomDock extends StatelessWidget {
               ),
               child: beanWorkActive
                   ? _BeanWorkDockStrip(
-                      key: const Key('bean-work-dock-strip'),
+                      key: Key(
+                        showComposer
+                            ? 'bean-work-dock-strip'
+                            : 'bean-global-work-dock-strip',
+                      ),
                       status: beanWorkStatus,
                       items: beanWorkItems,
                     )
@@ -27568,17 +28193,18 @@ class _SignedInBottomDock extends StatelessWidget {
                       height: 0,
                     ),
             ),
-            Align(
-              key: const Key('bean-chat-composer-dock'),
-              alignment: Alignment.bottomCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  minHeight: _beanChatComposerReservedHeight,
-                  maxHeight: _beanChatComposerMaxHeight,
+            if (showComposer)
+              Align(
+                key: const Key('bean-chat-composer-dock'),
+                alignment: Alignment.bottomCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minHeight: _beanChatComposerReservedHeight,
+                    maxHeight: _beanChatComposerMaxHeight,
+                  ),
+                  child: composer,
                 ),
-                child: composer,
               ),
-            ),
             SizedBox(height: menuHeight - _beanBottomMenuSurfaceInset),
           ],
         ),
@@ -27593,9 +28219,6 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     required this.beanListening,
-    required this.beanWorkItems,
-    required this.beanWorkStatus,
-    required this.beanWorkActive,
     required this.onMorePressed,
     required this.onBeanLongPressStart,
     required this.onBeanLongPressEnd,
@@ -27604,9 +28227,6 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   final _HomeDestination selected;
   final ValueChanged<_HomeDestination> onSelected;
   final bool beanListening;
-  final List<_BeanWorkItem> beanWorkItems;
-  final String beanWorkStatus;
-  final bool beanWorkActive;
   final VoidCallback onMorePressed;
   final VoidCallback onBeanLongPressStart;
   final VoidCallback onBeanLongPressEnd;
@@ -27702,35 +28322,6 @@ class _HeyBeanBottomMenu extends StatelessWidget {
               onLongPressEnd: onBeanLongPressEnd,
             ),
           ),
-          Positioned(
-            bottom: 86 + dockBottomPadding,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeOut,
-              transitionBuilder: (child, animation) => FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, .08),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
-                ),
-              ),
-              child: beanWorkActive
-                  ? _BeanWorkStatusTag(
-                      key: const Key('bean-work-status-tag'),
-                      status: beanWorkStatus,
-                      items: beanWorkItems,
-                    )
-                  : const SizedBox(
-                      key: Key('bean-work-status-tag-empty'),
-                      width: 1,
-                      height: 1,
-                    ),
-            ),
-          ),
         ],
       ),
     );
@@ -27752,7 +28343,7 @@ class _BeanWorkDockStrip extends StatelessWidget {
     final title = _compactBeanStatusLabel(status);
     final displayItems = items
         .where((item) => item.label.trim().isNotEmpty)
-        .take(4)
+        .take(6)
         .toList();
     final completed = displayItems.where((item) => item.done).length;
     final statusLooksDone = RegExp(
@@ -27764,11 +28355,14 @@ class _BeanWorkDockStrip extends StatelessWidget {
         (displayItems.isEmpty && !statusLooksDone);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+      padding: EdgeInsets.zero,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: HeyBeanTheme.surface.withValues(alpha: .98),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(18),
+            topRight: Radius.circular(18),
+          ),
           border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .24)),
           boxShadow: [
             BoxShadow(
@@ -27843,124 +28437,6 @@ class _BeanWorkDockStrip extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          item.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: item.done
-                                ? HeyBeanTheme.muted
-                                : HeyBeanTheme.text,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BeanWorkStatusTag extends StatelessWidget {
-  const _BeanWorkStatusTag({
-    super.key,
-    required this.status,
-    required this.items,
-  });
-
-  final String status;
-  final List<_BeanWorkItem> items;
-
-  @override
-  Widget build(BuildContext context) {
-    final title = _compactBeanStatusLabel(status);
-    final displayItems = items.take(6).toList();
-    final completed = displayItems.where((item) => item.done).length;
-
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: math.min(MediaQuery.sizeOf(context).width - 32, 330.0),
-      ),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: HeyBeanTheme.surface.withValues(alpha: .96),
-          border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .26)),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: .14),
-              blurRadius: 26,
-              offset: const Offset(0, 12),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: HeyBeanTheme.accentStrong,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: HeyBeanTheme.accentStrong,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  if (displayItems.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    Text(
-                      '$completed/${displayItems.length}',
-                      style: const TextStyle(
-                        color: HeyBeanTheme.muted,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              if (displayItems.isNotEmpty) const SizedBox(height: 7),
-              for (final item in displayItems)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        item.done
-                            ? Icons.check_box_rounded
-                            : Icons.check_box_outline_blank_rounded,
-                        size: 17,
-                        color: item.done
-                            ? HeyBeanTheme.accentStrong
-                            : HeyBeanTheme.muted,
-                      ),
-                      const SizedBox(width: 7),
-                      Flexible(
                         child: Text(
                           item.label,
                           maxLines: 1,

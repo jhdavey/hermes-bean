@@ -326,6 +326,7 @@ if (mount) {
     let beanWorkStatusHoldUntil = 0;
     let beanWorkStatusMinUntil = 0;
     let beanWorkEventFloorId = 0;
+    const beanWorkAppliedEventIds = new Set();
     const cancelledChatRequestIds = new Set();
 
     boot();
@@ -2650,16 +2651,21 @@ if (mount) {
         return ['completed', 'succeeded', 'recorded', 'cancelled', 'failed', 'skipped'].includes(String(item?.status || '').toLowerCase());
     }
 
-    function resetBeanWorkItems(label, status = 'running') {
+    function resetBeanWorkItems(labels, status = 'running') {
         cancelBeanWorkStatusClear();
         stopBeanWorkEventPolling();
         beanWorkEventFloorId = maxActivityEventId(state.activity);
-        if (!label) {
+        beanWorkAppliedEventIds.clear();
+        const normalizedLabels = normalizeList(Array.isArray(labels) ? labels : (labels ? [labels] : []))
+            .map((label) => String(label || '').trim())
+            .filter((label) => label && !isGenericBeanWorkLabel(label))
+            .slice(0, 6);
+        if (!normalizedLabels.length) {
             state.beanWorkItems = [];
             refreshBeanStatusTag();
             return;
         }
-        state.beanWorkItems = [{ id: `turn-${Date.now()}`, label, status }];
+        state.beanWorkItems = normalizedLabels.map((label, index) => ({ id: `request-${index}`, label, status }));
         refreshBeanStatusTag();
     }
 
@@ -2773,6 +2779,7 @@ if (mount) {
 
     function prepareBeanWorkForFreshRequest() {
         beanWorkEventFloorId = maxActivityEventId(state.activity);
+        beanWorkAppliedEventIds.clear();
         clearCompletedBeanWorkItemsForFreshRequest();
     }
 
@@ -2789,23 +2796,27 @@ if (mount) {
     }
 
     function ensureRealtimeRequestWorkItem(content, status = 'running', options = {}) {
-        const label = beanWorkLabelForRequest(content);
-        if (!label) return;
+        const labels = beanWorkLabelsForTurn(content);
+        if (!labels.length) return;
         if (options.freshRequest) prepareBeanWorkForFreshRequest();
-        const existing = state.beanWorkItems.find((item) => item.id === 'realtime-request');
-        if (existing?.resolvedByEvent && !beanWorkItemDone(existing)) {
-            refreshBeanStatusTag();
-            return;
-        }
-        upsertBeanWorkItem('realtime-request', label, status);
+        labels.forEach((label, index) => upsertBeanWorkItem(`request-${index}`, label, status));
     }
 
     function beanWorkPlaceholderIndex(label) {
-        const eventCategory = beanWorkCategoryForLabel(label);
+        const target = beanWorkTargetForLabel(label);
+        const subjectKey = beanWorkSubjectKeyForLabel(label);
         return state.beanWorkItems.findIndex((item) => {
-            if (item.id !== 'realtime-request' || item.resolvedByEvent || beanWorkItemDone(item)) return false;
-            const placeholderCategory = beanWorkCategoryForLabel(item.label);
-            return !eventCategory || !placeholderCategory || eventCategory === placeholderCategory;
+            if ((!String(item.id || '').startsWith('request-') && item.id !== 'realtime-request') || item.resolvedByEvent || beanWorkItemDone(item)) return false;
+            const placeholderTarget = beanWorkTargetForLabel(item.label);
+            const placeholderSubjectKey = beanWorkSubjectKeyForLabel(item.label);
+            if (target && placeholderTarget && target !== placeholderTarget) return false;
+            if (subjectKey && placeholderSubjectKey) {
+                return subjectKey === placeholderSubjectKey
+                    || subjectKey.includes(placeholderSubjectKey)
+                    || placeholderSubjectKey.includes(subjectKey);
+            }
+            if (!subjectKey && placeholderSubjectKey) return false;
+            return !target || !placeholderTarget || target === placeholderTarget;
         });
     }
 
@@ -2826,45 +2837,152 @@ if (mount) {
         return action || target ? `${action}:${target}` : '';
     }
 
+    function beanWorkTargetForLabel(label) {
+        const category = beanWorkCategoryForLabel(label);
+        const separator = category.indexOf(':');
+        return separator >= 0 ? category.slice(separator + 1) : '';
+    }
+
+    function beanWorkSubjectKeyForLabel(label) {
+        const separator = String(label || '').indexOf(':');
+        if (separator < 0) return '';
+        let subject = String(label || '').slice(separator + 1).toLowerCase();
+        subject = subject
+            .replace(/\([^)]*\)/g, ' ')
+            .replace(/\b(?:calendar|event|events|task|tasks|reminder|reminders|note|notes|create|creating|created|update|updating|updated|delete|deleting|deleted|save|saving|saved)\b/g, ' ')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (subject === 'groceries' || subject === 'grocery store') subject = 'grocery shopping';
+        if (subject === 'cooking dinner' || subject === 'make dinner') subject = 'cook dinner';
+        return subject;
+    }
+
     function isGenericBeanWorkLabel(label) {
         return /^(?:finish|finished|background work|finish background work|bean started working|read request|follow up on voice request|working on request)$/i.test(String(label || '').trim());
     }
 
-    function beanWorkLabelForRequest(content) {
+    function beanWorkLabelsForTurn(content) {
+        const directLabels = beanWorkLabelsForRequest(content);
+        if (directLabels.length) return directLabels;
+        if (!beanWorkIsAffirmativeFollowUp(content)) return [];
+        const lastAssistant = [...state.messages].reverse().find((message) => message?.role === 'assistant' && String(message.content || '').trim());
+        return lastAssistant ? beanWorkLabelsForAssistantProposal(lastAssistant.content || '') : [];
+    }
+
+    function beanWorkLabelsForRequest(content) {
         const command = normalizedVoiceCommand(content);
-        if (!command || voiceCommandIsCapabilityQuestion(command)) return null;
-        const targetsEvent = /\b(?:calendar|event|events|appointment|appointments|meeting|meetings)\b/.test(command);
-        const targetsTask = /\b(?:task|tasks|todo|to do)\b/.test(command);
-        const targetsReminder = /\b(?:reminder|reminders|remind)\b/.test(command);
-        const targetsNote = /\b(?:note|notes|folder|folders|list|lists)\b/.test(command);
-        const targetsMemory = /\b(?:remember|memory|forget|knows about me|preferences?)\b/.test(command);
+        if (!command || voiceCommandIsCapabilityQuestion(command)) return [];
+        const inheritedTarget = beanWorkTargetForClause(command);
+        const scheduleContext = inheritedTarget === 'event'
+            && /\b(?:schedule|plan|organize)\b.*\b(?:day|calendar|events?)\b|\b(?:calendar|events?)\b.*\b(?:schedule|plan|organize)\b/.test(command);
+        const labels = beanWorkRequestClauses(command)
+            .map((clause) => beanWorkLabelForClause(clause, inheritedTarget, scheduleContext))
+            .filter((label, index, list) => label && !isGenericBeanWorkLabel(label) && list.indexOf(label) === index);
+        if (labels.length) return labels.slice(0, 6);
+        const fallback = beanWorkLabelForClause(command, inheritedTarget, scheduleContext);
+        return fallback && !isGenericBeanWorkLabel(fallback) ? [fallback] : [];
+    }
+
+    function beanWorkLabelForRequest(content) {
+        return beanWorkLabelsForRequest(content)[0] || null;
+    }
+
+    function beanWorkIsAffirmativeFollowUp(content) {
+        const command = normalizedVoiceCommand(content);
+        return /^(?:yes|yeah|yep|yup|sure|ok|okay|please|yes please|sure please|do it|go ahead|that works|sounds good)$/.test(command);
+    }
+
+    function beanWorkLabelsForAssistantProposal(content) {
+        const text = String(content || '').replace(/\s+/g, ' ').trim();
+        if (!text) return [];
+        const normalized = normalizedVoiceCommand(text);
+        const labels = [];
+        const calendarMatch = /\badd\s+(.+?)\s+to\s+(?:your\s+|my\s+)?calendar\b/i.exec(text);
+        if (calendarMatch) {
+            const names = beanWorkProposalItems(calendarMatch[1] || '');
+            names.forEach((name) => labels.push(`Creating calendar event: ${name}`));
+            if (/\breminders?\b.*\bfor each\b/.test(normalized)) {
+                names.forEach((name) => labels.push(`Creating reminder: ${name}`));
+            } else if (/\breminders?\b/.test(normalized) && names.length) {
+                labels.push(`Creating reminder: ${names[0]}`);
+            }
+        }
+        const taskMatch = /\badd\s+(.+?)\s+to\s+(?:your\s+|my\s+)?tasks\b/i.exec(text);
+        if (taskMatch) {
+            beanWorkProposalItems(taskMatch[1] || '').forEach((name) => labels.push(`Creating task: ${name}`));
+        }
+        const noteMatch = /\b(?:create|add)\s+(.+?)\s+(?:as\s+)?(?:a\s+)?note\b/i.exec(text);
+        if (noteMatch) {
+            beanWorkProposalItems(noteMatch[1] || '').forEach((name) => labels.push(`Creating note: ${name}`));
+        }
+        return [...new Set(labels.filter((label) => String(label || '').trim()))].slice(0, 6);
+    }
+
+    function beanWorkProposalItems(raw) {
+        let text = String(raw || '')
+            .replace(/\([^)]*\)/g, ' ')
+            .replace(/\bnow\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^(?:the|a|an)\s+/i, '');
+        if (!text) return [];
+        return text
+            .split(/\s*,\s*|\s+\band\b\s+/i)
+            .map((item) => item.trim())
+            .filter((item) => item.length >= 2)
+            .map((item) => item.charAt(0).toUpperCase() + item.slice(1));
+    }
+
+    function beanWorkRequestClauses(command) {
+        const normalized = String(command || '')
+            .replace(/\b(?:and then|then)\b/g, ' and ')
+            .replace(/\s*,\s*/g, ' and ');
+        const clauses = normalized.split(/\s+\band\s+/).map((part) => part.trim()).filter(Boolean);
+        return clauses.length ? clauses : [command];
+    }
+
+    function beanWorkLabelForClause(clause, inheritedTarget = '', scheduleContext = false) {
+        const command = String(clause || '').trim();
+        if (!command) return null;
+        const clauseTarget = beanWorkTargetForClause(command);
+        const effectiveTarget = clauseTarget || inheritedTarget;
+        const targetsEvent = /\b(?:calendar|event|events|appointment|appointments|meeting|meetings)\b/.test(command) || effectiveTarget === 'event';
+        const targetsTask = /\b(?:task|tasks|todo|to-do)\b/.test(command) || effectiveTarget === 'task';
+        const targetsReminder = /\b(?:reminder|reminders|remind)\b/.test(command) || effectiveTarget === 'reminder';
+        const targetsNote = /\b(?:note|notes|folder|folders|list|lists)\b/.test(command) || effectiveTarget === 'note';
+        const targetsMemory = /\b(?:remember|memory|forget|knows about me|preferences?)\b/.test(command) || effectiveTarget === 'memory';
+        const subject = beanWorkSubjectForClause(command);
+        const withSubject = (base) => subject ? `${base}: ${subject}` : base;
+        const scheduleActivityAsEvent = scheduleContext && effectiveTarget === 'event' && beanWorkLooksLikeSchedulableActivity(command);
         if (/\b(?:delete|remove|cancel)\b/.test(command)) {
-            if (targetsMemory) return 'Forgetting knowledge';
-            if (targetsEvent) return 'Deleting event';
-            if (targetsReminder) return 'Deleting reminder';
-            if (targetsTask) return 'Deleting task';
-            if (targetsNote) return 'Deleting note';
+            if (targetsMemory) return withSubject('Forgetting knowledge');
+            if (targetsEvent) return withSubject('Deleting event');
+            if (targetsReminder) return withSubject('Deleting reminder');
+            if (targetsTask) return withSubject('Deleting task');
+            if (targetsNote) return withSubject('Deleting note');
             return 'Deleting item';
         }
         if (/\b(?:move|reschedule|update|change)\b/.test(command)) {
-            if (targetsMemory) return 'Updating knowledge';
-            if (targetsEvent) return 'Updating event';
-            if (targetsReminder) return 'Updating reminder';
-            if (targetsTask) return 'Updating task';
-            if (targetsNote) return 'Updating note';
+            if (targetsMemory) return withSubject('Updating knowledge');
+            if (targetsEvent) return withSubject('Updating event');
+            if (targetsReminder) return withSubject('Updating reminder');
+            if (targetsTask) return withSubject('Updating task');
+            if (targetsNote) return withSubject('Updating note');
             return 'Updating item';
         }
-        if (/\b(?:add|create|put|schedule|write|save)\b/.test(command)) {
-            if (targetsMemory) return 'Saving knowledge';
-            if (targetsEvent) return 'Creating event';
-            if (targetsReminder) return 'Creating reminder';
-            if (targetsTask) return 'Creating task';
-            if (targetsNote) return 'Creating note';
+        if (/\b(?:add|create|put|schedule|write|save)\b/.test(command) || scheduleActivityAsEvent) {
+            if (!subject && beanWorkClauseReferencesPriorItems(command)) return null;
+            if (targetsMemory) return withSubject('Saving knowledge');
+            if (targetsEvent) return withSubject('Creating event');
+            if (targetsReminder) return withSubject('Creating reminder');
+            if (targetsTask) return withSubject('Creating task');
+            if (targetsNote) return withSubject('Creating note');
             return 'Creating item';
         }
         if (/\b(?:complete|finish|mark)\b/.test(command)) {
-            if (targetsTask) return 'Updating task';
-            if (targetsReminder) return 'Updating reminder';
+            if (targetsTask) return withSubject('Updating task');
+            if (targetsReminder) return withSubject('Updating reminder');
             return 'Updating item';
         }
         if (targetsMemory) return 'Saving knowledge';
@@ -2872,12 +2990,85 @@ if (mount) {
         return 'Working on request';
     }
 
+    function beanWorkClauseReferencesPriorItems(command) {
+        return /\b(?:these|those|them|that|it|the above|all of that)\b/.test(command)
+            && /\b(?:add|create|put|schedule|save|write)\b/.test(command);
+    }
+
+    function beanWorkTargetForClause(command) {
+        if (/\b(?:calendar|event|events|appointment|appointments|meeting|meetings)\b/.test(command)) return 'event';
+        if (/\b(?:reminder|reminders|remind)\b/.test(command)) return 'reminder';
+        if (/\b(?:task|tasks|todo|to-do)\b/.test(command)) return 'task';
+        if (/\b(?:note|notes|folder|folders|list|lists)\b/.test(command)) return 'note';
+        if (/\b(?:remember|memory|forget|knows about me|preferences?)\b/.test(command)) return 'memory';
+        return '';
+    }
+
+    function beanWorkSubjectForClause(clause) {
+        const semantic = beanWorkSemanticSubjectForClause(clause);
+        if (semantic) return semantic;
+        let text = beanWorkExplicitSubjectForClause(clause) || String(clause || '');
+        text = text
+            .replace(/\b(?:hey bean|can you|could you|would you|please|i need to|i want to|i need|i want|need to|want to|i have to|have to|lets|let's)\b/g, ' ')
+            .replace(/\b(?:add|create|make|put|schedule|write|save|move|reschedule|update|change|delete|remove|cancel|complete|finish|mark)\b/g, ' ')
+            .replace(/\b(?:to|on|in|from)?\s*(?:my|the|a|an)?\s*(?:calendar|event|events|appointment|appointments|meeting|meetings|task|tasks|todo|to-do|reminder|reminders|note|notes|folder|folders|list|lists)\b/g, ' ')
+            .replace(/\b(?:to be|be|after that|before that|for me|for that recipe|for the recipe|as a note|the rest of my day|rest of my day|these|this|that|it|today|tomorrow|tonight|later|soon|sometime|this morning|this afternoon|this evening|early morning|late morning|early afternoon|late afternoon|early evening|late evening)\b/g, ' ')
+            .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/g, ' ')
+            .replace(/\bfrom\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/g, ' ')
+            .replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^(?:called|named|titled)\s+/, '')
+            .replace(/^(?:for|to|at|on|in|by|before|after|around)\s+/, '')
+            .replace(/\s+(?:for|to|at|on|in|by|before|after|around)$/, '')
+            .trim();
+        if (text.length < 3 || /^(?:it|that|this|item)$/.test(text)) return null;
+        return text.length > 42 ? `${text.slice(0, 42).trim()}...` : text;
+    }
+
+    function beanWorkLooksLikeSchedulableActivity(clause) {
+        const text = String(clause || '').toLowerCase();
+        if (/\b(?:recipe|grocery list|shopping list|note)\b/.test(text)) return false;
+        return /\b(?:workout|exercise|gym|grocery store|grocery shopping|groceries|run to (?:the )?grocery|cook dinner|cooking dinner|make dinner|dinner)\b/.test(text);
+    }
+
+    function beanWorkSemanticSubjectForClause(clause) {
+        const text = String(clause || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        if (!text) return null;
+        if (/\b(?:grocery|shopping)\s+list\b|\blist\b.*\bgrocer/.test(text)) return 'Grocery list';
+        if (/\b(?:workout|exercise|gym)\b/.test(text)) return 'Workout';
+        if (/\b(?:grocery store|grocery shopping|groceries|run to (?:the )?grocery)\b/.test(text)) return 'Grocery shopping';
+        if (/\b(?:cook dinner|cooking dinner|make dinner)\b/.test(text)) return 'Cook dinner';
+        return null;
+    }
+
+    function beanWorkExplicitSubjectForClause(clause) {
+        const text = String(clause || '').replace(/\s+/g, ' ').trim();
+        if (!text) return null;
+        const titleMarker = /\b(?:called|named|titled|labelled|labeled|that says|saying|with title|with the title)\s+(.+)$/i.exec(text);
+        if (titleMarker?.[1]?.trim()?.length >= 3) return titleMarker[1].trim();
+        const matches = [...text.matchAll(/\bto\s+(.+)$/g)];
+        if (!matches.length) return null;
+        const last = matches[matches.length - 1];
+        const value = String(last[1] || '').trim();
+        if (value.length < 3 || /^(?:be\s+)?(?:after|before|at|on|in|by|around)\b/.test(value)) return null;
+        const before = text.slice(0, last.index);
+        const looksLikeTitle = /\b(?:task|todo|to-do|reminder|note|list)\b/.test(before)
+            || /\b(?:today|tomorrow|tonight|later|morning|afternoon|evening)\b/.test(before);
+        return looksLikeTitle ? value : null;
+    }
+
     function applyBeanWorkEvents(events = []) {
-        normalizeList(events).forEach((event) => {
+        normalizeList(events).sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0)).forEach((event) => {
             const eventId = Number(event?.id || 0);
             if (Number.isFinite(eventId) && eventId <= beanWorkEventFloorId) return;
+            if (Number.isFinite(eventId) && beanWorkAppliedEventIds.has(eventId)) return;
             const item = beanWorkItemFromEvent(event);
             if (!item) return;
+            if (Number.isFinite(eventId)) {
+                beanWorkAppliedEventIds.add(eventId);
+                beanWorkEventFloorId = Math.max(beanWorkEventFloorId, eventId);
+            }
             upsertBeanWorkItem(item.id, item.label, item.status, { source: 'event', resolvedByEvent: true });
         });
     }
@@ -2958,21 +3149,14 @@ if (mount) {
     function chatMarkup(options = {}) {
         const working = state.busy && state.chatRunState !== 'Ready';
         const messages = state.messages.length ? state.messages : [
-            { id: 'intro', role: 'assistant', content: needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey, I’m Bean. Tell me what you need planned, captured, moved, or remembered.' },
+            { id: 'intro', role: 'assistant', content: needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey! How can I help?' },
         ];
         const expandLabel = state.chatExpanded ? 'Close' : 'Expand';
-        const title = currentChatTitle();
+        const workStrip = chatDockedWorkStripMarkup();
         return `
             <section class="hb-chat">
-                <div class="hb-chat-top">
-                    <strong class="hb-chat-session-title">${escapeHtml(title)}</strong>
-                    <span class="hb-spacer"></span>
-                    <button class="hb-button-ghost hb-chat-history-toggle ${state.chatHistoryOpen ? 'hb-chat-history-toggle-active' : ''}" type="button" data-toggle-chat-history aria-expanded="${state.chatHistoryOpen ? 'true' : 'false'}">${icons.history}<span>History</span></button>
-                    ${options.expandable ? `<button class="hb-button-secondary hb-chat-expand-action" type="button" data-toggle-chat-expand aria-label="${escapeAttr(expandLabel)}">${escapeHtml(expandLabel)}</button>` : ''}
-                    <button class="hb-button-ghost hb-chat-new-session" type="button" data-new-session ${state.busy ? 'disabled' : ''}>${icons.add}<span>New</span></button>
-                </div>
+                ${options.expandable ? `<div class="hb-chat-top"><span class="hb-spacer"></span><button class="hb-button-secondary hb-chat-expand-action" type="button" data-toggle-chat-expand aria-label="${escapeAttr(expandLabel)}">${escapeHtml(expandLabel)}</button></div>` : ''}
                 ${errorMarkup(state.error)}
-                ${state.chatHistoryOpen ? chatHistoryMarkup() : ''}
                 <div class="hb-chat-messages" id="hb-chat-messages">
                     ${onboardingInterviewIntroMarkup()}
                     ${messages.map((message, index) => messageMarkup(message, index, messages)).join('')}
@@ -2981,11 +3165,31 @@ if (mount) {
                     ${working ? messageMarkup({ id: 'busy', role: 'assistant', content: state.chatRunState || 'Working…', progress: true }) : ''}
                 </div>
                 <div class="hb-chat-voice-status ${state.voiceStatusTone === 'error' ? 'hb-chat-voice-status-error' : ''}" data-voice-status ${state.voiceStatus ? '' : 'hidden'}>${escapeHtml(state.voiceStatus)}</div>
-                <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''}" data-action="chat">
-                    <textarea name="message" placeholder="${state.voiceListening ? 'Listening… release to send' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
-                    <button class="hb-button-secondary hb-chat-text-send-button" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send message">${icons.send}</button>
-                    <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-voice-button" type="button" ${state.busy ? 'data-cancel-turn' : 'data-voice-hold'} aria-label="${state.busy ? 'Stop Bean' : 'Hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
-                </form>
+                <div class="hb-chat-input-stack ${workStrip ? 'hb-chat-input-stack-working' : ''}">
+                    ${workStrip}
+                    <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''} ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat">
+                        <textarea name="message" placeholder="${state.voiceListening ? 'Listening' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
+                        <button class="hb-button-secondary hb-chat-text-send-button" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send message">${icons.send}</button>
+                        <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-voice-button" type="button" ${state.busy ? 'data-cancel-turn' : 'data-voice-hold'} aria-label="${state.busy ? 'Stop Bean' : 'Hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
+                    </form>
+                </div>
+            </section>`;
+    }
+
+    function chatDockedWorkStripMarkup() {
+        const items = beanWorkDisplayItems();
+        const active = beanWorkStatusActive() || (Date.now() < beanWorkStatusHoldUntil && items.length > 0);
+        if (!active || !items.length) return '';
+        const completedCount = items.filter((item) => beanWorkItemDone(item)).length;
+        const label = beanWorkStatusLabel(items);
+        return `
+            <section class="hb-chat-work-strip" aria-live="polite">
+                <div class="hb-chat-work-strip-head">
+                    <span class="hb-chat-work-spinner" aria-hidden="true"></span>
+                    <strong>${escapeHtml(label)}</strong>
+                    <span>${escapeHtml(`${completedCount}/${items.length}`)}</span>
+                </div>
+                ${beanWorkListMarkup(items, 'hb-bean-work-list hb-chat-work-list')}
             </section>`;
     }
 
@@ -7319,8 +7523,8 @@ if (mount) {
         state.voiceStatus = '';
         state.voiceStatusTone = '';
         state.chatRunState = voiceCommandIsCapabilityQuestion(content) ? 'Thinking…' : 'Working…';
-        const initialWorkLabel = options.voiceQuickReply || options.voiceQuickReplyPending ? 'Follow up on voice request' : beanWorkLabelForRequest(content);
-        resetBeanWorkItems(initialWorkLabel || '');
+        const initialWorkLabels = options.voiceQuickReply || options.voiceQuickReplyPending ? ['Follow up on voice request'] : beanWorkLabelsForTurn(content);
+        resetBeanWorkItems(initialWorkLabels);
         state.error = '';
         render();
         try {

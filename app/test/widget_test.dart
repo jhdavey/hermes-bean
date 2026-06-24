@@ -1911,6 +1911,58 @@ void main() {
     expect(find.text('Edit reminder'), findsOneWidget);
   });
 
+  testWidgets(
+    'Command Center keeps remaining agenda items during partial silent refresh after event delete',
+    (WidgetTester tester) async {
+      final api = _CommandCenterDeleteRefreshEmptyFakeHermesApiClient();
+
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('command-center-agenda-reminder-601')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('command-center-agenda-event-602')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('command-center-agenda-event-603')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const Key('command-center-agenda-event-603')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('event-delete-action')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('destructive-confirm-action')));
+      await tester.pumpAndSettle();
+
+      expect(api.deletedEventId, 603);
+      expect(
+        find.byKey(const Key('command-center-agenda-event-603')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('command-center-agenda-reminder-601')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('command-center-agenda-event-602')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('command-center-agenda-empty')),
+        findsNothing,
+      );
+    },
+  );
+
   testWidgets('settings can rename command center in appearance', (
     WidgetTester tester,
   ) async {
@@ -7047,6 +7099,96 @@ class _CommandCenterAgendaFakeHermesApiClient
         endsAt: start.add(const Duration(minutes: 30)).toIso8601String(),
       ),
     ];
+  }
+}
+
+class _CommandCenterDeleteRefreshEmptyFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  int? deletedEventId;
+
+  DateTime _todayFutureTime(int offsetMinutes) {
+    final now = DateTime.now();
+    final latestToday = DateTime(now.year, now.month, now.day, 23, 59);
+    final minutesLeft = math.max(1, latestToday.difference(now).inMinutes);
+    final clampedOffset = math.min(offsetMinutes, minutesLeft);
+    return now.add(Duration(minutes: clampedOffset));
+  }
+
+  @override
+  Future<List<HermesTask>> listTasks() async => const [];
+
+  @override
+  Future<List<HermesReminder>> listReminders() async {
+    if (deletedEventId != null) return const [];
+    return [
+      HermesReminder(
+        id: 601,
+        title: 'Grocery shopping reminder',
+        status: 'pending',
+        dueAt: _todayFutureTime(20).toIso8601String(),
+        workspaceId: 1,
+      ),
+    ];
+  }
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
+    final groceryStart = _todayFutureTime(30);
+    final cookingStart = _todayFutureTime(60);
+    if (deletedEventId != null) {
+      return [
+        HermesCalendarEvent(
+          id: deletedEventId!,
+          title: 'Cooking dinner',
+          workspaceId: 1,
+          startsAt: cookingStart.toIso8601String(),
+          endsAt: cookingStart
+              .add(const Duration(minutes: 45))
+              .toIso8601String(),
+        ),
+      ];
+    }
+    return [
+      HermesCalendarEvent(
+        id: 602,
+        title: 'Grocery shopping',
+        workspaceId: 1,
+        startsAt: groceryStart.toIso8601String(),
+        endsAt: groceryStart.add(const Duration(minutes: 45)).toIso8601String(),
+      ),
+      HermesCalendarEvent(
+        id: 603,
+        title: 'Cooking dinner',
+        workspaceId: 1,
+        startsAt: cookingStart.toIso8601String(),
+        endsAt: cookingStart.add(const Duration(minutes: 45)).toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
+    todaySummaryCalls++;
+    return HermesTodaySummary(
+      tasks: const [],
+      reminders: await listReminders(),
+      calendarEvents: await listCalendarEvents(),
+      activityEvents: const [],
+      approvals: const [],
+      blockers: const [],
+    );
+  }
+
+  @override
+  Future<void> deleteCalendarEvent(
+    int eventId, {
+    List<Object> deleteFromWorkspaceIds = const [],
+    String? recurringDeleteMode,
+    String? recurringOccurrenceDate,
+  }) async {
+    deletedEventId = eventId;
   }
 }
 

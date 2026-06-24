@@ -3369,8 +3369,8 @@
     width: min(980px, 100%);
     min-height: 0;
     margin: 0 auto;
-    display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    display: flex;
+    flex-direction: column;
     gap: 8px;
 }
 
@@ -3685,7 +3685,7 @@
 }
 
 .hb-chat-messages {
-    grid-row: 3;
+    flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
     display: flex;
@@ -3929,7 +3929,6 @@
 
 .hb-chat-dock {
     --hb-chat-input-max-height: 68px;
-    grid-row: 5;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 8px;
@@ -3941,13 +3940,85 @@
     box-shadow: 0 10px 22px rgba(0, 0, 0, .08);
 }
 
+.hb-chat-input-stack {
+    flex: 0 0 auto;
+    display: grid;
+    min-width: 0;
+}
+
+.hb-chat-work-strip {
+    display: grid;
+    gap: 7px;
+    padding: 10px 12px;
+    border: 1px solid rgba(var(--hb-accent-strong-rgb), .20);
+    border-bottom: 0;
+    border-radius: 20px 20px 0 0;
+    background: rgba(var(--hb-accent-rgb), .08);
+    color: var(--hb-accent-strong);
+    box-shadow: 0 -4px 20px rgba(var(--hb-accent-strong-rgb), .08);
+}
+
+.hb-chat-work-strip-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.hb-chat-work-strip-head strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--hb-accent-strong);
+    font-size: 13px;
+    font-weight: 950;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-chat-work-strip-head span:last-child {
+    margin-left: auto;
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 950;
+}
+
+.hb-chat-work-spinner {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    border: 3px solid rgba(var(--hb-accent-strong-rgb), .22);
+    border-top-color: var(--hb-accent-strong);
+    border-radius: 999px;
+    animation: hb-chat-work-spin .86s linear infinite;
+}
+
+.hb-chat-work-list {
+    max-height: 148px;
+    overflow: hidden;
+}
+
+.hb-chat-work-list .hb-bean-work-item {
+    font-size: 13px;
+}
+
+.hb-chat-dock-with-work {
+    border-top-color: rgba(var(--hb-accent-strong-rgb), .16);
+    border-radius: 0 0 22px 22px;
+    box-shadow: 0 10px 22px rgba(0, 0, 0, .08);
+}
+
+@keyframes hb-chat-work-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .hb-chat-dock-listening {
     border-color: var(--hb-accent-strong);
     box-shadow: 0 10px 26px rgba(var(--hb-accent-rgb), .18);
 }
 
 .hb-chat-voice-status {
-    grid-row: 4;
     min-height: 28px;
     align-content: center;
     border: 1px solid rgba(var(--hb-accent-rgb), .18);
