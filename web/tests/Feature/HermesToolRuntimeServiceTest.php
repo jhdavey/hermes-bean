@@ -11,6 +11,7 @@ use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -27,6 +28,9 @@ class HermesToolRuntimeServiceTest extends TestCase
         config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
         config()->set('services.hermes_runtime.api_key', 'test-key');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        config()->set('services.hermes_runtime.tavily_api_key', '');
+        config()->set('services.hermes_runtime.geoapify_api_key', '');
+        Cache::flush();
     }
 
     public function test_tool_runtime_sends_user_prompt_directly_and_exposes_native_tools(): void
@@ -735,12 +739,199 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_external_lookup_routes_nearby_places_to_geoapify(): void
+    {
+        config()->set('services.hermes_runtime.geoapify_api_key', 'geoapify-test-key');
+
+        $chatCalls = 0;
+        $capturedLookupResult = [];
+        Http::fake(function ($request) use (&$chatCalls, &$capturedLookupResult) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-places-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_places',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'nearest Wawa',
+                                            'location' => '08080',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $capturedLookupResult = json_decode((string) data_get($toolOutput, 'content'), true) ?: [];
+
+                return Http::response([
+                    'id' => 'chatcmpl-places-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($capturedLookupResult, 'text'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.geoapify.com/v1/geocode/search')) {
+                return Http::response([
+                    'features' => [[
+                        'properties' => [
+                            'lat' => 39.7391,
+                            'lon' => -75.1051,
+                            'formatted' => 'Sewell, NJ 08080, United States',
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.geoapify.com/v2/places')) {
+                return Http::response([
+                    'features' => [[
+                        'properties' => [
+                            'name' => 'Wawa',
+                            'formatted' => '123 Example Road, Sewell, NJ 08080, United States',
+                            'lat' => 39.741,
+                            'lon' => -75.11,
+                            'distance' => 1400,
+                            'categories' => ['commercial.convenience'],
+                            'place_id' => 'geo-place-1',
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-places@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'where is the nearest wawa to 08080',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertSame('geoapify_places', data_get($capturedLookupResult, 'provider'));
+        $this->assertStringContainsString('Wawa', (string) data_get($capturedLookupResult, 'text'));
+        $this->assertSame('08080', data_get($capturedLookupResult, 'location'));
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
+    }
+
+    public function test_external_lookup_routes_general_live_search_to_tavily(): void
+    {
+        config()->set('services.hermes_runtime.tavily_api_key', 'tavily-test-key');
+
+        $chatCalls = 0;
+        $capturedLookupResult = [];
+        Http::fake(function ($request) use (&$chatCalls, &$capturedLookupResult) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-tavily-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_tavily',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => 'latest Apple earnings news today',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $capturedLookupResult = json_decode((string) data_get($toolOutput, 'content'), true) ?: [];
+
+                return Http::response([
+                    'id' => 'chatcmpl-tavily-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($capturedLookupResult, 'text'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://api.tavily.com/search') {
+                return Http::response([
+                    'query' => 'latest Apple earnings news today',
+                    'answer' => 'Apple reported updated earnings results.',
+                    'results' => [[
+                        'title' => 'Apple earnings',
+                        'url' => 'https://example.com/apple-earnings',
+                        'content' => 'Apple reported updated earnings results.',
+                    ]],
+                    'response_time' => '0.42',
+                    'usage' => ['credits' => 1],
+                    'request_id' => 'tavily-request-1',
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-tavily@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'what is the latest Apple earnings news today',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Apple reported updated earnings results.');
+
+        $this->assertSame('tavily_search', data_get($capturedLookupResult, 'provider'));
+        $this->assertSame('Apple reported updated earnings results.', data_get($capturedLookupResult, 'text'));
+        $this->assertSame('https://example.com/apple-earnings', data_get($capturedLookupResult, 'citations.0.url'));
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.tavily.com/search'
+                && $request->hasHeader('Authorization', 'Bearer tavily-test-key');
+        });
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+    }
+
     public function test_external_lookup_result_falls_back_if_final_model_call_fails(): void
     {
         config()->set('services.hermes_runtime.weather_lookup_enabled', false);
 
         $chatCalls = 0;
-        Http::fake(function ($request) use (&$chatCalls) {
+        $capturedToolContent = null;
+        Http::fake(function ($request) use (&$chatCalls, &$capturedToolContent) {
             if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
                 $chatCalls++;
 
@@ -769,6 +960,9 @@ class HermesToolRuntimeServiceTest extends TestCase
                     ], 200);
                 }
 
+                $messages = $request->data()['messages'] ?? [];
+                $capturedToolContent = (string) data_get(collect($messages)->firstWhere('role', 'tool'), 'content', '');
+
                 return Http::response(['error' => ['message' => 'temporary final model failure']], 500);
             }
 
@@ -786,13 +980,13 @@ class HermesToolRuntimeServiceTest extends TestCase
         $token = $this->apiToken('tool-external-fallback@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
         ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'It is 82 degrees and partly cloudy in Orlando right now.')
+            ->assertJsonPath('data.status', 'completed');
+        $this->assertStringContainsString('It is 82 degrees and partly cloudy in Orlando right now.', (string) $capturedToolContent);
+        $response->assertJsonPath('data.assistant_message.content', 'It is 82 degrees and partly cloudy in Orlando right now.')
             ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
-
         Http::assertSentCount(3);
     }
 

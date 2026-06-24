@@ -1769,8 +1769,14 @@ PROMPT;
         }
 
         if (($last['tool'] ?? null) === 'external_lookup') {
-            if (($last['ok'] ?? false) && filled($last['text'] ?? null)) {
-                return (string) $last['text'];
+            $successfulLookup = collect($toolOutputs)
+                ->reverse()
+                ->first(fn (mixed $output): bool => is_array($output)
+                    && ($output['tool'] ?? null) === 'external_lookup'
+                    && filled($output['text'] ?? null));
+
+            if (is_array($successfulLookup)) {
+                return (string) $successfulLookup['text'];
             }
 
             return 'I tried to check that live information, but the lookup did not return a usable result.';

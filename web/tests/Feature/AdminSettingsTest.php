@@ -173,6 +173,8 @@ SH);
     public function test_admin_can_view_live_lookup_provider_status_and_usage(): void
     {
         config()->set('services.hermes_runtime.api_key', 'test-openai-key');
+        config()->set('services.hermes_runtime.tavily_api_key', 'test-tavily-key');
+        config()->set('services.hermes_runtime.geoapify_api_key', 'test-geoapify-key');
         config()->set('services.hermes_runtime.weather_lookup_enabled', true);
 
         $adminToken = $this->apiToken('lookup-admin@example.com');
@@ -191,6 +193,32 @@ SH);
             'estimated_cost_usd' => 0,
             'action_types' => ['external_lookup', 'open_meteo_weather'],
             'metadata' => ['live_lookup_provider' => 'open_meteo', 'latency_ms' => 240],
+        ]);
+
+        AiUsageLog::create([
+            'user_id' => $admin->id,
+            'provider' => 'geoapify',
+            'model' => 'geoapify-places',
+            'route_tier' => 'external_lookup',
+            'request_type' => 'external_lookup',
+            'status' => 'completed',
+            'tool_call_count' => 2,
+            'estimated_cost_usd' => 0,
+            'action_types' => ['external_lookup', 'geoapify_places'],
+            'metadata' => ['live_lookup_provider' => 'geoapify_places', 'latency_ms' => 350],
+        ]);
+
+        AiUsageLog::create([
+            'user_id' => $admin->id,
+            'provider' => 'tavily',
+            'model' => 'tavily-search',
+            'route_tier' => 'external_lookup',
+            'request_type' => 'external_lookup',
+            'status' => 'completed',
+            'tool_call_count' => 1,
+            'estimated_cost_usd' => 0,
+            'action_types' => ['external_lookup', 'tavily_search'],
+            'metadata' => ['live_lookup_provider' => 'tavily_search', 'latency_ms' => 420, 'credits' => 1],
         ]);
 
         AiUsageLog::create([
@@ -215,9 +243,15 @@ SH);
             ->assertJsonPath('data.providers.0.connected', true)
             ->assertJsonPath('data.providers.0.usage.requests', 1)
             ->assertJsonPath('data.providers.0.usage.avg_latency_ms', 240)
-            ->assertJsonPath('data.providers.1.key', 'openai_web_search')
+            ->assertJsonPath('data.providers.1.key', 'geoapify_places')
             ->assertJsonPath('data.providers.1.connected', true)
-            ->assertJsonPath('data.providers.1.usage.failed', 1);
+            ->assertJsonPath('data.providers.1.usage.requests', 1)
+            ->assertJsonPath('data.providers.2.key', 'tavily_search')
+            ->assertJsonPath('data.providers.2.connected', true)
+            ->assertJsonPath('data.providers.2.usage.avg_latency_ms', 420)
+            ->assertJsonPath('data.providers.3.key', 'openai_web_search')
+            ->assertJsonPath('data.providers.3.connected', true)
+            ->assertJsonPath('data.providers.3.usage.failed', 1);
     }
 
     private function settingsPayload(array $models = [], array $usageLimits = [], bool $apply = false, array $killSwitches = []): array
