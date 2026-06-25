@@ -647,6 +647,35 @@
     box-shadow: 0 14px 34px rgba(0, 0, 0, .32), inset 0 1px 0 rgba(255, 255, 255, .06);
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-bean-button img,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-send-bean-logo {
+    filter: brightness(0) invert(1);
+    opacity: .94;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-form .hb-modal-actions {
+    border-top-color: rgba(var(--hb-accent-rgb), .28);
+    background: rgba(17, 24, 32, .96);
+    box-shadow: 0 -18px 36px rgba(0, 0, 0, .26);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-pill {
+    border-color: rgba(var(--hb-accent-rgb), .34);
+    background: rgba(17, 24, 32, .94);
+    color: var(--hb-text);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .28);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-pill-disabled {
+    color: var(--hb-text);
+    border-color: rgba(var(--hb-accent-rgb), .24);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-work-count {
+    background: rgba(var(--hb-accent-rgb), .16);
+    color: var(--hb-text);
+}
+
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-settings-grid > .hb-settings-section {
     border-color: rgba(var(--hb-accent-rgb), .32);
     background: transparent;
@@ -6041,16 +6070,17 @@
 .hb-option-list .hb-switch-row {
     min-height: 50px;
     align-items: flex-start;
-    border: 1px solid rgba(28, 49, 78, .10);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, .72);
-    padding: 10px 11px;
+    border: 0;
+    border-top: 1px solid rgba(var(--hb-accent-rgb), .24);
+    border-radius: 0;
+    background: transparent;
+    padding: 10px 0;
     transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
 }
 
 .hb-option-list .hb-switch-row:hover {
-    border-color: rgba(var(--hb-accent-rgb), .24);
-    background: #fff;
+    border-color: rgba(var(--hb-accent-rgb), .42);
+    background: rgba(var(--hb-accent-rgb), .06);
 }
 
 .hb-option-list .hb-switch-row span {
@@ -6566,8 +6596,12 @@
     }
 
     .hb-form-section {
-        padding: 12px;
-        border-radius: 14px;
+        padding: 14px 0 0;
+        border-radius: 0;
+    }
+
+    .hb-form-section-primary {
+        padding-top: 0;
     }
 
     .hb-compact-field-row {
