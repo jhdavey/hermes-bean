@@ -1145,19 +1145,19 @@ class HeyBeanTheme {
   static void useTheme(String key, {Brightness brightness = Brightness.light}) {
     _current = heyBeanColorThemeForKey(key);
     isDark = brightness == Brightness.dark;
-    bg0 = isDark ? const Color(0xFF06100D) : _current.bg0;
-    bg1 = isDark ? const Color(0xFF0A1712) : _current.bg1;
-    bg2 = isDark ? const Color(0xFF0F1F19) : _current.bg2;
-    surface = isDark ? const Color(0xFF101D17) : const Color(0xFFFFFFFF);
-    surface2 = isDark ? const Color(0xFF14251D) : _current.surface2;
-    text = isDark ? const Color(0xFFF3FBF6) : const Color(0xFF2D3748);
-    muted = isDark ? const Color(0xFFA9BDAE) : const Color(0xFF667085);
-    border = isDark ? const Color(0x293EE98E) : const Color(0xFFD9DDE3);
-    borderStrong = isDark ? const Color(0x4D3EE98E) : const Color(0xFFCBD1DA);
-    accent = isDark ? const Color(0xFF6EE98E) : _current.accent;
-    accentStrong = isDark ? const Color(0xFF49D66F) : _current.accentStrong;
-    accentInk = isDark ? const Color(0xFF04120B) : _current.accentInk;
-    success = isDark ? const Color(0xFF6EE98E) : _current.success;
+    bg0 = isDark ? const Color(0xFF0B0F14) : _current.bg0;
+    bg1 = isDark ? const Color(0xFF10151C) : _current.bg1;
+    bg2 = isDark ? const Color(0xFF151B23) : _current.bg2;
+    surface = isDark ? const Color(0xFF141A20) : const Color(0xFFFFFFFF);
+    surface2 = isDark ? const Color(0xFF19212A) : _current.surface2;
+    text = isDark ? const Color(0xFFF4F7FB) : const Color(0xFF2D3748);
+    muted = isDark ? const Color(0xFFA7B0BD) : const Color(0xFF667085);
+    border = isDark ? const Color(0x2E94A3B8) : const Color(0xFFD9DDE3);
+    borderStrong = isDark ? const Color(0x4D94A3B8) : const Color(0xFFCBD1DA);
+    accent = _current.accent;
+    accentStrong = _current.accentStrong;
+    accentInk = _current.accentInk;
+    success = _current.success;
     warning = isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
     destructive = isDark ? const Color(0xFFFB7185) : const Color(0xFFDC2626);
   }
@@ -1174,29 +1174,23 @@ class HeyBeanTheme {
     final isDarkTheme = brightness == Brightness.dark;
     final colorTheme = heyBeanColorThemeForKey(key);
     final surfaceColor = isDarkTheme
-        ? const Color(0xFF101D17)
+        ? const Color(0xFF141A20)
         : const Color(0xFFFFFFFF);
     final textColor = isDarkTheme
-        ? const Color(0xFFF3FBF6)
+        ? const Color(0xFFF4F7FB)
         : const Color(0xFF2D3748);
     final mutedColor = isDarkTheme
-        ? const Color(0xFFA9BDAE)
+        ? const Color(0xFFA7B0BD)
         : const Color(0xFF667085);
     final borderColor = isDarkTheme
-        ? const Color(0x293EE98E)
+        ? const Color(0x2E94A3B8)
         : const Color(0xFFD9DDE3);
     final borderStrongColor = isDarkTheme
-        ? const Color(0x4D3EE98E)
+        ? const Color(0x4D94A3B8)
         : const Color(0xFFCBD1DA);
-    final accentColor = isDarkTheme
-        ? const Color(0xFF6EE98E)
-        : colorTheme.accent;
-    final accentStrongColor = isDarkTheme
-        ? const Color(0xFF49D66F)
-        : colorTheme.accentStrong;
-    final accentInkColor = isDarkTheme
-        ? const Color(0xFF04120B)
-        : colorTheme.accentInk;
+    final accentColor = colorTheme.accent;
+    final accentStrongColor = colorTheme.accentStrong;
+    final accentInkColor = colorTheme.accentInk;
     final colorScheme =
         ColorScheme.fromSeed(
           brightness: brightness,
@@ -1207,7 +1201,7 @@ class HeyBeanTheme {
           primaryContainer: accentColor,
           onPrimaryContainer: accentInkColor,
           secondary: accentStrongColor,
-          tertiary: isDarkTheme ? const Color(0xFF6EE98E) : colorTheme.success,
+          tertiary: colorTheme.success,
           surface: surfaceColor,
           onSurface: textColor,
           onSurfaceVariant: mutedColor,
@@ -1222,7 +1216,7 @@ class HeyBeanTheme {
       fontFamily: 'Plus Jakarta Sans',
       fontFamilyFallback: const ['Avenir Next', 'Inter', 'Roboto', 'Arial'],
       scaffoldBackgroundColor: Colors.transparent,
-      canvasColor: isDarkTheme ? const Color(0xFF06100D) : colorTheme.bg0,
+      canvasColor: isDarkTheme ? const Color(0xFF0B0F14) : colorTheme.bg0,
       appBarTheme: AppBarTheme(
         centerTitle: false,
         backgroundColor: Colors.transparent,
@@ -1246,7 +1240,7 @@ class HeyBeanTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: isDarkTheme
-            ? const Color(0xFF0D1914)
+            ? const Color(0xFF111820)
             : surfaceColor.withValues(alpha: .88),
         hintStyle: TextStyle(color: mutedColor),
         helperStyle: TextStyle(
