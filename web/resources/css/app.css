@@ -647,6 +647,58 @@
     box-shadow: 0 14px 34px rgba(0, 0, 0, .32), inset 0 1px 0 rgba(255, 255, 255, .06);
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-settings-grid > .hb-settings-section {
+    border-color: rgba(var(--hb-accent-rgb), .32);
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] input:not([type="checkbox"]):not([type="radio"]),
+.heybean-app-body[data-hb-theme-resolved="dark"] textarea,
+.heybean-app-body[data-hb-theme-resolved="dark"] select {
+    background-color: #111820;
+    color: var(--hb-text);
+    color-scheme: dark;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+.heybean-app-body[data-hb-theme-resolved="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+.heybean-app-body[data-hb-theme-resolved="dark"] input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(.82);
+    opacity: .74;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-actions-inline {
+    opacity: 1;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-icon-action {
+    border-color: rgba(var(--hb-accent-rgb), .32);
+    background: rgba(20, 27, 35, .94);
+    color: var(--hb-text);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-icon-action:hover {
+    border-color: rgba(var(--hb-accent-rgb), .52);
+    background: rgba(var(--hb-accent-rgb), .16);
+    color: var(--hb-text);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-bean-work-status,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-bean-work-status-mobile,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-work-list {
+    border-color: var(--hb-border);
+    background: rgba(20, 27, 35, .96);
+    color: var(--hb-text);
+    box-shadow: 0 18px 42px rgba(0, 0, 0, .32);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-bean-work-checkbox {
+    border-color: rgba(var(--hb-accent-rgb), .40);
+    background: rgba(var(--hb-accent-rgb), .14);
+    color: var(--hb-text);
+}
+
 .heybean-app-body {
     min-height: 100vh;
     margin: 0;
@@ -3435,15 +3487,17 @@
 .hb-form-section {
     display: grid;
     gap: 12px;
-    padding: 14px;
-    border: 1px solid rgba(28, 49, 78, .10);
-    border-radius: 16px;
-    background: rgba(246, 250, 244, .66);
+    padding: 16px 0 0;
+    border: 0;
+    border-top: 1px solid rgba(var(--hb-accent-rgb), .32);
+    border-radius: 0;
+    background: transparent;
 }
 
 .hb-form-section-primary {
-    border-color: rgba(var(--hb-accent-rgb), .18);
-    background: rgba(var(--hb-accent-rgb), .06);
+    padding-top: 0;
+    border-top: 0;
+    background: transparent;
 }
 
 .hb-form-section-head {
@@ -3481,10 +3535,10 @@
 .hb-form-switch {
     min-height: 54px;
     align-items: flex-start;
-    padding: 11px 12px;
-    border: 1px solid rgba(28, 49, 78, .10);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, .72);
+    padding: 4px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 .hb-form-switch input {
@@ -4207,14 +4261,15 @@
     place-items: center;
     border: 1px solid rgba(var(--hb-accent-rgb), .18);
     border-radius: 999px;
-    background: rgba(255, 255, 255, .62);
+    background: color-mix(in srgb, var(--hb-surface) 72%, transparent);
     color: var(--hb-accent-strong);
     cursor: pointer;
 }
 
 .hb-message-icon-action:hover {
     border-color: rgba(var(--hb-accent-rgb), .34);
-    background: rgba(255, 255, 255, .9);
+    background: rgba(var(--hb-accent-rgb), .14);
+    color: var(--hb-text);
 }
 
 .hb-message-icon-action svg {
@@ -4925,6 +4980,15 @@
 .hb-settings-section {
     display: grid;
     gap: 12px;
+}
+
+.hb-settings-grid > .hb-settings-section {
+    padding: 18px 0 0;
+    border: 0;
+    border-top: 1px solid rgba(var(--hb-accent-rgb), .32);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
 .hb-settings-panel-head {
@@ -6864,11 +6928,20 @@
     }
 
     .hb-settings-grid > .hb-compact-item,
-    .hb-settings-grid > .hb-surface-soft,
-    .hb-settings-grid > .hb-card {
+    .hb-settings-grid > .hb-surface-soft:not(.hb-settings-section),
+    .hb-settings-grid > .hb-card:not(.hb-settings-section) {
         border-radius: 16px;
         border: 1px solid var(--hb-border);
         background: var(--hb-surface2);
+        box-shadow: none;
+    }
+
+    .hb-settings-grid > .hb-settings-section {
+        padding: 16px 0 0;
+        border: 0;
+        border-top: 1px solid rgba(var(--hb-accent-rgb), .32);
+        border-radius: 0;
+        background: transparent;
         box-shadow: none;
     }
 
