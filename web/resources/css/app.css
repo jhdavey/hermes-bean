@@ -1475,7 +1475,7 @@
     margin: 3px 0 0;
     color: var(--hb-muted);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .hb-section-action-row {
@@ -1760,7 +1760,7 @@
     color: var(--hb-muted);
     font-size: 12px;
     line-height: 1.35;
-    font-weight: 650;
+    font-weight: 500;
 }
 
 .hb-inline-info[open] .hb-inline-info-popover,
@@ -1781,8 +1781,9 @@
     border-radius: 999px;
     border: 1px solid transparent;
     padding: 11px 20px;
+    font-family: inherit;
     font-size: 14px;
-    font-weight: 900;
+    font-weight: 700;
     text-decoration: none;
     cursor: pointer;
     transition: transform .16s ease, background .16s ease, border-color .16s ease, opacity .16s ease;
@@ -5495,7 +5496,7 @@
     display: block;
     color: var(--hb-muted);
     font-size: 12px;
-    font-weight: 760;
+    font-weight: 700;
 }
 
 .hb-admin-settings-grid label {
@@ -5855,7 +5856,7 @@
     background: transparent;
     color: var(--hb-text);
     font-size: 13px;
-    font-weight: 760;
+    font-weight: 700;
     font-family: inherit;
     text-align: left;
     cursor: pointer;
@@ -5954,10 +5955,11 @@
     grid-template-columns: minmax(0, 1fr) 112px auto;
     gap: 8px;
     align-items: center;
-    padding: 10px;
-    border: 1px solid var(--hb-border);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, .64);
+    padding: 12px 0;
+    border: 0;
+    border-top: 1px solid rgba(var(--hb-accent-rgb), .24);
+    border-radius: 0;
+    background: transparent;
 }
 
 .hb-member-row strong,
@@ -6005,10 +6007,11 @@
     width: 100%;
     display: grid;
     gap: 10px;
-    border: 1px solid rgba(28, 49, 78, .10);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, .72);
-    padding: 12px;
+    border: 0;
+    border-top: 1px solid rgba(var(--hb-accent-rgb), .24);
+    border-radius: 0;
+    background: transparent;
+    padding: 12px 0 0;
 }
 
 .hb-inline-category-manager[hidden] {
@@ -7901,4 +7904,113 @@
     .hb-note-editor {
         padding-bottom: 120px;
     }
+}
+
+.hb-button,
+.hb-button-secondary,
+.hb-button-danger,
+.hb-button-ghost,
+.hb-chip,
+.hb-admin-growth-range-button,
+.hb-theme-mode-option span,
+.hb-kiosk-voice-pill,
+.hb-chat-voice-status,
+.hb-inline-loading,
+.hb-empty {
+    font-weight: 700;
+}
+
+.hb-label,
+.hb-checkbox-row,
+.hb-switch-row,
+.hb-profile-action,
+.hb-profile-workspace,
+.hb-overflow-action span,
+.hb-day-board-head span,
+.hb-task-future-toggle strong,
+.hb-settings-panel-head small,
+.hb-settings-panel-subtitle,
+.hb-billing-header small,
+.hb-theme-mode-option small,
+.hb-form-section-head span,
+.hb-form-switch small,
+.hb-member-row small,
+.hb-reminder-recipient-group-head small,
+.hb-compact-item small,
+.hb-item-meta,
+.hb-event-time,
+.hb-month-event-time,
+.hb-multi-day-event-time,
+.hb-glance-event .hb-event-time,
+.hb-timeline-day-head span,
+.hb-note-card-meta,
+.hb-note-preview,
+.hb-note-folder-count,
+.hb-note-workspace-menu small {
+    font-weight: 500;
+}
+
+.hb-label > span,
+.hb-label-optional,
+.hb-input,
+.hb-textarea,
+.hb-select,
+.hb-profile-workspace select,
+.hb-role-select,
+.hb-note-body,
+.hb-note-title-input {
+    font-weight: 600;
+}
+
+.hb-compact-item strong,
+.hb-member-row strong,
+.hb-switch-row strong,
+.hb-form-section-head strong,
+.hb-settings-panel-head strong,
+.hb-billing-header strong,
+.hb-admin-growth-header strong,
+.hb-admin-metric strong,
+.hb-item-title,
+.hb-event-title,
+.hb-month-event-title,
+.hb-glance-event .hb-event-title,
+.hb-timeline-day-head strong,
+.hb-task-future-toggle span:nth-child(2),
+.hb-note-title,
+.hb-note-folder-name,
+.hb-note-sidebar-title {
+    font-weight: 700;
+}
+
+.hb-section-title h1,
+.hb-section-title h2,
+.hb-auth-title h1,
+.hb-subscribe-hero h1,
+.hb-subscribe-plan h2,
+.hb-note-body h1,
+.hb-note-body h2 {
+    font-weight: 900;
+}
+
+.heybean-app-body .hb-button,
+.heybean-app-body .hb-button-secondary,
+.heybean-app-body .hb-button-danger,
+.heybean-app-body .hb-button-ghost,
+.heybean-app-body .hb-chip,
+.heybean-app-body .hb-admin-growth-range-button,
+.heybean-app-body .hb-theme-mode-option span,
+.heybean-app-body .hb-kiosk-voice-pill,
+.heybean-app-body .hb-chat-voice-status,
+.heybean-app-body .hb-inline-loading,
+.heybean-app-body .hb-empty {
+    font-weight: 700;
+}
+
+.heybean-app-body .hb-input,
+.heybean-app-body .hb-textarea,
+.heybean-app-body .hb-select,
+.heybean-app-body .hb-profile-workspace select,
+.heybean-app-body .hb-role-select,
+.heybean-app-body .hb-note-title-input {
+    font-weight: 500;
 }
