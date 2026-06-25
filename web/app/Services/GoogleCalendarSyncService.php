@@ -685,7 +685,7 @@ class GoogleCalendarSyncService
                 'description' => $event->description,
                 'location' => $event->location,
                 'start' => ['date' => $event->starts_at->toDateString()],
-                'end' => ['date' => ($event->ends_at ?: $event->starts_at->copy()->addDay())->toDateString()],
+                'end' => ['date' => $this->allDayExclusiveEndDate($event)],
             ];
         }
 
@@ -760,6 +760,22 @@ class GoogleCalendarSyncService
         // offset here makes the next app refresh display the event one timezone
         // offset earlier (3:15 PM -> 11:15 AM during EDT).
         return Carbon::parse($dateTime)->utc();
+    }
+
+    private function allDayExclusiveEndDate(CalendarEvent $event): string
+    {
+        if (! $event->ends_at) {
+            return $event->starts_at->copy()->utc()->addDay()->toDateString();
+        }
+
+        $end = $event->ends_at->copy()->utc();
+        $start = $event->starts_at->copy()->utc()->startOfDay();
+
+        if ($end->isStartOfDay() && $end->gt($start)) {
+            return $end->toDateString();
+        }
+
+        return $end->copy()->addDay()->toDateString();
     }
 
     private function markFailed(GoogleCalendarConnection $connection, string $message): void

@@ -135,20 +135,28 @@ class AuthAndAccountLifecycleTest extends TestCase
 
         $this->withToken($token)->getJson('/api/auth/me')
             ->assertOk()
-            ->assertJsonPath('data.theme', 'green');
+            ->assertJsonPath('data.theme', 'green')
+            ->assertJsonPath('data.theme_mode', 'auto');
 
         $this->withToken($token)->patchJson('/api/auth/me', [
             'theme' => 'purple',
+            'theme_mode' => 'dark',
         ])->assertOk()
-            ->assertJsonPath('data.theme', 'purple');
+            ->assertJsonPath('data.theme', 'purple')
+            ->assertJsonPath('data.theme_mode', 'dark');
 
         $this->assertDatabaseHas('users', [
             'email' => 'theme-user@example.com',
             'theme' => 'purple',
+            'theme_mode' => 'dark',
         ]);
 
         $this->withToken($token)->patchJson('/api/auth/me', [
             'theme' => 'neon',
+        ])->assertUnprocessable();
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'theme_mode' => 'sepia',
         ])->assertUnprocessable();
     }
 

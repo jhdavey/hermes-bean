@@ -463,7 +463,7 @@ TEXT;
         }
 
         if ($allDay) {
-            return $event->ends_at->copy()->utc()->subDay()->toDateString();
+            return $this->allDayDisplayEndDate($event);
         }
 
         $end = $event->ends_at->copy()->setTimezone($timezone);
@@ -474,6 +474,22 @@ TEXT;
     private function storedDate(?Carbon $value): ?string
     {
         return $value?->copy()->utc()->toDateString();
+    }
+
+    private function allDayDisplayEndDate(CalendarEvent $event): ?string
+    {
+        if (! $event->ends_at) {
+            return $this->storedDate($event->starts_at);
+        }
+
+        $end = $event->ends_at->copy()->utc();
+        $start = $event->starts_at?->copy()->utc()->startOfDay();
+
+        if ($start && $end->isStartOfDay() && $end->gt($start)) {
+            return $end->copy()->subDay()->toDateString();
+        }
+
+        return $end->toDateString();
     }
 
     private function displayDateRange(?string $startDate, ?string $endDate): ?string

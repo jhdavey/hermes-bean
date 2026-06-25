@@ -38,6 +38,13 @@ if (mount) {
         { key: 'indigo', label: 'Indigo', accent: '#4f46e5' },
     ];
     const appThemesByKey = new Map(appThemes.map((theme) => [theme.key, theme]));
+    const themeModes = [
+        { key: 'auto', label: 'Auto', detail: 'Use device setting' },
+        { key: 'light', label: 'Light', detail: 'Always light' },
+        { key: 'dark', label: 'Dark', detail: 'Always dark' },
+    ];
+    const themeModesByKey = new Map(themeModes.map((mode) => [mode.key, mode]));
+    const systemDarkScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
     const subscriptionPlans = {
         base: {
             label: 'Base',
@@ -114,6 +121,7 @@ if (mount) {
         indentIncrease: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h16"/><path d="m15 9 3 3-3 3"/></svg>',
         indentDecrease: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M10 12h10M4 18h16"/><path d="m9 9-3 3 3 3"/></svg>',
         history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>',
+        infoCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg>',
     };
 
     const state = {
@@ -222,6 +230,9 @@ if (mount) {
     };
 
     applyAppTheme();
+    systemDarkScheme?.addEventListener?.('change', () => {
+        if (currentThemeModeKey() === 'auto') applyAppTheme();
+    });
 
     let voiceHoldActive = false;
     let voiceHoldPressed = false;
@@ -313,9 +324,8 @@ if (mount) {
     const kioskRealtimeConnectTimeoutMs = 15000;
     const kioskRealtimeTransientDisconnectMs = 12000;
     const kioskRealtimeTransientStatusMs = 2500;
-    const kioskRealtimeTurnDebounceMs = 2200;
+    const kioskRealtimeTurnDebounceMs = 1200;
     const kioskRealtimeWakeContinuationMs = 5500;
-    const kioskRealtimeRunDeadlineMs = 12000;
     const kioskRealtimeProcessedCalls = new Set();
     const kioskRealtimeRunWatchTimers = new Map();
     const kioskRealtimeDeferredFunctionOutputTimers = new Set();
@@ -552,10 +562,29 @@ if (mount) {
         return normalizeThemeKey(state.user?.theme);
     }
 
+    function normalizeThemeModeKey(value) {
+        const key = String(value || '').trim().toLowerCase();
+        return themeModesByKey.has(key) ? key : 'auto';
+    }
+
+    function currentThemeModeKey() {
+        return normalizeThemeModeKey(state.user?.theme_mode || state.user?.themeMode);
+    }
+
+    function resolvedThemeMode(value = currentThemeModeKey()) {
+        const mode = normalizeThemeModeKey(value);
+        if (mode !== 'auto') return mode;
+        return systemDarkScheme?.matches ? 'dark' : 'light';
+    }
+
     function applyAppTheme(value = currentThemeKey()) {
         const theme = themeForKey(value);
         document.body.dataset.hbTheme = theme.key;
-        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme.accent);
+        const mode = currentThemeModeKey();
+        const resolvedMode = resolvedThemeMode(mode);
+        document.body.dataset.hbThemeMode = mode;
+        document.body.dataset.hbThemeResolved = resolvedMode;
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolvedMode === 'dark' ? '#121712' : theme.accent);
     }
 
     function themeAccentColor() {
@@ -565,9 +594,11 @@ if (mount) {
     function themeSettingsMarkup() {
         const selectedTheme = currentThemeKey();
         const selected = themeForKey(selectedTheme);
+        const selectedMode = currentThemeModeKey();
+        const resolvedMode = resolvedThemeMode(selectedMode);
         return `
             <div class="hb-surface-soft hb-card-pad hb-settings-section hb-theme-settings">
-                ${settingsSectionHeader(icons.palette, 'Appearance', `${selected.label} accent`)}
+                ${settingsSectionHeader(icons.palette, 'Appearance', `${selected.label} accent · ${selectedMode === 'auto' ? `Auto (${resolvedMode})` : themeModesByKey.get(selectedMode).label}`)}
                 <div class="hb-theme-select-row">
                     <span class="hb-theme-swatch" style="--hb-theme-swatch: ${escapeAttr(selected.accent)}" aria-hidden="true"></span>
                     <label class="hb-label">Accent color
@@ -575,6 +606,15 @@ if (mount) {
                             ${appThemes.map((theme) => `<option value="${escapeAttr(theme.key)}" ${theme.key === selectedTheme ? 'selected' : ''}>${escapeHtml(theme.label)}</option>`).join('')}
                         </select>
                     </label>
+                </div>
+                <div class="hb-theme-mode-group" role="radiogroup" aria-label="Theme mode">
+                    ${themeModes.map((mode) => `
+                        <label class="hb-theme-mode-option ${mode.key === selectedMode ? 'is-selected' : ''}">
+                            <input type="radio" name="theme_mode" value="${escapeAttr(mode.key)}" data-theme-mode-option ${mode.key === selectedMode ? 'checked' : ''}>
+                            <span>${escapeHtml(mode.label)}</span>
+                            <small>${escapeHtml(mode.detail)}</small>
+                        </label>
+                    `).join('')}
                 </div>
             </div>
         `;
@@ -2794,19 +2834,15 @@ if (mount) {
         beanWorkStatusHoldUntil = 0;
     }
 
-    function clearCompletedBeanWorkItemsForFreshRequest() {
-        if (!state.beanWorkItems.length || state.beanWorkItems.some((item) => !beanWorkItemDone(item))) return;
+    function prepareBeanWorkForFreshRequest() {
         window.clearTimeout(beanWorkStatusClearTimer);
         beanWorkStatusClearTimer = 0;
         beanWorkStatusHoldUntil = 0;
         beanWorkStatusMinUntil = 0;
-        state.beanWorkItems = [];
-    }
-
-    function prepareBeanWorkForFreshRequest() {
         beanWorkEventFloorId = maxActivityEventId(state.activity);
         beanWorkAppliedEventIds.clear();
-        clearCompletedBeanWorkItemsForFreshRequest();
+        state.beanWorkItems = [];
+        refreshBeanStatusTag();
     }
 
     function maxActivityEventId(events = []) {
@@ -4622,7 +4658,13 @@ if (mount) {
         const startSource = item?.starts_at || item?.startsAt || when || defaultEventStart();
         const startDate = allDay ? storedDateOnly(startSource) : dateOnly(startSource);
         return `
-            <label class="hb-switch-row hb-form-switch hb-all-day-toggle"><input type="checkbox" name="allDay" data-all-day-toggle ${allDay ? 'checked' : ''}> <span><strong>All day</strong><small>Use dates instead of specific start and end times.</small></span></label>
+            <div class="hb-all-day-toggle">
+                <label class="hb-switch-row hb-all-day-checkbox"><input type="checkbox" name="allDay" data-all-day-toggle ${allDay ? 'checked' : ''}> <strong>All day</strong></label>
+                <details class="hb-inline-info">
+                    <summary aria-label="All day event info" title="All day event info">${icons.infoCircle}</summary>
+                    <div class="hb-inline-info-popover" role="tooltip">Use dates instead of specific start and end times.</div>
+                </details>
+            </div>
             <div class="hb-field-row" data-timed-fields ${allDay ? 'hidden' : ''}>
                 ${labelInput('Starts at', 'time', 'datetime-local', when, allDay ? 'disabled' : 'required')}
                 ${labelInput('Ends at', 'endsAt', 'datetime-local', end, allDay ? 'disabled' : '')}
@@ -5305,6 +5347,7 @@ if (mount) {
         mount.querySelectorAll('[data-top-workspace-select]').forEach((select) => select.addEventListener('change', (event) => setWorkspace(event.currentTarget.value)));
         mount.querySelectorAll('[data-pref]').forEach((input) => input.addEventListener('change', updateNotificationPrefs));
         mount.querySelector('[data-theme-select]')?.addEventListener('change', updateThemePreference);
+        mount.querySelectorAll('[data-theme-mode-option]').forEach((input) => input.addEventListener('change', updateThemeModePreference));
         mount.querySelector('[data-home-city-form]')?.addEventListener('submit', updateHomeCityPreference);
         mount.querySelector('[data-clear-home-city]')?.addEventListener('click', clearHomeCityPreference);
         mount.querySelector('[data-billing-interval-select]')?.addEventListener('change', (event) => {
@@ -9703,7 +9746,6 @@ if (mount) {
             ...context,
             startedAt: Number(context.startedAt || context.started_at || Date.now()),
         };
-        const fastLookupDeadline = realtimeRunNeedsFastLookupDeadline(watchContext.userContent || watchContext.user_content || '');
         if (!kioskRealtimeBackgroundWorkActive) {
             setRealtimeBackgroundWorkActive(true, watchContext);
         } else {
@@ -9716,15 +9758,6 @@ if (mount) {
             try {
                 const run = await api(`/assistant/runs/${id}`);
                 const status = String(run?.status || '').toLowerCase();
-                if (fastLookupDeadline && ['queued', 'running'].includes(status) && Date.now() - watchContext.startedAt >= kioskRealtimeRunDeadlineMs) {
-                    try {
-                        await api(`/assistant/runs/${id}/cancel`, { method: 'POST' });
-                    } catch (_) {}
-                    markActiveBeanWorkItems('cancelled');
-                    setRealtimeBackgroundWorkActive(false);
-                    deliverRealtimeBackgroundResult('I could not get that live lookup back quickly enough. Please try again in a moment, or include the city and zip code so I can narrow it down faster.', id);
-                    return;
-                }
                 if (['queued', 'running'].includes(status) && attempt < 45) {
                     if (!kioskRealtimeBackgroundWorkActive) {
                         setRealtimeBackgroundWorkActive(true, watchContext);
@@ -9756,15 +9789,6 @@ if (mount) {
             }
         }, delay);
         kioskRealtimeRunWatchTimers.set(id, timer);
-    }
-
-    function realtimeRunNeedsFastLookupDeadline(content) {
-        const command = normalizedVoiceCommand(content);
-        if (!command) return false;
-        const targetsAppData = /\b(calendar|event|events|task|tasks|todo|to do|reminder|reminders|note|notes)\b/.test(command);
-        const changesAppData = /\b(add|create|schedule|delete|remove|cancel|update|change|move|reschedule|complete|mark|write|save)\b/.test(command);
-        if (targetsAppData && changesAppData) return false;
-        return /\b(nearest|closest|near me|nearby|local|store|restaurant|business|address|directions|open now|hours|price|prices|available|availability|weather|forecast|traffic|news|stock|stocks|sports|score|scores|flight|flights|hotel|hotels|wawa)\b/.test(command);
     }
 
     function handleRealtimeAssistantRunCompleted(run, context = {}) {
@@ -11632,6 +11656,28 @@ if (mount) {
         }
     }
 
+    async function updateThemeModePreference(event) {
+        const themeMode = normalizeThemeModeKey(event.currentTarget.value);
+        if (themeMode === currentThemeModeKey()) return;
+        const previousUser = state.user;
+        state.user = { ...(state.user || {}), theme_mode: themeMode };
+        state.error = '';
+        state.notice = '';
+        applyAppTheme();
+        render();
+        try {
+            state.user = await api('/auth/me', { method: 'PATCH', body: { theme_mode: themeMode } });
+            state.notice = 'Theme mode saved.';
+            applyAppTheme();
+            render();
+        } catch (error) {
+            state.user = previousUser;
+            applyAppTheme();
+            state.error = friendlyError(error, 'save theme mode');
+            render();
+        }
+    }
+
     function applyBillingReturnNotice() {
         const status = String(state.billingCheckoutStatus || '').toLowerCase();
         if (!status) return;
@@ -12485,8 +12531,7 @@ if (mount) {
         if (eventAllDay(event)) {
             const dayValue = dateOnly(day);
             const startDate = storedDateOnly(startValue);
-            const endValue = event.ends_at || event.endsAt;
-            const endDate = endValue ? storedDateOnly(endValue) : dateOnly(addDays(startDate, 1));
+            const endDate = allDayExclusiveEndDate(event, startDate);
             return startDate <= dayValue && endDate > dayValue;
         }
         const dayStart = new Date(parseLocalDate(day));
@@ -12684,9 +12729,37 @@ if (mount) {
     function allDayEndDateInputValue(item, fallbackStartDate) {
         const end = item?.ends_at || item?.endsAt;
         if (!end || !eventAllDay(item)) return fallbackStartDate;
-        const inclusive = parseLocalDate(storedDateOnly(end));
-        inclusive.setDate(inclusive.getDate() - 1);
-        return dateOnly(inclusive);
+        return allDayInclusiveEndDate(item) || fallbackStartDate;
+    }
+
+    function allDayInclusiveEndDate(event) {
+        const startValue = event?.starts_at || event?.startsAt;
+        const endValue = event?.ends_at || event?.endsAt;
+        if (!endValue) return startValue ? storedDateOnly(startValue) : '';
+        const endDate = storedDateOnly(endValue);
+        if (allDayEndIsExclusiveMidnight(startValue, endValue)) {
+            return dateOnly(addDays(endDate, -1));
+        }
+        return endDate;
+    }
+
+    function allDayExclusiveEndDate(event, fallbackStartDate = '') {
+        const startValue = event?.starts_at || event?.startsAt;
+        const endValue = event?.ends_at || event?.endsAt;
+        const startDate = fallbackStartDate || (startValue ? storedDateOnly(startValue) : '');
+        if (!endValue) return dateOnly(addDays(startDate, 1));
+        const endDate = storedDateOnly(endValue);
+        return allDayEndIsExclusiveMidnight(startValue, endValue) ? endDate : dateOnly(addDays(endDate, 1));
+    }
+
+    function allDayEndIsExclusiveMidnight(startValue, endValue) {
+        if (!startValue || !endValue) return false;
+        const startDate = storedDateOnly(startValue);
+        const endDate = storedDateOnly(endValue);
+        if (endDate <= startDate) return false;
+        const endText = String(endValue);
+        return /^\d{4}-\d{2}-\d{2}$/.test(endText)
+            || /T00:00(?::00(?:\.0+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/.test(endText);
     }
 
     function storedDateOnly(value) {
@@ -12866,10 +12939,7 @@ if (mount) {
 
     function fromDateInputEndInclusive(value) {
         if (!value) return null;
-        const end = parseLocalDate(value);
-        end.setDate(end.getDate() + 1);
-        end.setHours(0, 0, 0, 0);
-        return `${dateOnly(end)}T00:00:00.000Z`;
+        return `${value}T23:59:00.000Z`;
     }
 
     function safeColor(value, fallback = themeAccentColor()) {

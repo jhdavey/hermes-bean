@@ -1015,12 +1015,15 @@ class GoogleCalendarSyncTest extends TestCase
         $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Field day',
             'starts_at' => '2026-06-04T00:00:00Z',
-            'ends_at' => '2026-06-05T00:00:00Z',
+            'ends_at' => '2026-06-04T23:59:00Z',
             'metadata' => [
                 'all_day' => true,
                 'google_calendar_ids' => ['primary'],
             ],
         ])->assertCreated();
+
+        $event = CalendarEvent::where('title', 'Field day')->firstOrFail();
+        $this->assertSame('2026-06-04T23:59:00+00:00', $event->ends_at->utc()->toIso8601String());
 
         Http::assertSent(fn ($request): bool => $request->method() === 'POST'
             && str_contains($request->url(), '/calendars/primary/events')

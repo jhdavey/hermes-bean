@@ -1843,7 +1843,7 @@ void main() {
 
     expect(find.byKey(const Key('theme-preferences-card')), findsOneWidget);
     expect(find.text('Appearance'), findsOneWidget);
-    expect(find.text('Green accent'), findsOneWidget);
+    expect(find.text('Green accent · Auto · Command Center'), findsOneWidget);
     expect(find.byKey(const Key('theme-preferences-options')), findsNothing);
     expect(
       find.text('Choose the accent color used across HeyBean.'),
@@ -1856,10 +1856,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('theme-preferences-options')), findsOneWidget);
+    expect(find.byKey(const Key('theme-mode-selector')), findsOneWidget);
     expect(
       find.text('Choose the accent color used across HeyBean.'),
       findsOneWidget,
     );
+    expect(find.text('Choose when HeyBean uses dark mode.'), findsOneWidget);
+    expect(find.text('Auto'), findsOneWidget);
+    expect(find.text('Light'), findsOneWidget);
+    expect(find.text('Dark'), findsOneWidget);
     expect(find.text('Green'), findsOneWidget);
     expect(find.text('Gray'), findsOneWidget);
   });
@@ -6121,7 +6126,9 @@ void main() {
       DateTime(
         today.year,
         today.month,
-        today.day + 1,
+        today.day,
+        23,
+        59,
       ).toUtc().toIso8601String(),
     );
     expect(find.byKey(const Key('calendar-all-day-event-3')), findsOneWidget);
@@ -7939,6 +7946,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   HermesNotificationPreferences updatedNotificationPreferences =
       const HermesNotificationPreferences();
   String updatedTheme = 'green';
+  String updatedThemeMode = 'auto';
   String updatedCommandCenterLabel = 'Command Center';
   String subscriptionTier = 'base';
   String? currentSubscriptionStatus = 'active';
@@ -8026,6 +8034,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       subscriptionTier: subscriptionTier,
       subscriptionStatus: subscriptionStatus ?? currentSubscriptionStatus,
       theme: updatedTheme,
+      themeMode: updatedThemeMode,
       commandCenterLabel: updatedCommandCenterLabel,
       onboardComplete: !needsBeanOnboarding,
       agentProfile: profile,
@@ -8197,6 +8206,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? name,
     String? email,
     String? theme,
+    String? themeMode,
     String? commandCenterLabel,
     String? agentPersonality,
     List<String>? onboardingPriorities,
@@ -8206,6 +8216,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     updatedName = name ?? updatedName;
     updatedEmail = email ?? updatedEmail;
     updatedTheme = theme ?? updatedTheme;
+    updatedThemeMode = themeMode ?? updatedThemeMode;
     updatedCommandCenterLabel = commandCenterLabel ?? updatedCommandCenterLabel;
     updatedAgentPersonality = agentPersonality ?? updatedAgentPersonality;
     updatedPriorities = onboardingPriorities ?? updatedPriorities;

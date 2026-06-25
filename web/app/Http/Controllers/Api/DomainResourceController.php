@@ -614,6 +614,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
+        $this->normalizeAllDayCalendarBounds($validated);
         $validated = $this->withDefaultUncategorizedColor($validated, true);
         if ($this->calendarRecurrenceRequested($validated['recurrence'] ?? null) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
             return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
@@ -670,6 +671,7 @@ class DomainResourceController extends Controller
             );
             $validated['metadata'] = $metadata;
         }
+        $this->normalizeAllDayCalendarBounds($validated, $model);
         if (array_key_exists('recurrence', $validated) && $this->calendarRecurrenceRequested($validated['recurrence']) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
             return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
         }
@@ -1835,5 +1837,56 @@ class DomainResourceController extends Controller
 
             $attributes[$field] = Carbon::parse((string) $attributes[$field])->utc();
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function normalizeAllDayCalendarBounds(array &$attributes, ?CalendarEvent $event = null): void
+    {
+        $metadata = array_key_exists('metadata', $attributes)
+            ? ($attributes['metadata'] ?? [])
+            : ($event?->metadata ?? []);
+        if (! is_array($metadata) || ! $this->calendarMetadataAllDay($metadata)) {
+            return;
+        }
+
+        if ($event && ! array_key_exists('starts_at', $attributes) && ! array_key_exists('ends_at', $attributes) && ! array_key_exists('metadata', $attributes)) {
+            return;
+        }
+
+        $start = $attributes['starts_at'] ?? $event?->starts_at;
+        if (! $start instanceof Carbon) {
+            return;
+        }
+
+        $attributes['ends_at'] = $this->inclusiveAllDayEnd($start, $attributes['ends_at'] ?? $event?->ends_at);
+        if (array_key_exists('metadata', $attributes)) {
+            $attributes['metadata'] = array_merge($metadata, ['all_day' => true]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function calendarMetadataAllDay(array $metadata): bool
+    {
+        $value = $metadata['all_day'] ?? $metadata['allDay'] ?? null;
+
+        return $value === true
+            || $value === 1
+            || in_array(strtolower((string) $value), ['true', '1', 'yes'], true);
+    }
+
+    private function inclusiveAllDayEnd(Carbon $startsAt, ?Carbon $endsAt): Carbon
+    {
+        $start = $startsAt->copy()->utc()->startOfDay();
+        $end = $endsAt?->copy()->utc() ?? $start->copy();
+
+        if ($end->isStartOfDay() && $end->gt($start)) {
+            return $end->subMinute();
+        }
+
+        return $end->setTime(23, 59);
     }
 }

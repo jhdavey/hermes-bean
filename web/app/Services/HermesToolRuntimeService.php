@@ -1284,7 +1284,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         if ($this->calendarEventAllDay($event)) {
-            return $event->ends_at->copy()->utc()->subDay()->toDateString();
+            return $this->calendarEventAllDayDisplayEndDate($event);
         }
 
         $end = $event->ends_at->copy()->setTimezone($timezone);
@@ -1299,6 +1299,22 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         return $this->localDate($event->starts_at, $timezone);
+    }
+
+    private function calendarEventAllDayDisplayEndDate(CalendarEvent $event): ?string
+    {
+        if (! $event->ends_at) {
+            return $this->calendarEventDisplayStartDate($event, 'UTC');
+        }
+
+        $end = $event->ends_at->copy()->utc();
+        $start = $event->starts_at?->copy()->utc()->startOfDay();
+
+        if ($start && $end->isStartOfDay() && $end->gt($start)) {
+            return $end->copy()->subDay()->toDateString();
+        }
+
+        return $end->toDateString();
     }
 
     private function displayDateRange(?string $startDate, ?string $endDate): ?string

@@ -742,7 +742,7 @@ void main() {
         expect(request.method, 'PATCH');
         expect(request.path, '/auth/me');
         expect(request.headers['Authorization'], 'Bearer token-123');
-        expect(request.body, {'theme': 'purple'});
+        expect(request.body, {'theme': 'purple', 'theme_mode': 'dark'});
         return HermesApiResponse(
           200,
           jsonEncode({
@@ -751,15 +751,17 @@ void main() {
               'name': 'Bean User',
               'email': 'bean@example.com',
               'theme': 'purple',
+              'theme_mode': 'dark',
             },
           }),
         );
       },
     );
 
-    final user = await client.updateMe(theme: 'purple');
+    final user = await client.updateMe(theme: 'purple', themeMode: 'dark');
 
     expect(user.theme, 'purple');
+    expect(user.themeMode, 'dark');
     expect(requests, hasLength(1));
   });
 

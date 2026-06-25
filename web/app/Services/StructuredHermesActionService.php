@@ -604,6 +604,10 @@ class StructuredHermesActionService
         $metadata = $this->metadataWithRecurrence($parameters, [
             'created_by' => 'structured_hermes_action',
         ]);
+        if ($this->parametersMarkAllDay($parameters, $metadata)) {
+            $metadata['all_day'] = true;
+            $endsAt = $this->inclusiveAllDayEnd($startsAt, $endsAt);
+        }
         $this->guardRecurringCalendarAccess($session, $recurrence);
 
         $calendarEvent = CalendarEvent::create([
@@ -740,6 +744,14 @@ class StructuredHermesActionService
         } elseif (isset($updates['starts_at']) && $calendarEvent->starts_at && $calendarEvent->ends_at) {
             $updates['ends_at'] = (clone $updates['starts_at'])->addSeconds(
                 $calendarEvent->starts_at->diffInSeconds($calendarEvent->ends_at)
+            );
+        }
+        $updatedMetadata = is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($calendarEvent->metadata ?? []);
+        if ($this->parametersMarkAllDay($parameters, $updatedMetadata)) {
+            $updates['metadata'] = array_merge($updatedMetadata, ['all_day' => true]);
+            $updates['ends_at'] = $this->inclusiveAllDayEnd(
+                $updates['starts_at'] ?? $calendarEvent->starts_at,
+                $updates['ends_at'] ?? $calendarEvent->ends_at,
             );
         }
         $calendarEvent->update($updates);
@@ -1538,6 +1550,31 @@ class StructuredHermesActionService
             : ($metadata['recurrence'] ?? null);
 
         return $this->normalizeRecurrence($raw)['value'];
+    }
+
+    private function parametersMarkAllDay(array $parameters, array $metadata): bool
+    {
+        $value = $parameters['all_day']
+            ?? $parameters['allDay']
+            ?? $metadata['all_day']
+            ?? $metadata['allDay']
+            ?? null;
+
+        return $value === true
+            || $value === 1
+            || in_array(strtolower((string) $value), ['true', '1', 'yes'], true);
+    }
+
+    private function inclusiveAllDayEnd(Carbon $startsAt, ?Carbon $endsAt): Carbon
+    {
+        $start = $startsAt->copy()->utc()->startOfDay();
+        $end = $endsAt?->copy()->utc() ?? $start->copy();
+
+        if ($end->isStartOfDay() && $end->gt($start)) {
+            return $end->subMinute();
+        }
+
+        return $end->setTime(23, 59);
     }
 
     private function guardRecurringTaskAccess(ConversationSession $session, array $metadata): void

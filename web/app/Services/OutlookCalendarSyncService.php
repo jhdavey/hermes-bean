@@ -523,7 +523,7 @@ class OutlookCalendarSyncService
         $end = ($event->ends_at ?: $event->starts_at)->copy()->utc();
         if ($allDay) {
             $start = $event->starts_at->copy()->startOfDay()->utc();
-            $end = ($event->ends_at ?: $event->starts_at->copy()->addDay())->copy()->startOfDay()->utc();
+            $end = $this->allDayExclusiveEnd($event);
         }
 
         return [
@@ -562,6 +562,22 @@ class OutlookCalendarSyncService
         }
 
         return Carbon::parse($dateTime, (string) ($value['timeZone'] ?? 'UTC'))->utc();
+    }
+
+    private function allDayExclusiveEnd(CalendarEvent $event): Carbon
+    {
+        if (! $event->ends_at) {
+            return $event->starts_at->copy()->utc()->addDay()->startOfDay();
+        }
+
+        $end = $event->ends_at->copy()->utc();
+        $start = $event->starts_at->copy()->utc()->startOfDay();
+
+        if ($end->isStartOfDay() && $end->gt($start)) {
+            return $end;
+        }
+
+        return $end->copy()->addDay()->startOfDay();
     }
 
     private function validAccessToken(OutlookCalendarConnection $connection): string

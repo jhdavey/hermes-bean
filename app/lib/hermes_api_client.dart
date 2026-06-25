@@ -223,6 +223,7 @@ class HermesApiClient {
     String? name,
     String? email,
     String? theme,
+    String? themeMode,
     String? commandCenterLabel,
     String? agentPersonality,
     List<String>? onboardingPriorities,
@@ -236,6 +237,7 @@ class HermesApiClient {
         if (name != null) 'name': name,
         if (email != null) 'email': email,
         if (theme != null) 'theme': theme,
+        if (themeMode != null) 'theme_mode': themeMode,
         if (commandCenterLabel != null)
           'command_center_label': commandCenterLabel,
         if (agentPersonality != null) 'agent_personality': agentPersonality,
@@ -1738,6 +1740,7 @@ class HermesUser {
     this.subscriptionStatus,
     this.subscriptionTrialEndsAt,
     this.theme = 'green',
+    this.themeMode = 'auto',
     this.commandCenterLabel = 'Command Center',
     this.onboardComplete = false,
     this.agentProfile,
@@ -1761,6 +1764,7 @@ class HermesUser {
   final String? subscriptionStatus;
   final String? subscriptionTrialEndsAt;
   final String theme;
+  final String themeMode;
   final String commandCenterLabel;
   final bool onboardComplete;
   final HermesAgentProfile? agentProfile;
@@ -1786,6 +1790,7 @@ class HermesUser {
     String? subscriptionStatus,
     String? subscriptionTrialEndsAt,
     String? theme,
+    String? themeMode,
     String? commandCenterLabel,
     bool? onboardComplete,
     HermesAgentProfile? agentProfile,
@@ -1809,6 +1814,7 @@ class HermesUser {
     subscriptionTrialEndsAt:
         subscriptionTrialEndsAt ?? this.subscriptionTrialEndsAt,
     theme: theme ?? this.theme,
+    themeMode: themeMode ?? this.themeMode,
     commandCenterLabel: commandCenterLabel ?? this.commandCenterLabel,
     onboardComplete: onboardComplete ?? this.onboardComplete,
     agentProfile: agentProfile ?? this.agentProfile,
@@ -1841,6 +1847,10 @@ class HermesUser {
         (json['subscription_trial_ends_at'] ?? json['subscriptionTrialEndsAt'])
             ?.toString(),
     theme: _readStringOrDefault(json['theme'], 'green'),
+    themeMode: _readStringOrDefault(
+      json['theme_mode'] ?? json['themeMode'],
+      'auto',
+    ),
     commandCenterLabel: _readStringOrDefault(
       json['command_center_label'] ?? json['commandCenterLabel'],
       'Command Center',

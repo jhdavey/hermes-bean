@@ -745,6 +745,7 @@ class HermesBeanApp extends StatefulWidget {
 
 class _HermesBeanAppState extends State<HermesBeanApp> {
   String _themeKey = 'green';
+  String _themeModeKey = 'auto';
 
   void _setThemeKey(String themeKey) {
     final normalizedThemeKey = heyBeanColorThemeForKey(themeKey).key;
@@ -752,14 +753,27 @@ class _HermesBeanAppState extends State<HermesBeanApp> {
     setState(() => _themeKey = normalizedThemeKey);
   }
 
+  void _setThemeModeKey(String themeModeKey) {
+    final normalizedThemeModeKey = heyBeanThemeModeForKey(themeModeKey).key;
+    if (normalizedThemeModeKey == _themeModeKey) return;
+    setState(() => _themeModeKey = normalizedThemeModeKey);
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Hermes Bean',
       debugShowCheckedModeBanner: false,
-      theme: HeyBeanTheme.lightThemeFor(_themeKey),
-      builder: (context, child) =>
-          _KeyboardDismissOnTapOutside(child: child ?? const SizedBox.shrink()),
+      theme: HeyBeanTheme.themeDataFor(_themeKey, Brightness.light),
+      darkTheme: HeyBeanTheme.themeDataFor(_themeKey, Brightness.dark),
+      themeMode: heyBeanThemeModeForKey(_themeModeKey).materialThemeMode,
+      builder: (context, child) => _HeyBeanThemeRuntime(
+        themeKey: _themeKey,
+        themeModeKey: _themeModeKey,
+        child: _KeyboardDismissOnTapOutside(
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
       home: CommandCenterShell(
         apiClient: widget.apiClient,
         tokenStore: widget.tokenStore,
@@ -768,8 +782,32 @@ class _HermesBeanAppState extends State<HermesBeanApp> {
         stripePaymentHandler: widget.stripePaymentHandler,
         realtimeConversation: widget.realtimeConversation,
         onThemeChanged: _setThemeKey,
+        onThemeModeChanged: _setThemeModeKey,
       ),
     );
+  }
+}
+
+class _HeyBeanThemeRuntime extends StatelessWidget {
+  const _HeyBeanThemeRuntime({
+    required this.themeKey,
+    required this.themeModeKey,
+    required this.child,
+  });
+
+  final String themeKey;
+  final String themeModeKey;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final configuredMode = heyBeanThemeModeForKey(themeModeKey);
+    final platformBrightness = MediaQuery.platformBrightnessOf(context);
+    final brightness = configuredMode.key == 'auto'
+        ? platformBrightness
+        : configuredMode.brightness!;
+    HeyBeanTheme.useTheme(themeKey, brightness: brightness);
+    return child;
   }
 }
 
@@ -1020,25 +1058,71 @@ HeyBeanColorTheme heyBeanColorThemeForKey(String key) =>
       orElse: () => heyBeanColorThemes.first,
     );
 
+class HeyBeanThemeModeOption {
+  const HeyBeanThemeModeOption({
+    required this.key,
+    required this.label,
+    required this.subtitle,
+    required this.materialThemeMode,
+    this.brightness,
+  });
+
+  final String key;
+  final String label;
+  final String subtitle;
+  final ThemeMode materialThemeMode;
+  final Brightness? brightness;
+}
+
+const List<HeyBeanThemeModeOption> heyBeanThemeModes = [
+  HeyBeanThemeModeOption(
+    key: 'auto',
+    label: 'Auto',
+    subtitle: 'Use device setting',
+    materialThemeMode: ThemeMode.system,
+  ),
+  HeyBeanThemeModeOption(
+    key: 'light',
+    label: 'Light',
+    subtitle: 'Always light',
+    materialThemeMode: ThemeMode.light,
+    brightness: Brightness.light,
+  ),
+  HeyBeanThemeModeOption(
+    key: 'dark',
+    label: 'Dark',
+    subtitle: 'Always dark',
+    materialThemeMode: ThemeMode.dark,
+    brightness: Brightness.dark,
+  ),
+];
+
+HeyBeanThemeModeOption heyBeanThemeModeForKey(String key) =>
+    heyBeanThemeModes.firstWhere(
+      (mode) => mode.key == key.trim().toLowerCase(),
+      orElse: () => heyBeanThemeModes.first,
+    );
+
 class HeyBeanTheme {
   const HeyBeanTheme._();
 
   static HeyBeanColorTheme _current = heyBeanColorThemes.first;
+  static bool isDark = false;
   static Color bg0 = _current.bg0;
   static Color bg1 = _current.bg1;
   static Color bg2 = _current.bg2;
-  static const Color surface = Color(0xFFFFFFFF);
+  static Color surface = const Color(0xFFFFFFFF);
   static Color surface2 = _current.surface2;
-  static const Color text = Color(0xFF2D3748);
-  static const Color muted = Color(0xFF667085);
-  static const Color border = Color(0xFFD9DDE3);
-  static const Color borderStrong = Color(0xFFCBD1DA);
+  static Color text = const Color(0xFF2D3748);
+  static Color muted = const Color(0xFF667085);
+  static Color border = const Color(0xFFD9DDE3);
+  static Color borderStrong = const Color(0xFFCBD1DA);
   static Color accent = _current.accent;
   static Color accentStrong = _current.accentStrong;
   static Color accentInk = _current.accentInk;
   static Color success = _current.success;
-  static const Color warning = Color(0xFFF59E0B);
-  static const Color destructive = Color(0xFFDC2626);
+  static Color warning = const Color(0xFFF59E0B);
+  static Color destructive = const Color(0xFFDC2626);
 
   static const SystemUiOverlayStyle lightSystemOverlayStyle =
       SystemUiOverlayStyle(
@@ -1049,75 +1133,119 @@ class HeyBeanTheme {
         systemNavigationBarIconBrightness: Brightness.dark,
       );
 
-  static void useTheme(String key) {
+  static const SystemUiOverlayStyle darkSystemOverlayStyle =
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.light,
+      );
+
+  static void useTheme(String key, {Brightness brightness = Brightness.light}) {
     _current = heyBeanColorThemeForKey(key);
-    bg0 = _current.bg0;
-    bg1 = _current.bg1;
-    bg2 = _current.bg2;
-    surface2 = _current.surface2;
+    isDark = brightness == Brightness.dark;
+    bg0 = isDark ? const Color(0xFF111510) : _current.bg0;
+    bg1 = isDark ? const Color(0xFF171D16) : _current.bg1;
+    bg2 = isDark ? const Color(0xFF20281F) : _current.bg2;
+    surface = isDark ? const Color(0xFF171D16) : const Color(0xFFFFFFFF);
+    surface2 = isDark ? const Color(0xFF1D251C) : _current.surface2;
+    text = isDark ? const Color(0xFFEDF5EA) : const Color(0xFF2D3748);
+    muted = isDark ? const Color(0xFFAAB8A6) : const Color(0xFF667085);
+    border = isDark ? const Color(0xFF3A4637) : const Color(0xFFD9DDE3);
+    borderStrong = isDark ? const Color(0xFF53614F) : const Color(0xFFCBD1DA);
     accent = _current.accent;
     accentStrong = _current.accentStrong;
     accentInk = _current.accentInk;
     success = _current.success;
+    warning = isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
+    destructive = isDark ? const Color(0xFFFB7185) : const Color(0xFFDC2626);
   }
 
   static ThemeData lightThemeFor(String key) {
-    useTheme(key);
+    useTheme(key, brightness: Brightness.light);
+    return themeDataFor(key, Brightness.light);
+  }
+
+  static ThemeData darkThemeFor(String key) =>
+      themeDataFor(key, Brightness.dark);
+
+  static ThemeData themeDataFor(String key, Brightness brightness) {
+    final isDarkTheme = brightness == Brightness.dark;
+    final colorTheme = heyBeanColorThemeForKey(key);
+    final surfaceColor = isDarkTheme
+        ? const Color(0xFF171D16)
+        : const Color(0xFFFFFFFF);
+    final textColor = isDarkTheme
+        ? const Color(0xFFEDF5EA)
+        : const Color(0xFF2D3748);
+    final mutedColor = isDarkTheme
+        ? const Color(0xFFAAB8A6)
+        : const Color(0xFF667085);
+    final borderColor = isDarkTheme
+        ? const Color(0xFF3A4637)
+        : const Color(0xFFD9DDE3);
+    final borderStrongColor = isDarkTheme
+        ? const Color(0xFF53614F)
+        : const Color(0xFFCBD1DA);
     final colorScheme =
         ColorScheme.fromSeed(
-          brightness: Brightness.light,
-          seedColor: accent,
+          brightness: brightness,
+          seedColor: colorTheme.accent,
         ).copyWith(
-          primary: accent,
-          onPrimary: accentInk,
-          primaryContainer: accent,
-          onPrimaryContainer: accentInk,
-          secondary: accentStrong,
-          tertiary: success,
-          surface: surface,
-          onSurface: text,
-          outline: borderStrong,
-          outlineVariant: border,
+          primary: colorTheme.accent,
+          onPrimary: colorTheme.accentInk,
+          primaryContainer: colorTheme.accent,
+          onPrimaryContainer: colorTheme.accentInk,
+          secondary: colorTheme.accentStrong,
+          tertiary: colorTheme.success,
+          surface: surfaceColor,
+          onSurface: textColor,
+          onSurfaceVariant: mutedColor,
+          outline: borderStrongColor,
+          outlineVariant: borderColor,
         );
 
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.light,
+      brightness: brightness,
       colorScheme: colorScheme,
       fontFamily: 'Plus Jakarta Sans',
       fontFamilyFallback: const ['Avenir Next', 'Inter', 'Roboto', 'Arial'],
       scaffoldBackgroundColor: Colors.transparent,
-      canvasColor: bg0,
-      appBarTheme: const AppBarTheme(
+      canvasColor: isDarkTheme ? const Color(0xFF111510) : colorTheme.bg0,
+      appBarTheme: AppBarTheme(
         centerTitle: false,
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: text,
-        systemOverlayStyle: lightSystemOverlayStyle,
+        foregroundColor: textColor,
+        systemOverlayStyle: isDarkTheme
+            ? darkSystemOverlayStyle
+            : lightSystemOverlayStyle,
       ),
       cardTheme: CardThemeData(
-        color: surface,
+        color: surfaceColor,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: border),
+          side: BorderSide(color: borderColor),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: Colors.white.withValues(alpha: .88),
-        hintStyle: const TextStyle(color: muted),
-        helperStyle: const TextStyle(
-          color: muted,
+        fillColor: surfaceColor.withValues(alpha: isDarkTheme ? .92 : .88),
+        hintStyle: TextStyle(color: mutedColor),
+        helperStyle: TextStyle(
+          color: mutedColor,
           fontWeight: FontWeight.w600,
           height: 1.25,
         ),
-        labelStyle: const TextStyle(color: muted, fontWeight: FontWeight.w800),
+        labelStyle: TextStyle(color: mutedColor, fontWeight: FontWeight.w800),
         floatingLabelStyle: TextStyle(
-          color: accentStrong,
+          color: colorTheme.accentStrong,
           fontWeight: FontWeight.w900,
         ),
         contentPadding: const EdgeInsets.symmetric(
@@ -1126,24 +1254,24 @@ class HeyBeanTheme {
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(999),
-          borderSide: const BorderSide(color: border),
+          borderSide: BorderSide(color: borderColor),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(999),
-          borderSide: const BorderSide(color: border),
+          borderSide: BorderSide(color: borderColor),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(999),
           borderSide: BorderSide(
-            color: accent.withValues(alpha: .56),
+            color: colorTheme.accent.withValues(alpha: .56),
             width: 1.2,
           ),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: accent,
-          foregroundColor: accentInk,
+          backgroundColor: colorTheme.accent,
+          foregroundColor: colorTheme.accentInk,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
@@ -1152,15 +1280,15 @@ class HeyBeanTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: text,
-          side: const BorderSide(color: borderStrong),
+          foregroundColor: textColor,
+          side: BorderSide(color: borderStrongColor),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
           ),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: accentStrong),
+        style: TextButton.styleFrom(foregroundColor: colorTheme.accentStrong),
       ),
     );
   }
@@ -1180,11 +1308,11 @@ InputDecoration _longFormInputDecoration({
   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
   border: OutlineInputBorder(
     borderRadius: BorderRadius.circular(16),
-    borderSide: const BorderSide(color: HeyBeanTheme.border),
+    borderSide: BorderSide(color: HeyBeanTheme.border),
   ),
   enabledBorder: OutlineInputBorder(
     borderRadius: BorderRadius.circular(16),
-    borderSide: const BorderSide(color: HeyBeanTheme.border),
+    borderSide: BorderSide(color: HeyBeanTheme.border),
   ),
   focusedBorder: OutlineInputBorder(
     borderRadius: BorderRadius.circular(16),
@@ -1229,13 +1357,13 @@ Future<bool> _confirmDestructiveAction(
         TextButton(
           key: const Key('destructive-cancel-action'),
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
+          child: Text('Cancel'),
         ),
         FilledButton.icon(
           key: const Key('destructive-confirm-action'),
           style: _destructiveFilledButtonStyle(),
           onPressed: () => Navigator.of(context).pop(true),
-          icon: const Icon(Icons.delete_outline_rounded),
+          icon: Icon(Icons.delete_outline_rounded),
           label: Text(confirmLabel),
         ),
       ],
@@ -1376,7 +1504,7 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
                       workspace.isPersonal ? 'Personal' : workspace.name,
                     ),
                     subtitle: workspace.numericId == workspaceId
-                        ? const Text('Current copy')
+                        ? Text('Current copy')
                         : null,
                   ),
               ],
@@ -1385,7 +1513,7 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: Text('Cancel'),
             ),
             FilledButton(
               key: Key('$itemType-delete-selected-workspaces-action'),
@@ -1604,6 +1732,7 @@ class CommandCenterShell extends StatefulWidget {
     required this.updateAppIconBadge,
     required this.stripePaymentHandler,
     required this.onThemeChanged,
+    required this.onThemeModeChanged,
     this.realtimeConversation,
   });
 
@@ -1613,6 +1742,7 @@ class CommandCenterShell extends StatefulWidget {
   final AppIconBadgeUpdater updateAppIconBadge;
   final StripePaymentHandler stripePaymentHandler;
   final ValueChanged<String> onThemeChanged;
+  final ValueChanged<String> onThemeModeChanged;
   final BeanRealtimeConversation? realtimeConversation;
 
   @override
@@ -1714,6 +1844,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   void _applyUserTheme(HermesUser? user) {
     widget.onThemeChanged(user?.theme ?? 'green');
+    widget.onThemeModeChanged(user?.themeMode ?? 'auto');
   }
 
   void _markDashboardDataMutated() {
@@ -2334,21 +2465,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkStatusHoldUntil = null;
   }
 
-  void _clearCompletedBeanWorkItemsForFreshRequest() {
-    if (_beanWorkItems.isEmpty || _beanWorkItems.any((item) => !item.done)) {
-      return;
-    }
+  void _prepareBeanWorkForFreshRequest() {
     _beanWorkStatusClearTimer?.cancel();
     _beanWorkStatusClearTimer = null;
     _beanWorkStatusHoldUntil = null;
     _beanWorkStatusMinUntil = null;
     _beanWorkItems = const [];
-    _beanWorkFinalized = false;
-    _beanWorkStagedCompletionIds.clear();
-    _cancelBeanWorkStageTimers();
-  }
-
-  void _prepareBeanWorkForFreshRequest() {
     _beanWorkEventFloorId = _events.fold<int>(
       0,
       (maxId, event) => math.max(maxId, event.id),
@@ -2357,7 +2479,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkFinalized = false;
     _beanWorkStagedCompletionIds.clear();
     _cancelBeanWorkStageTimers();
-    _clearCompletedBeanWorkItemsForFreshRequest();
   }
 
   void _cancelBeanWorkStageTimers() {
@@ -6730,6 +6851,43 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
+  Future<void> _updateThemeMode(String themeModeKey) async {
+    if (_busy) return;
+    final normalizedThemeModeKey = heyBeanThemeModeForKey(themeModeKey).key;
+    final previousUser = _user;
+    setState(() {
+      _busy = true;
+      _error = null;
+      if (previousUser != null) {
+        _user = previousUser.copyWith(themeMode: normalizedThemeModeKey);
+      }
+    });
+    _applyUserTheme(_user);
+    try {
+      final updatedUser = await widget.apiClient.updateMe(
+        themeMode: normalizedThemeModeKey,
+      );
+      if (!mounted) return;
+      _applyUserTheme(updatedUser);
+      setState(() {
+        _user = updatedUser;
+        _busy = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      _applyUserTheme(previousUser);
+      setState(() {
+        _user = previousUser;
+        _busy = false;
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'update your theme mode',
+        );
+      });
+    }
+  }
+
   Future<void> _updateCommandCenterLabel(String label) async {
     if (_busy) return;
     final normalizedLabel = label.trim().isEmpty
@@ -6909,7 +7067,7 @@ ${_truncateDiagnostic(stack, 2200)}
         );
 
     return [
-      const Padding(
+      Padding(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 6),
         child: Align(
           alignment: Alignment.centerLeft,
@@ -6939,7 +7097,7 @@ ${_truncateDiagnostic(stack, 2200)}
           title: Text(
             _workspaceDisplayName(workspace),
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w800),
+            style: TextStyle(fontWeight: FontWeight.w800),
           ),
           onTap: _busy || workspace.numericId == null
               ? null
@@ -6948,7 +7106,7 @@ ${_truncateDiagnostic(stack, 2200)}
                   unawaited(_switchWorkspaceFromTopBar(workspace));
                 },
         ),
-      const Padding(
+      Padding(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Divider(height: 1),
       ),
@@ -7013,7 +7171,7 @@ ${_truncateDiagnostic(stack, 2200)}
                             icon: null,
                             horizontalPadding: 10,
                             verticalPadding: 7,
-                            labelStyle: const TextStyle(
+                            labelStyle: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
                             ),
@@ -7027,7 +7185,7 @@ ${_truncateDiagnostic(stack, 2200)}
                               icon: Icons.calendar_month_rounded,
                               horizontalPadding: 10,
                               verticalPadding: 7,
-                              labelStyle: const TextStyle(
+                              labelStyle: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -7138,7 +7296,7 @@ ${_truncateDiagnostic(stack, 2200)}
               Text(
                 _loadingStatusText!,
                 key: const Key('full-screen-loading-message'),
-                style: const TextStyle(
+                style: TextStyle(
                   color: HeyBeanTheme.muted,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -7340,6 +7498,7 @@ ${_truncateDiagnostic(stack, 2200)}
     onAccountEmailChanged: _updateAccountEmail,
     onNotificationPreferencesChanged: _updateNotificationPreferences,
     onThemeChanged: _updateTheme,
+    onThemeModeChanged: _updateThemeMode,
     onCommandCenterLabelChanged: _updateCommandCenterLabel,
     launchExternalUrl: widget.launchExternalUrl,
     stripePaymentHandler: widget.stripePaymentHandler,
@@ -7367,16 +7526,16 @@ ${_truncateDiagnostic(stack, 2200)}
               children: [
                 ..._moreMenuWorkspaceTiles(context),
                 ListTile(
-                  leading: const Icon(Icons.psychology_alt_rounded),
-                  title: const Text("Bean's Knowledge"),
+                  leading: Icon(Icons.psychology_alt_rounded),
+                  title: Text("Bean's Knowledge"),
                   onTap: () {
                     Navigator.pop(context);
                     _selectDestination(_HomeDestination.memory);
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.settings_rounded),
-                  title: const Text('Settings'),
+                  leading: Icon(Icons.settings_rounded),
+                  title: Text('Settings'),
                   onTap: () {
                     Navigator.pop(context);
                     _selectDestination(_HomeDestination.settings);
@@ -7477,7 +7636,7 @@ class _ThemedPlusButton extends StatelessWidget {
   Widget build(BuildContext context) => IconButton(
     tooltip: tooltip,
     onPressed: onPressed,
-    icon: const Icon(Icons.add_rounded),
+    icon: Icon(Icons.add_rounded),
     style: IconButton.styleFrom(
       backgroundColor: onPressed == null
           ? HeyBeanTheme.border.withValues(alpha: .32)
@@ -7522,7 +7681,7 @@ class _CreateItemMenuRow extends StatelessWidget {
     children: [
       iconWidget ?? Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
       const SizedBox(width: 10),
-      Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+      Text(label, style: TextStyle(fontWeight: FontWeight.w700)),
     ],
   );
 }
@@ -7727,7 +7886,7 @@ class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
               padding: const EdgeInsets.only(left: 4, bottom: 8),
               child: Text(
                 'Account created for ${widget.user.name}.',
-                style: const TextStyle(
+                style: TextStyle(
                   color: HeyBeanTheme.muted,
                   fontWeight: FontWeight.w700,
                 ),
@@ -7767,7 +7926,7 @@ class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
                     ],
                   ),
                   const SizedBox(height: 14),
-                  const Text(
+                  Text(
                     '14-day free trial - cancel anytime. Pick the plan that best fits your needs.',
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
@@ -7808,7 +7967,7 @@ class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text(
+                  Text(
                     'Already subscribed?',
                     style: TextStyle(
                       color: HeyBeanTheme.text,
@@ -7816,7 +7975,7 @@ class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     'If your account was updated on another device, refresh here and Bean will check your latest subscription status.',
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
@@ -7827,13 +7986,13 @@ class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
                   OutlinedButton.icon(
                     key: const Key('signup-paywall-refresh-action'),
                     onPressed: _busy ? null : widget.onContinue,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Refresh subscription status'),
+                    icon: Icon(Icons.refresh_rounded),
+                    label: Text('Refresh subscription status'),
                   ),
                   TextButton(
                     key: const Key('signup-paywall-sign-out-action'),
                     onPressed: _busy ? null : widget.onSignOut,
-                    child: const Text('Use a different account'),
+                    child: Text('Use a different account'),
                   ),
                 ],
               ),
@@ -7923,7 +8082,7 @@ class _SignupPlanCard extends StatelessWidget {
                               color: const Color(0xFFFDE68A),
                               borderRadius: BorderRadius.circular(999),
                             ),
-                            child: const Text(
+                            child: Text(
                               'Most popular',
                               style: TextStyle(
                                 color: Color(0xFF7C4A03),
@@ -8125,11 +8284,11 @@ class _BillingIntervalButton extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+          Text(label, style: TextStyle(fontWeight: FontWeight.w900)),
           if (detail != null)
             Text(
               detail!,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900),
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900),
             ),
         ],
       ),
@@ -8371,7 +8530,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
                           if (_step == 1) _prioritiesStep(),
                           if (_step == 2) _contextStep(),
                           if (_step == 3)
-                            const Text(
+                            Text(
                               'Bean will use your personality, priorities, and context to shape tone, planning, reminders, and follow-up. Look for Bean preferences in Settings whenever you want to change them.',
                               style: TextStyle(color: HeyBeanTheme.muted),
                             ),
@@ -8386,7 +8545,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
                                   onPressed: widget.busy
                                       ? null
                                       : widget.onCancel,
-                                  child: const Text('Cancel'),
+                                  child: Text('Cancel'),
                                 ),
                               ),
                               const SizedBox(width: 10),
@@ -8459,7 +8618,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         'Bean personality options',
                         style: TextStyle(
@@ -8471,7 +8630,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Choose the style that best matches how you want Bean to help. You can change this any time in Settings.',
                   style: TextStyle(color: HeyBeanTheme.muted),
                 ),
@@ -8494,7 +8653,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
     children: [
       Row(
         children: [
-          const Expanded(
+          Expanded(
             child: Text(
               'Choose Bean’s personality',
               style: TextStyle(fontWeight: FontWeight.w800),
@@ -8506,7 +8665,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-            icon: const Icon(Icons.info_outline_rounded, size: 20),
+            icon: Icon(Icons.info_outline_rounded, size: 20),
             color: HeyBeanTheme.accent,
             onPressed: _showPersonalityInfo,
           ),
@@ -8538,7 +8697,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
         _agentPersonalityOptions
             .firstWhere((option) => option.key == _selectedPersonality)
             .description,
-        style: const TextStyle(color: HeyBeanTheme.muted),
+        style: TextStyle(color: HeyBeanTheme.muted),
       ),
     ],
   );
@@ -8546,7 +8705,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
   Widget _prioritiesStep() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Text(
+      Text(
         'What should Bean prioritize?',
         style: TextStyle(fontWeight: FontWeight.w800),
       ),
@@ -8604,7 +8763,7 @@ class _PersonalityInfoRow extends StatelessWidget {
             Expanded(
               child: Text(
                 option.label,
-                style: const TextStyle(fontWeight: FontWeight.w800),
+                style: TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
           ],
@@ -8612,7 +8771,7 @@ class _PersonalityInfoRow extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           option.infoTitle,
-          style: const TextStyle(
+          style: TextStyle(
             color: HeyBeanTheme.muted,
             fontWeight: FontWeight.w700,
           ),
@@ -8624,11 +8783,11 @@ class _PersonalityInfoRow extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('• ', style: TextStyle(color: HeyBeanTheme.muted)),
+                Text('• ', style: TextStyle(color: HeyBeanTheme.muted)),
                 Expanded(
                   child: Text(
                     detail,
-                    style: const TextStyle(color: HeyBeanTheme.muted),
+                    style: TextStyle(color: HeyBeanTheme.muted),
                   ),
                 ),
               ],
@@ -8823,7 +8982,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                               : (value) => setState(
                                   () => _rememberMe = value ?? false,
                                 ),
-                          title: const Text('Remember me'),
+                          title: Text('Remember me'),
                           contentPadding: EdgeInsets.zero,
                           controlAffinity: ListTileControlAffinity.leading,
                           dense: true,
@@ -8833,7 +8992,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                         const SizedBox(height: 12),
                         Text(
                           widget.error!,
-                          style: const TextStyle(color: Colors.redAccent),
+                          style: TextStyle(color: Colors.redAccent),
                         ),
                       ],
                       if (widget.notice != null) ...[
@@ -8884,7 +9043,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                             onPressed: widget.busy
                                 ? null
                                 : _showForgotPasswordDialog,
-                            child: const Text('Forgot password?'),
+                            child: Text('Forgot password?'),
                           ),
                         ],
                       ),
@@ -8902,7 +9061,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                                 : () => widget.launchExternalUrl(
                                     _privacyPolicyUrl,
                                   ),
-                            child: const Text('Privacy'),
+                            child: Text('Privacy'),
                           ),
                           TextButton(
                             key: const Key('terms-of-service-link'),
@@ -8911,14 +9070,14 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                                 : () => widget.launchExternalUrl(
                                     _termsOfServiceUrl,
                                   ),
-                            child: const Text('Terms'),
+                            child: Text('Terms'),
                           ),
                           TextButton(
                             key: const Key('support-link'),
                             onPressed: widget.busy
                                 ? null
                                 : () => widget.launchExternalUrl(_supportUrl),
-                            child: const Text('Support'),
+                            child: Text('Support'),
                           ),
                         ],
                       ),
@@ -8991,27 +9150,27 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   Widget build(BuildContext context) {
     if (_sent) {
       return AlertDialog(
-        title: const Text('Check your email'),
-        content: const Text(
+        title: Text('Check your email'),
+        content: Text(
           'If that email matches a HeyBean account, we sent a password reset link. After you reset it, come back here and sign in with your new password.',
         ),
         actions: [
           FilledButton(
             key: const Key('back-to-login-after-reset'),
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Back to login'),
+            child: Text('Back to login'),
           ),
         ],
       );
     }
 
     return AlertDialog(
-      title: const Text('Reset password'),
+      title: Text('Reset password'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
+          Text(
             'Enter the email used for your account and we’ll send a password reset link.',
           ),
           const SizedBox(height: 16),
@@ -9026,14 +9185,14 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+            Text(_error!, style: TextStyle(color: Colors.redAccent)),
           ],
         ],
       ),
       actions: [
         TextButton(
           onPressed: _sending ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text('Cancel'),
         ),
         FilledButton(
           key: const Key('send-password-reset-link'),
@@ -9111,6 +9270,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onAccountEmailChanged,
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
+    required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
     required this.launchExternalUrl,
     required this.stripePaymentHandler,
@@ -9295,6 +9455,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(HermesNotificationPreferences preferences)
   onNotificationPreferencesChanged;
   final Future<void> Function(String themeKey) onThemeChanged;
+  final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final StripePaymentHandler stripePaymentHandler;
@@ -9429,6 +9590,7 @@ class _CommandCenterContent extends StatelessWidget {
             onAccountEmailChanged: onAccountEmailChanged,
             onNotificationPreferencesChanged: onNotificationPreferencesChanged,
             onThemeChanged: onThemeChanged,
+            onThemeModeChanged: onThemeModeChanged,
             onCommandCenterLabelChanged: onCommandCenterLabelChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onWorkspacesChanged: onWorkspacesChanged,
@@ -10041,7 +10203,7 @@ class _CommandCenterAgendaList extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: HeyBeanTheme.border),
         ),
-        child: const Text(
+        child: Text(
           'Nothing else scheduled for today.',
           style: TextStyle(
             color: HeyBeanTheme.muted,
@@ -10140,7 +10302,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                       item.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.text,
                         fontSize: 13,
                         fontWeight: FontWeight.w900,
@@ -10151,7 +10313,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                         item.subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: HeyBeanTheme.muted,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
@@ -10160,7 +10322,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                     else
                       Text(
                         kindLabel,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: HeyBeanTheme.muted,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
@@ -10194,7 +10356,7 @@ class _CommandCenterAgendaTimeLabel extends StatelessWidget {
     final canStack =
         rangeParts.length == 2 &&
         rangeParts.every((part) => part.trim().isNotEmpty);
-    const style = TextStyle(
+    final style = TextStyle(
       color: HeyBeanTheme.muted,
       fontSize: 12,
       fontWeight: FontWeight.w900,
@@ -10543,13 +10705,13 @@ class _ChatInputDock extends StatelessWidget {
               padding: EdgeInsets.zero,
             ),
             onPressed: () => unawaited(onStop()),
-            child: const Icon(Icons.stop_rounded, size: 18),
+            child: Icon(Icons.stop_rounded, size: 18),
           )
         else
           FilledButton(
             key: const Key('primary-chat-action'),
             onPressed: onSend,
-            child: const Icon(Icons.arrow_upward_rounded, size: 18),
+            child: Icon(Icons.arrow_upward_rounded, size: 18),
           ),
       ],
     ),
@@ -10611,7 +10773,7 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
       child: Container(
         key: const Key('global-approval-bottom-sheet'),
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           color: HeyBeanTheme.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
           boxShadow: [
@@ -10649,7 +10811,7 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
                       color: HeyBeanTheme.warning.withValues(alpha: .14),
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.verified_user_rounded,
                       color: HeyBeanTheme.warning,
                     ),
@@ -10665,7 +10827,7 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
                               ?.copyWith(fontWeight: FontWeight.w900),
                         ),
                         const SizedBox(height: 3),
-                        const Text(
+                        Text(
                           "Approve or deny Bean's next action",
                           style: TextStyle(
                             color: HeyBeanTheme.muted,
@@ -10690,7 +10852,7 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
                 child: Text(
                   actionDescription,
                   key: const Key('approval-action-description'),
-                  style: const TextStyle(
+                  style: TextStyle(
                     height: 1.35,
                     fontWeight: FontWeight.w700,
                     color: HeyBeanTheme.text,
@@ -10723,7 +10885,7 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
                     onPressed: _busy
                         ? null
                         : () => _run(() => widget.onDeny(approval)),
-                    child: const Text('Deny'),
+                    child: Text('Deny'),
                   ),
                   OutlinedButton(
                     key: const Key('approval-change-action'),
@@ -10745,7 +10907,7 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
                     onPressed: _busy
                         ? null
                         : () => _run(() => widget.onAlwaysApprove(approval)),
-                    child: const Text('Always approve'),
+                    child: Text('Always approve'),
                   ),
                   FilledButton(
                     key: const Key('approval-approve-action'),
@@ -10757,7 +10919,7 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
                             dimension: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Approve'),
+                        : Text('Approve'),
                   ),
                 ],
               ),
@@ -10851,8 +11013,8 @@ class _QuickPromptRail extends StatelessWidget {
             label: Text(prompt.label),
             onPressed: () => onPrompt(prompt.prompt),
             backgroundColor: HeyBeanTheme.accent.withValues(alpha: .08),
-            side: const BorderSide(color: HeyBeanTheme.border),
-            labelStyle: const TextStyle(
+            side: BorderSide(color: HeyBeanTheme.border),
+            labelStyle: TextStyle(
               color: HeyBeanTheme.text,
               fontWeight: FontWeight.w700,
             ),
@@ -10939,8 +11101,8 @@ class _MessageBubble extends StatelessWidget {
             if (onCopy != null)
               ListTile(
                 key: const Key('chat-copy-sent-message-action'),
-                leading: const Icon(Icons.copy_rounded),
-                title: const Text('Copy'),
+                leading: Icon(Icons.copy_rounded),
+                title: Text('Copy'),
                 onTap: () {
                   Navigator.pop(context);
                   onCopy?.call();
@@ -10949,8 +11111,8 @@ class _MessageBubble extends StatelessWidget {
             if (onEdit != null)
               ListTile(
                 key: const Key('chat-edit-sent-message-action'),
-                leading: const Icon(Icons.edit_rounded),
-                title: const Text('Edit'),
+                leading: Icon(Icons.edit_rounded),
+                title: Text('Edit'),
                 onTap: () {
                   Navigator.pop(context);
                   onEdit?.call();
@@ -11000,7 +11162,7 @@ class _ApprovalCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: HeyBeanTheme.border),
               ),
-              child: const Text(
+              child: Text(
                 'Hermes Bean asks first for mail, payments, destructive edits, deployments, and other risky requests.',
               ),
             ),
@@ -11025,12 +11187,12 @@ class _ApprovalListTile extends StatelessWidget {
     ),
     child: Row(
       children: [
-        const Icon(Icons.shield_rounded, color: HeyBeanTheme.warning),
+        Icon(Icons.shield_rounded, color: HeyBeanTheme.warning),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
             approval.title,
-            style: const TextStyle(fontWeight: FontWeight.w700),
+            style: TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
         Text(
@@ -11205,7 +11367,7 @@ class _PlanLimitErrorBanner extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Upgrade to keep going',
                       style: TextStyle(
                         color: HeyBeanTheme.text,
@@ -11215,7 +11377,7 @@ class _PlanLimitErrorBanner extends StatelessWidget {
                     const SizedBox(height: 3),
                     Text(
                       text!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontWeight: FontWeight.w700,
                         height: 1.35,
@@ -11232,8 +11394,8 @@ class _PlanLimitErrorBanner extends StatelessWidget {
             child: FilledButton.icon(
               key: const Key('plan-limit-upgrade-action'),
               onPressed: () => launchExternalUrl(_pricingUrl),
-              icon: const Icon(Icons.arrow_upward_rounded),
-              label: const Text('Upgrade plan'),
+              icon: Icon(Icons.arrow_upward_rounded),
+              label: Text('Upgrade plan'),
             ),
           ),
         ],
@@ -11255,7 +11417,7 @@ class _InlinePlanLimitError extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!_isPlanLimitMessage(message)) {
-      return Text(message, style: const TextStyle(color: Colors.redAccent));
+      return Text(message, style: TextStyle(color: Colors.redAccent));
     }
 
     return Container(
@@ -11268,7 +11430,7 @@ class _InlinePlanLimitError extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Upgrade to keep going',
             style: TextStyle(
               color: HeyBeanTheme.text,
@@ -11278,7 +11440,7 @@ class _InlinePlanLimitError extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             message,
-            style: const TextStyle(
+            style: TextStyle(
               color: HeyBeanTheme.muted,
               fontWeight: FontWeight.w700,
               height: 1.35,
@@ -11290,8 +11452,8 @@ class _InlinePlanLimitError extends StatelessWidget {
             child: FilledButton.icon(
               key: const Key('inline-plan-limit-upgrade-action'),
               onPressed: () => launchExternalUrl(_pricingUrl),
-              icon: const Icon(Icons.arrow_upward_rounded),
-              label: const Text('Upgrade plan'),
+              icon: Icon(Icons.arrow_upward_rounded),
+              label: Text('Upgrade plan'),
             ),
           ),
         ],
@@ -11325,7 +11487,7 @@ class _SuccessNotice extends StatelessWidget {
         Expanded(
           child: Text(
             message,
-            style: const TextStyle(
+            style: TextStyle(
               color: HeyBeanTheme.text,
               fontWeight: FontWeight.w800,
               height: 1.3,
@@ -11356,7 +11518,7 @@ class _ActivityCard extends StatelessWidget {
         for (final event in events)
           ListTile(
             dense: true,
-            leading: const Icon(Icons.bolt_rounded),
+            leading: Icon(Icons.bolt_rounded),
             title: Text(event.eventType),
           ),
       ],
@@ -11828,7 +11990,7 @@ class _CriticalDropdownRow extends StatelessWidget {
                 title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: HeyBeanTheme.text,
                   fontWeight: FontWeight.w800,
                 ),
@@ -11838,10 +12000,7 @@ class _CriticalDropdownRow extends StatelessWidget {
                   subtitle,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: HeyBeanTheme.muted,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
                 ),
             ],
           ),
@@ -12150,7 +12309,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
             controller: _timelineScrollController,
             child: Container(
               key: const Key('apple-style-day-timeline'),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 border: Border(top: BorderSide(color: HeyBeanTheme.border)),
               ),
               height: timelineHeight,
@@ -12234,7 +12393,7 @@ class _AppleStyleTodayTimelineState extends State<_AppleStyleTodayTimeline> {
                             fit: BoxFit.scaleDown,
                             child: Text(
                               _naturalTimeLabel(now),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 9,
                                 fontWeight: FontWeight.w800,
@@ -12477,7 +12636,7 @@ class _ScrollableTimelineDayHeader extends StatelessWidget {
     return Container(
       key: const Key('calendar-sticky-day-header'),
       height: _calendarDayHeaderHeight,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(top: BorderSide(color: HeyBeanTheme.border)),
       ),
       child: Row(
@@ -12485,7 +12644,7 @@ class _ScrollableTimelineDayHeader extends StatelessWidget {
           Container(
             width: _calendarTimeColumnWidth,
             height: _calendarDayHeaderHeight,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: HeyBeanTheme.border)),
             ),
           ),
@@ -12560,7 +12719,7 @@ class _DayColumnHeading extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     height: _calendarDayHeaderHeight,
     alignment: Alignment.center,
-    decoration: const BoxDecoration(
+    decoration: BoxDecoration(
       border: Border(
         left: BorderSide(color: HeyBeanTheme.border),
         bottom: BorderSide(color: HeyBeanTheme.border),
@@ -12738,7 +12897,7 @@ class _PinnedTimelineLabel extends StatelessWidget {
       color: accent
           ? HeyBeanTheme.accent.withValues(alpha: .06)
           : Colors.transparent,
-      border: const Border(bottom: BorderSide(color: HeyBeanTheme.border)),
+      border: Border(bottom: BorderSide(color: HeyBeanTheme.border)),
     ),
     child: Padding(
       padding: const EdgeInsets.only(top: 10, right: 6),
@@ -12747,7 +12906,7 @@ class _PinnedTimelineLabel extends StatelessWidget {
         child: Text(
           label,
           textAlign: TextAlign.right,
-          style: const TextStyle(
+          style: TextStyle(
             color: HeyBeanTheme.muted,
             fontSize: 11,
             fontWeight: FontWeight.w800,
@@ -12825,7 +12984,7 @@ class _ScrollableAllDayEventRows extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(
+    decoration: BoxDecoration(
       border: Border(bottom: BorderSide(color: HeyBeanTheme.border)),
     ),
     child: ClipRect(
@@ -12919,7 +13078,7 @@ class _FixedTimelineHoursColumn extends StatelessWidget {
                 child: Text(
                   _hourLabel(hour),
                   textAlign: TextAlign.right,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: HeyBeanTheme.muted,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -12944,7 +13103,7 @@ class _TimelineDayGridRow extends StatelessWidget {
         for (var column = 0; column < 2; column++)
           Expanded(
             child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(color: HeyBeanTheme.border),
                   left: BorderSide(color: HeyBeanTheme.border),
@@ -13056,7 +13215,7 @@ class _MultiDayEventSpanRow extends StatelessWidget {
                       left: (dayOffsetIndex - dayOffset) * columnWidth,
                       top: 0,
                       bottom: 0,
-                      child: const VerticalDivider(
+                      child: VerticalDivider(
                         width: 1,
                         thickness: 1,
                         color: HeyBeanTheme.border,
@@ -13308,7 +13467,7 @@ class _MultiDayEventSpan extends StatelessWidget {
                           : dayIndex == 0
                           ? TextAlign.left
                           : TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Colors.black,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
@@ -13389,7 +13548,7 @@ class _AllDayEventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(
+    decoration: BoxDecoration(
       border: Border(
         left: BorderSide(color: HeyBeanTheme.border),
         bottom: BorderSide(color: HeyBeanTheme.border),
@@ -13503,7 +13662,7 @@ class _AllDayEventRow extends StatelessWidget {
                     event.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: Colors.black,
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
@@ -14115,7 +14274,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         startDate.year,
         startDate.month,
         startDate.day,
-      ).add(const Duration(days: 1));
+        23,
+        59,
+      );
       startsAt = parsedStart.toUtc().toIso8601String();
       endsAt = parsedEnd.toUtc().toIso8601String();
     } else {
@@ -14462,7 +14623,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             final canDelete = selectedIds.isNotEmpty || deleteChoices.isEmpty;
 
             return AlertDialog(
-              title: const Text('Delete recurring event'),
+              title: Text('Delete recurring event'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -14480,10 +14641,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       ),
                       onTap: () =>
                           setDialogState(() => recurringMode = 'single'),
-                      title: const Text('This event only'),
-                      subtitle: const Text(
-                        'The series resumes after this date.',
-                      ),
+                      title: Text('This event only'),
+                      subtitle: Text('The series resumes after this date.'),
                     ),
                     ListTile(
                       key: const Key('event-delete-recurring-future'),
@@ -14498,10 +14657,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       ),
                       onTap: () =>
                           setDialogState(() => recurringMode = 'future'),
-                      title: const Text('This and future events'),
-                      subtitle: const Text(
-                        'Earlier events stay on the calendar.',
-                      ),
+                      title: Text('This and future events'),
+                      subtitle: Text('Earlier events stay on the calendar.'),
                     ),
                     ListTile(
                       key: const Key('event-delete-recurring-all'),
@@ -14515,11 +14672,11 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             : HeyBeanTheme.muted,
                       ),
                       onTap: () => setDialogState(() => recurringMode = 'all'),
-                      title: const Text('Entire series'),
-                      subtitle: const Text('Remove every occurrence.'),
+                      title: Text('Entire series'),
+                      subtitle: Text('Remove every occurrence.'),
                     ),
                     if (deleteChoices.length > 1) ...[
-                      const Divider(height: 20),
+                      Divider(height: 20),
                       for (final workspace in deleteChoices)
                         CheckboxListTile(
                           key: Key('event-delete-workspace-${workspace.id}'),
@@ -14540,7 +14697,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           ),
                           subtitle:
                               workspace.numericId == widget.event.workspaceId
-                              ? const Text('Current copy')
+                              ? Text('Current copy')
                               : null,
                         ),
                     ],
@@ -14550,7 +14707,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+                  child: Text('Cancel'),
                 ),
                 FilledButton(
                   key: const Key('event-delete-recurring-action'),
@@ -14565,7 +14722,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           'recurringOccurrenceDate': occurrenceDate,
                         })
                       : null,
-                  child: const Text('Delete'),
+                  child: Text('Delete'),
                 ),
               ],
             );
@@ -14600,7 +14757,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
           final canDelete = selectedIds.isNotEmpty;
 
           return AlertDialog(
-            title: const Text('Delete event from'),
+            title: Text('Delete event from'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -14627,7 +14784,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       workspace.isPersonal ? 'Personal' : workspace.name,
                     ),
                     subtitle: workspace.numericId == widget.event.workspaceId
-                        ? const Text('Current copy')
+                        ? Text('Current copy')
                         : null,
                   ),
               ],
@@ -14635,7 +14792,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
+                child: Text('Cancel'),
               ),
               FilledButton(
                 key: const Key('event-delete-selected-workspaces-action'),
@@ -14648,7 +14805,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         context,
                       ).pop({'deleteFromWorkspaceIds': selectedIds.toList()})
                     : null,
-                child: const Text('Delete event'),
+                child: Text('Delete event'),
               ),
             ],
           );
@@ -14833,7 +14990,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                     IconButton.filledTonal(
                       key: const Key('event-detail-back-action'),
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.arrow_back_rounded),
+                      icon: Icon(Icons.arrow_back_rounded),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -14897,14 +15054,66 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               key: const Key('event-validation-error'),
                               message: _validationError!,
                             ),
-                          _MobileFormSwitch(
-                            widgetKey: const Key('event-all-day-toggle'),
-                            value: _allDay,
-                            onChanged: _setAllDay,
-                            icon: Icons.calendar_today_rounded,
-                            title: 'All day',
-                            subtitle:
-                                'Use dates only instead of start and end times.',
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: GestureDetector(
+                                    key: const Key('event-all-day-toggle'),
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () => _setAllDay(!_allDay),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 10,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.calendar_today_rounded,
+                                            size: 20,
+                                            color: HeyBeanTheme.accentStrong,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              'All day',
+                                              style: TextStyle(
+                                                color: HeyBeanTheme.text,
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w900,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'All day event info',
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 34,
+                                    height: 34,
+                                  ),
+                                  icon: Icon(
+                                    Icons.info_outline_rounded,
+                                    semanticLabel: 'All day event info',
+                                    size: 18,
+                                    color: HeyBeanTheme.accentStrong,
+                                  ),
+                                  onPressed: () => _showInfoSheet(
+                                    context,
+                                    title: 'All day events',
+                                    bullets: const [
+                                      'Use dates instead of specific start and end times.',
+                                    ],
+                                  ),
+                                ),
+                                Switch(value: _allDay, onChanged: _setAllDay),
+                              ],
+                            ),
                           ),
                           TextField(
                             key: const Key('event-start-field'),
@@ -14926,7 +15135,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                     ? Icons.event_rounded
                                     : Icons.play_arrow_rounded,
                               ),
-                              suffixIcon: const Icon(Icons.expand_less_rounded),
+                              suffixIcon: Icon(Icons.expand_less_rounded),
                             ),
                           ),
                           if (!_allDay)
@@ -15099,7 +15308,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                     ? null
                                     : _openCategoryCreationModal,
                                 tooltip: 'Create category',
-                                icon: const Icon(Icons.add_rounded),
+                                icon: Icon(Icons.add_rounded),
                               ),
                             ],
                           ),
@@ -15175,7 +15384,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                             icon: Icons.repeat_on_rounded,
                             label: 'Recurrence',
                           ),
-                          const Text(
+                          Text(
                             'Repeat this event when needed.',
                             style: TextStyle(
                               color: HeyBeanTheme.muted,
@@ -15302,7 +15511,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                         widget
                                             .googleCalendarStatus!
                                             .defaultCalendarId
-                                    ? const Text('Default external calendar')
+                                    ? Text('Default external calendar')
                                     : null,
                               ),
                           ],
@@ -15354,7 +15563,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                         widget
                                             .outlookCalendarStatus!
                                             .defaultCalendarId
-                                    ? const Text('Default Outlook calendar')
+                                    ? Text('Default Outlook calendar')
                                     : null,
                               ),
                           ],
@@ -15475,7 +15684,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         top: false,
         child: Container(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: Color(0xEEF8FBF6),
             border: Border(top: BorderSide(color: HeyBeanTheme.border)),
           ),
@@ -15484,7 +15693,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
               Expanded(
                 child: OutlinedButton(
                   onPressed: _saving ? null : () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+                  child: Text('Cancel'),
                 ),
               ),
               if (widget.onDelete != null) ...[
@@ -15511,7 +15720,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 deleteOptions['recurringOccurrenceDate'],
                           });
                         },
-                  icon: const Icon(Icons.delete_outline_rounded),
+                  icon: Icon(Icons.delete_outline_rounded),
                 ),
               ],
               const SizedBox(width: 12),
@@ -15525,7 +15734,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.check_rounded),
+                      : Icon(Icons.check_rounded),
                   label: Text(_saving ? 'Saving...' : 'Save event'),
                 ),
               ),
@@ -15687,7 +15896,7 @@ class _ColorSwatchButton extends StatelessWidget {
               ],
             ),
             child: selected
-                ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
+                ? Icon(Icons.check_rounded, color: Colors.white, size: 16)
                 : null,
           ),
         ),
@@ -15780,7 +15989,7 @@ class _EventCategoryCreateDialogState
               onSubmitted: (_) => _submit(),
               decoration: InputDecoration(
                 labelText: 'Category name',
-                prefixIcon: const Icon(Icons.sell_outlined),
+                prefixIcon: Icon(Icons.sell_outlined),
                 errorText: _validationError,
               ),
             ),
@@ -15819,7 +16028,7 @@ class _EventCategoryCreateDialogState
                   Expanded(
                     child: Text(
                       _selectedColor,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.text,
                         fontWeight: FontWeight.w800,
                       ),
@@ -15840,13 +16049,13 @@ class _EventCategoryCreateDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text('Cancel'),
         ),
         if (widget.editing)
           FilledButton(
             key: const Key('event-category-modal-save-action'),
             onPressed: _submit,
-            child: const Text('Save'),
+            child: Text('Save'),
           )
         else
           _ThemedPlusButton(
@@ -17084,7 +17293,7 @@ class _MonthGrid extends StatelessWidget {
                 child: Center(
                   child: Text(
                     weekday,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: HeyBeanTheme.muted,
                       fontWeight: FontWeight.w800,
                     ),
@@ -17569,7 +17778,7 @@ Future<DateTime?> _showStandardDateTimeDock(
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Cancel'),
+                      child: Text('Cancel'),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -17593,7 +17802,7 @@ Future<DateTime?> _showStandardDateTimeDock(
                           context,
                         ).pop(DateTime(year, month, day, hour24, minute));
                       },
-                      child: const Text('Done'),
+                      child: Text('Done'),
                     ),
                   ),
                 ],
@@ -17961,7 +18170,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
           child: Container(
             height: mediaQuery.size.height - topInset,
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: HeyBeanTheme.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
               border: Border(top: BorderSide(color: HeyBeanTheme.border)),
@@ -18018,9 +18227,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                         context,
                                         setModalState,
                                       ),
-                                      icon: const Icon(
-                                        Icons.calendar_month_rounded,
-                                      ),
+                                      icon: Icon(Icons.calendar_month_rounded),
                                     ),
                                   ),
                                 )
@@ -18075,7 +18282,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                               ),
                                             ),
                                           ),
-                                          const Icon(
+                                          Icon(
                                             Icons.calendar_month_rounded,
                                             size: 18,
                                             color: HeyBeanTheme.muted,
@@ -18121,7 +18328,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                   decoration: _longFormInputDecoration(
                                     labelText: 'Notes',
                                     hintText: 'Add task details',
-                                    prefixIcon: const _BeanNotesIcon(),
+                                    prefixIcon: _BeanNotesIcon(),
                                   ),
                                 ),
                               ],
@@ -18137,7 +18344,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                               children: [
                                 Row(
                                   children: [
-                                    const Expanded(
+                                    Expanded(
                                       child: Text(
                                         'Category',
                                         style: TextStyle(
@@ -18210,7 +18417,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                                   });
                                                 }
                                               },
-                                        icon: const Icon(Icons.add_rounded),
+                                        icon: Icon(Icons.add_rounded),
                                       ),
                                   ],
                                 ),
@@ -18343,7 +18550,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                 ),
                                 Text(
                                   recurrenceSubtitle,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: HeyBeanTheme.muted,
                                     fontSize: 12,
                                     height: 1.35,
@@ -18447,8 +18654,8 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                               key: const Key('title-time-editor-picker-button'),
                               onPressed: () =>
                                   chooseDateTime(context, setModalState),
-                              icon: const Icon(Icons.schedule_rounded),
-                              label: const Text('Choose date and time'),
+                              icon: Icon(Icons.schedule_rounded),
+                              label: Text('Choose date and time'),
                             ),
                           ),
                           if (writableGoogleCalendars.isNotEmpty) ...[
@@ -18677,7 +18884,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                       padding: const EdgeInsets.fromLTRB(0, 10, 0, 0),
                       decoration: BoxDecoration(
                         color: HeyBeanTheme.surface.withValues(alpha: .94),
-                        border: const Border(
+                        border: Border(
                           top: BorderSide(color: HeyBeanTheme.border),
                         ),
                       ),
@@ -18692,7 +18899,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                   onPressed: saving
                                       ? null
                                       : () => Navigator.of(context).pop(),
-                                  child: const Text('Cancel'),
+                                  child: Text('Cancel'),
                                 ),
                               ),
                               if (deleteLabel != null) ...[
@@ -18706,9 +18913,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                       : () => Navigator.of(
                                           context,
                                         ).pop({'delete': true}),
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                  ),
+                                  icon: Icon(Icons.delete_outline_rounded),
                                 ),
                               ],
                               const SizedBox(width: 10),
@@ -18731,7 +18936,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                             strokeWidth: 2,
                                           ),
                                         )
-                                      : const Icon(Icons.check_rounded),
+                                      : Icon(Icons.check_rounded),
                                   label: Text(
                                     saving ? 'Saving...' : actionLabel,
                                   ),
@@ -18752,7 +18957,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                         setModalState,
                                         complete: true,
                                       ),
-                                icon: const Icon(Icons.done_all_rounded),
+                                icon: Icon(Icons.done_all_rounded),
                                 label: Text(completeLabel),
                               ),
                             ),
@@ -18885,7 +19090,7 @@ class _TaskListCardState extends State<_TaskListCard> {
           children: [
             ChoiceChip(
               key: const Key('task-filter-open'),
-              label: const Text('Active'),
+              label: Text('Active'),
               selected: !_showCompleted && !_showAll,
               onSelected: (_) => setState(() {
                 _showCompleted = false;
@@ -18894,7 +19099,7 @@ class _TaskListCardState extends State<_TaskListCard> {
             ),
             ChoiceChip(
               key: const Key('task-filter-done'),
-              label: const Text('Done'),
+              label: Text('Done'),
               selected: _showCompleted && !_showAll,
               onSelected: (_) => setState(() {
                 _showCompleted = true;
@@ -18903,7 +19108,7 @@ class _TaskListCardState extends State<_TaskListCard> {
             ),
             ChoiceChip(
               key: const Key('task-filter-all'),
-              label: const Text('All tasks'),
+              label: Text('All tasks'),
               selected: _showAll,
               onSelected: (_) => setState(() {
                 _showCompleted = false;
@@ -19157,7 +19362,7 @@ class _FutureTaskBucket extends StatelessWidget {
                         label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: HeyBeanTheme.text,
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
@@ -19167,7 +19372,7 @@ class _FutureTaskBucket extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                       countLabel,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
@@ -19183,7 +19388,7 @@ class _FutureTaskBucket extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 8),
               child: DecoratedBox(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   border: Border(
                     left: BorderSide(color: HeyBeanTheme.border, width: 2),
                   ),
@@ -19233,7 +19438,7 @@ class _DatedListSection extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: HeyBeanTheme.text,
                       fontSize: 13,
                       fontWeight: FontWeight.w900,
@@ -19242,7 +19447,7 @@ class _DatedListSection extends StatelessWidget {
                 ),
                 Text(
                   countLabel,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: HeyBeanTheme.muted,
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -19353,7 +19558,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
           children: [
             ChoiceChip(
               key: const Key('reminder-filter-pending'),
-              label: const Text('Pending'),
+              label: Text('Pending'),
               selected: !_showCompleted && !_showAll,
               onSelected: (_) => setState(() {
                 _showCompleted = false;
@@ -19362,7 +19567,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
             ),
             ChoiceChip(
               key: const Key('reminder-filter-completed'),
-              label: const Text('Completed'),
+              label: Text('Completed'),
               selected: _showCompleted && !_showAll,
               onSelected: (_) => setState(() {
                 _showCompleted = true;
@@ -19371,7 +19576,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
             ),
             ChoiceChip(
               key: const Key('reminder-filter-all'),
-              label: const Text('All reminders'),
+              label: Text('All reminders'),
               selected: _showAll,
               onSelected: (_) => setState(() {
                 _showCompleted = false;
@@ -19719,7 +19924,7 @@ class _MemoryViewState extends State<_MemoryView> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Forget knowledge?'),
+        title: Text('Forget knowledge?'),
         content: Text(
           item.title?.trim().isNotEmpty == true ? item.title! : item.content,
           maxLines: 3,
@@ -19728,12 +19933,12 @@ class _MemoryViewState extends State<_MemoryView> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           FilledButton(
             style: _destructiveFilledButtonStyle(),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Forget'),
+            child: Text('Forget'),
           ),
         ],
       ),
@@ -19813,7 +20018,7 @@ class _MemoryViewState extends State<_MemoryView> {
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.refresh_rounded),
+                        : Icon(Icons.refresh_rounded),
                     label: Text(_refreshing ? 'Refreshing' : 'Refresh'),
                   ),
                 ],
@@ -19889,7 +20094,7 @@ class _MemoryComposer extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Add knowledge',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
           ),
@@ -19933,7 +20138,7 @@ class _MemoryComposer extends StatelessWidget {
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.add_rounded),
+                    : Icon(Icons.add_rounded),
                 label: Text(saving ? 'Saving' : 'Remember'),
               ),
             ],
@@ -19978,7 +20183,7 @@ class _MemoryItemTile extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                       confidence,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -19989,30 +20194,27 @@ class _MemoryItemTile extends StatelessWidget {
                   IconButton(
                     tooltip: 'Edit knowledge',
                     onPressed: onEdit,
-                    icon: const Icon(Icons.edit_rounded),
+                    icon: Icon(Icons.edit_rounded),
                   ),
                   IconButton(
                     tooltip: 'Forget knowledge',
                     onPressed: onForget,
-                    icon: const Icon(Icons.delete_outline_rounded),
+                    icon: Icon(Icons.delete_outline_rounded),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               Text(
                 title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 6),
-              Text(item.content, style: const TextStyle(height: 1.35)),
+              Text(item.content, style: TextStyle(height: 1.35)),
               if (updated.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
                   'Updated $updated',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: HeyBeanTheme.muted,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -20043,7 +20245,7 @@ class _MemoryTypeChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       child: Text(
         _memoryTypeLabel(type),
-        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
       ),
     ),
   );
@@ -20115,7 +20317,7 @@ class _MemoryEditSheetState extends State<_MemoryEditSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               'Edit knowledge',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
             ),
@@ -20150,7 +20352,7 @@ class _MemoryEditSheetState extends State<_MemoryEditSheet> {
               },
             ),
             const SizedBox(height: 10),
-            FilledButton(onPressed: _save, child: const Text('Save')),
+            FilledButton(onPressed: _save, child: Text('Save')),
           ],
         ),
       ),
@@ -20168,7 +20370,7 @@ class _MemorySummarySection extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Summaries',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
         ),
@@ -20183,12 +20385,12 @@ class _MemorySummarySection extends StatelessWidget {
                   children: [
                     Text(
                       summary.title,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
+                      style: TextStyle(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       summary.content,
-                      style: const TextStyle(color: HeyBeanTheme.muted),
+                      style: TextStyle(color: HeyBeanTheme.muted),
                     ),
                   ],
                 ),
@@ -20209,7 +20411,7 @@ class _RequestHistorySection extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Recent requests',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
         ),
@@ -20221,7 +20423,7 @@ class _RequestHistorySection extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 2),
                   child: Icon(
                     Icons.history_rounded,
@@ -20238,12 +20440,12 @@ class _RequestHistorySection extends StatelessWidget {
                         item.content,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+                        style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                       if (created.isNotEmpty)
                         Text(
                           created,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: HeyBeanTheme.muted,
                             fontSize: 12,
                           ),
@@ -20543,16 +20745,16 @@ class _NotesViewState extends State<_NotesView> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete note?'),
+        title: Text('Delete note?'),
         content: Text('This will permanently delete "${note.title}".'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text('Delete'),
           ),
         ],
       ),
@@ -20585,7 +20787,7 @@ class _NotesViewState extends State<_NotesView> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete folder?'),
+        title: Text('Delete folder?'),
         content: Text(
           noteCount == 0
               ? 'This will delete "${folder.name}".'
@@ -20594,11 +20796,11 @@ class _NotesViewState extends State<_NotesView> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text('Delete'),
           ),
         ],
       ),
@@ -20650,20 +20852,20 @@ class _NotesViewState extends State<_NotesView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.folder_open_rounded),
-              title: const Text('All Notes'),
+              leading: Icon(Icons.folder_open_rounded),
+              title: Text('All Notes'),
               onTap: () => Navigator.pop(context, -2),
             ),
             ...widget.folders.map(
               (folder) => ListTile(
-                leading: const Icon(Icons.folder_rounded),
+                leading: Icon(Icons.folder_rounded),
                 title: Text(folder.name),
                 onTap: () => Navigator.pop(context, folder.id),
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.create_new_folder_rounded),
-              title: const Text('New folder'),
+              leading: Icon(Icons.create_new_folder_rounded),
+              title: Text('New folder'),
               onTap: () async {
                 Navigator.pop(context, -1);
               },
@@ -21176,7 +21378,7 @@ class _NotesViewState extends State<_NotesView> {
                     key: const Key('notes-folder-title'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: HeyBeanTheme.text,
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
@@ -21189,11 +21391,11 @@ class _NotesViewState extends State<_NotesView> {
                     IconButton.outlined(
                       key: const Key('notes-list-menu'),
                       onPressed: _showNotesListOptionsSheet,
-                      icon: const Icon(Icons.more_vert_rounded),
+                      icon: Icon(Icons.more_vert_rounded),
                       tooltip: 'Notes options',
                       style: IconButton.styleFrom(
                         foregroundColor: HeyBeanTheme.text,
-                        side: const BorderSide(color: HeyBeanTheme.border),
+                        side: BorderSide(color: HeyBeanTheme.border),
                         backgroundColor: HeyBeanTheme.surface,
                         fixedSize: const Size(38, 38),
                       ),
@@ -21253,7 +21455,7 @@ class _NotesViewState extends State<_NotesView> {
                     IconButton(
                       key: const Key('note-detail-back'),
                       onPressed: _closeNote,
-                      icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                      icon: Icon(Icons.arrow_back_ios_new_rounded),
                       tooltip: 'Notes',
                     ),
                     Expanded(
@@ -21264,7 +21466,7 @@ class _NotesViewState extends State<_NotesView> {
                             ? 'Locked'
                             : 'Notes',
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: HeyBeanTheme.muted,
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
@@ -21273,7 +21475,7 @@ class _NotesViewState extends State<_NotesView> {
                     ),
                     PopupMenuButton<String>(
                       key: const Key('note-detail-menu'),
-                      icon: const Icon(Icons.more_vert_rounded),
+                      icon: Icon(Icons.more_vert_rounded),
                       tooltip: 'Note actions',
                       onSelected: (value) async {
                         switch (value) {
@@ -21301,11 +21503,11 @@ class _NotesViewState extends State<_NotesView> {
                             selected.isPinned ? 'Unpin Note' : 'Pin Note',
                           ),
                         ),
-                        const PopupMenuItem<String>(
+                        PopupMenuItem<String>(
                           value: 'move',
                           child: Text('Move to Folder'),
                         ),
-                        const PopupMenuItem<String>(
+                        PopupMenuItem<String>(
                           key: Key('note-workspaces-action'),
                           value: 'workspaces',
                           child: Text('Workspaces'),
@@ -21315,7 +21517,7 @@ class _NotesViewState extends State<_NotesView> {
                           child: Text(locked ? 'Unlock Note' : 'Lock Note'),
                         ),
                         const PopupMenuDivider(),
-                        const PopupMenuItem<String>(
+                        PopupMenuItem<String>(
                           value: 'delete',
                           child: Text(
                             'Delete Note',
@@ -21362,7 +21564,7 @@ class _NotesViewState extends State<_NotesView> {
                       textInputAction: TextInputAction.next,
                       onChanged: (_) => _queueAutosave(),
                       onTapOutside: _dismissEditorFocus,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 30,
                         fontWeight: FontWeight.w900,
                       ),
@@ -21376,7 +21578,7 @@ class _NotesViewState extends State<_NotesView> {
                         hintText: 'New Note',
                       ),
                     ),
-                    const Divider(
+                    Divider(
                       height: 1,
                       thickness: 1,
                       color: HeyBeanTheme.border,
@@ -21404,7 +21606,7 @@ class _NotesViewState extends State<_NotesView> {
                           focusedErrorBorder: InputBorder.none,
                           hintText: 'Start writing',
                         ),
-                        style: const TextStyle(fontSize: 17, height: 1.55),
+                        style: TextStyle(fontSize: 17, height: 1.55),
                       ),
                     ),
                   ],
@@ -21436,9 +21638,9 @@ class _NotesViewState extends State<_NotesView> {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const _BeanNotesIcon(color: HeyBeanTheme.muted, size: 42),
+        _BeanNotesIcon(color: HeyBeanTheme.muted, size: 42),
         const SizedBox(height: 10),
-        const Text('No notes', style: TextStyle(fontWeight: FontWeight.w800)),
+        Text('No notes', style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 12),
         _ThemedPlusButton(onPressed: _newNote, tooltip: 'New note'),
       ],
@@ -21452,7 +21654,7 @@ class _NotesViewState extends State<_NotesView> {
       color: HeyBeanTheme.surface,
       child: Container(
         height: 54,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           border: Border(top: BorderSide(color: HeyBeanTheme.border)),
         ),
         child: ListView(
@@ -21529,7 +21731,7 @@ class _NotesViewState extends State<_NotesView> {
         minimumSize: const Size(42, 38),
         padding: const EdgeInsets.symmetric(horizontal: 12),
       ),
-      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+      child: Text(label, style: TextStyle(fontWeight: FontWeight.w900)),
     ),
   );
 
@@ -21548,17 +21750,17 @@ class _NotesViewState extends State<_NotesView> {
     controller: _searchController,
     textAlignVertical: TextAlignVertical.center,
     decoration: InputDecoration(
-      prefixIcon: const Icon(Icons.search),
+      prefixIcon: Icon(Icons.search),
       hintText: 'Search',
       isDense: true,
       filled: true,
       fillColor: HeyBeanTheme.surface,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      border: const OutlineInputBorder(
+      border: OutlineInputBorder(
         borderRadius: BorderRadius.all(Radius.circular(999)),
         borderSide: BorderSide(color: HeyBeanTheme.border),
       ),
-      enabledBorder: const OutlineInputBorder(
+      enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.all(Radius.circular(999)),
         borderSide: BorderSide(color: HeyBeanTheme.border),
       ),
@@ -21634,7 +21836,7 @@ class _NotesListOptionsSheetState extends State<_NotesListOptionsSheet> {
             children: [
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Notes options',
                       style: TextStyle(
@@ -21706,7 +21908,7 @@ class _NotesListOptionsSheetState extends State<_NotesListOptionsSheet> {
                         onPressed: _deletingFolderIds.contains(folder.id)
                             ? null
                             : () => unawaited(_deleteFolder(folder)),
-                        icon: const Icon(Icons.delete_outline_rounded),
+                        icon: Icon(Icons.delete_outline_rounded),
                         color: HeyBeanTheme.destructive,
                       ),
                     ),
@@ -21759,7 +21961,7 @@ class _NotesOptionsSection extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
         child: Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             color: HeyBeanTheme.muted,
             fontSize: 12,
             fontWeight: FontWeight.w900,
@@ -21778,7 +21980,7 @@ class _NotesOptionsSection extends StatelessWidget {
                 padding: const EdgeInsets.all(16),
                 child: Text(
                   emptyText ?? 'Nothing to show',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: HeyBeanTheme.muted,
                     fontWeight: FontWeight.w700,
                   ),
@@ -21789,7 +21991,7 @@ class _NotesOptionsSection extends StatelessWidget {
                   for (var index = 0; index < children.length; index++) ...[
                     children[index],
                     if (index != children.length - 1)
-                      const Divider(height: 1, indent: 56, endIndent: 12),
+                      Divider(height: 1, indent: 56, endIndent: 12),
                   ],
                 ],
               ),
@@ -21858,7 +22060,7 @@ class _NotesOptionRow extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 8),
                   child: Text(
                     '$count',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: HeyBeanTheme.muted,
                       fontSize: 13,
                       fontWeight: FontWeight.w800,
@@ -21942,7 +22144,7 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Note workspaces',
               style: TextStyle(
                 color: HeyBeanTheme.text,
@@ -21951,7 +22153,7 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Choose which additional workspaces this note is synced to.',
               style: TextStyle(
                 color: HeyBeanTheme.muted,
@@ -21971,7 +22173,7 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
                       : primaryWorkspace.name,
                   selected: true,
                   onTap: () {},
-                  trailing: const Padding(
+                  trailing: Padding(
                     padding: EdgeInsets.only(left: 8, right: 8),
                     child: Text(
                       'Fixed',
@@ -22020,7 +22222,7 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+                    child: Text('Cancel'),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -22031,7 +22233,7 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
                       context,
                       _selectedWorkspaceIds.toList()..sort(),
                     ),
-                    child: const Text('Save'),
+                    child: Text('Save'),
                   ),
                 ),
               ],
@@ -22287,7 +22489,7 @@ class _FormattedNoteTextController extends TextEditingController {
     TextStyle? style,
     required bool withComposing,
   }) {
-    final baseStyle = style ?? const TextStyle();
+    final baseStyle = style ?? TextStyle();
     final value = text;
     if (value.isEmpty) {
       return TextSpan(style: baseStyle, text: value);
@@ -22368,14 +22570,14 @@ class _FormattedNoteTextController extends TextEditingController {
       if (format.start > offset || format.end <= offset) continue;
       switch (format.kind) {
         case 'bold':
-          next = next.merge(const TextStyle(fontWeight: FontWeight.w900));
+          next = next.merge(TextStyle(fontWeight: FontWeight.w900));
           break;
         case 'italic':
-          next = next.merge(const TextStyle(fontStyle: FontStyle.italic));
+          next = next.merge(TextStyle(fontStyle: FontStyle.italic));
           break;
         case 'heading':
           next = next.merge(
-            const TextStyle(fontSize: 25, fontWeight: FontWeight.w900),
+            TextStyle(fontSize: 25, fontWeight: FontWeight.w900),
           );
           break;
       }
@@ -22405,7 +22607,7 @@ class _NoteCheckboxMarker extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
         ),
         child: checked
-            ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+            ? Icon(Icons.check_rounded, size: 14, color: Colors.white)
             : null,
       ),
     ),
@@ -22436,7 +22638,7 @@ class _NewNoteFolderDialogState extends State<_NewNoteFolderDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('New folder'),
+    title: Text('New folder'),
     content: TextField(
       key: const Key('new-note-folder-name'),
       controller: _controller,
@@ -22448,7 +22650,7 @@ class _NewNoteFolderDialogState extends State<_NewNoteFolderDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
+        child: Text('Cancel'),
       ),
       _ThemedPlusButton(
         key: const Key('new-note-folder-create'),
@@ -22485,7 +22687,7 @@ class _NoteSection extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
             child: Text(
               title!,
-              style: const TextStyle(
+              style: TextStyle(
                 color: HeyBeanTheme.muted,
                 fontSize: 13,
                 fontWeight: FontWeight.w900,
@@ -22497,7 +22699,7 @@ class _NoteSection extends StatelessWidget {
             for (var index = 0; index < notes.length; index++) ...[
               _NoteListTile(note: notes[index], onTap: onTap),
               if (index != notes.length - 1)
-                const Divider(height: 1, indent: 18, endIndent: 18),
+                Divider(height: 1, indent: 18, endIndent: 18),
             ],
           ],
         ),
@@ -22527,11 +22729,11 @@ class _NoteListTile extends StatelessWidget {
               note.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w800),
+              style: TextStyle(fontWeight: FontWeight.w800),
             ),
           ),
           if (note.isPinned)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(left: 8),
               child: Icon(Icons.push_pin_rounded, size: 15),
             ),
@@ -22542,10 +22744,7 @@ class _NoteListTile extends StatelessWidget {
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: const Icon(
-        Icons.chevron_right_rounded,
-        color: HeyBeanTheme.muted,
-      ),
+      trailing: Icon(Icons.chevron_right_rounded, color: HeyBeanTheme.muted),
     );
   }
 }
@@ -22723,6 +22922,7 @@ class _SettingsView extends StatelessWidget {
     required this.onAccountEmailChanged,
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
+    required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
@@ -22745,6 +22945,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(HermesNotificationPreferences preferences)
   onNotificationPreferencesChanged;
   final Future<void> Function(String themeKey) onThemeChanged;
+  final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
@@ -22790,13 +22991,15 @@ class _SettingsView extends StatelessWidget {
               trailing: TextButton(
                 key: const Key('open-bean-preferences'),
                 onPressed: onEditAgentOnboarding,
-                child: const Text('Update'),
+                child: Text('Update'),
               ),
             ),
             _ThemePreferencesCard(
               selectedThemeKey: user.theme,
+              selectedThemeModeKey: user.themeMode,
               commandCenterLabel: user.commandCenterLabel,
               onChanged: onThemeChanged,
+              onModeChanged: onThemeModeChanged,
               onCommandCenterLabelChanged: onCommandCenterLabelChanged,
             ),
             _NotificationPreferencesCard(
@@ -23159,7 +23362,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Billing',
                       style: TextStyle(
                         color: HeyBeanTheme.text,
@@ -23171,7 +23374,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                       _loadingSubscription
                           ? 'Loading subscription...'
                           : statusLine,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontWeight: FontWeight.w700,
                       ),
@@ -23180,7 +23383,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                     Text(
                       paymentLine,
                       key: const Key('settings-payment-method-summary'),
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontWeight: FontWeight.w700,
                       ),
@@ -23190,14 +23393,14 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                       Text(
                         accessEndLine,
                         key: const Key('settings-subscription-access-end'),
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: HeyBeanTheme.destructive,
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         'Once the final active period has ended, your HeyBean data will be deleted and you will need to create a new account to keep using the app.',
                         style: TextStyle(
                           color: HeyBeanTheme.muted,
@@ -23211,7 +23414,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                       Text(
                         renewalLine,
                         key: const Key('settings-subscription-renewal-summary'),
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: HeyBeanTheme.muted,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -23219,7 +23422,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                       ),
                     ] else if (subscription.status == 'trialing') ...[
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         'Trial renewal uses the saved Stripe payment method.',
                         style: TextStyle(
                           color: HeyBeanTheme.muted,
@@ -23254,21 +23457,21 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                         dimension: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.swap_vert_rounded),
-                label: const Text('Change plan'),
+                    : Icon(Icons.swap_vert_rounded),
+                label: Text('Change plan'),
               ),
               OutlinedButton.icon(
                 key: const Key('settings-update-payment-method-action'),
                 onPressed: _busy ? null : _updatePaymentMethod,
-                icon: const Icon(Icons.credit_card_rounded),
-                label: const Text('Update payment'),
+                icon: Icon(Icons.credit_card_rounded),
+                label: Text('Update payment'),
               ),
               OutlinedButton.icon(
                 key: const Key('settings-cancel-subscription-action'),
                 onPressed: _busy || !subscription.canCancel
                     ? null
                     : _cancelSubscription,
-                icon: const Icon(Icons.event_busy_rounded),
+                icon: Icon(Icons.event_busy_rounded),
                 label: Text(canceled ? 'Renewal canceled' : 'Cancel renewal'),
               ),
               if (subscription.canResume)
@@ -23280,8 +23483,8 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                           dimension: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.restart_alt_rounded),
-                  label: const Text('Restart subscription'),
+                      : Icon(Icons.restart_alt_rounded),
+                  label: Text('Restart subscription'),
                 ),
             ],
           ),
@@ -23373,7 +23576,7 @@ class _PlanManagementSheetState extends State<_PlanManagementSheet> {
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Payment stays inside HeyBean with Stripe handling secure card entry and storage.',
               style: TextStyle(
                 color: HeyBeanTheme.muted,
@@ -23461,7 +23664,7 @@ class _PlanManagementTile extends StatelessWidget {
               children: [
                 Text(
                   plan.label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: HeyBeanTheme.text,
                     fontWeight: FontWeight.w900,
                   ),
@@ -23469,7 +23672,7 @@ class _PlanManagementTile extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   '${_planDisplayPrice(plan, billingInterval)}${_planDisplayPriceSuffix(plan, billingInterval) ?? ''} • ${_planTrialText(billingInterval)}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: HeyBeanTheme.muted,
                     fontWeight: FontWeight.w700,
                   ),
@@ -23486,14 +23689,18 @@ class _PlanManagementTile extends StatelessWidget {
 class _ThemePreferencesCard extends StatefulWidget {
   const _ThemePreferencesCard({
     required this.selectedThemeKey,
+    required this.selectedThemeModeKey,
     required this.commandCenterLabel,
     required this.onChanged,
+    required this.onModeChanged,
     required this.onCommandCenterLabelChanged,
   });
 
   final String selectedThemeKey;
+  final String selectedThemeModeKey;
   final String commandCenterLabel;
   final Future<void> Function(String themeKey) onChanged;
+  final Future<void> Function(String themeModeKey) onModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
 
   @override
@@ -23502,8 +23709,10 @@ class _ThemePreferencesCard extends StatefulWidget {
 
 class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
   late String _selectedThemeKey;
+  late String _selectedThemeModeKey;
   late final TextEditingController _commandCenterLabelController;
   bool _saving = false;
+  bool _savingMode = false;
   bool _expanded = false;
   bool _savingLabel = false;
 
@@ -23511,6 +23720,9 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
   void initState() {
     super.initState();
     _selectedThemeKey = heyBeanColorThemeForKey(widget.selectedThemeKey).key;
+    _selectedThemeModeKey = heyBeanThemeModeForKey(
+      widget.selectedThemeModeKey,
+    ).key;
     _commandCenterLabelController = TextEditingController(
       text: widget.commandCenterLabel,
     );
@@ -23521,6 +23733,11 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
     super.didUpdateWidget(oldWidget);
     if (!_saving) {
       _selectedThemeKey = heyBeanColorThemeForKey(widget.selectedThemeKey).key;
+    }
+    if (!_savingMode) {
+      _selectedThemeModeKey = heyBeanThemeModeForKey(
+        widget.selectedThemeModeKey,
+      ).key;
     }
     if (!_savingLabel &&
         oldWidget.commandCenterLabel != widget.commandCenterLabel &&
@@ -23549,6 +23766,20 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
     }
   }
 
+  Future<void> _saveMode(String themeModeKey) async {
+    final normalizedThemeModeKey = heyBeanThemeModeForKey(themeModeKey).key;
+    if (_savingMode || normalizedThemeModeKey == _selectedThemeModeKey) return;
+    setState(() {
+      _selectedThemeModeKey = normalizedThemeModeKey;
+      _savingMode = true;
+    });
+    try {
+      await widget.onModeChanged(normalizedThemeModeKey);
+    } finally {
+      if (mounted) setState(() => _savingMode = false);
+    }
+  }
+
   Future<void> _saveCommandCenterLabel() async {
     if (_savingLabel) return;
     final label = _commandCenterLabelController.text.trim().isEmpty
@@ -23569,6 +23800,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
   @override
   Widget build(BuildContext context) {
     final selectedTheme = heyBeanColorThemeForKey(_selectedThemeKey);
+    final selectedMode = heyBeanThemeModeForKey(_selectedThemeModeKey);
     return Container(
       key: const Key('theme-preferences-card'),
       margin: const EdgeInsets.only(top: 10),
@@ -23599,14 +23831,14 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Appearance',
                             style: TextStyle(fontWeight: FontWeight.w800),
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${selectedTheme.label} accent · ${widget.commandCenterLabel}',
-                            style: const TextStyle(
+                            '${selectedTheme.label} accent · ${selectedMode.label} · ${widget.commandCenterLabel}',
+                            style: TextStyle(
                               color: HeyBeanTheme.muted,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -23660,7 +23892,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Divider(height: 1, color: HeyBeanTheme.border),
+                  Divider(height: 1, color: HeyBeanTheme.border),
                   const SizedBox(height: 12),
                   Text(
                     'Choose the accent color used across HeyBean.',
@@ -23679,6 +23911,17 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                           onTap: () => _save(theme.key),
                         ),
                     ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Choose when HeyBean uses dark mode.',
+                    style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
+                  ),
+                  const SizedBox(height: 10),
+                  _ThemeModeSelector(
+                    selectedThemeModeKey: _selectedThemeModeKey,
+                    disabled: _savingMode,
+                    onChanged: _saveMode,
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -23705,7 +23948,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                               dimension: 17,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('Save'),
+                          : Text('Save'),
                     ),
                   ),
                 ],
@@ -23786,7 +24029,7 @@ class _ThemeSwatchButton extends StatelessWidget {
                 theme.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800),
+                style: TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
           ],
@@ -23795,6 +24038,63 @@ class _ThemeSwatchButton extends StatelessWidget {
     ),
   );
 }
+
+class _ThemeModeSelector extends StatelessWidget {
+  const _ThemeModeSelector({
+    required this.selectedThemeModeKey,
+    required this.disabled,
+    required this.onChanged,
+  });
+
+  final String selectedThemeModeKey;
+  final bool disabled;
+  final Future<void> Function(String themeModeKey) onChanged;
+
+  @override
+  Widget build(BuildContext context) => SegmentedButton<String>(
+    key: const Key('theme-mode-selector'),
+    segments: [
+      for (final mode in heyBeanThemeModes)
+        ButtonSegment<String>(
+          value: mode.key,
+          icon: Icon(_themeModeIcon(mode.key), size: 18),
+          label: Text(mode.label),
+          tooltip: mode.subtitle,
+        ),
+    ],
+    selected: {heyBeanThemeModeForKey(selectedThemeModeKey).key},
+    showSelectedIcon: false,
+    onSelectionChanged: disabled
+        ? null
+        : (selection) => unawaited(onChanged(selection.first)),
+    style: ButtonStyle(
+      visualDensity: VisualDensity.compact,
+      foregroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? HeyBeanTheme.accentInk
+            : HeyBeanTheme.text,
+      ),
+      backgroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? HeyBeanTheme.accent
+            : HeyBeanTheme.surface,
+      ),
+      side: WidgetStateProperty.resolveWith(
+        (states) => BorderSide(
+          color: states.contains(WidgetState.selected)
+              ? HeyBeanTheme.accentStrong.withValues(alpha: .42)
+              : HeyBeanTheme.border,
+        ),
+      ),
+    ),
+  );
+}
+
+IconData _themeModeIcon(String key) => switch (key) {
+  'light' => Icons.light_mode_rounded,
+  'dark' => Icons.dark_mode_rounded,
+  _ => Icons.brightness_auto_rounded,
+};
 
 class _NotificationPreferencesCard extends StatefulWidget {
   const _NotificationPreferencesCard({
@@ -23866,7 +24166,7 @@ class _NotificationPreferencesCardState
                 color: HeyBeanTheme.accentStrong,
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Notification preferences',
                   style: TextStyle(fontWeight: FontWeight.w800),
@@ -23881,8 +24181,8 @@ class _NotificationPreferencesCardState
           onChanged: _saving
               ? null
               : (value) => _save(_preferences.copyWith(reminderPush: value)),
-          title: const Text('Reminder push notifications'),
-          secondary: const Icon(Icons.phone_iphone_rounded),
+          title: Text('Reminder push notifications'),
+          secondary: Icon(Icons.phone_iphone_rounded),
         ),
         SwitchListTile.adaptive(
           key: const Key('reminder-email-preference'),
@@ -23890,8 +24190,8 @@ class _NotificationPreferencesCardState
           onChanged: _saving
               ? null
               : (value) => _save(_preferences.copyWith(reminderEmail: value)),
-          title: const Text('Reminder emails'),
-          secondary: const Icon(Icons.email_outlined),
+          title: Text('Reminder emails'),
+          secondary: Icon(Icons.email_outlined),
         ),
       ],
     ),
@@ -24033,24 +24333,24 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Invitation sent'),
+        title: Text('Invitation sent'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Share this invite link if the email does not arrive.'),
+            Text('Share this invite link if the email does not arrive.'),
             const SizedBox(height: 12),
             SelectableText(
               link,
               key: const Key('workspace-invite-share-link'),
-              style: const TextStyle(fontSize: 13),
+              style: TextStyle(fontSize: 13),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Done'),
+            child: Text('Done'),
           ),
           FilledButton.icon(
             key: const Key('workspace-invite-copy-link'),
@@ -24061,8 +24361,8 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                 setState(() => _message = 'Invitation link copied.');
               }
             },
-            icon: const Icon(Icons.copy_rounded),
-            label: const Text('Copy link'),
+            icon: Icon(Icons.copy_rounded),
+            label: Text('Copy link'),
           ),
         ],
       ),
@@ -24139,19 +24439,19 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sync all from my personal workspace'),
+        title: Text('Sync all from my personal workspace'),
         content: Text(
           'Copy all current Personal tasks, reminders, and events to ${target.name}. This is a one-time sync and will not automatically sync future items.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           FilledButton(
             key: Key('workspace-sync-personal-run-${target.id}'),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Sync'),
+            child: Text('Sync'),
           ),
         ],
       ),
@@ -24268,7 +24568,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
         size: 18,
       );
     }
-    return const Icon(
+    return Icon(
       Icons.schedule_send_rounded,
       color: HeyBeanTheme.muted,
       size: 18,
@@ -24305,7 +24605,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                   color: HeyBeanTheme.accentStrong,
                 ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -24381,13 +24681,13 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                         Expanded(
                           child: Text(
                             workspace.isPersonal ? 'Personal' : workspace.name,
-                            style: const TextStyle(fontWeight: FontWeight.w800),
+                            style: TextStyle(fontWeight: FontWeight.w800),
                           ),
                         ),
                         Text(
                           workspace.role,
                           key: Key('workspace-role-${workspace.id}'),
-                          style: const TextStyle(color: HeyBeanTheme.muted),
+                          style: TextStyle(color: HeyBeanTheme.muted),
                         ),
                         if (!workspace.isPersonal &&
                             workspace.numericId != null) ...[
@@ -24402,7 +24702,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                                     ),
                                     'Left ${workspace.name}.',
                                   ),
-                            child: const Text('Leave'),
+                            child: Text('Leave'),
                           ),
                         ],
                       ],
@@ -24418,7 +24718,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                             onPressed: _busy
                                 ? null
                                 : () => _renameWorkspace(workspace),
-                            child: const Text('Rename'),
+                            child: Text('Rename'),
                           ),
                         if (workspace.canManageMembers && !workspace.isPersonal)
                           TextButton(
@@ -24426,7 +24726,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                             onPressed: _busy
                                 ? null
                                 : () => _inviteMember(workspace),
-                            child: const Text('Invite'),
+                            child: Text('Invite'),
                           ),
                       ],
                     ),
@@ -24505,13 +24805,13 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                         onPressed: _busy
                             ? null
                             : () => _syncAllFromPersonal(workspace, workspaces),
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: const Text('Sync all from personal'),
+                        icon: Icon(Icons.refresh_rounded),
+                        label: Text('Sync all from personal'),
                       ),
                     ],
                     if (googleCalendars.isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      const Text(
+                      Text(
                         'Connected calendars for this workspace',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
@@ -24540,7 +24840,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                             key: Key(
                               'workspace-google-calendar-access-${workspace.id}-${calendar.id}',
                             ),
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: HeyBeanTheme.muted,
                               fontSize: 12,
                             ),
@@ -24563,8 +24863,8 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                 OutlinedButton.icon(
                   key: const Key('workspace-accept-invitation-action'),
                   onPressed: _busy ? null : _acceptInvitation,
-                  icon: const Icon(Icons.mark_email_read_rounded),
-                  label: const Text('Accept invitation'),
+                  icon: Icon(Icons.mark_email_read_rounded),
+                  label: Text('Accept invitation'),
                 ),
               ],
             ),
@@ -24627,7 +24927,7 @@ class _WorkspaceTextInputDialogState extends State<_WorkspaceTextInputDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
+        child: Text('Cancel'),
       ),
       FilledButton(
         key: widget.submitKey,
@@ -24681,13 +24981,13 @@ class _CalendarPreferencesCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Calendar preferences',
                       style: TextStyle(fontWeight: FontWeight.w800),
                     ),
                     Text(
                       'Day view visible hours: ${_hourLabel(startHour)} – ${_hourLabel(endHour)}',
-                      style: const TextStyle(color: HeyBeanTheme.muted),
+                      style: TextStyle(color: HeyBeanTheme.muted),
                     ),
                   ],
                 ),
@@ -24829,16 +25129,16 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
             children: [
               ListTile(
                 key: const Key('external-calendar-connect-google'),
-                leading: const Icon(Icons.calendar_month_rounded),
-                title: const Text('Google Calendar'),
-                subtitle: const Text('Connect with Google OAuth'),
+                leading: Icon(Icons.calendar_month_rounded),
+                title: Text('Google Calendar'),
+                subtitle: Text('Connect with Google OAuth'),
                 onTap: () => Navigator.of(context).pop('google'),
               ),
               ListTile(
                 key: const Key('external-calendar-connect-outlook'),
-                leading: const Icon(Icons.mail_outline_rounded),
-                title: const Text('Microsoft Outlook'),
-                subtitle: const Text('Connect with Microsoft sign-in'),
+                leading: Icon(Icons.mail_outline_rounded),
+                title: Text('Microsoft Outlook'),
+                subtitle: Text('Connect with Microsoft sign-in'),
                 onTap: () => Navigator.of(context).pop('outlook'),
               ),
             ],
@@ -25100,7 +25400,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'External Calendar Sync',
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
@@ -25108,7 +25408,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                         connected
                             ? 'Connected calendars pull external events into Bean. Bean events push out only when selected on that event.'
                             : 'Connect Google Calendar or Microsoft Outlook.',
-                        style: const TextStyle(color: HeyBeanTheme.muted),
+                        style: TextStyle(color: HeyBeanTheme.muted),
                       ),
                     ],
                   ),
@@ -25130,7 +25430,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
               const SizedBox(height: 8),
               Text(
                 googleStatus.lastError!,
-                style: const TextStyle(color: Colors.redAccent),
+                style: TextStyle(color: Colors.redAccent),
               ),
             ],
             if (outlookStatus?.lastError != null &&
@@ -25138,7 +25438,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
               const SizedBox(height: 8),
               Text(
                 outlookStatus.lastError!,
-                style: const TextStyle(color: Colors.redAccent),
+                style: TextStyle(color: Colors.redAccent),
               ),
             ],
             if (_message != null) ...[
@@ -25179,7 +25479,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                 OutlinedButton.icon(
                   key: const Key('google-calendar-connect-action'),
                   onPressed: _busy ? null : _showConnectOptions,
-                  icon: const Icon(Icons.login_rounded),
+                  icon: Icon(Icons.login_rounded),
                   label: Text(
                     connected ? 'Connect another calendar' : 'Connect Calendar',
                   ),
@@ -25245,7 +25545,7 @@ class _ExternalCalendarProviderTile extends StatelessWidget {
                     connected
                         ? '$label connected${status?.lastSyncedAt == null ? '' : ' · last sync ${_formatCalendarEventDateTime(status?.lastSyncedAt)}'}'
                         : '$label not connected',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
+                    style: TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
               ],
@@ -25259,21 +25559,21 @@ class _ExternalCalendarProviderTile extends StatelessWidget {
                   OutlinedButton.icon(
                     key: Key('$provider-calendar-copy-link-action'),
                     onPressed: busy ? null : onCopyLink,
-                    icon: const Icon(Icons.copy_rounded),
-                    label: const Text('Copy auth link'),
+                    icon: Icon(Icons.copy_rounded),
+                    label: Text('Copy auth link'),
                   ),
                   OutlinedButton.icon(
                     key: Key('$provider-calendar-check-connection-action'),
                     onPressed: busy ? null : onCheckConnection,
-                    icon: const Icon(Icons.verified_rounded),
-                    label: const Text('Check connection'),
+                    icon: Icon(Icons.verified_rounded),
+                    label: Text('Check connection'),
                   ),
                 ],
               ),
             ],
             if (connected) ...[
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Sync now pulls selected external events into Bean. Bean events push outward only when that event has this provider checked.',
                 style: TextStyle(color: HeyBeanTheme.muted),
               ),
@@ -25322,13 +25622,13 @@ class _ExternalCalendarProviderTile extends StatelessWidget {
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.refresh_rounded),
-                    label: const Text('Sync now'),
+                        : Icon(Icons.refresh_rounded),
+                    label: Text('Sync now'),
                   ),
                   TextButton(
                     key: Key('$provider-calendar-disconnect-action'),
                     onPressed: busy ? null : onDisconnect,
-                    child: const Text('Disconnect'),
+                    child: Text('Disconnect'),
                   ),
                 ],
               ),
@@ -25401,7 +25701,7 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   widget.pending
-                      ? const Padding(
+                      ? Padding(
                           padding: EdgeInsets.all(12),
                           child: SizedBox.square(
                             dimension: 18,
@@ -25469,7 +25769,7 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                                 alignment: Alignment.centerRight,
                                 child: Text(
                                   widget.subtitle,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: HeyBeanTheme.muted,
                                     fontSize: 12,
                                   ),
@@ -25486,7 +25786,7 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                       key: Key('task-edit-action-${task.id}'),
                       tooltip: 'Edit task',
                       onPressed: widget.onTap,
-                      icon: const Icon(Icons.edit_outlined),
+                      icon: Icon(Icons.edit_outlined),
                     ),
                 ],
               ),
@@ -25507,14 +25807,14 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                           ),
                           child: Text(
                             task.notes!.trim(),
-                            style: const TextStyle(fontSize: 13, height: 1.35),
+                            style: TextStyle(fontSize: 13, height: 1.35),
                           ),
                         ),
                         const SizedBox(height: 8),
                       ],
                       Row(
                         children: [
-                          const Expanded(
+                          Expanded(
                             child: Text(
                               'Sub-tasks',
                               style: TextStyle(
@@ -25528,13 +25828,13 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                             TextButton.icon(
                               key: Key('task-add-subtask-${task.id}'),
                               onPressed: widget.onAddSubtask,
-                              icon: const Icon(Icons.add_rounded, size: 16),
-                              label: const Text('Add'),
+                              icon: Icon(Icons.add_rounded, size: 16),
+                              label: Text('Add'),
                             ),
                         ],
                       ),
                       if (widget.subtasks.isEmpty)
-                        const Text(
+                        Text(
                           'No active sub-tasks',
                           style: TextStyle(
                             color: HeyBeanTheme.muted,
@@ -25563,7 +25863,7 @@ class _TaskItemTileState extends State<_TaskItemTile> {
               key: Key('task-critical-star-${task.id}'),
               top: 1,
               right: 4,
-              child: const Icon(
+              child: Icon(
                 Icons.star_rounded,
                 color: HeyBeanTheme.warning,
                 size: 16,
@@ -25617,11 +25917,7 @@ class _SubtaskRow extends StatelessWidget {
                     activeColor: HeyBeanTheme.accentStrong,
                   ),
             if (_taskIsCritical(task))
-              const Icon(
-                Icons.star_rounded,
-                size: 14,
-                color: HeyBeanTheme.warning,
-              ),
+              Icon(Icons.star_rounded, size: 14, color: HeyBeanTheme.warning),
             Expanded(
               child: Text(
                 task.title,
@@ -25635,7 +25931,7 @@ class _SubtaskRow extends StatelessWidget {
             if ((task.dueAt ?? '').trim().isNotEmpty)
               Text(
                 _formatCalendarEventDateTime(task.dueAt),
-                style: const TextStyle(color: HeyBeanTheme.muted, fontSize: 11),
+                style: TextStyle(color: HeyBeanTheme.muted, fontSize: 11),
               ),
           ],
         ),
@@ -25698,7 +25994,7 @@ class _ReminderItemTile extends StatelessWidget {
                     Row(
                       children: [
                         if (critical) ...[
-                          const Icon(
+                          Icon(
                             Icons.star_rounded,
                             size: 15,
                             color: HeyBeanTheme.warning,
@@ -25724,10 +26020,7 @@ class _ReminderItemTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: const TextStyle(
-                        color: HeyBeanTheme.muted,
-                        fontSize: 12,
-                      ),
+                      style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
                     ),
                   ],
                 ),
@@ -25738,7 +26031,7 @@ class _ReminderItemTile extends StatelessWidget {
             key: Key('reminder-edit-action-${reminder.id}'),
             tooltip: 'Edit reminder',
             onPressed: onTap,
-            icon: const Icon(Icons.edit_outlined),
+            icon: Icon(Icons.edit_outlined),
           ),
         ],
       ),
@@ -25781,14 +26074,8 @@ class _CompactItemTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                Text(
-                  subtitle,
-                  style: const TextStyle(color: HeyBeanTheme.muted),
-                ),
+                Text(title, style: TextStyle(fontWeight: FontWeight.w800)),
+                Text(subtitle, style: TextStyle(color: HeyBeanTheme.muted)),
               ],
             ),
           ),
@@ -25813,7 +26100,7 @@ class _EmptySurface extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       border: Border.all(color: HeyBeanTheme.border),
     ),
-    child: Text(label, style: const TextStyle(color: HeyBeanTheme.muted)),
+    child: Text(label, style: TextStyle(color: HeyBeanTheme.muted)),
   );
 }
 
@@ -25854,7 +26141,7 @@ class _InlineLoadingSurface extends StatelessWidget {
           const SizedBox(width: 10),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               color: HeyBeanTheme.muted,
               fontWeight: FontWeight.w800,
             ),
@@ -25914,7 +26201,7 @@ class _InlineLoadingBadge extends StatelessWidget {
             const SizedBox(width: 7),
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 color: HeyBeanTheme.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w900,
@@ -26529,13 +26816,13 @@ class _DeleteAccountConfirmationDialogState
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Delete account permanently?'),
+    title: Text('Delete account permanently?'),
     content: SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'This permanently deletes your HeyBean account, assistant history, tasks, reminders, calendar events, and account data. Export anything you need before continuing.',
           ),
           const SizedBox(height: 12),
@@ -26554,13 +26841,13 @@ class _DeleteAccountConfirmationDialogState
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(false),
-        child: const Text('Cancel'),
+        child: Text('Cancel'),
       ),
       FilledButton(
         key: const Key('delete-account-confirmation-submit'),
         style: _destructiveFilledButtonStyle(),
         onPressed: _submit,
-        child: const Text('Delete account'),
+        child: Text('Delete account'),
       ),
     ],
   );
@@ -26630,7 +26917,7 @@ class _AccountCard extends StatelessWidget {
           trailing: TextButton(
             key: const Key('settings-edit-email-action'),
             onPressed: () => _editEmail(context),
-            child: const Text('Edit'),
+            child: Text('Edit'),
           ),
         ),
         const SizedBox(height: 10),
@@ -26645,15 +26932,15 @@ class _AccountCard extends StatelessWidget {
             OutlinedButton.icon(
               key: const Key('sign-out-action'),
               onPressed: onSignOut,
-              icon: const Icon(Icons.logout_rounded),
-              label: const Text('Sign out'),
+              icon: Icon(Icons.logout_rounded),
+              label: Text('Sign out'),
             ),
             FilledButton.icon(
               key: const Key('delete-account-action'),
               style: _destructiveFilledButtonStyle(),
               onPressed: () => _requestDeleteAccount(context),
-              icon: const Icon(Icons.delete_outline_rounded),
-              label: const Text('Delete account'),
+              icon: Icon(Icons.delete_outline_rounded),
+              label: Text('Delete account'),
             ),
           ],
         ),
@@ -26697,19 +26984,19 @@ class _SettingsLegalLinksRow extends StatelessWidget {
             key: const Key('settings-privacy-policy-link'),
             style: buttonStyle,
             onPressed: () => launchExternalUrl(_privacyPolicyUrl),
-            child: const Text('Privacy Policy'),
+            child: Text('Privacy Policy'),
           ),
           TextButton(
             key: const Key('settings-terms-of-service-link'),
             style: buttonStyle,
             onPressed: () => launchExternalUrl(_termsOfServiceUrl),
-            child: const Text('Terms of Use'),
+            child: Text('Terms of Use'),
           ),
           TextButton(
             key: const Key('settings-support-link'),
             style: buttonStyle,
             onPressed: () => launchExternalUrl(_supportUrl),
-            child: const Text('Support'),
+            child: Text('Support'),
           ),
         ],
       ),
@@ -26751,7 +27038,7 @@ class _EmailEditorDialogState extends State<_EmailEditorDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Update email'),
+    title: Text('Update email'),
     content: TextField(
       key: const Key('settings-email-editor-field'),
       controller: _controller,
@@ -26762,12 +27049,12 @@ class _EmailEditorDialogState extends State<_EmailEditorDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
+        child: Text('Cancel'),
       ),
       FilledButton(
         key: const Key('settings-email-editor-save'),
         onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
-        child: const Text('Save'),
+        child: Text('Save'),
       ),
     ],
   );
@@ -26841,7 +27128,7 @@ class _FormEditorHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.only(bottom: 14),
-    decoration: const BoxDecoration(
+    decoration: BoxDecoration(
       border: Border(bottom: BorderSide(color: Color(0x1A1C314E))),
     ),
     child: Row(
@@ -26948,7 +27235,7 @@ class _MobileFormSection extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: HeyBeanTheme.text,
                       fontSize: 13,
                       height: 1.2,
@@ -26959,7 +27246,7 @@ class _MobileFormSection extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontSize: 12,
                         height: 1.35,
@@ -27024,7 +27311,7 @@ class _MobileFormSwitch extends StatelessWidget {
       dense: true,
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           color: HeyBeanTheme.text,
           fontSize: 13,
           fontWeight: FontWeight.w900,
@@ -27032,7 +27319,7 @@ class _MobileFormSwitch extends StatelessWidget {
       ),
       subtitle: Text(
         subtitle,
-        style: const TextStyle(
+        style: TextStyle(
           color: HeyBeanTheme.muted,
           fontSize: 12,
           height: 1.35,
@@ -27153,7 +27440,7 @@ Future<void> _showInfoSheet(
               width: double.infinity,
               child: FilledButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Got it'),
+                child: Text('Got it'),
               ),
             ),
           ],
@@ -27215,12 +27502,12 @@ class _MiniSurface extends StatelessWidget {
       children: [
         Icon(icon, color: HeyBeanTheme.accentStrong),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+        Text(label, style: TextStyle(fontWeight: FontWeight.w800)),
         Text(
           value,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: HeyBeanTheme.muted),
+          style: TextStyle(color: HeyBeanTheme.muted),
         ),
       ],
     ),
@@ -27261,16 +27548,13 @@ class _DueReminderBanner extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(
-                Icons.notifications_active_rounded,
-                color: Colors.white,
-              ),
+              Icon(Icons.notifications_active_rounded, color: Colors.white),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Reminder due now',
                       style: TextStyle(
                         color: Colors.white70,
@@ -27281,7 +27565,7 @@ class _DueReminderBanner extends StatelessWidget {
                     Text(
                       reminder.title,
                       key: const Key('due-reminder-banner-title'),
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Colors.white,
                         fontSize: 16,
                         fontWeight: FontWeight.w900,
@@ -27293,7 +27577,7 @@ class _DueReminderBanner extends StatelessWidget {
               IconButton(
                 key: const Key('due-reminder-dismiss-icon'),
                 onPressed: onDismiss,
-                icon: const Icon(Icons.close_rounded, color: Colors.white),
+                icon: Icon(Icons.close_rounded, color: Colors.white),
                 tooltip: 'Dismiss reminder banner',
               ),
             ],
@@ -27305,7 +27589,7 @@ class _DueReminderBanner extends StatelessWidget {
                 key: const Key('due-reminder-dismiss'),
                 onPressed: onDismiss,
                 style: TextButton.styleFrom(foregroundColor: Colors.white),
-                child: const Text('Dismiss'),
+                child: Text('Dismiss'),
               ),
               const Spacer(),
               FilledButton.icon(
@@ -27315,8 +27599,8 @@ class _DueReminderBanner extends StatelessWidget {
                   backgroundColor: Colors.white,
                   foregroundColor: HeyBeanTheme.accent,
                 ),
-                icon: const Icon(Icons.check_rounded),
-                label: const Text('Mark complete'),
+                icon: Icon(Icons.check_rounded),
+                label: Text('Mark complete'),
               ),
             ],
           ),
@@ -27408,12 +27692,12 @@ class _BetaFeedbackDialogState extends State<_BetaFeedbackDialog> {
   Widget build(BuildContext context) => AlertDialog(
     key: const Key('beta-feedback-dialog'),
     icon: Icon(Icons.bug_report_rounded, color: HeyBeanTheme.accent),
-    title: const Text('Report an issue'),
+    title: Text('Report an issue'),
     content: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Tell us what happened so we can fix it quickly.'),
+        Text('Tell us what happened so we can fix it quickly.'),
         const SizedBox(height: 12),
         TextField(
           key: const Key('beta-feedback-message'),
@@ -27433,7 +27717,7 @@ class _BetaFeedbackDialogState extends State<_BetaFeedbackDialog> {
           Text(
             _error!,
             key: const Key('beta-feedback-error'),
-            style: const TextStyle(
+            style: TextStyle(
               color: HeyBeanTheme.destructive,
               fontWeight: FontWeight.w700,
             ),
@@ -27444,7 +27728,7 @@ class _BetaFeedbackDialogState extends State<_BetaFeedbackDialog> {
     actions: [
       TextButton(
         onPressed: _submitting ? null : () => Navigator.of(context).pop(false),
-        child: const Text('Cancel'),
+        child: Text('Cancel'),
       ),
       FilledButton.icon(
         key: const Key('beta-feedback-submit'),
@@ -27455,7 +27739,7 @@ class _BetaFeedbackDialogState extends State<_BetaFeedbackDialog> {
                 height: 16,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : const Icon(Icons.send_rounded),
+            : Icon(Icons.send_rounded),
         label: Text(_submitting ? 'Sending...' : 'Send report'),
       ),
     ],
@@ -27488,8 +27772,8 @@ class _BetaFeedbackThanksDialog extends StatelessWidget {
         size: 34,
       ),
     ),
-    title: const Text('Thank you for helping improve HeyBean!'),
-    content: const Text(
+    title: Text('Thank you for helping improve HeyBean!'),
+    content: Text(
       "We've received your feedback and will fix any issues ASAP!",
       textAlign: TextAlign.center,
     ),
@@ -27498,7 +27782,7 @@ class _BetaFeedbackThanksDialog extends StatelessWidget {
       FilledButton(
         key: const Key('beta-feedback-thanks-done'),
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Done'),
+        child: Text('Done'),
       ),
     ],
   );
@@ -27678,7 +27962,7 @@ class _TourCaptionCard extends StatelessWidget {
         Text(
           caption,
           key: const Key('onboarding-tour-caption'),
-          style: const TextStyle(
+          style: TextStyle(
             color: HeyBeanTheme.text,
             decoration: TextDecoration.none,
             fontSize: 17,
@@ -27692,7 +27976,7 @@ class _TourCaptionCard extends StatelessWidget {
             TextButton(
               key: const Key('onboarding-tour-skip'),
               onPressed: onSkip,
-              child: const Text('Skip'),
+              child: Text('Skip'),
             ),
             const Spacer(),
             FilledButton(
@@ -27742,7 +28026,7 @@ class _BeanIntroCallout extends StatelessWidget {
               children: [
                 Icon(Icons.eco_rounded, color: HeyBeanTheme.accentStrong),
                 const SizedBox(width: 10),
-                const Flexible(
+                Flexible(
                   child: Text(
                     'Start by introducing yourself to Bean',
                     key: Key('bean-intro-callout-text'),
@@ -27944,9 +28228,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: HeyBeanTheme.surface.withValues(alpha: .94),
-                border: const Border(
-                  top: BorderSide(color: HeyBeanTheme.border),
-                ),
+                border: Border(top: BorderSide(color: HeyBeanTheme.border)),
                 boxShadow: const [
                   BoxShadow(
                     color: Color(0x1A020617),
@@ -28108,7 +28390,7 @@ class _BeanWorkDockStrip extends StatelessWidget {
                   if (displayItems.isNotEmpty)
                     Text(
                       '$completed/${displayItems.length}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontSize: 11,
                         fontWeight: FontWeight.w900,
@@ -28290,7 +28572,7 @@ class _BeanResponsePreviewTagState extends State<_BeanResponsePreviewTag> {
                         widget.text,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: HeyBeanTheme.text,
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
