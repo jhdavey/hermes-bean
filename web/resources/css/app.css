@@ -7049,8 +7049,32 @@
     display: none;
 }
 
-.hb-note-folder-select {
+.hb-note-folder-select-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
     width: min(220px, 100%);
+}
+
+.hb-note-folder-select-icon {
+    position: absolute;
+    left: 16px;
+    width: 18px;
+    height: 18px;
+    color: var(--hb-muted);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.hb-note-folder-select-icon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+
+.hb-note-folder-select {
+    width: 100%;
+    padding-left: 44px;
 }
 
 .hb-note-pin-active {
@@ -7072,6 +7096,10 @@
     background: var(--hb-surface);
     color: var(--hb-text);
     font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
 }
 
 .hb-note-format-button svg {

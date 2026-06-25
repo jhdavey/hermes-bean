@@ -90,6 +90,190 @@ class HermesToolRuntimeServiceTest extends TestCase
         });
     }
 
+    public function test_stale_prior_completion_claim_cannot_skip_requested_app_write(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-stale-already-done',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I already created that note for you.',
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-create-note-after-correction',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_create_note',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_note',
+                                'arguments' => json_encode([
+                                    'title' => 'Directions to boil an egg',
+                                    'plain_text' => "1. Bring water to a boil.\n2. Add the egg.\n3. Cook 9-12 minutes.",
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-create-note-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Done — I created the note.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-stale-already@example.com');
+        $user = User::where('email', 'tool-stale-already@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'create a note with directions to boil an egg',
+        ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'All set — I created the note.',
+        ]);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'create a note with directions to boil an egg',
+            'metadata' => [
+                'source' => 'flutter',
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Done — I created the note.')
+            ->assertJsonFragment(['event_type' => 'assistant.note.created']);
+
+        $this->assertDatabaseHas('notes', [
+            'user_id' => $user->id,
+            'title' => 'Directions to boil an egg',
+        ]);
+
+        Http::assertSent(function ($request): bool {
+            $messages = collect($request->data()['messages'] ?? []);
+
+            return $messages->contains(fn (mixed $message): bool => is_array($message)
+                && ($message['role'] ?? null) === 'system'
+                && str_contains((string) ($message['content'] ?? ''), 'claimed prior completion without checking current app state'));
+        });
+    }
+
+    public function test_tool_runtime_emits_ordered_work_items_for_write_tool_calls(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-work-plan-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [
+                            [
+                                'id' => 'call_event',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_calendar_event',
+                                    'arguments' => json_encode([
+                                        'title' => 'Deep work',
+                                        'starts_at' => '2026-06-24T20:00:00-04:00',
+                                        'ends_at' => '2026-06-24T23:00:00-04:00',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                            [
+                                'id' => 'call_reminder',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_reminder',
+                                    'arguments' => json_encode([
+                                        'title' => 'Reminder: Deep work',
+                                        'remind_at' => '2026-06-24T19:30:00-04:00',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                        ],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-work-plan-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Done — I added the deep work block and reminder.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->premiumApiToken('tool-work-plan@example.com');
+        $user = User::where('email', 'tool-work-plan@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'I need to do some deep work later. Put a work block on my schedule for 8-11pm. Set a reminder 30 minutes before as well',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-06-24T17:37:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.work_item.planned'])
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.reminder.created']);
+
+        $events = collect($response->json('data.events'));
+        $planned = $events->where('event_type', 'assistant.work_item.planned')->values();
+        $this->assertSame('Create calendar event: Deep work', data_get($planned[0], 'payload.label'));
+        $this->assertSame(0, data_get($planned[0], 'payload.work_order'));
+        $this->assertSame('Create reminder: Deep work', data_get($planned[1], 'payload.label'));
+        $this->assertSame(1, data_get($planned[1], 'payload.work_order'));
+
+        $calendarEvent = $events->firstWhere('event_type', 'assistant.calendar_event.created');
+        $reminderEvent = $events->firstWhere('event_type', 'assistant.reminder.created');
+        $this->assertSame(data_get($planned[0], 'payload.work_item_id'), data_get($calendarEvent, 'payload.work_item_id'));
+        $this->assertSame('Create calendar event: Deep work', data_get($calendarEvent, 'payload.work_label'));
+        $this->assertSame(data_get($planned[1], 'payload.work_item_id'), data_get($reminderEvent, 'payload.work_item_id'));
+        $this->assertSame('Create reminder: Deep work', data_get($reminderEvent, 'payload.work_label'));
+
+        $this->assertDatabaseHas('calendar_events', [
+            'user_id' => $user->id,
+            'title' => 'Deep work',
+        ]);
+        $this->assertDatabaseHas('reminders', [
+            'user_id' => $user->id,
+            'title' => 'Reminder: Deep work',
+        ]);
+    }
+
     public function test_tool_runtime_saves_onboarding_profile_from_top_level_tool_fields(): void
     {
         Http::fakeSequence()
@@ -716,6 +900,8 @@ class HermesToolRuntimeServiceTest extends TestCase
                                         'name' => 'external_lookup',
                                         'arguments' => json_encode([
                                             'query' => 'current weather in Orlando Florida right now',
+                                            'domain' => 'weather',
+                                            'intent' => 'current_weather',
                                             'location' => 'Orlando, FL',
                                         ], JSON_THROW_ON_ERROR),
                                     ],
@@ -793,6 +979,117 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
         Http::assertSentCount(3);
+    }
+
+    public function test_external_lookup_routes_structured_weather_forecast_to_open_meteo(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-24 19:20:00', 'America/New_York'));
+
+        $chatCalls = 0;
+        Http::fake(function ($request) use (&$chatCalls) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                $chatCalls++;
+
+                if ($chatCalls === 1) {
+                    return Http::response([
+                        'id' => 'chatcmpl-weather-forecast-tool',
+                        'model' => 'gpt-test-tools',
+                        'choices' => [[
+                            'finish_reason' => 'tool_calls',
+                            'message' => [
+                                'role' => 'assistant',
+                                'content' => null,
+                                'tool_calls' => [[
+                                    'id' => 'call_weather_forecast',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'external_lookup',
+                                        'arguments' => json_encode([
+                                            'query' => "what's the weather for tomorrow in Orlando",
+                                            'domain' => 'weather',
+                                            'intent' => 'weather_forecast',
+                                            'location' => 'Orlando, FL',
+                                            'date' => '2026-06-25',
+                                        ], JSON_THROW_ON_ERROR),
+                                    ],
+                                ]],
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                $messages = $request->data()['messages'] ?? [];
+                $toolOutput = collect($messages)->firstWhere('role', 'tool');
+                $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
+
+                $this->assertSame('open_meteo', data_get($lookupResult, 'provider'));
+                $this->assertSame('weather_forecast', data_get($lookupResult, 'kind'));
+                $this->assertSame('Orlando, Florida, US', data_get($lookupResult, 'location'));
+                $this->assertSame('2026-06-25', data_get($lookupResult, 'date'));
+                $this->assertSame(91.0, data_get($lookupResult, 'weather.temperature_max_f'));
+                $this->assertSame(76.0, data_get($lookupResult, 'weather.temperature_min_f'));
+
+                return Http::response([
+                    'id' => 'chatcmpl-weather-forecast-final',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => data_get($lookupResult, 'text'),
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                return Http::response([
+                    'results' => [[
+                        'id' => 4167147,
+                        'name' => 'Orlando',
+                        'latitude' => 28.5383,
+                        'longitude' => -81.3792,
+                        'admin1' => 'Florida',
+                        'country_code' => 'US',
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')) {
+                $payload = $request->data();
+                $this->assertSame('2026-06-25', data_get($payload, 'start_date'));
+                $this->assertSame('2026-06-25', data_get($payload, 'end_date'));
+                $this->assertSame('weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max', data_get($payload, 'daily'));
+
+                return Http::response([
+                    'timezone' => 'America/New_York',
+                    'daily' => [
+                        'time' => ['2026-06-25'],
+                        'temperature_2m_max' => [91.2],
+                        'temperature_2m_min' => [75.9],
+                        'precipitation_probability_max' => [40],
+                        'precipitation_sum' => [0.08],
+                        'weather_code' => [3],
+                        'wind_speed_10m_max' => [12.4],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-weather-forecast@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => "what's the weather for tomorrow in orlando",
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Tomorrow in Orlando, Florida, US should be overcast. High 91°F, low 76°F. Precipitation chance up to 40%, wind up to 12 mph.');
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+        Http::assertSentCount(3);
+        Carbon::setTestNow();
     }
 
     public function test_external_lookup_routes_nearby_places_to_google_places(): void

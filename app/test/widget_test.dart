@@ -2644,7 +2644,8 @@ void main() {
       'Plan tomorrow',
     );
     await tester.tap(find.byKey(const Key('primary-chat-action')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
 
     expect(api.branchMessageCalls, 1);
     expect(api.branchedFromMessageId, 7001);
@@ -2711,6 +2712,74 @@ void main() {
     expect(realtime.started, isFalse);
     expect(api.sentMessages, ['Plan today']);
     expect(find.text('Done — I updated your day.'), findsOneWidget);
+  });
+
+  testWidgets('queued Bean chat does not show empty working dialog', (
+    WidgetTester tester,
+  ) async {
+    final api = _DelayedQueueFakeHermesApiClient();
+    final realtime = _FailingBeanRealtimeConversation(api);
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'what is the weather tomorrow in Orlando',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(api.queueMessageCalls, 1);
+    expect(find.text('working...'), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+
+    api.completeQueue();
+    await tester.pumpAndSettle();
+
+    expect(find.text('It should be warm and cloudy tomorrow.'), findsOneWidget);
+  });
+
+  testWidgets('Bean work dock uses backend work plan labels in order', (
+    WidgetTester tester,
+  ) async {
+    final api = _BeanWorkPlanFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'I need to do some deep work later. Let’s put a work block on my schedule for 8-11pm. Set a reminder 30 minutes before as well',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create calendar event: Deep work'), findsOneWidget);
+    expect(find.text('Create reminder: Deep work'), findsOneWidget);
+    expect(
+      find.textContaining('do some deep work let s a work block'),
+      findsNothing,
+    );
+
+    final eventTop = tester.getTopLeft(
+      find.text('Create calendar event: Deep work'),
+    );
+    final reminderTop = tester.getTopLeft(
+      find.text('Create reminder: Deep work'),
+    );
+    expect(eventTop.dy, lessThan(reminderTop.dy));
+    expect(find.text('2/2'), findsOneWidget);
   });
 
   testWidgets('chat stop cancels an in-flight Bean request', (
@@ -7293,6 +7362,44 @@ class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {
   }
 }
 
+class _DelayedQueueFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  final Completer<HermesMessageResult> _queueCompleter =
+      Completer<HermesMessageResult>();
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    return _queueCompleter.future;
+  }
+
+  void completeQueue() {
+    if (_queueCompleter.isCompleted) return;
+    _queueCompleter.complete(
+      const HermesMessageResult(
+        status: 'completed',
+        session: HermesSession(id: 42, status: 'active', title: 'Today'),
+        userMessage: HermesMessage(
+          id: 7100,
+          role: 'user',
+          content: 'what is the weather tomorrow in Orlando',
+        ),
+        assistantMessage: HermesMessage(
+          id: 7101,
+          role: 'assistant',
+          content: 'It should be warm and cloudy tomorrow.',
+        ),
+        events: [],
+      ),
+    );
+  }
+}
+
 class _NotesFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   static const personalWorkspace = HermesWorkspace(
     id: '1',
@@ -8647,6 +8754,99 @@ class _SlowChatFakeHermesApiClient extends _SignedInFakeHermesApiClient {
         ),
         events: [],
       ),
+    );
+  }
+}
+
+class _BeanWorkPlanFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  bool _messageSent = false;
+
+  static const _workEvents = [
+    HermesActivityEvent(
+      id: 2,
+      eventType: 'assistant.work_item.planned',
+      status: 'planned',
+      toolName: 'assistant.work',
+      payload: {
+        'work_item_id': 'tool-call-event',
+        'work_order': 0,
+        'action_type': 'calendar_event.create',
+        'label': 'Create calendar event: Deep work',
+      },
+    ),
+    HermesActivityEvent(
+      id: 3,
+      eventType: 'assistant.work_item.planned',
+      status: 'planned',
+      toolName: 'assistant.work',
+      payload: {
+        'work_item_id': 'tool-call-reminder',
+        'work_order': 1,
+        'action_type': 'reminder.create',
+        'label': 'Create reminder: Deep work',
+      },
+    ),
+    HermesActivityEvent(
+      id: 4,
+      eventType: 'assistant.calendar_event.created',
+      status: 'succeeded',
+      toolName: 'calendar.create',
+      payload: {
+        'calendar_event_id': 30,
+        'title': 'Deep work',
+        'work_item_id': 'tool-call-event',
+        'work_order': 0,
+        'work_label': 'Create calendar event: Deep work',
+        'action_type': 'calendar_event.create',
+      },
+    ),
+    HermesActivityEvent(
+      id: 5,
+      eventType: 'assistant.reminder.created',
+      status: 'succeeded',
+      toolName: 'reminders.create',
+      payload: {
+        'reminder_id': 20,
+        'title': 'Reminder: Deep work',
+        'work_item_id': 'tool-call-reminder',
+        'work_order': 1,
+        'work_label': 'Create reminder: Deep work',
+        'action_type': 'reminder.create',
+      },
+    ),
+  ];
+
+  @override
+  Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>
+      _messageSent ? _workEvents : const [];
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    plannedToday = true;
+    _messageSent = true;
+    return HermesMessageResult(
+      status: 'completed',
+      session: const HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 7100 + queueMessageCalls,
+        role: 'user',
+        content: content,
+        metadata: metadata ?? const {},
+      ),
+      assistantMessage: const HermesMessage(
+        id: 8100,
+        role: 'assistant',
+        content: 'Done — I added the deep work block and reminder.',
+      ),
+      events: _workEvents,
     );
   }
 }

@@ -30,7 +30,7 @@ class LiveLookupService
         $user = User::findOrFail($session->user_id);
         $context = trim((string) ($arguments['context'] ?? ''));
         $location = trim((string) ($arguments['location'] ?? ''));
-        $cacheKey = $this->cacheKey($query, $context, $location);
+        $cacheKey = $this->cacheKey($query, $context, $location, $arguments);
         $cached = Cache::get($cacheKey);
         if (is_array($cached)) {
             return [
@@ -63,10 +63,12 @@ class LiveLookupService
         }
 
         if ((bool) config('services.hermes_runtime.weather_lookup_enabled', true)) {
-            $weatherResult = $this->weatherService->currentWeatherForQuery($query, $context, $location, [
+            $timezone = $this->sessionTimezone($session);
+            $weatherResult = $this->weatherService->weatherForIntent($arguments, $timezone, [
                 'source' => 'live_lookup_gateway',
                 'session_id' => $session->id,
                 'workspace_id' => $session->workspace_id,
+                'timezone' => $timezone,
             ]);
             if ($weatherResult !== null) {
                 $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
@@ -88,9 +90,13 @@ class LiveLookupService
 
                 if (($result['ok'] ?? false) === true) {
                     Cache::put($cacheKey, $result, now()->addSeconds((int) config('services.hermes_runtime.live_lookup_cache_seconds', 300)));
+
+                    return $result;
                 }
 
-                return $result;
+                if (($result['error_code'] ?? null) === 'weather_location_missing') {
+                    return $result;
+                }
             }
         }
 
@@ -855,9 +861,29 @@ class LiveLookupService
         return $values->isEmpty() ? null : (int) round($values->avg());
     }
 
-    private function cacheKey(string $query, string $context, string $location): string
+    private function cacheKey(string $query, string $context, string $location, array $arguments = []): string
     {
-        return 'live_lookup:'.sha1(mb_strtolower(trim($query.'|'.$context.'|'.$location)));
+        $structured = collect($arguments)
+            ->only(['domain', 'intent', 'date', 'date_range', 'time'])
+            ->filter(fn (mixed $value): bool => is_scalar($value) && trim((string) $value) !== '')
+            ->map(fn (mixed $value): string => mb_strtolower(trim((string) $value)))
+            ->all();
+
+        return 'live_lookup:'.sha1(mb_strtolower(trim($query.'|'.$context.'|'.$location.'|'.json_encode($structured))));
+    }
+
+    private function sessionTimezone(ConversationSession $session): string
+    {
+        $profileSettings = $this->profileForSession($session)?->settings ?? [];
+        $timezone = (string) data_get($profileSettings, 'timezone', config('app.timezone'));
+
+        try {
+            new \DateTimeZone($timezone);
+
+            return $timezone;
+        } catch (\Throwable) {
+            return (string) config('app.timezone');
+        }
     }
 
     private function profileForSession(ConversationSession $session): ?AgentProfile

@@ -188,7 +188,7 @@ double _beanWorkDockStripHeight(List<_BeanWorkItem> items, bool active) {
     items.where((item) => item.label.trim().isNotEmpty).length,
     6,
   );
-  if (count == 0) return 48;
+  if (count == 0) return 0;
   return math.min(196, 48 + (count * 24));
 }
 
@@ -1657,6 +1657,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _beanWorkFinalized = false;
   final Set<int> _beanWorkAppliedEventIds = <int>{};
   final Set<String> _beanWorkStagedCompletionIds = <String>{};
+  final Set<Timer> _beanWorkStageTimers = <Timer>{};
   Timer? _beanWorkStatusClearTimer;
   Timer? _beanResponsePreviewTimer;
   DateTime? _beanWorkStatusHoldUntil;
@@ -2323,6 +2324,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanWorkFinalized = false;
         _beanWorkStagedCompletionIds.clear();
       });
+      _cancelBeanWorkStageTimers();
     });
   }
 
@@ -2343,6 +2345,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkItems = const [];
     _beanWorkFinalized = false;
     _beanWorkStagedCompletionIds.clear();
+    _cancelBeanWorkStageTimers();
   }
 
   void _prepareBeanWorkForFreshRequest() {
@@ -2353,7 +2356,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkAppliedEventIds.clear();
     _beanWorkFinalized = false;
     _beanWorkStagedCompletionIds.clear();
+    _cancelBeanWorkStageTimers();
     _clearCompletedBeanWorkItemsForFreshRequest();
+  }
+
+  void _cancelBeanWorkStageTimers() {
+    for (final timer in _beanWorkStageTimers) {
+      timer.cancel();
+    }
+    _beanWorkStageTimers.clear();
   }
 
   bool _beanWorkStatusDone(String status) => const {
@@ -2481,389 +2492,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     caseSensitive: false,
   ).hasMatch(label.trim());
 
-  void _ensureBeanRequestWorkItem(
-    String content, {
-    String status = 'running',
-    bool freshRequest = false,
-  }) {
+  void _ensureBeanRequestWorkItem(String content, {bool freshRequest = false}) {
     if (_beanRequestIsCapabilityQuestion(content)) return;
-    final labels = _beanWorkLabelsForTurn(content);
-    if (labels.isEmpty) return;
     if (freshRequest) {
       _prepareBeanWorkForFreshRequest();
     }
-    for (var index = 0; index < labels.length; index++) {
-      _upsertBeanWorkItem('request-$index', labels[index], status: status);
-    }
-  }
-
-  List<String> _beanWorkLabelsForTurn(String content) {
-    final directLabels = _beanWorkLabelsForRequest(content);
-    if (directLabels.isNotEmpty) return directLabels;
-    if (!_beanWorkIsAffirmativeFollowUp(content)) return const [];
-    final lastAssistant = _messages.reversed.where(
-      (message) =>
-          message.role == 'assistant' &&
-          (message.content ?? '').trim().isNotEmpty,
-    );
-    if (lastAssistant.isEmpty) return const [];
-    return _beanWorkLabelsForAssistantProposal(
-      lastAssistant.first.content ?? '',
-    );
-  }
-
-  List<String> _beanWorkLabelsForRequest(String content) {
-    final command = _normalizedVoiceCommand(content);
-    if (command.isEmpty) return const [];
-    if (_beanCommandIsCapabilityQuestion(command)) return const [];
-    final inheritedTarget = _beanWorkTargetForClause(command);
-    final scheduleContext =
-        inheritedTarget == 'event' &&
-        RegExp(
-          r'\b(schedule|plan|organize)\b.*\b(day|calendar|events?)\b|\b(calendar|events?)\b.*\b(schedule|plan|organize)\b',
-        ).hasMatch(command);
-    final clauses = _beanWorkRequestClauses(command);
-    final labels = <String>[];
-    for (final clause in clauses) {
-      final label = _beanWorkLabelForClause(
-        clause,
-        inheritedTarget: inheritedTarget,
-        scheduleContext: scheduleContext,
-      );
-      if (label == null || _isGenericBeanWorkLabel(label)) continue;
-      if (labels.contains(label)) continue;
-      labels.add(label);
-    }
-    if (labels.isNotEmpty) return labels.take(6).toList();
-    final fallback = _beanWorkLabelForClause(
-      command,
-      inheritedTarget: inheritedTarget,
-      scheduleContext: scheduleContext,
-    );
-    return fallback == null || _isGenericBeanWorkLabel(fallback)
-        ? const []
-        : [fallback];
-  }
-
-  bool _beanWorkIsAffirmativeFollowUp(String content) {
-    final command = _normalizedVoiceCommand(content);
-    if (command.isEmpty) return false;
-    return RegExp(
-      r'^(yes|yeah|yep|yup|sure|ok|okay|please|yes please|sure please|do it|go ahead|that works|sounds good)$',
-    ).hasMatch(command);
-  }
-
-  List<String> _beanWorkLabelsForAssistantProposal(String content) {
-    final text = content.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (text.isEmpty) return const [];
-    final normalized = _normalizedVoiceCommand(text);
-    final labels = <String>[];
-
-    final calendarMatch = RegExp(
-      r'\badd\s+(.+?)\s+to\s+(?:your\s+|my\s+)?calendar\b',
-      caseSensitive: false,
-    ).firstMatch(text);
-    if (calendarMatch != null) {
-      final eventNames = _beanWorkProposalItems(calendarMatch.group(1) ?? '');
-      for (final name in eventNames) {
-        labels.add('Creating calendar event: $name');
-      }
-      if (RegExp(r'\breminder(?:s)?\b.*\bfor each\b').hasMatch(normalized)) {
-        for (final name in eventNames) {
-          labels.add('Creating reminder: $name');
-        }
-      } else if (RegExp(r'\breminder(?:s)?\b').hasMatch(normalized) &&
-          eventNames.isNotEmpty) {
-        labels.add('Creating reminder: ${eventNames.first}');
-      }
-    }
-
-    final taskMatch = RegExp(
-      r'\badd\s+(.+?)\s+to\s+(?:your\s+|my\s+)?tasks\b',
-      caseSensitive: false,
-    ).firstMatch(text);
-    if (taskMatch != null) {
-      for (final name in _beanWorkProposalItems(taskMatch.group(1) ?? '')) {
-        labels.add('Creating task: $name');
-      }
-    }
-
-    final noteMatch = RegExp(
-      r'\b(?:create|add)\s+(.+?)\s+(?:as\s+)?(?:a\s+)?note\b',
-      caseSensitive: false,
-    ).firstMatch(text);
-    if (noteMatch != null) {
-      for (final name in _beanWorkProposalItems(noteMatch.group(1) ?? '')) {
-        labels.add('Creating note: $name');
-      }
-    }
-
-    return labels
-        .where((label) => label.trim().isNotEmpty)
-        .toSet()
-        .take(6)
-        .toList();
-  }
-
-  List<String> _beanWorkProposalItems(String raw) {
-    var text = raw
-        .replaceAll(RegExp(r'\([^)]*\)'), ' ')
-        .replaceAll(RegExp(r'\bnow\b', caseSensitive: false), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    text = text.replaceAll(RegExp(r'^(the|a|an)\s+', caseSensitive: false), '');
-    if (text.isEmpty) return const [];
-    return text
-        .split(RegExp(r'\s*,\s*|\s+\band\b\s+', caseSensitive: false))
-        .map((item) => item.trim())
-        .where((item) => item.length >= 2)
-        .map((item) => item[0].toUpperCase() + item.substring(1))
-        .toList();
-  }
-
-  List<String> _beanWorkRequestClauses(String command) {
-    final normalized = command
-        .replaceAll(RegExp(r'\b(?:and then|then)\b'), ' and ')
-        .replaceAll(RegExp(r'\s*,\s*'), ' and ');
-    final clauses = normalized
-        .split(RegExp(r'\s+\band\b\s+'))
-        .map((part) => part.trim())
-        .where((part) => part.isNotEmpty)
-        .toList();
-    return clauses.isEmpty ? [command] : clauses;
-  }
-
-  String? _beanWorkLabelForClause(
-    String clause, {
-    required String inheritedTarget,
-    bool scheduleContext = false,
-  }) {
-    final command = clause.trim();
-    if (command.isEmpty) return null;
-    final clauseTarget = _beanWorkTargetForClause(command);
-    final effectiveTarget = clauseTarget.isEmpty
-        ? inheritedTarget
-        : clauseTarget;
-    final targetsEvent =
-        RegExp(
-          r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
-        ).hasMatch(command) ||
-        effectiveTarget == 'event';
-    final targetsTask =
-        RegExp(r'\b(task|tasks|todo|to-do)\b').hasMatch(command) ||
-        effectiveTarget == 'task';
-    final targetsReminder =
-        RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command) ||
-        effectiveTarget == 'reminder';
-    final targetsNote =
-        RegExp(
-          r'\b(note|notes|folder|folders|list|lists)\b',
-        ).hasMatch(command) ||
-        effectiveTarget == 'note';
-    final targetsMemory =
-        RegExp(
-          r'\b(remember|memory|forget|preference|preferences)\b',
-        ).hasMatch(command) ||
-        effectiveTarget == 'memory';
-    final subject = _beanWorkSubjectForClause(command);
-    String withSubject(String base) =>
-        subject == null ? base : '$base: $subject';
-    final scheduleActivityAsEvent =
-        scheduleContext &&
-        effectiveTarget == 'event' &&
-        _beanWorkLooksLikeSchedulableActivity(command);
-    if (RegExp(r'\b(delete|remove|cancel)\b').hasMatch(command)) {
-      if (targetsMemory) return withSubject('Forgetting knowledge');
-      if (targetsEvent) return withSubject('Deleting event');
-      if (targetsReminder) return withSubject('Deleting reminder');
-      if (targetsTask) return withSubject('Deleting task');
-      if (targetsNote) return withSubject('Deleting note');
-      return 'Deleting item';
-    }
-    if (RegExp(r'\b(move|reschedule|update|change)\b').hasMatch(command)) {
-      if (targetsMemory) return withSubject('Updating knowledge');
-      if (targetsEvent) return withSubject('Updating event');
-      if (targetsReminder) return withSubject('Updating reminder');
-      if (targetsTask) return withSubject('Updating task');
-      if (targetsNote) return withSubject('Updating note');
-      return 'Updating item';
-    }
-    if (RegExp(r'\b(add|create|put|schedule|write|save)\b').hasMatch(command) ||
-        scheduleActivityAsEvent) {
-      if (subject == null && _beanWorkClauseReferencesPriorItems(command)) {
-        return null;
-      }
-      if (targetsMemory) return withSubject('Saving knowledge');
-      if (targetsEvent) return withSubject('Creating event');
-      if (targetsReminder) return withSubject('Creating reminder');
-      if (targetsTask) return withSubject('Creating task');
-      if (targetsNote) return withSubject('Creating note');
-      return 'Creating item';
-    }
-    if (RegExp(r'\b(complete|finish|mark)\b').hasMatch(command)) {
-      if (targetsTask) return withSubject('Updating task');
-      if (targetsReminder) return withSubject('Updating reminder');
-      return 'Updating item';
-    }
-    if (RegExp(r'\b(remember|memory)\b').hasMatch(command)) {
-      return 'Saving knowledge';
-    }
-    if (RegExp(r'\b(plan|organize|prioritize)\b').hasMatch(command)) {
-      return 'Planning request';
-    }
-    return 'Working on request';
-  }
-
-  bool _beanWorkClauseReferencesPriorItems(String command) =>
-      RegExp(
-        r'\b(these|those|them|that|it|the above|all of that)\b',
-      ).hasMatch(command) &&
-      RegExp(r'\b(add|create|put|schedule|save|write)\b').hasMatch(command);
-
-  String _beanWorkTargetForClause(String command) {
-    if (RegExp(
-      r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
-    ).hasMatch(command)) {
-      return 'event';
-    }
-    if (RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command)) {
-      return 'reminder';
-    }
-    if (RegExp(r'\b(task|tasks|todo|to-do)\b').hasMatch(command)) {
-      return 'task';
-    }
-    if (RegExp(
-      r'\b(note|notes|folder|folders|list|lists)\b',
-    ).hasMatch(command)) {
-      return 'note';
-    }
-    if (RegExp(
-      r'\b(remember|memory|forget|preference|preferences)\b',
-    ).hasMatch(command)) {
-      return 'memory';
-    }
-    return '';
-  }
-
-  String? _beanWorkSubjectForClause(String clause) {
-    final semanticSubject = _beanWorkSemanticSubjectForClause(clause);
-    if (semanticSubject != null) return semanticSubject;
-    var text = _beanWorkExplicitSubjectForClause(clause) ?? clause;
-    text = text
-        .replaceAll(
-          RegExp(
-            r"\b(hey bean|can you|could you|would you|please|i need to|i want to|i need|i want|need to|want to|i have to|have to|lets|let's)\b",
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(add|create|make|put|schedule|write|save|move|reschedule|update|change|delete|remove|cancel|complete|finish|mark)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(to|on|in|from)?\s*(my|the|a|an)?\s*(calendar|event|events|appointment|appointments|meeting|meetings|task|tasks|todo|to-do|reminder|reminders|note|notes|folder|folders|list|lists)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(to be|be|after that|before that|for me|for that recipe|for the recipe|as a note|the rest of my day|rest of my day|these|this|that|it|today|tomorrow|tonight|later|soon|sometime|this morning|this afternoon|this evening|early morning|late morning|early afternoon|late afternoon|early evening|late evening)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(RegExp(r'\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b'), ' ')
-        .replaceAll(
-          RegExp(
-            r'\bfrom\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b',
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b',
-          ),
-          ' ',
-        )
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    text = text.replaceAll(RegExp(r'^(called|named|titled)\s+'), '').trim();
-    text = text
-        .replaceAll(RegExp(r'^(for|to|at|on|in|by|before|after|around)\s+'), '')
-        .replaceAll(RegExp(r'\s+(for|to|at|on|in|by|before|after|around)$'), '')
-        .trim();
-    if (text.length < 3 || RegExp(r'^(it|that|this|item)$').hasMatch(text)) {
-      return null;
-    }
-    if (text.length > 42) text = '${text.substring(0, 42).trim()}...';
-    return text;
-  }
-
-  bool _beanWorkLooksLikeSchedulableActivity(String clause) {
-    final text = clause.toLowerCase();
-    if (RegExp(
-      r'\b(recipe|grocery list|shopping list|note)\b',
-    ).hasMatch(text)) {
-      return false;
-    }
-    return RegExp(
-      r'\b(workout|exercise|gym|grocery store|grocery shopping|groceries|run to (?:the )?grocery|cook dinner|cooking dinner|make dinner|dinner)\b',
-    ).hasMatch(text);
-  }
-
-  String? _beanWorkSemanticSubjectForClause(String clause) {
-    final text = clause.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (text.isEmpty) return null;
-    if (RegExp(
-      r'\b(grocery|shopping)\s+list\b|\blist\b.*\bgrocer',
-    ).hasMatch(text)) {
-      return 'Grocery list';
-    }
-    if (RegExp(r'\b(workout|exercise|gym)\b').hasMatch(text)) {
-      return 'Workout';
-    }
-    if (RegExp(
-      r'\b(grocery store|grocery shopping|groceries|run to (?:the )?grocery)\b',
-    ).hasMatch(text)) {
-      return 'Grocery shopping';
-    }
-    if (RegExp(
-      r'\b(cook dinner|cooking dinner|make dinner)\b',
-    ).hasMatch(text)) {
-      return 'Cook dinner';
-    }
-    return null;
-  }
-
-  String? _beanWorkExplicitSubjectForClause(String clause) {
-    final text = clause.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (text.isEmpty) return null;
-    final titleMarker = RegExp(
-      r'\b(?:called|named|titled|labelled|labeled|that says|saying|with title|with the title)\s+(.+)$',
-    ).firstMatch(text);
-    if (titleMarker != null) {
-      final value = titleMarker.group(1)?.trim();
-      if (value != null && value.length >= 3) return value;
-    }
-
-    final toMatches = RegExp(r'\bto\s+(.+)$').allMatches(text).toList();
-    if (toMatches.isEmpty) return null;
-    final last = toMatches.last.group(1)?.trim();
-    if (last == null || last.length < 3) return null;
-    if (RegExp(
-      r'^(be\s+)?(?:after|before|at|on|in|by|around)\b',
-    ).hasMatch(last)) {
-      return null;
-    }
-    final before = text.substring(0, toMatches.last.start);
-    final looksLikeTaskTitle =
-        RegExp(r'\b(task|todo|to-do|reminder|note|list)\b').hasMatch(before) ||
-        RegExp(
-          r'\b(today|tomorrow|tonight|later|morning|afternoon|evening)\b',
-        ).hasMatch(before);
-    return looksLikeTaskTitle ? last : null;
   }
 
   bool _beanRequestIsCapabilityQuestion(String content) =>
@@ -2923,6 +2556,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (item == null) continue;
       _beanWorkAppliedEventIds.add(event.id);
       _beanWorkEventFloorId = math.max(_beanWorkEventFloorId, event.id);
+      if (item.resolvedByEvent) {
+        _removeLocalBeanWorkPlaceholders();
+      }
       final shouldStageCompletion =
           item.done &&
           !_beanWorkItems.any((existing) => existing.id == item.id) &&
@@ -2946,10 +2582,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
+  void _removeLocalBeanWorkPlaceholders() {
+    if (!_beanWorkItems.any((item) => item.id.startsWith('request-'))) {
+      return;
+    }
+    _beanWorkItems = [
+      for (final item in _beanWorkItems)
+        if (!item.id.startsWith('request-')) item,
+    ];
+  }
+
   void _stageBeanWorkCompletion(_BeanWorkItem item) {
     if (_beanWorkStagedCompletionIds.contains(item.id)) return;
     _beanWorkStagedCompletionIds.add(item.id);
-    Timer(const Duration(milliseconds: 850), () {
+    late final Timer timer;
+    timer = Timer(const Duration(milliseconds: 850), () {
+      _beanWorkStageTimers.remove(timer);
       if (!mounted || _beanWorkFinalized) return;
       setState(() {
         _upsertBeanWorkItem(
@@ -2961,6 +2609,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanWorkStagedCompletionIds.remove(item.id);
       });
     });
+    _beanWorkStageTimers.add(timer);
   }
 
   _BeanWorkItem? _beanWorkItemFromEvent(HermesActivityEvent event) {
@@ -2979,14 +2628,40 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
     }
     if (!type.startsWith('assistant.')) return null;
-    if (type.contains('.duplicate_skipped')) return null;
+    final workItemId = _stringFromPayload(payload, 'work_item_id');
+    final workLabel = _stringFromPayload(payload, 'work_label');
+    if (type == 'assistant.work_item.planned') {
+      final label =
+          _stringFromPayload(payload, 'label') ??
+          workLabel ??
+          _stringFromPayload(payload, 'title');
+      if (workItemId == null || label == null || label.trim().isEmpty) {
+        return null;
+      }
+
+      return _BeanWorkItem(
+        id: workItemId,
+        label: label,
+        status: 'running',
+        resolvedByEvent: true,
+      );
+    }
+    if (type.contains('.duplicate_skipped') && workItemId == null) return null;
     final label = _beanWorkEventLabel(type, payload);
     if (label == null) return null;
     return _BeanWorkItem(
-      id: 'event-${event.id}',
-      label: label,
+      id: workItemId ?? 'event-${event.id}',
+      label: workLabel ?? label,
       status: _beanWorkEventStatus(status),
+      resolvedByEvent: workItemId != null,
     );
+  }
+
+  String? _stringFromPayload(Map<String, Object?> payload, String key) {
+    final value = payload[key];
+    if (value == null) return null;
+    final string = value.toString().trim();
+    return string.isEmpty ? null : string;
   }
 
   String _beanWorkEventStatus(String status) {
@@ -3131,6 +2806,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _cancelBeanWorkStageTimers();
     _beanWorkStatusClearTimer?.cancel();
     _beanResponsePreviewTimer?.cancel();
     _reminderDueTimer?.cancel();
@@ -3172,6 +2848,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool get _beanStatusTagVisible =>
       _beanVoiceListening ||
       _busy ||
+      _activeAssistantRunId != null ||
       _beanWorkItems.isNotEmpty ||
       _beanWorkStatusHolding;
 
@@ -4397,13 +4074,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _chatRunState = 'working...';
           _events = _mergeEvents(result.events, _events);
           _applyBeanWorkEvents(result.events);
-          _messages.add(
-            HermesMessage(
-              id: _messages.length + 1,
-              role: 'assistant',
-              content: 'I’m working on that in the background.',
-            ),
-          );
         });
         final run = result.run;
         if (run != null) {
@@ -7290,11 +6960,13 @@ ${_truncateDiagnostic(stack, 2200)}
     final criticalItemCount = _criticalItemCountForToday();
     final showBeanIntroSpotlight = _showBeanIntroSpotlight;
     final beanResponsePreview = _beanCollapsedResponsePreview;
+    final beanWorkStripActive =
+        _beanStatusTagVisible && _beanVisibleWorkItems.isNotEmpty;
     final beanDockStatusLift = _selectedDestination == _HomeDestination.bean
         ? _beanChatComposerReservedHeight +
               _beanWorkDockStripHeight(
                 _beanVisibleWorkItems,
-                _beanStatusTagVisible,
+                beanWorkStripActive,
               )
         : 0.0;
     _syncBeanResponsePreviewTimer(beanResponsePreview);
@@ -7390,13 +7062,13 @@ ${_truncateDiagnostic(stack, 2200)}
                           _selectedDestination == _HomeDestination.bean,
                       beanWorkItems: _beanVisibleWorkItems,
                       beanWorkStatus: _beanStatusTagLabel,
-                      beanWorkActive: _beanStatusTagVisible,
+                      beanWorkActive: beanWorkStripActive,
                       composer: _DockedBeanChatComposer(
                         controller: _chatInputController,
                         focusNode: _chatInputFocusNode,
                         busy: _beanStopAvailable,
                         listening: _beanVoiceListening,
-                        attachedToWorkStrip: _beanStatusTagVisible,
+                        attachedToWorkStrip: beanWorkStripActive,
                         voiceDraft: _beanVoiceDraft,
                         onChanged: _updateBeanVoiceDraft,
                         onSend: () => unawaited(_sendChatInputDraft()),
@@ -10614,17 +10286,27 @@ class _HeroChatCard extends StatefulWidget {
 
 class _HeroChatCardState extends State<_HeroChatCard> {
   final _scrollController = ScrollController();
+  int _lastScrollSignature = 0;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    _lastScrollSignature = _chatScrollSignature();
+    _scheduleScrollToBottom(immediate: true);
   }
 
   @override
   void didUpdateWidget(covariant _HeroChatCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    final nextSignature = _chatScrollSignature();
+    if (nextSignature != _lastScrollSignature ||
+        widget.busy != oldWidget.busy ||
+        widget.runState != oldWidget.runState) {
+      _lastScrollSignature = nextSignature;
+      _scheduleScrollToBottom(
+        immediate: widget.messages.length != oldWidget.messages.length,
+      );
+    }
   }
 
   @override
@@ -10633,10 +10315,40 @@ class _HeroChatCardState extends State<_HeroChatCard> {
     super.dispose();
   }
 
-  void _scrollToBottom() {
+  int _chatScrollSignature() {
+    if (widget.messages.isEmpty) return 0;
+    final last = widget.messages.last;
+    return Object.hash(
+      widget.messages.length,
+      last.id,
+      last.role,
+      last.content,
+    );
+  }
+
+  void _scheduleScrollToBottom({bool immediate = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom(immediate: immediate);
+    });
+    Future<void>.delayed(const Duration(milliseconds: 60), () {
+      if (!mounted) return;
+      _scrollToBottom(immediate: immediate);
+    });
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      if (!mounted) return;
+      _scrollToBottom(immediate: immediate);
+    });
+  }
+
+  void _scrollToBottom({bool immediate = false}) {
     if (!_scrollController.hasClients) return;
+    final target = _scrollController.position.maxScrollExtent;
+    if (immediate) {
+      _scrollController.jumpTo(target);
+      return;
+    }
     _scrollController.animateTo(
-      _scrollController.position.maxScrollExtent,
+      target,
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOut,
     );
@@ -10658,15 +10370,8 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                       key: const Key('chat-message-list'),
                       controller: _scrollController,
                       padding: const EdgeInsets.only(bottom: 12, top: 8),
-                      itemCount: widget.messages.length + (widget.busy ? 1 : 0),
+                      itemCount: widget.messages.length,
                       itemBuilder: (context, index) {
-                        if (index >= widget.messages.length) {
-                          return _MessageBubble(
-                            sender: 'Bean',
-                            message: widget.runState,
-                            progress: true,
-                          );
-                        }
                         final message = widget.messages[index];
                         final isUser = message.role == 'user';
                         return Padding(
@@ -11162,7 +10867,6 @@ class _MessageBubble extends StatelessWidget {
     required this.sender,
     required this.message,
     this.alignRight = false,
-    this.progress = false,
     this.onCopy,
     this.onEdit,
   });
@@ -11170,7 +10874,6 @@ class _MessageBubble extends StatelessWidget {
   final String sender;
   final String message;
   final bool alignRight;
-  final bool progress;
   final VoidCallback? onCopy;
   final VoidCallback? onEdit;
 
@@ -11193,13 +10896,6 @@ class _MessageBubble extends StatelessWidget {
         children: [
           Row(
             children: [
-              if (progress) ...[
-                const SizedBox.square(
-                  dimension: 12,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 8),
-              ],
               Text(
                 sender,
                 overflow: TextOverflow.ellipsis,

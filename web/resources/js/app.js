@@ -87,6 +87,7 @@ if (mount) {
         tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 2 2 4-5"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>',
         reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
         notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M9 4v16"/><path d="M12 8h4M12 12h4M12 16h3"/></svg>',
+        folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2.5h6.5A2.5 2.5 0 0 1 21 10v7.5A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5Z"/></svg>',
         memory: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5a4 4 0 0 0-4 4v.4A4.2 4.2 0 0 0 3 11.5 4.2 4.2 0 0 0 5 15v1.2a4.3 4.3 0 0 0 7 3.35 4.3 4.3 0 0 0 7-3.35V15a4.2 4.2 0 0 0 2-3.5 4.2 4.2 0 0 0-2-3.6v-.4a4 4 0 0 0-7-2.65A4 4 0 0 0 9 3.5Z"/><path d="M12 5v15M8 9h1.5M14.5 9H16M8 14h1.5M14.5 14H16"/></svg>',
         pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.8 4.6 15.2a1 1 0 0 0 .7 1.8h13.4a1 1 0 0 0 .7-1.8L15 10.8V5l1.2-1.2A1 1 0 0 0 15.5 2h-7a1 1 0 0 0-.7 1.8L9 5Z"/></svg>',
         settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.8l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.7.6 1 .3.25.68.4 1.1.4H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.6Z"/></svg>',
@@ -1894,10 +1895,13 @@ if (mount) {
             <form class="hb-note-editor ${locked ? 'hb-note-editor-locked' : ''}" data-note-editor="${escapeAttr(note.id)}">
                 <div class="hb-note-editor-toolbar">
                     <button class="hb-icon-button hb-note-back-button" type="button" data-note-back aria-label="Back to notes" title="Back to notes">${icons.chevronLeft}</button>
-                    <select class="hb-select hb-note-folder-select" name="note_folder_id" aria-label="Folder" ${locked ? 'disabled' : ''}>
-                        <option value="">All Notes</option>
-                        ${state.noteFolders.map((folder) => `<option value="${escapeAttr(folder.id)}" ${String(folder.id) === String(folderId) ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join('')}
-                    </select>
+                    <label class="hb-note-folder-select-wrap" aria-label="Folder">
+                        <span class="hb-note-folder-select-icon" aria-hidden="true">${icons.folder}</span>
+                        <select class="hb-select hb-note-folder-select" name="note_folder_id" ${locked ? 'disabled' : ''}>
+                            <option value="">All Notes</option>
+                            ${state.noteFolders.map((folder) => `<option value="${escapeAttr(folder.id)}" ${String(folder.id) === String(folderId) ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join('')}
+                        </select>
+                    </label>
                     <span class="hb-note-toolbar-divider"></span>
                     ${noteCommandButton('formatBlock', 'h1', 'H1', locked, 'Heading 1')}
                     ${noteCommandButton('bold', '', 'B', locked, 'Bold')}
@@ -2633,7 +2637,13 @@ if (mount) {
     }
 
     function beanWorkDisplayItems() {
-        const items = state.beanWorkItems.filter((item) => item?.label);
+        let items = state.beanWorkItems.filter((item) => item?.label);
+        if (items.some((item) => String(item?.source || '') === 'event' || item?.resolvedByEvent)) {
+            items = items.filter((item) => {
+                const id = String(item?.id || '');
+                return !id.startsWith('request-') && id !== 'realtime-request';
+            });
+        }
         if (items.length) return items.slice(-6);
         return [];
     }
@@ -2676,11 +2686,15 @@ if (mount) {
             cancelBeanWorkStatusClear();
             beanWorkStatusMinUntil = Math.max(beanWorkStatusMinUntil, Date.now() + 700);
         }
+        if (options.source === 'event') {
+            removeLocalBeanWorkPlaceholders();
+        }
         const existingIndex = state.beanWorkItems.findIndex((item) => item.id === id);
         const next = {
             id,
             label,
             status: normalizedStatus,
+            ...(Number.isFinite(Number(options.order)) ? { order: Number(options.order) } : {}),
             ...(options.source ? { source: options.source } : {}),
             ...(options.resolvedByEvent ? { resolvedByEvent: true } : {}),
         };
@@ -2709,9 +2723,21 @@ if (mount) {
             refreshBeanStatusTag();
             return;
         }
-        state.beanWorkItems = [...state.beanWorkItems, next].slice(-8);
+        state.beanWorkItems = [...state.beanWorkItems, next]
+            .sort((left, right) => Number(left.order ?? 999) - Number(right.order ?? 999))
+            .slice(-8);
         if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
         refreshBeanStatusTag();
+    }
+
+    function removeLocalBeanWorkPlaceholders() {
+        const next = state.beanWorkItems.filter((item) => {
+            const id = String(item?.id || '');
+            return !id.startsWith('request-') && id !== 'realtime-request';
+        });
+        if (next.length !== state.beanWorkItems.length) {
+            state.beanWorkItems = next;
+        }
     }
 
     function completeBeanWorkItem(id, label = '') {
@@ -2796,10 +2822,7 @@ if (mount) {
     }
 
     function ensureRealtimeRequestWorkItem(content, status = 'running', options = {}) {
-        const labels = beanWorkLabelsForTurn(content);
-        if (!labels.length) return;
         if (options.freshRequest) prepareBeanWorkForFreshRequest();
-        labels.forEach((label, index) => upsertBeanWorkItem(`request-${index}`, label, status));
     }
 
     function beanWorkPlaceholderIndex(label) {
@@ -3069,7 +3092,11 @@ if (mount) {
                 beanWorkAppliedEventIds.add(eventId);
                 beanWorkEventFloorId = Math.max(beanWorkEventFloorId, eventId);
             }
-            upsertBeanWorkItem(item.id, item.label, item.status, { source: 'event', resolvedByEvent: true });
+            upsertBeanWorkItem(item.id, item.label, item.status, {
+                source: 'event',
+                resolvedByEvent: true,
+                order: item.order,
+            });
         });
     }
 
@@ -3077,15 +3104,33 @@ if (mount) {
         const type = String(event?.event_type || event?.eventType || '');
         const status = String(event?.status || '').toLowerCase();
         const payload = event?.payload || {};
-        const id = event?.id ? `event-${event.id}` : `${type}-${JSON.stringify(payload).slice(0, 80)}`;
+        const fallbackId = event?.id ? `event-${event.id}` : `${type}-${JSON.stringify(payload).slice(0, 80)}`;
         if (!type || type === 'runtime.run_queued') return null;
         if (type === 'runtime.run_started' || type === 'runtime.run_completed') return null;
-        if (type === 'runtime.run_failed') return { id, label: 'Finish request', status: 'failed' };
+        if (type === 'runtime.run_failed') return { id: fallbackId, label: 'Finish request', status: 'failed' };
         if (!type.startsWith('assistant.')) return null;
         if (type.includes('.duplicate_skipped')) return null;
+        const plannedId = payload.work_item_id || payload.workItemId || '';
+        const plannedLabel = payload.work_label || payload.workLabel || payload.label || '';
+        if (type === 'assistant.work_item.planned' && plannedId && plannedLabel) {
+            return {
+                id: String(plannedId),
+                label: String(plannedLabel),
+                status: 'running',
+                order: Number(payload.work_order ?? payload.workOrder ?? 0),
+            };
+        }
+        const id = plannedId
+            ? String(plannedId)
+            : fallbackId;
         const label = beanWorkEventLabel(type, payload);
         if (!label) return null;
-        return { id, label, status: beanWorkEventStatus(status) };
+        return {
+            id,
+            label,
+            status: beanWorkEventStatus(status),
+            order: Number(payload.work_order ?? payload.workOrder ?? 999),
+        };
     }
 
     function beanWorkEventStatus(status) {
@@ -3094,6 +3139,8 @@ if (mount) {
     }
 
     function beanWorkEventLabel(type, payload = {}) {
+        const workLabel = payload.work_label || payload.workLabel;
+        if (workLabel) return String(workLabel);
         const title = payload.title || payload.summary || payload.name || payload.reason || payload.display_name || payload.displayName || '';
         const readable = title ? `: ${String(title).slice(0, 72)}` : '';
         if (type.includes('.task.created')) return `Create task${readable}`;
@@ -3162,7 +3209,6 @@ if (mount) {
                     ${messages.map((message, index) => messageMarkup(message, index, messages)).join('')}
                     ${working ? '' : pendingApprovalChatMarkup()}
                     ${working ? '' : onboardingCompletionMarkup()}
-                    ${working ? messageMarkup({ id: 'busy', role: 'assistant', content: state.chatRunState || 'Working…', progress: true }) : ''}
                 </div>
                 <div class="hb-chat-voice-status ${state.voiceStatusTone === 'error' ? 'hb-chat-voice-status-error' : ''}" data-voice-status ${state.voiceStatus ? '' : 'hidden'}>${escapeHtml(state.voiceStatus)}</div>
                 <div class="hb-chat-input-stack ${workStrip ? 'hb-chat-input-stack-working' : ''}">
@@ -7523,8 +7569,7 @@ if (mount) {
         state.voiceStatus = '';
         state.voiceStatusTone = '';
         state.chatRunState = voiceCommandIsCapabilityQuestion(content) ? 'Thinking…' : 'Working…';
-        const initialWorkLabels = options.voiceQuickReply || options.voiceQuickReplyPending ? ['Follow up on voice request'] : beanWorkLabelsForTurn(content);
-        resetBeanWorkItems(initialWorkLabels);
+        resetBeanWorkItems([]);
         state.error = '';
         render();
         try {
@@ -7575,7 +7620,6 @@ if (mount) {
                 state.messages.push(result.assistant_message);
                 assistantContent = result.assistant_message.content || '';
             }
-            completeBeanWorkItem(state.beanWorkItems[0]?.id, 'Finish request');
             if (result.status === 'blocked' && isPlanLimitMessage(assistantContent)) {
                 state.error = assistantContent;
             }

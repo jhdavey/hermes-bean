@@ -175,6 +175,19 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
                 if ($toolCalls === []) {
                     $candidateContent = $this->normalizedAssistantContent(data_get($message, 'content', ''));
+                    if ($this->shouldContinueAfterUnverifiedCompletionClaim($userMessage, $candidateContent, $actions, $toolOutputs, $turn)) {
+                        $messages[] = [
+                            'role' => 'assistant',
+                            'content' => $candidateContent,
+                        ];
+                        $messages[] = [
+                            'role' => 'system',
+                            'content' => $this->unverifiedCompletionCorrectionPrompt(),
+                        ];
+
+                        continue;
+                    }
+
                     if ($this->shouldContinueAfterReadOnlyTerminal($userMessage, $candidateContent, $actions, $toolOutputs, $turn)) {
                         $messages[] = [
                             'role' => 'assistant',
@@ -198,6 +211,14 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'tool_calls' => $toolCalls,
                 ];
 
+                $plannedWorkByToolCall = $this->recordPlannedNativeWorkItems($session, $toolCalls);
+                $domainEvents = $domainEvents->concat(
+                    collect($plannedWorkByToolCall)
+                        ->pluck('event')
+                        ->filter(fn (mixed $event): bool => $event instanceof ActivityEvent)
+                        ->values()
+                );
+
                 foreach ($toolCalls as $toolCall) {
                     if ($this->isCancellationRequested($session)) {
                         return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
@@ -206,7 +227,13 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     if (! is_array($toolCall)) {
                         continue;
                     }
-                    [$toolActions, $toolEvents, $toolOutput] = $this->executeNativeToolCall($session, $userMessage, $toolCall);
+                    $toolCallId = (string) ($toolCall['id'] ?? '');
+                    [$toolActions, $toolEvents, $toolOutput] = $this->executeNativeToolCall(
+                        $session,
+                        $userMessage,
+                        $toolCall,
+                        is_array($plannedWorkByToolCall[$toolCallId] ?? null) ? $plannedWorkByToolCall[$toolCallId] : null
+                    );
                     $actions = array_merge($actions, $toolActions);
                     $toolOutputs[] = $toolOutput;
                     $domainEvents = $domainEvents->concat($toolEvents);
@@ -352,7 +379,147 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $decoded;
     }
 
-    private function executeNativeToolCall(ConversationSession $session, ConversationMessage $userMessage, array $toolCall): array
+    private function recordPlannedNativeWorkItems(ConversationSession $session, array $toolCalls): array
+    {
+        $planned = [];
+        $order = 0;
+
+        foreach ($toolCalls as $toolCall) {
+            if (! is_array($toolCall)) {
+                continue;
+            }
+
+            $toolCallId = (string) ($toolCall['id'] ?? '');
+            if ($toolCallId === '') {
+                $toolCallId = 'tool-'.count($planned);
+            }
+
+            $name = (string) data_get($toolCall, 'function.name', '');
+            if ($name === '' || $this->isNativeReadTool($name)) {
+                continue;
+            }
+
+            $actionType = $this->actionTypeForNativeTool($name);
+            if ($actionType === null) {
+                continue;
+            }
+
+            $arguments = $this->decodeToolArguments((string) data_get($toolCall, 'function.arguments', '{}'));
+            $label = $this->workItemLabelForAction($actionType, $arguments);
+            if ($label === '') {
+                continue;
+            }
+
+            $workItem = [
+                'work_item_id' => 'tool-call-'.$toolCallId,
+                'work_order' => $order++,
+                'action_type' => $actionType,
+                'label' => $label,
+            ];
+            $workItem['event'] = $this->recordEvent(
+                $session,
+                'assistant.work_item.planned',
+                $workItem,
+                'assistant.work',
+                'planned'
+            );
+
+            $planned[$toolCallId] = $workItem;
+        }
+
+        return $planned;
+    }
+
+    private function workItemLabelForAction(string $actionType, array $arguments): string
+    {
+        $verb = match (true) {
+            $actionType === 'memory.create', $actionType === 'workspace_memory.note' => 'Save',
+            $actionType === 'memory.update' => 'Update',
+            $actionType === 'memory.delete' => 'Forget',
+            str_ends_with($actionType, '.create') || $actionType === 'calendar.create' => 'Create',
+            str_ends_with($actionType, '.update') || $actionType === 'calendar.update' => 'Update',
+            str_ends_with($actionType, '.delete') || $actionType === 'calendar.delete' => 'Delete',
+            default => 'Work on',
+        };
+
+        $target = match (true) {
+            str_starts_with($actionType, 'task.') => 'task',
+            str_starts_with($actionType, 'reminder.') => 'reminder',
+            str_starts_with($actionType, 'calendar') => 'calendar event',
+            str_starts_with($actionType, 'note_folder.') => 'folder',
+            str_starts_with($actionType, 'note.') => 'note',
+            str_starts_with($actionType, 'event_category.') => 'category',
+            str_starts_with($actionType, 'memory.'), $actionType === 'workspace_memory.note' => 'knowledge',
+            str_starts_with($actionType, 'blocker.') => 'blocker',
+            str_starts_with($actionType, 'approval.') => 'approval',
+            default => str_replace(['_', '.'], ' ', $actionType),
+        };
+
+        $subject = $this->workItemSubjectForAction($actionType, $arguments);
+        $label = trim($verb.' '.$target);
+
+        return $subject === '' ? $label : $label.': '.$subject;
+    }
+
+    private function workItemSubjectForAction(string $actionType, array $arguments): string
+    {
+        $value = $arguments['title']
+            ?? $arguments['match_title']
+            ?? $arguments['name']
+            ?? $arguments['summary']
+            ?? $arguments['reason']
+            ?? $arguments['text']
+            ?? null;
+
+        if ($value === null && str_starts_with($actionType, 'calendar')) {
+            $value = $arguments['event_title'] ?? $arguments['calendar_event_title'] ?? null;
+        }
+
+        if (! is_scalar($value)) {
+            return '';
+        }
+
+        $subject = str((string) $value)
+            ->replaceMatches('/\s+/', ' ')
+            ->trim()
+            ->toString();
+
+        if ($subject === '') {
+            return '';
+        }
+
+        if (str_starts_with($actionType, 'reminder.')) {
+            $subject = preg_replace('/^reminder\s*:\s*/i', '', $subject) ?? $subject;
+            $subject = preg_replace('/\s+reminder$/i', '', $subject) ?? $subject;
+        }
+
+        return str($subject)->limit(72, '...')->toString();
+    }
+
+    private function attachWorkItemToEvent(ActivityEvent $event, array $workItem): ActivityEvent
+    {
+        $event->update([
+            'payload' => $this->payloadWithWorkItem($event->payload ?? [], $workItem),
+        ]);
+
+        return $event->refresh();
+    }
+
+    private function payloadWithWorkItem(array $payload, ?array $workItem): array
+    {
+        if ($workItem === null) {
+            return $payload;
+        }
+
+        return array_merge($payload, [
+            'work_item_id' => $workItem['work_item_id'] ?? null,
+            'work_order' => $workItem['work_order'] ?? null,
+            'work_label' => $workItem['label'] ?? null,
+            'action_type' => $workItem['action_type'] ?? null,
+        ]);
+    }
+
+    private function executeNativeToolCall(ConversationSession $session, ConversationMessage $userMessage, array $toolCall, ?array $workItem = null): array
     {
         $name = (string) data_get($toolCall, 'function.name', '');
         $arguments = $this->decodeToolArguments((string) data_get($toolCall, 'function.arguments', '{}'));
@@ -398,13 +565,13 @@ class HermesToolRuntimeService implements HermesRuntimeService
         if ($actionType === 'calendar_event.create' && $this->messageIsAffirmativeOnly($userMessage)) {
             $duplicate = $this->duplicateCalendarCreateForConfirmation($session, $arguments);
             if ($duplicate instanceof CalendarEvent) {
-                $event = $this->recordEvent($session, 'assistant.calendar_event.duplicate_skipped', [
+                $event = $this->recordEvent($session, 'assistant.calendar_event.duplicate_skipped', $this->payloadWithWorkItem([
                     'calendar_event_id' => $duplicate->id,
                     'title' => $duplicate->title,
                     'starts_at' => $duplicate->starts_at?->toIso8601String(),
                     'ends_at' => $duplicate->ends_at?->toIso8601String(),
                     'reason' => 'matching event already created in this conversation',
-                ], 'calendar.create', 'skipped');
+                ], $workItem), 'calendar.create', 'skipped');
 
                 return [[], collect([$event]), [
                     'ok' => true,
@@ -428,6 +595,11 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
+        if ($workItem !== null) {
+            $events = $events
+                ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
+                ->values();
+        }
         $failed = $events->contains(fn (ActivityEvent $event): bool => $event->status === 'failed');
 
         return [[$action], $events, [
@@ -529,6 +701,35 @@ class HermesToolRuntimeService implements HermesRuntimeService
             ], true));
     }
 
+    private function shouldContinueAfterUnverifiedCompletionClaim(ConversationMessage $userMessage, string $assistantContent, array $actions, array $toolOutputs, int $turn): bool
+    {
+        if ($turn >= 2 || $actions !== [] || $toolOutputs !== [] || trim($assistantContent) === '') {
+            return false;
+        }
+
+        if (! $this->messageAppearsToRequestAppWrite($userMessage)) {
+            return false;
+        }
+
+        return $this->assistantClaimsPriorCompletion($assistantContent);
+    }
+
+    private function assistantClaimsPriorCompletion(string $content): bool
+    {
+        $normalized = str($content)
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($normalized === '' || ! preg_match('/\b(already|previously|earlier)\b/u', $normalized)) {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(already|previously|earlier)\b.{0,80}\b(created|added|scheduled|saved|made|set|moved|updated|changed|deleted|removed|cancelled|completed|did|done)\b/u', $normalized)
+            || (bool) preg_match('/\b(created|added|scheduled|saved|made|set|moved|updated|changed|deleted|removed|cancelled|completed|did|done)\b.{0,80}\b(already|previously|earlier)\b/u', $normalized);
+    }
+
     private function messageAppearsToRequestAppWrite(ConversationMessage $message): bool
     {
         $content = str((string) $message->content)
@@ -550,6 +751,11 @@ class HermesToolRuntimeService implements HermesRuntimeService
     private function readOnlyTerminalCorrectionPrompt(): string
     {
         return 'The user asked to change HeyBean app data, but only read tools have run so far. Use the read results already available in this conversation to call the necessary write tools now. If the target cannot be uniquely identified, ask one concise follow-up instead of ending with a lookup count. Do not say the work is complete until write tool results confirm it.';
+    }
+
+    private function unverifiedCompletionCorrectionPrompt(): string
+    {
+        return 'The user asked to change HeyBean app data, but the previous answer claimed prior completion without checking current app state or running write tools in this turn. Conversation history can be stale because the user may have deleted or changed those items. Do not rely on an earlier assistant message as proof. Use current read/write tools now: verify the requested records exist in current app state when needed, and create, update, or delete them if they are missing or still need changes. Only say the work is already complete if current tool results confirm the exact requested state.';
     }
 
     private function duplicateCalendarCreateForConfirmation(ConversationSession $session, array $arguments): ?CalendarEvent
@@ -1297,6 +1503,7 @@ You own intent and conversation. Interpret the user's message naturally, includi
 
 Use recent conversation turns to resolve follow-ups, corrections, and pronouns. If the user corrects the entity type, such as "task, not reminder", apply that correction to the prior request and search/use the corrected tool type.
 Use runtime_context.recent_assistant_actions to resolve follow-up confirmations. If the user says only "yes", "sure", or another short confirmation after Bean asked about an additional related action, perform only the unresolved related action. Do not recreate tasks, reminders, notes, or events that recent_assistant_actions shows were already created or updated. When creating a reminder for an event that was just created, pass that event's calendar_event_id from recent_assistant_actions.
+Conversation history and recent_assistant_actions can be stale because the user may delete, move, or edit items outside the chat. For any create, update, delete, schedule, move, or reminder request, current app state and tool results override earlier assistant claims. Never say an app change is already done solely because an earlier chat message said it was done; verify current state with tools when needed, and run the write tools if the requested records are missing or still need changes.
 When a user asks what/when/where about an item and the type is ambiguous, search the relevant app records before saying it is not found. For task-like words or chores, search tasks; for reminder-like alarms, search reminders; for note, list, idea, writing, or saved text requests, search notes; if unclear, search the likely record types.
 
 Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded.
@@ -1340,7 +1547,7 @@ PROMPT;
             $this->nativeTool('get_request_history', 'Recall prior user requests from Bean conversation history by local date, text, or workspace. Use for questions like what did I ask yesterday.', $this->historyProperties()),
             $this->nativeTool('get_activity_timeline', 'Recall Bean activity/tool outcomes by local date, event type, tool, or workspace.', $this->activityTimelineProperties()),
             $this->nativeTool('get_day_context', 'Get tasks, reminders, and calendar events for a specific local date.', $this->dayContextProperties(), ['date']),
-            $this->nativeTool('external_lookup', 'Look up current external information outside HeyBean, such as live web facts, store hours, travel, weather, prices, traffic, news, sports, or current availability. Use this instead of guessing when the answer depends on current outside data.', $this->externalLookupProperties(), ['query']),
+            $this->nativeTool('external_lookup', 'Look up current external information outside HeyBean, such as live web facts, store hours, travel, weather, prices, traffic, news, sports, or current availability. Use this instead of guessing when the answer depends on current outside data. When the domain is clear, fill structured fields such as domain, intent, location, and date so fast providers can execute without reparsing the user sentence.', $this->externalLookupProperties(), ['query']),
             $this->nativeTool('create_task', 'Create a visible task in Hey Bean.', $this->taskProperties(), ['title']),
             $this->nativeTool('update_task', 'Update one existing task. Prefer id from search_tasks; otherwise use match_title and Laravel will require a unique match.', $this->taskProperties(requireId: false)),
             $this->nativeTool('delete_task', 'Delete one existing task by id.', $this->idProperties(), ['id']),
@@ -1509,8 +1716,13 @@ PROMPT;
     {
         return [
             'query' => ['type' => 'string', 'description' => 'Specific external lookup query. Include relevant names, dates, route, city, or domain details from the user request.'],
+            'domain' => ['type' => 'string', 'description' => 'Structured lookup domain when clear, such as weather, places, web, news, finance, sports, travel, or general.'],
+            'intent' => ['type' => 'string', 'description' => 'Structured lookup intent, such as current_weather, weather_forecast, nearby_place, business_hours, current_fact, or recent_news.'],
             'context' => ['type' => 'string', 'description' => 'Short reason or constraints for the lookup, such as one-way flights tomorrow or store closing time today.'],
             'location' => ['type' => 'string', 'description' => 'Optional user-provided or inferred location hint.'],
+            'date' => ['type' => 'string', 'description' => 'Structured target date in YYYY-MM-DD local format when the request refers to a specific date, such as tomorrow or next Friday. Use runtime_context.temporal_context to resolve relative dates.'],
+            'date_range' => ['type' => 'string', 'description' => 'Structured target date range when the request spans multiple days.'],
+            'time' => ['type' => 'string', 'description' => 'Structured local time or part of day when relevant.'],
         ];
     }
 
