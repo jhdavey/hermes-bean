@@ -245,7 +245,9 @@
     --hb-bg2: #f1f7ee;
     --hb-surface: #ffffff;
     --hb-surface2: #fbfcfb;
+    --hb-surface-soft: #f6faf4;
     --hb-text: #2d3748;
+    --hb-ink: #2d3748;
     --hb-muted: #667085;
     --hb-border: rgba(217, 221, 227, .92);
     --hb-border-strong: rgba(217, 221, 227, 1);
@@ -390,19 +392,266 @@
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] {
-    --hb-bg0: #111510;
-    --hb-bg1: #171d16;
-    --hb-bg2: #20281f;
-    --hb-surface: #171d16;
-    --hb-surface2: #1d251c;
-    --hb-text: #edf5ea;
-    --hb-muted: #aab8a6;
-    --hb-border: rgba(128, 146, 124, .28);
-    --hb-border-strong: rgba(154, 174, 149, .38);
-    --hb-accent-ink: #102014;
-    --hb-shadow: 0 18px 52px rgba(0, 0, 0, .34);
+    --hb-bg0: #06100d;
+    --hb-bg1: #0a1712;
+    --hb-bg2: #0f1f19;
+    --hb-surface: #101d17;
+    --hb-surface2: #14251d;
+    --hb-surface-soft: #182c23;
+    --hb-text: #f3fbf6;
+    --hb-ink: #f3fbf6;
+    --hb-muted: #a9bdae;
+    --hb-border: rgba(134, 243, 166, .16);
+    --hb-border-strong: rgba(134, 243, 166, .30);
+    --hb-accent: #6ee98e;
+    --hb-accent-strong: #49d66f;
+    --hb-accent-ink: #04120b;
+    --hb-success: #6ee98e;
+    --hb-accent-rgb: 110, 233, 142;
+    --hb-accent-strong-rgb: 73, 214, 111;
+    --hb-success-rgb: 110, 233, 142;
+    --hb-warning: #fbbf24;
+    --hb-shadow: 0 22px 70px rgba(0, 0, 0, .48);
     --hb-critical-star: #fbbf24;
     --hb-destructive: #fb7185;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] {
+    background:
+        radial-gradient(circle at 16% -14%, rgba(var(--hb-accent-rgb), .20), transparent 32%),
+        radial-gradient(circle at 88% 12%, rgba(45, 212, 191, .11), transparent 28%),
+        linear-gradient(180deg, var(--hb-bg0) 0%, var(--hb-bg1) 52%, var(--hb-bg2) 100%);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-app::before {
+    background:
+        radial-gradient(circle at -10% -18%, rgba(var(--hb-accent-rgb), .18), transparent 42%),
+        linear-gradient(90deg, rgba(255, 255, 255, .025), transparent 34%, rgba(var(--hb-accent-rgb), .035));
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-topbar,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-bottom-bar {
+    border-color: rgba(var(--hb-accent-rgb), .14);
+    background: rgba(5, 13, 10, .82);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .24);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-topbar {
+    backdrop-filter: blur(22px) saturate(150%);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-card,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-surface-soft,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-profile-popover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-create-popover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-critical-popover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-modal,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-dock,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-log-modal {
+    border-color: var(--hb-border);
+    background: linear-gradient(180deg, rgba(21, 39, 31, .96), rgba(11, 23, 18, .96));
+    box-shadow: 0 16px 44px rgba(0, 0, 0, .28);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-surface-soft,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-metric,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-switch,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-provider-stats span,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-billing-summary-grid > div,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-day-board-column,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-task-future-toggle {
+    background: linear-gradient(180deg, rgba(27, 49, 39, .90), rgba(15, 31, 24, .92));
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-section-icon,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button {
+    background: rgba(var(--hb-accent-rgb), .14);
+    color: var(--hb-accent);
+    border-color: rgba(var(--hb-accent-rgb), .18);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button:hover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button-active {
+    background: rgba(var(--hb-accent-rgb), .22);
+    border-color: rgba(var(--hb-accent-rgb), .38);
+    color: var(--hb-accent);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-button,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-button-secondary,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-button-ghost,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chip,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-growth-range-button,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-theme-mode-option {
+    border-color: var(--hb-border);
+    background: rgba(22, 38, 31, .92);
+    color: var(--hb-text);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-button,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button-active,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-theme-mode-option.is-selected,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-growth-range-button[aria-pressed="true"] {
+    border-color: rgba(var(--hb-accent-rgb), .42);
+    background: linear-gradient(180deg, rgba(var(--hb-accent-rgb), .92), rgba(var(--hb-accent-strong-rgb), .88));
+    color: var(--hb-accent-ink);
+    box-shadow: 0 12px 28px rgba(var(--hb-accent-rgb), .18);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-button:disabled,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-button-secondary:disabled,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-button-ghost:disabled {
+    background: rgba(30, 42, 36, .70);
+    color: rgba(221, 235, 225, .38);
+    border-color: rgba(134, 243, 166, .09);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-input,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-textarea,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-select,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-profile-workspace select {
+    border-color: rgba(var(--hb-accent-rgb), .18);
+    background-color: #0d1914;
+    color: var(--hb-text);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-input:focus,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-textarea:focus,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-select:focus {
+    border-color: rgba(var(--hb-accent-rgb), .62);
+    background-color: #102019;
+    box-shadow: 0 0 0 3px rgba(var(--hb-accent-rgb), .16);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-input::placeholder,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-textarea::placeholder {
+    color: rgba(169, 189, 174, .72);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-form {
+    background:
+        radial-gradient(circle at 10% 0%, rgba(var(--hb-accent-rgb), .09), transparent 32%),
+        linear-gradient(180deg, rgba(18, 34, 27, .98), rgba(8, 18, 14, .98));
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-day,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-day {
+    border-color: rgba(134, 243, 166, .13);
+    background: rgba(18, 31, 25, .92);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell-adjacent {
+    background: rgba(9, 17, 14, .86);
+    border-color: rgba(134, 243, 166, .08);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell-active,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-day-active {
+    border-color: rgba(var(--hb-accent-rgb), .46);
+    background: linear-gradient(180deg, rgba(var(--hb-accent-rgb), .22), rgba(18, 43, 30, .96));
+    box-shadow: inset 0 0 0 1px rgba(var(--hb-accent-rgb), .22);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-event,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-event,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-event,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-multi-day-event,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-all-day-event,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timed-event,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-item {
+    border-color: rgba(var(--hb-accent-rgb), .28);
+    background: rgba(var(--hb-accent-rgb), .13);
+    color: var(--hb-text);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-event:hover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-event:hover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-event:hover {
+    border-color: rgba(var(--hb-accent-rgb), .46);
+    background: rgba(var(--hb-accent-rgb), .20);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-complete,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-day-empty {
+    background: rgba(13, 25, 20, .90);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-task-expand-icon,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-title,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-event-title,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-event-title,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-event .hb-event-title,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline-day-head strong {
+    color: var(--hb-text);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-meta,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-event-time,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-event-time,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-event .hb-event-time,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline-day-head span {
+    color: var(--hb-muted);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline {
+    border-color: rgba(134, 243, 166, .14);
+    background: #09130f;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline-head,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-all-day-row,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-multi-day-row,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline-hour {
+    background: rgba(13, 25, 20, .96);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline-row,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline-slot,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline-day-head,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-multi-day-cell,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-all-day-cell {
+    border-color: rgba(134, 243, 166, .11);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-growth-card {
+    background:
+        radial-gradient(circle at 80% 0%, rgba(var(--hb-accent-rgb), .12), transparent 32%),
+        linear-gradient(180deg, rgba(18, 34, 27, .96), rgba(10, 22, 17, .98));
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-growth-stats span,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-provider-card,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-hermes-status {
+    border-color: var(--hb-border);
+    background: rgba(20, 37, 29, .86);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-growth-axis,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-growth-grid {
+    stroke: rgba(169, 189, 174, .20);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-growth-dot {
+    fill: #102019;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-approval,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-model-note {
+    border-color: rgba(251, 191, 36, .32);
+    background: rgba(120, 73, 12, .22);
+    color: #fde68a;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-bean-button,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-mobile-bean-button,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-topbar-bean-button {
+    border-color: rgba(var(--hb-accent-rgb), .42);
+    background: linear-gradient(145deg, #143322 0%, #0d1f18 58%, #092016 100%);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .32), inset 0 1px 0 rgba(255, 255, 255, .06);
 }
 
 .heybean-app-body {

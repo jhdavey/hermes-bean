@@ -1145,19 +1145,19 @@ class HeyBeanTheme {
   static void useTheme(String key, {Brightness brightness = Brightness.light}) {
     _current = heyBeanColorThemeForKey(key);
     isDark = brightness == Brightness.dark;
-    bg0 = isDark ? const Color(0xFF111510) : _current.bg0;
-    bg1 = isDark ? const Color(0xFF171D16) : _current.bg1;
-    bg2 = isDark ? const Color(0xFF20281F) : _current.bg2;
-    surface = isDark ? const Color(0xFF171D16) : const Color(0xFFFFFFFF);
-    surface2 = isDark ? const Color(0xFF1D251C) : _current.surface2;
-    text = isDark ? const Color(0xFFEDF5EA) : const Color(0xFF2D3748);
-    muted = isDark ? const Color(0xFFAAB8A6) : const Color(0xFF667085);
-    border = isDark ? const Color(0xFF3A4637) : const Color(0xFFD9DDE3);
-    borderStrong = isDark ? const Color(0xFF53614F) : const Color(0xFFCBD1DA);
-    accent = _current.accent;
-    accentStrong = _current.accentStrong;
-    accentInk = _current.accentInk;
-    success = _current.success;
+    bg0 = isDark ? const Color(0xFF06100D) : _current.bg0;
+    bg1 = isDark ? const Color(0xFF0A1712) : _current.bg1;
+    bg2 = isDark ? const Color(0xFF0F1F19) : _current.bg2;
+    surface = isDark ? const Color(0xFF101D17) : const Color(0xFFFFFFFF);
+    surface2 = isDark ? const Color(0xFF14251D) : _current.surface2;
+    text = isDark ? const Color(0xFFF3FBF6) : const Color(0xFF2D3748);
+    muted = isDark ? const Color(0xFFA9BDAE) : const Color(0xFF667085);
+    border = isDark ? const Color(0x293EE98E) : const Color(0xFFD9DDE3);
+    borderStrong = isDark ? const Color(0x4D3EE98E) : const Color(0xFFCBD1DA);
+    accent = isDark ? const Color(0xFF6EE98E) : _current.accent;
+    accentStrong = isDark ? const Color(0xFF49D66F) : _current.accentStrong;
+    accentInk = isDark ? const Color(0xFF04120B) : _current.accentInk;
+    success = isDark ? const Color(0xFF6EE98E) : _current.success;
     warning = isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
     destructive = isDark ? const Color(0xFFFB7185) : const Color(0xFFDC2626);
   }
@@ -1174,31 +1174,40 @@ class HeyBeanTheme {
     final isDarkTheme = brightness == Brightness.dark;
     final colorTheme = heyBeanColorThemeForKey(key);
     final surfaceColor = isDarkTheme
-        ? const Color(0xFF171D16)
+        ? const Color(0xFF101D17)
         : const Color(0xFFFFFFFF);
     final textColor = isDarkTheme
-        ? const Color(0xFFEDF5EA)
+        ? const Color(0xFFF3FBF6)
         : const Color(0xFF2D3748);
     final mutedColor = isDarkTheme
-        ? const Color(0xFFAAB8A6)
+        ? const Color(0xFFA9BDAE)
         : const Color(0xFF667085);
     final borderColor = isDarkTheme
-        ? const Color(0xFF3A4637)
+        ? const Color(0x293EE98E)
         : const Color(0xFFD9DDE3);
     final borderStrongColor = isDarkTheme
-        ? const Color(0xFF53614F)
+        ? const Color(0x4D3EE98E)
         : const Color(0xFFCBD1DA);
+    final accentColor = isDarkTheme
+        ? const Color(0xFF6EE98E)
+        : colorTheme.accent;
+    final accentStrongColor = isDarkTheme
+        ? const Color(0xFF49D66F)
+        : colorTheme.accentStrong;
+    final accentInkColor = isDarkTheme
+        ? const Color(0xFF04120B)
+        : colorTheme.accentInk;
     final colorScheme =
         ColorScheme.fromSeed(
           brightness: brightness,
-          seedColor: colorTheme.accent,
+          seedColor: accentColor,
         ).copyWith(
-          primary: colorTheme.accent,
-          onPrimary: colorTheme.accentInk,
-          primaryContainer: colorTheme.accent,
-          onPrimaryContainer: colorTheme.accentInk,
-          secondary: colorTheme.accentStrong,
-          tertiary: colorTheme.success,
+          primary: accentColor,
+          onPrimary: accentInkColor,
+          primaryContainer: accentColor,
+          onPrimaryContainer: accentInkColor,
+          secondary: accentStrongColor,
+          tertiary: isDarkTheme ? const Color(0xFF6EE98E) : colorTheme.success,
           surface: surfaceColor,
           onSurface: textColor,
           onSurfaceVariant: mutedColor,
@@ -1213,7 +1222,7 @@ class HeyBeanTheme {
       fontFamily: 'Plus Jakarta Sans',
       fontFamilyFallback: const ['Avenir Next', 'Inter', 'Roboto', 'Arial'],
       scaffoldBackgroundColor: Colors.transparent,
-      canvasColor: isDarkTheme ? const Color(0xFF111510) : colorTheme.bg0,
+      canvasColor: isDarkTheme ? const Color(0xFF06100D) : colorTheme.bg0,
       appBarTheme: AppBarTheme(
         centerTitle: false,
         backgroundColor: Colors.transparent,
@@ -1236,7 +1245,9 @@ class HeyBeanTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surfaceColor.withValues(alpha: isDarkTheme ? .92 : .88),
+        fillColor: isDarkTheme
+            ? const Color(0xFF0D1914)
+            : surfaceColor.withValues(alpha: .88),
         hintStyle: TextStyle(color: mutedColor),
         helperStyle: TextStyle(
           color: mutedColor,
@@ -1245,7 +1256,7 @@ class HeyBeanTheme {
         ),
         labelStyle: TextStyle(color: mutedColor, fontWeight: FontWeight.w800),
         floatingLabelStyle: TextStyle(
-          color: colorTheme.accentStrong,
+          color: accentStrongColor,
           fontWeight: FontWeight.w900,
         ),
         contentPadding: const EdgeInsets.symmetric(
@@ -1263,15 +1274,15 @@ class HeyBeanTheme {
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(999),
           borderSide: BorderSide(
-            color: colorTheme.accent.withValues(alpha: .56),
+            color: accentColor.withValues(alpha: .62),
             width: 1.2,
           ),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: colorTheme.accent,
-          foregroundColor: colorTheme.accentInk,
+          backgroundColor: accentColor,
+          foregroundColor: accentInkColor,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
@@ -1288,7 +1299,7 @@ class HeyBeanTheme {
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: colorTheme.accentStrong),
+        style: TextButton.styleFrom(foregroundColor: accentStrongColor),
       ),
     );
   }
