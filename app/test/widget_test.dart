@@ -27,6 +27,7 @@ Future<void> openNotesFromBottomNav(WidgetTester tester) async {
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    HeyBeanTheme.useTheme('green', brightness: Brightness.light);
   });
 
   test('realtime voice cancellation phrases end the active conversation', () {
@@ -913,7 +914,8 @@ void main() {
 
       await openSettingsFromBottomNav(tester);
       expect(find.byKey(const Key('open-bean-preferences')), findsOneWidget);
-      expect(find.text('Bean preferences'), findsOneWidget);
+      expect(find.text('Bean'), findsOneWidget);
+      expect(find.byKey(const Key('open-bean-knowledge')), findsOneWidget);
       expect(find.byKey(const Key('delete-account-action')), findsOneWidget);
       await tester.ensureVisible(
         find.byKey(const Key('delete-account-action')),
@@ -2413,8 +2415,17 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-more')));
       await tester.pumpAndSettle();
 
-      expect(find.text("Bean's Knowledge"), findsOneWidget);
+      expect(find.text("Bean's Knowledge"), findsNothing);
       expect(find.text('Memory'), findsNothing);
+
+      await tester.tap(find.text('Settings').last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('open-bean-knowledge')), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const Key('open-bean-knowledge')));
+      await tester.tap(find.byKey(const Key('open-bean-knowledge')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('memory-view')), findsOneWidget);
+      expect(find.text("Bean's Knowledge"), findsOneWidget);
     },
   );
 
@@ -2785,6 +2796,41 @@ void main() {
     );
     expect(eventTop.dy, lessThan(reminderTop.dy));
     expect(find.text('2/2'), findsOneWidget);
+  });
+
+  testWidgets('dashboard refresh applies Bean work events during active runs', (
+    WidgetTester tester,
+  ) async {
+    final api = _DashboardRefreshBeanWorkFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'I need to do some deep work later. Let’s put a work block on my schedule for 8-11pm.',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('Create calendar event: Deep work'), findsOneWidget);
+    expect(find.text('Create reminder: Deep work'), findsOneWidget);
+    expect(
+      find.text('Done — I added the deep work block and reminder.'),
+      findsOneWidget,
+    );
+
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(milliseconds: 250));
   });
 
   testWidgets('chat stop cancels an in-flight Bean request', (
@@ -3758,7 +3804,8 @@ void main() {
       await openSettingsFromBottomNav(tester);
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
       expect(find.text('Settings'), findsWidgets);
-      expect(find.text('Bean preferences'), findsOneWidget);
+      expect(find.text('Bean'), findsOneWidget);
+      expect(find.byKey(const Key('open-bean-knowledge')), findsOneWidget);
       expect(find.text('Calendar preferences'), findsOneWidget);
       expect(find.text('Start hour'), findsOneWidget);
       expect(find.text('End hour'), findsOneWidget);
@@ -5002,7 +5049,7 @@ void main() {
     expect(find.byKey(const Key('heybean-center-bean-button')), findsOneWidget);
     expect(
       tester.getSize(find.byKey(const Key('heybean-center-bean-button'))),
-      const Size(72, 72),
+      const Size(64, 64),
     );
     final beanLogo = tester.widget<Image>(
       find.byKey(const Key('heybean-center-bean-logo')),
@@ -5014,8 +5061,8 @@ void main() {
     );
     expect(beanLogo.color, isNull);
     expect(beanLogo.colorBlendMode, isNull);
-    expect(beanLogo.width, 42);
-    expect(beanLogo.height, 42);
+    expect(beanLogo.width, 38);
+    expect(beanLogo.height, 38);
     expect(
       find.byKey(const Key('heybean-center-bean-logo-badge')),
       findsNothing,
@@ -5032,6 +5079,111 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('primary-chat-action')), findsOneWidget);
+  });
+
+  testWidgets('dark mode uses dark calendar controls and white Bean logo', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient()..updatedThemeMode = 'dark';
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(HeyBeanTheme.isDark, isTrue);
+    final beanLogo = tester.widget<Image>(
+      find.byKey(const Key('heybean-center-bean-logo')),
+    );
+    expect(
+      (beanLogo.image as AssetImage).assetName,
+      'assets/images/bean/bean-logo-white-overlay.png',
+    );
+
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
+
+    final todayButtonDecoration = tester
+        .widgetList<Container>(
+          find.descendant(
+            of: find.byKey(const Key('calendar-today-button')),
+            matching: find.byType(Container),
+          ),
+        )
+        .map((container) => container.decoration)
+        .whereType<BoxDecoration>()
+        .first;
+    expect(
+      todayButtonDecoration.color,
+      HeyBeanTheme.surface2.withValues(alpha: .94),
+    );
+    expect(
+      (todayButtonDecoration.border! as Border).top.color,
+      HeyBeanTheme.borderStrong,
+    );
+
+    await tester.tap(find.byKey(const Key('calendar-month-chevron')));
+    await tester.pumpAndSettle();
+
+    final monthPillDecoration = tester
+        .widgetList<Container>(
+          find.descendant(
+            of: find.byKey(const Key('calendar-month-pill-0')),
+            matching: find.byType(Container),
+          ),
+        )
+        .map((container) => container.decoration)
+        .whereType<BoxDecoration>()
+        .first;
+    expect(
+      monthPillDecoration.color,
+      HeyBeanTheme.surface2.withValues(alpha: .94),
+    );
+    expect(
+      (monthPillDecoration.border! as Border).top.color,
+      HeyBeanTheme.borderStrong,
+    );
+  });
+
+  test('Flutter theme tokens mirror Laravel light and dark palettes', () {
+    final lightGold = HeyBeanTheme.themeDataFor('gold', Brightness.light);
+    expect(lightGold.useMaterial3, isTrue);
+    expect(lightGold.canvasColor, const Color(0xFFFFFDF7));
+    expect(lightGold.colorScheme.primary, const Color(0xFFFCD34D));
+    expect(lightGold.colorScheme.onPrimary, const Color(0xFF3F2C07));
+    expect(lightGold.colorScheme.surface, const Color(0xFFFFFFFF));
+    expect(lightGold.colorScheme.onSurface, const Color(0xFF2D3748));
+
+    final darkGold = HeyBeanTheme.themeDataFor('gold', Brightness.dark);
+    expect(darkGold.canvasColor, const Color(0xFF0B0F14));
+    expect(darkGold.colorScheme.primary, const Color(0xFFFCD34D));
+    expect(darkGold.colorScheme.onPrimary, const Color(0xFF3F2C07));
+    expect(darkGold.colorScheme.surface, const Color(0xFF141A20));
+    expect(
+      darkGold.colorScheme.surfaceContainerHighest,
+      const Color(0xFF19212A),
+    );
+    expect(darkGold.colorScheme.onSurface, const Color(0xFFF4F7FB));
+    expect(darkGold.colorScheme.onSurfaceVariant, const Color(0xFFA7B0BD));
+    expect(darkGold.colorScheme.outlineVariant, const Color(0x2E94A3B8));
+    expect(darkGold.colorScheme.outline, const Color(0x4D94A3B8));
+    expect(darkGold.colorScheme.error, const Color(0xFFFB7185));
+    expect(darkGold.inputDecorationTheme.fillColor, const Color(0xFF111820));
+    expect(darkGold.dialogTheme.backgroundColor, const Color(0xFF141A20));
+    expect(
+      darkGold.bottomSheetTheme.modalBackgroundColor,
+      const Color(0xFF141A20),
+    );
+
+    HeyBeanTheme.useTheme('gold', brightness: Brightness.dark);
+    expect(HeyBeanTheme.bg0, const Color(0xFF0B0F14));
+    expect(HeyBeanTheme.bg1, const Color(0xFF10151C));
+    expect(HeyBeanTheme.bg2, const Color(0xFF151B23));
+    expect(HeyBeanTheme.surface, const Color(0xFF141A20));
+    expect(HeyBeanTheme.surface2, const Color(0xFF19212A));
+    expect(HeyBeanTheme.surfaceSoft, const Color(0xFF1F2933));
+    expect(HeyBeanTheme.accent, const Color(0xFFFCD34D));
+    expect(HeyBeanTheme.warning, const Color(0xFFFBBF24));
+    expect(HeyBeanTheme.destructive, const Color(0xFFFB7185));
   });
 
   testWidgets(
@@ -8860,6 +9012,108 @@ class _BeanWorkPlanFakeHermesApiClient extends _SignedInFakeHermesApiClient {
       events: _workEvents,
     );
   }
+}
+
+class _DashboardRefreshBeanWorkFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  bool _dashboardRefreshRequested = false;
+  bool _markedCurrent = false;
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return HermesMessageResult(
+      status: 'queued',
+      session: const HermesSession(id: 42, status: 'queued', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 7200 + queueMessageCalls,
+        role: 'user',
+        content: content,
+        metadata: metadata ?? const {},
+      ),
+      run: const HermesAssistantRun(
+        id: 64,
+        status: 'running',
+        source: 'flutter',
+      ),
+      events: const [
+        HermesActivityEvent(
+          id: 2,
+          eventType: 'runtime.run_queued',
+          status: 'queued',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<HermesAssistantRun> getAssistantRun(int runId) async =>
+      _dashboardRefreshRequested
+      ? const HermesAssistantRun(
+          id: 64,
+          status: 'completed',
+          source: 'flutter',
+          assistantMessage: HermesMessage(
+            id: 8800,
+            role: 'assistant',
+            content: 'Done — I added the deep work block and reminder.',
+          ),
+        )
+      : const HermesAssistantRun(id: 64, status: 'running', source: 'flutter');
+
+  @override
+  Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async =>
+      HermesSessionDetails(
+        session: HermesSession(
+          id: sessionId,
+          status: _dashboardRefreshRequested ? 'active' : 'queued',
+          title: 'Today',
+        ),
+        messages: [
+          if (_dashboardRefreshRequested)
+            const HermesMessage(
+              id: 8800,
+              role: 'assistant',
+              content: 'Done — I added the deep work block and reminder.',
+            ),
+        ],
+      );
+
+  @override
+  Future<HermesDashboardChangeFeed> dashboardChanges({
+    required int after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async {
+    if (!_markedCurrent) {
+      _markedCurrent = true;
+      return const HermesDashboardChangeFeed(changes: [], latestId: 1);
+    }
+    _dashboardRefreshRequested = true;
+    return const HermesDashboardChangeFeed(
+      latestId: 2,
+      changes: [
+        HermesDashboardChange(
+          id: 2,
+          resourceType: 'calendar_event',
+          action: 'created',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>
+      _dashboardRefreshRequested
+      ? _BeanWorkPlanFakeHermesApiClient._workEvents
+      : const [];
 }
 
 class _TomorrowReminderFakeHermesApiClient

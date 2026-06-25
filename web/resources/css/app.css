@@ -682,6 +682,15 @@
     box-shadow: none;
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-settings-grid > .hb-compact-item,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-settings-grid > .hb-surface-soft:not(.hb-settings-section),
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-settings-grid > .hb-card:not(.hb-settings-section),
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-billing-summary-grid > div {
+    border-color: rgba(var(--hb-accent-rgb), .24);
+    background: transparent;
+    box-shadow: none;
+}
+
 .heybean-app-body[data-hb-theme-resolved="dark"] input:not([type="checkbox"]):not([type="radio"]),
 .heybean-app-body[data-hb-theme-resolved="dark"] textarea,
 .heybean-app-body[data-hb-theme-resolved="dark"] select {
@@ -5021,6 +5030,17 @@
     box-shadow: none;
 }
 
+.hb-settings-grid > .hb-compact-item,
+.hb-settings-grid > .hb-surface-soft:not(.hb-settings-section),
+.hb-settings-grid > .hb-card:not(.hb-settings-section) {
+    padding: 16px 0 0;
+    border: 0;
+    border-top: 1px solid rgba(var(--hb-accent-rgb), .24);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
 .hb-settings-panel-head {
     display: flex;
     align-items: flex-start;
@@ -5123,10 +5143,11 @@
 
 .hb-billing-summary-grid > div {
     min-width: 0;
-    padding: 10px 12px;
-    border: 1px solid var(--hb-border);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, .58);
+    padding: 10px 0 0;
+    border: 0;
+    border-top: 1px solid rgba(var(--hb-accent-rgb), .20);
+    border-radius: 0;
+    background: transparent;
 }
 
 .hb-billing-summary-grid span {
@@ -6169,10 +6190,11 @@
     grid-template-columns: 34px minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
-    padding: 12px;
-    border: 1px solid var(--hb-border);
-    border-radius: 16px;
-    background: var(--hb-surface2);
+    padding: 12px 0;
+    border: 0;
+    border-top: 1px solid rgba(var(--hb-accent-rgb), .24);
+    border-radius: 0;
+    background: transparent;
 }
 
 .hb-compact-icon {
@@ -6967,9 +6989,11 @@
     .hb-settings-grid > .hb-compact-item,
     .hb-settings-grid > .hb-surface-soft:not(.hb-settings-section),
     .hb-settings-grid > .hb-card:not(.hb-settings-section) {
-        border-radius: 16px;
-        border: 1px solid var(--hb-border);
-        background: var(--hb-surface2);
+        padding: 14px 0 0;
+        border: 0;
+        border-top: 1px solid rgba(var(--hb-accent-rgb), .24);
+        border-radius: 0;
+        background: transparent;
         box-shadow: none;
     }
 
@@ -6988,7 +7012,7 @@
 
     .hb-settings-grid .hb-card-pad,
     .hb-settings-grid > .hb-card {
-        padding: 12px;
+        padding: 14px 0 0;
     }
 
     .hb-settings-panel-head {

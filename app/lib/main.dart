@@ -75,6 +75,16 @@ const double _beanChatComposerReservedHeight = 66;
 const double _beanChatComposerMaxHeight = 134;
 const double _beanBottomMenuSurfaceInset = 22;
 
+Color _sectionDividerColor({double? alpha}) => HeyBeanTheme.accent.withValues(
+  alpha: alpha ?? (HeyBeanTheme.isDark ? .30 : .24),
+);
+
+BoxDecoration _sectionDividerDecoration({double? alpha}) => BoxDecoration(
+  border: Border(
+    top: BorderSide(color: _sectionDividerColor(alpha: alpha)),
+  ),
+);
+
 class _BeanNotesIcon extends StatelessWidget {
   const _BeanNotesIcon({this.size, this.color});
 
@@ -1113,6 +1123,7 @@ class HeyBeanTheme {
   static Color bg2 = _current.bg2;
   static Color surface = const Color(0xFFFFFFFF);
   static Color surface2 = _current.surface2;
+  static Color surfaceSoft = const Color(0xFFF6FAF4);
   static Color text = const Color(0xFF2D3748);
   static Color muted = const Color(0xFF667085);
   static Color border = const Color(0xFFD9DDE3);
@@ -1123,6 +1134,29 @@ class HeyBeanTheme {
   static Color success = _current.success;
   static Color warning = const Color(0xFFF59E0B);
   static Color destructive = const Color(0xFFDC2626);
+
+  static const Color lightSurface = Color(0xFFFFFFFF);
+  static const Color lightSurfaceSoft = Color(0xFFF6FAF4);
+  static const Color lightText = Color(0xFF2D3748);
+  static const Color lightMuted = Color(0xFF667085);
+  static const Color lightBorder = Color(0xEBD9DDE3);
+  static const Color lightBorderStrong = Color(0xFFD9DDE3);
+  static const Color lightWarning = Color(0xFFF59E0B);
+  static const Color lightDestructive = Color(0xFFDC2626);
+
+  static const Color darkBg0 = Color(0xFF0B0F14);
+  static const Color darkBg1 = Color(0xFF10151C);
+  static const Color darkBg2 = Color(0xFF151B23);
+  static const Color darkSurface = Color(0xFF141A20);
+  static const Color darkSurface2 = Color(0xFF19212A);
+  static const Color darkSurfaceSoft = Color(0xFF1F2933);
+  static const Color darkInputSurface = Color(0xFF111820);
+  static const Color darkText = Color(0xFFF4F7FB);
+  static const Color darkMuted = Color(0xFFA7B0BD);
+  static const Color darkBorder = Color(0x2E94A3B8);
+  static const Color darkBorderStrong = Color(0x4D94A3B8);
+  static const Color darkWarning = Color(0xFFFBBF24);
+  static const Color darkDestructive = Color(0xFFFB7185);
 
   static const SystemUiOverlayStyle lightSystemOverlayStyle =
       SystemUiOverlayStyle(
@@ -1145,21 +1179,22 @@ class HeyBeanTheme {
   static void useTheme(String key, {Brightness brightness = Brightness.light}) {
     _current = heyBeanColorThemeForKey(key);
     isDark = brightness == Brightness.dark;
-    bg0 = isDark ? const Color(0xFF0B0F14) : _current.bg0;
-    bg1 = isDark ? const Color(0xFF10151C) : _current.bg1;
-    bg2 = isDark ? const Color(0xFF151B23) : _current.bg2;
-    surface = isDark ? const Color(0xFF141A20) : const Color(0xFFFFFFFF);
-    surface2 = isDark ? const Color(0xFF19212A) : _current.surface2;
-    text = isDark ? const Color(0xFFF4F7FB) : const Color(0xFF2D3748);
-    muted = isDark ? const Color(0xFFA7B0BD) : const Color(0xFF667085);
-    border = isDark ? const Color(0x2E94A3B8) : const Color(0xFFD9DDE3);
-    borderStrong = isDark ? const Color(0x4D94A3B8) : const Color(0xFFCBD1DA);
+    bg0 = isDark ? darkBg0 : _current.bg0;
+    bg1 = isDark ? darkBg1 : _current.bg1;
+    bg2 = isDark ? darkBg2 : _current.bg2;
+    surface = isDark ? darkSurface : lightSurface;
+    surface2 = isDark ? darkSurface2 : _current.surface2;
+    surfaceSoft = isDark ? darkSurfaceSoft : lightSurfaceSoft;
+    text = isDark ? darkText : lightText;
+    muted = isDark ? darkMuted : lightMuted;
+    border = isDark ? darkBorder : lightBorder;
+    borderStrong = isDark ? darkBorderStrong : lightBorderStrong;
     accent = _current.accent;
     accentStrong = _current.accentStrong;
     accentInk = _current.accentInk;
     success = _current.success;
-    warning = isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
-    destructive = isDark ? const Color(0xFFFB7185) : const Color(0xFFDC2626);
+    warning = isDark ? darkWarning : lightWarning;
+    destructive = isDark ? darkDestructive : lightDestructive;
   }
 
   static ThemeData lightThemeFor(String key) {
@@ -1173,21 +1208,18 @@ class HeyBeanTheme {
   static ThemeData themeDataFor(String key, Brightness brightness) {
     final isDarkTheme = brightness == Brightness.dark;
     final colorTheme = heyBeanColorThemeForKey(key);
-    final surfaceColor = isDarkTheme
-        ? const Color(0xFF141A20)
-        : const Color(0xFFFFFFFF);
-    final textColor = isDarkTheme
-        ? const Color(0xFFF4F7FB)
-        : const Color(0xFF2D3748);
-    final mutedColor = isDarkTheme
-        ? const Color(0xFFA7B0BD)
-        : const Color(0xFF667085);
-    final borderColor = isDarkTheme
-        ? const Color(0x2E94A3B8)
-        : const Color(0xFFD9DDE3);
+    final bgColor = isDarkTheme ? darkBg0 : colorTheme.bg0;
+    final surfaceColor = isDarkTheme ? darkSurface : lightSurface;
+    final surface2Color = isDarkTheme ? darkSurface2 : colorTheme.surface2;
+    final inputSurfaceColor = isDarkTheme
+        ? darkInputSurface
+        : surfaceColor.withValues(alpha: .88);
+    final textColor = isDarkTheme ? darkText : lightText;
+    final mutedColor = isDarkTheme ? darkMuted : lightMuted;
+    final borderColor = isDarkTheme ? darkBorder : lightBorder;
     final borderStrongColor = isDarkTheme
-        ? const Color(0x4D94A3B8)
-        : const Color(0xFFCBD1DA);
+        ? darkBorderStrong
+        : lightBorderStrong;
     final accentColor = colorTheme.accent;
     final accentStrongColor = colorTheme.accentStrong;
     final accentInkColor = colorTheme.accentInk;
@@ -1203,11 +1235,22 @@ class HeyBeanTheme {
           secondary: accentStrongColor,
           tertiary: colorTheme.success,
           surface: surfaceColor,
+          surfaceContainerHighest: surface2Color,
           onSurface: textColor,
           onSurfaceVariant: mutedColor,
           outline: borderStrongColor,
           outlineVariant: borderColor,
+          error: isDarkTheme ? darkDestructive : lightDestructive,
         );
+    final baseTextTheme = ThemeData(
+      brightness: brightness,
+      fontFamily: 'Plus Jakarta Sans',
+      fontFamilyFallback: const ['Avenir Next', 'Inter', 'Roboto', 'Arial'],
+    ).textTheme;
+    final textTheme = baseTextTheme.apply(
+      bodyColor: textColor,
+      displayColor: textColor,
+    );
 
     return ThemeData(
       useMaterial3: true,
@@ -1215,8 +1258,10 @@ class HeyBeanTheme {
       colorScheme: colorScheme,
       fontFamily: 'Plus Jakarta Sans',
       fontFamilyFallback: const ['Avenir Next', 'Inter', 'Roboto', 'Arial'],
+      textTheme: textTheme,
       scaffoldBackgroundColor: Colors.transparent,
-      canvasColor: isDarkTheme ? const Color(0xFF0B0F14) : colorTheme.bg0,
+      canvasColor: bgColor,
+      dividerColor: borderColor,
       appBarTheme: AppBarTheme(
         centerTitle: false,
         backgroundColor: Colors.transparent,
@@ -1237,21 +1282,61 @@ class HeyBeanTheme {
           side: BorderSide(color: borderColor),
         ),
       ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: surfaceColor,
+        surfaceTintColor: Colors.transparent,
+        titleTextStyle: textTheme.titleLarge?.copyWith(
+          color: textColor,
+          fontWeight: FontWeight.w800,
+        ),
+        contentTextStyle: textTheme.bodyMedium?.copyWith(
+          color: mutedColor,
+          fontWeight: FontWeight.w500,
+          height: 1.35,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: borderColor),
+        ),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: surfaceColor,
+        modalBackgroundColor: surfaceColor,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+      ),
+      dividerTheme: DividerThemeData(
+        color: borderColor,
+        thickness: 1,
+        space: 1,
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: surface2Color,
+        selectedColor: accentColor.withValues(alpha: .14),
+        disabledColor: surface2Color.withValues(alpha: .54),
+        labelStyle: TextStyle(color: textColor, fontWeight: FontWeight.w600),
+        secondaryLabelStyle: TextStyle(
+          color: accentStrongColor,
+          fontWeight: FontWeight.w700,
+        ),
+        side: BorderSide(color: borderColor),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDarkTheme
-            ? const Color(0xFF111820)
-            : surfaceColor.withValues(alpha: .88),
-        hintStyle: TextStyle(color: mutedColor),
+        fillColor: inputSurfaceColor,
+        hintStyle: TextStyle(color: mutedColor, fontWeight: FontWeight.w500),
         helperStyle: TextStyle(
           color: mutedColor,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
           height: 1.25,
         ),
-        labelStyle: TextStyle(color: mutedColor, fontWeight: FontWeight.w800),
+        labelStyle: TextStyle(color: mutedColor, fontWeight: FontWeight.w600),
         floatingLabelStyle: TextStyle(
           color: accentStrongColor,
-          fontWeight: FontWeight.w900,
+          fontWeight: FontWeight.w700,
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
@@ -1277,6 +1362,7 @@ class HeyBeanTheme {
         style: FilledButton.styleFrom(
           backgroundColor: accentColor,
           foregroundColor: accentInkColor,
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
@@ -1286,6 +1372,10 @@ class HeyBeanTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: textColor,
+          backgroundColor: isDarkTheme
+              ? surface2Color.withValues(alpha: .46)
+              : Colors.transparent,
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
           side: BorderSide(color: borderStrongColor),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
@@ -1293,7 +1383,47 @@ class HeyBeanTheme {
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: accentStrongColor),
+        style: TextButton.styleFrom(
+          foregroundColor: accentStrongColor,
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+      iconTheme: IconThemeData(color: textColor),
+      primaryIconTheme: IconThemeData(color: textColor),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          textStyle: WidgetStateProperty.all(
+            const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? accentInkColor
+                : textColor,
+          ),
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? accentColor
+                : surfaceColor,
+          ),
+          side: WidgetStateProperty.resolveWith(
+            (states) => BorderSide(
+              color: states.contains(WidgetState.selected)
+                  ? accentStrongColor.withValues(alpha: .42)
+                  : borderColor,
+            ),
+          ),
+        ),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) =>
+              states.contains(WidgetState.selected) ? accentColor : mutedColor,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? accentColor.withValues(alpha: .28)
+              : borderColor,
+        ),
       ),
     );
   }
@@ -4884,7 +5014,13 @@ ${_truncateDiagnostic(stack, 2200)}
       });
     }
     try {
-      final sessionDetailsFuture = session == null && user != null
+      final sessionDetailsFuture =
+          session != null && _activeAssistantRunId != null
+          ? widget.apiClient
+                .resumeSessionDetails(session.id)
+                .then<HermesSessionDetails?>((details) => details)
+                .catchError((_) => null)
+          : session == null && user != null
           ? _loadDailySessionForUser(
               user,
               source: 'refresh',
@@ -4948,6 +5084,7 @@ ${_truncateDiagnostic(stack, 2200)}
       final refreshedReminders = listedReminders.isEmpty
           ? summaryReminders
           : listedReminders;
+      final refreshedActivityEvents = results[11] as List<HermesActivityEvent>;
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
           authGeneration != _authGeneration ||
@@ -4991,7 +5128,12 @@ ${_truncateDiagnostic(stack, 2200)}
           idFor: (event) => event.id,
         );
         _approvals = summary.approvals;
-        _events = results[11] as List<HermesActivityEvent>;
+        _events = refreshedActivityEvents;
+        if (_busy ||
+            _activeAssistantRunId != null ||
+            _beanWorkItems.isNotEmpty) {
+          _applyBeanWorkEvents(refreshedActivityEvents);
+        }
         _dashboardDataLoading = false;
         _error = null;
       });
@@ -7135,7 +7277,9 @@ ${_truncateDiagnostic(stack, 2200)}
     _syncBeanResponsePreviewTimer(beanResponsePreview);
     _scheduleAppIconBadgeSync(criticalItemCount);
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: HeyBeanTheme.lightSystemOverlayStyle,
+      value: HeyBeanTheme.isDark
+          ? HeyBeanTheme.darkSystemOverlayStyle
+          : HeyBeanTheme.lightSystemOverlayStyle,
       child: Container(
         key: const Key('heybean-background-gradient'),
         decoration: BoxDecoration(
@@ -7530,14 +7674,6 @@ ${_truncateDiagnostic(stack, 2200)}
               mainAxisSize: MainAxisSize.min,
               children: [
                 ..._moreMenuWorkspaceTiles(context),
-                ListTile(
-                  leading: Icon(Icons.psychology_alt_rounded),
-                  title: Text("Bean's Knowledge"),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _selectDestination(_HomeDestination.memory);
-                  },
-                ),
                 ListTile(
                   leading: Icon(Icons.settings_rounded),
                   title: Text('Settings'),
@@ -8520,7 +8656,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
                           subtitle: widget.editMode
                               ? 'Review the current settings and save only what you want to change.'
                               : _step == 3
-                              ? 'You can update these settings any time in the Bean preferences section of Settings.'
+                              ? 'You can update these settings any time in the Bean section of Settings.'
                               : 'A few quick choices help Bean understand your style and priorities.',
                         ),
                         const SizedBox(height: 18),
@@ -8536,7 +8672,7 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
                           if (_step == 2) _contextStep(),
                           if (_step == 3)
                             Text(
-                              'Bean will use your personality, priorities, and context to shape tone, planning, reminders, and follow-up. Look for Bean preferences in Settings whenever you want to change them.',
+                              'Bean will use your personality, priorities, and context to shape tone, planning, reminders, and follow-up. Look for Bean in Settings whenever you want to change them.',
                               style: TextStyle(color: HeyBeanTheme.muted),
                             ),
                         ],
@@ -9598,6 +9734,8 @@ class _CommandCenterContent extends StatelessWidget {
             onThemeModeChanged: onThemeModeChanged,
             onCommandCenterLabelChanged: onCommandCenterLabelChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
+            onOpenBeanKnowledge: () =>
+                onSelectDestination(_HomeDestination.memory),
             onWorkspacesChanged: onWorkspacesChanged,
             error: error,
           ),
@@ -12578,49 +12716,64 @@ class _CalendarHeaderButton extends StatelessWidget {
   final TextStyle labelStyle;
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    borderRadius: BorderRadius.circular(22),
-    onTap: onTap,
-    child: ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 0),
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: horizontalPadding,
-          vertical: verticalPadding,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: HeyBeanTheme.border),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x12000000),
-              blurRadius: 14,
-              offset: Offset(0, 6),
+  Widget build(BuildContext context) {
+    final background = HeyBeanTheme.isDark
+        ? HeyBeanTheme.surface2.withValues(alpha: .94)
+        : HeyBeanTheme.surface;
+    final shadowColor = HeyBeanTheme.isDark
+        ? Colors.black.withValues(alpha: .20)
+        : Colors.black.withValues(alpha: .07);
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 0),
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPadding,
+            vertical: verticalPadding,
+          ),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: HeyBeanTheme.isDark
+                  ? HeyBeanTheme.borderStrong
+                  : HeyBeanTheme.border,
             ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              const SizedBox(width: 4),
-              Icon(icon, size: 16),
-              const SizedBox(width: 4),
-            ],
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: labelStyle,
+            boxShadow: [
+              BoxShadow(
+                color: shadowColor,
+                blurRadius: HeyBeanTheme.isDark ? 16 : 14,
+                offset: const Offset(0, 6),
               ),
+            ],
+          ),
+          child: IconTheme(
+            data: IconThemeData(color: HeyBeanTheme.muted, size: 16),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(icon, size: 16),
+                  const SizedBox(width: 4),
+                ],
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: labelStyle.copyWith(color: HeyBeanTheme.text),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ScrollableTimelineDayHeader extends StatelessWidget {
@@ -15690,7 +15843,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         child: Container(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
           decoration: BoxDecoration(
-            color: Color(0xEEF8FBF6),
+            color: HeyBeanTheme.isDark
+                ? HeyBeanTheme.surface.withValues(alpha: .96)
+                : const Color(0xEEF8FBF6),
             border: Border(top: BorderSide(color: HeyBeanTheme.border)),
           ),
           child: Row(
@@ -17200,11 +17355,15 @@ class _MonthScrollerState extends State<_MonthScroller> {
                               decoration: BoxDecoration(
                                 color: isSelected
                                     ? HeyBeanTheme.accent
-                                    : Colors.white,
+                                    : HeyBeanTheme.surface2.withValues(
+                                        alpha: HeyBeanTheme.isDark ? .94 : 1,
+                                      ),
                                 borderRadius: BorderRadius.circular(18),
                                 border: Border.all(
                                   color: isSelected
                                       ? HeyBeanTheme.accentStrong
+                                      : HeyBeanTheme.isDark
+                                      ? HeyBeanTheme.borderStrong
                                       : HeyBeanTheme.border,
                                 ),
                               ),
@@ -22029,7 +22188,7 @@ class _NotesOptionRow extends StatelessWidget {
   Widget build(BuildContext context) => Material(
     color: selected
         ? HeyBeanTheme.accent.withValues(alpha: 0.14)
-        : Colors.white,
+        : HeyBeanTheme.surface,
     child: InkWell(
       onTap: onTap,
       child: Padding(
@@ -22930,6 +23089,7 @@ class _SettingsView extends StatelessWidget {
     required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
     required this.onEditAgentOnboarding,
+    required this.onOpenBeanKnowledge,
     required this.onWorkspacesChanged,
     this.error,
   });
@@ -22953,6 +23113,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final VoidCallback onEditAgentOnboarding;
+  final VoidCallback onOpenBeanKnowledge;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
 
@@ -22991,12 +23152,23 @@ class _SettingsView extends StatelessWidget {
             ),
             _CompactItemTile(
               icon: Icons.tune_rounded,
-              title: 'Bean preferences',
+              title: 'Bean',
               subtitle: _agentPreferencesSummary(user.currentAgentProfile),
               trailing: TextButton(
                 key: const Key('open-bean-preferences'),
                 onPressed: onEditAgentOnboarding,
                 child: Text('Update'),
+              ),
+            ),
+            _CompactItemTile(
+              icon: Icons.psychology_alt_rounded,
+              title: "Bean's Knowledge",
+              subtitle:
+                  'Durable facts, preferences, and routines Bean remembers.',
+              trailing: TextButton(
+                key: const Key('open-bean-knowledge'),
+                onPressed: onOpenBeanKnowledge,
+                child: Text('View'),
               ),
             ),
             _ThemePreferencesCard(
@@ -23337,12 +23509,8 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface2,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HeyBeanTheme.border),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: _sectionDividerDecoration(),
       child: Column(
         key: const Key('billing-settings-card'),
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -23645,7 +23813,7 @@ class _PlanManagementTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: selected
             ? HeyBeanTheme.accent.withValues(alpha: .10)
-            : Colors.white,
+            : HeyBeanTheme.surface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: selected
@@ -23808,12 +23976,8 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
     final selectedMode = heyBeanThemeModeForKey(_selectedThemeModeKey);
     return Container(
       key: const Key('theme-preferences-card'),
-      margin: const EdgeInsets.only(top: 10),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface2,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: HeyBeanTheme.border),
-      ),
+      margin: const EdgeInsets.only(top: 4),
+      decoration: _sectionDividerDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -23821,10 +23985,9 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
             color: Colors.transparent,
             child: InkWell(
               key: const Key('theme-preferences-toggle'),
-              borderRadius: BorderRadius.circular(20),
               onTap: () => setState(() => _expanded = !_expanded),
               child: Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 child: Row(
                   children: [
                     Icon(
@@ -23858,10 +24021,15 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                       decoration: BoxDecoration(
                         color: selectedTheme.accent,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
+                        border: Border.all(
+                          color: HeyBeanTheme.surface,
+                          width: 2,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: .14),
+                            color: Colors.black.withValues(
+                              alpha: HeyBeanTheme.isDark ? .28 : .14,
+                            ),
                             blurRadius: 8,
                             offset: const Offset(0, 3),
                           ),
@@ -23893,7 +24061,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
           if (_expanded)
             Padding(
               key: const Key('theme-preferences-options'),
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              padding: const EdgeInsets.only(bottom: 14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -23992,7 +24160,9 @@ class _ThemeSwatchButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected
               ? theme.accent.withValues(alpha: .11)
-              : Colors.white.withValues(alpha: .72),
+              : HeyBeanTheme.surface.withValues(
+                  alpha: HeyBeanTheme.isDark ? .86 : .72,
+                ),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected
@@ -24018,10 +24188,12 @@ class _ThemeSwatchButton extends StatelessWidget {
               decoration: BoxDecoration(
                 color: theme.accent,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
+                border: Border.all(color: HeyBeanTheme.surface, width: 2),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: .14),
+                    color: Colors.black.withValues(
+                      alpha: HeyBeanTheme.isDark ? .28 : .14,
+                    ),
                     blurRadius: 8,
                     offset: const Offset(0, 3),
                   ),
@@ -24148,22 +24320,13 @@ class _NotificationPreferencesCardState
   @override
   Widget build(BuildContext context) => Container(
     key: const Key('notification-preferences-card'),
-    margin: const EdgeInsets.only(top: 10),
-    decoration: BoxDecoration(
-      color: HeyBeanTheme.accent.withValues(alpha: .06),
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .15)),
-    ),
+    margin: const EdgeInsets.only(top: 4),
+    padding: const EdgeInsets.only(top: 14, bottom: 6),
+    decoration: _sectionDividerDecoration(),
     child: Column(
       children: [
-        Container(
-          margin: const EdgeInsets.only(bottom: 4),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: HeyBeanTheme.surface2,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: HeyBeanTheme.border),
-          ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
           child: Row(
             children: [
               Icon(
@@ -24594,12 +24757,8 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
       return Container(
         key: const Key('workspaces-settings'),
         margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: HeyBeanTheme.surface2,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: HeyBeanTheme.border),
-        ),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: _sectionDividerDecoration(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -24671,12 +24830,12 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
             for (final workspace in workspaces)
               Container(
                 key: Key('workspace-row-${workspace.id}'),
-                margin: const EdgeInsets.only(top: 8),
-                padding: const EdgeInsets.all(10),
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.only(top: 10),
                 decoration: BoxDecoration(
-                  color: HeyBeanTheme.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: HeyBeanTheme.border),
+                  border: Border(
+                    top: BorderSide(color: _sectionDividerColor(alpha: .18)),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -24966,12 +25125,8 @@ class _CalendarPreferencesCard extends StatelessWidget {
     return Container(
       key: const Key('calendar-preferences-settings'),
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface2,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HeyBeanTheme.border),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: _sectionDividerDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -25388,12 +25543,8 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       return Container(
         key: const Key('google-calendar-sync-settings'),
         margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: HeyBeanTheme.surface2,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: HeyBeanTheme.border),
-        ),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: _sectionDividerDecoration(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -26061,16 +26212,10 @@ class _CompactItemTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => InkWell(
-    borderRadius: BorderRadius.circular(16),
     onTap: onTap,
     child: Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface2,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HeyBeanTheme.border),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 13),
+      decoration: _sectionDividerDecoration(alpha: .22),
       child: Row(
         children: [
           Icon(icon, color: HeyBeanTheme.accentStrong),
@@ -27211,18 +27356,8 @@ class _MobileFormSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: primary
-          ? HeyBeanTheme.accent.withValues(alpha: .06)
-          : HeyBeanTheme.surface2.withValues(alpha: .66),
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(
-        color: primary
-            ? HeyBeanTheme.accent.withValues(alpha: .18)
-            : const Color(0x1A1C314E),
-      ),
-    ),
+    padding: const EdgeInsets.symmetric(vertical: 15),
+    decoration: _sectionDividerDecoration(alpha: primary ? .36 : null),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -27305,9 +27440,8 @@ class _MobileFormSwitch extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     key: widgetKey,
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: .72),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: const Color(0x1A1C314E)),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: _sectionDividerColor(alpha: .20)),
     ),
     child: SwitchListTile(
       value: value,
@@ -27463,21 +27597,8 @@ class _ShellCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: HeyBeanTheme.surface.withValues(alpha: .96),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: HeyBeanTheme.border),
-      boxShadow: [
-        BoxShadow(
-          color: glow
-              ? HeyBeanTheme.accent.withValues(alpha: .12)
-              : const Color(0xFF0F172A).withValues(alpha: .07),
-          blurRadius: glow ? 30 : 22,
-          offset: Offset(0, glow ? 14 : 10),
-        ),
-      ],
-    ),
-    padding: const EdgeInsets.all(18),
+    padding: EdgeInsets.only(top: glow ? 12 : 4, bottom: 4),
+    decoration: glow ? _sectionDividerDecoration(alpha: .38) : null,
     child: child,
   );
 }
@@ -28778,7 +28899,7 @@ class _BeanFabState extends State<_BeanFab>
                     border: Border.all(
                       color: widget.listening || widget.selected
                           ? activeColor
-                          : const Color(0xFFE2E8F0),
+                          : HeyBeanTheme.border,
                       width: widget.listening ? 4 : 2.5,
                     ),
                     boxShadow: [
@@ -28794,7 +28915,9 @@ class _BeanFabState extends State<_BeanFab>
                   ),
                   child: Center(
                     child: Image.asset(
-                      'assets/images/bean/bean-logo.png',
+                      HeyBeanTheme.isDark
+                          ? 'assets/images/bean/bean-logo-white-overlay.png'
+                          : 'assets/images/bean/bean-logo.png',
                       key: const Key('heybean-center-bean-logo'),
                       width: 38,
                       height: 38,
