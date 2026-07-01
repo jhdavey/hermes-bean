@@ -5118,6 +5118,10 @@ if (mount) {
             render();
         }));
         mount.querySelectorAll('form[data-action="login"], form[data-action="register"], form[data-action="forgot"]').forEach((form) => form.addEventListener('submit', submitAuth));
+        mount.querySelectorAll('[data-dismiss-plan-limit-error]').forEach((button) => button.addEventListener('click', () => {
+            state.error = '';
+            render();
+        }));
     }
 
     function bindSubscriptionActions() {
@@ -5287,6 +5291,7 @@ if (mount) {
             state.selectedDay = dateOnly(new Date());
             resetCalendarWindow(new Date());
             state.showMonth = false;
+            clearPlanLimitError();
             history.pushState({}, '', '/app');
             render();
         });
@@ -5296,12 +5301,17 @@ if (mount) {
             state.selectedDay = dateOnly(today);
             resetCalendarWindow(today);
             state.showMonth = true;
+            clearPlanLimitError();
             history.pushState({}, '', '/app');
             render();
         });
         mount.querySelectorAll('[data-select-day]').forEach((button) => button.addEventListener('click', () => {
             const selected = allowedCalendarDate(button.dataset.selectDay);
-            if (selected.blocked) showCalendarHistoryLimit();
+            if (selected.blocked) {
+                showCalendarHistoryLimit();
+            } else {
+                clearPlanLimitError();
+            }
             state.selectedDay = dateOnly(selected.date);
             resetCalendarWindow(selected.date);
             state.showMonth = false;
@@ -11845,7 +11855,11 @@ if (mount) {
         const daysInTargetMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
         const requested = new Date(month.getFullYear(), month.getMonth(), Math.min(selected.getDate(), daysInTargetMonth));
         const allowed = allowedCalendarDate(requested);
-        if (allowed.blocked) showCalendarHistoryLimit();
+        if (allowed.blocked) {
+            showCalendarHistoryLimit();
+        } else {
+            clearPlanLimitError();
+        }
         state.selectedDay = dateOnly(allowed.date);
         resetCalendarWindow(allowed.date);
         state.showMonth = true;
@@ -13513,7 +13527,7 @@ if (mount) {
                     <strong>${paywall ? 'Upgrade to keep going' : 'Something needs attention'}</strong>
                     <span>${escapeHtml(message)}</span>
                 </div>
-                ${paywall ? '<a class="hb-button-secondary hb-paywall-cta" href="/pricing">View plans</a>' : ''}
+                ${paywall ? '<div class="hb-paywall-actions"><a class="hb-button-secondary hb-paywall-cta" href="/pricing">View plans</a><button class="hb-icon-button hb-paywall-dismiss" type="button" data-dismiss-plan-limit-error aria-label="Dismiss upgrade notice" title="Dismiss">×</button></div>' : ''}
             </div>`;
     }
 
@@ -13524,6 +13538,12 @@ if (mount) {
             || normalized.includes('available on premium')
             || normalized.includes('ai usage limit')
             || normalized.includes('external lookup usage limit');
+    }
+
+    function clearPlanLimitError() {
+        if (isPlanLimitMessage(state.error)) {
+            state.error = '';
+        }
     }
 
     function escapeHtml(value) {

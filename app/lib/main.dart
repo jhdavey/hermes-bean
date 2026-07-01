@@ -4574,6 +4574,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void _selectDestination(_HomeDestination destination) {
     setState(() {
       _selectedDestination = destination;
+      _clearPlanLimitError();
       if (destination == _HomeDestination.today) {
         _selectedCalendarDay = _dateOnly(DateTime.now());
         _showCalendarMonth = false;
@@ -5419,6 +5420,7 @@ ${_truncateDiagnostic(stack, 2200)}
       _selectedDestination = _HomeDestination.today;
       _selectedCalendarDay = _dateOnly(DateTime.now());
       _showCalendarMonth = false;
+      _clearPlanLimitError();
     });
   }
 
@@ -5427,11 +5429,15 @@ ${_truncateDiagnostic(stack, 2200)}
       _selectedDestination = _HomeDestination.today;
       _selectedCalendarDay = _dateOnly(DateTime.now());
       _showCalendarMonth = true;
+      _clearPlanLimitError();
     });
   }
 
   void _returnToCalendarDay() {
-    setState(() => _showCalendarMonth = false);
+    setState(() {
+      _showCalendarMonth = false;
+      _clearPlanLimitError();
+    });
   }
 
   void _selectCalendarDay(DateTime date) {
@@ -5440,7 +5446,11 @@ ${_truncateDiagnostic(stack, 2200)}
     setState(() {
       _selectedCalendarDay = allowedDate;
       _showCalendarMonth = false;
-      if (blocked) _error = _calendarHistoryLimitMessage();
+      if (blocked) {
+        _error = _calendarHistoryLimitMessage();
+      } else {
+        _clearPlanLimitError();
+      }
     });
   }
 
@@ -5457,7 +5467,11 @@ ${_truncateDiagnostic(stack, 2200)}
     setState(() {
       _selectedCalendarDay = allowedDate;
       _showCalendarMonth = true;
-      if (blocked) _error = _calendarHistoryLimitMessage();
+      if (blocked) {
+        _error = _calendarHistoryLimitMessage();
+      } else {
+        _clearPlanLimitError();
+      }
     });
   }
 
@@ -5479,6 +5493,16 @@ ${_truncateDiagnostic(stack, 2200)}
       return 'Your current plan includes $days days of calendar history.';
     }
     return 'Your current plan has limited calendar history access.';
+  }
+
+  void _clearPlanLimitError() {
+    if (_isPlanLimitMessage(_error)) {
+      _error = null;
+    }
+  }
+
+  void _dismissError() {
+    setState(() => _error = null);
   }
 
   Future<void> _loadCalendarPreferences() async {
@@ -8409,6 +8433,7 @@ ${_truncateDiagnostic(stack, 2200)}
     onCalendarHistoryLimitReached: () {
       setState(() => _error = _calendarHistoryLimitMessage());
     },
+    onErrorDismissed: _dismissError,
     onBackToCalendarDay: _returnToCalendarDay,
     onCalendarStartHourChanged: _setCalendarStartHour,
     onCalendarEndHourChanged: _setCalendarEndHour,
@@ -12027,6 +12052,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onCalendarMonthSelected,
     required this.calendarMinimumDay,
     required this.onCalendarHistoryLimitReached,
+    required this.onErrorDismissed,
     required this.onBackToCalendarDay,
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
@@ -12102,6 +12128,7 @@ class _CommandCenterContent extends StatelessWidget {
   final ValueChanged<DateTime> onCalendarMonthSelected;
   final DateTime? calendarMinimumDay;
   final VoidCallback onCalendarHistoryLimitReached;
+  final VoidCallback onErrorDismissed;
   final VoidCallback onBackToCalendarDay;
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
@@ -12393,12 +12420,14 @@ class _CommandCenterContent extends StatelessWidget {
                 onSelectDestination(_HomeDestination.memory),
             onWorkspacesChanged: onWorkspacesChanged,
             error: error,
+            onErrorDismissed: onErrorDismissed,
           ),
         };
         final limitBanner = _isPlanLimitMessage(error)
             ? _PlanLimitErrorBanner(
                 message: error,
                 launchExternalUrl: launchExternalUrl,
+                onDismissed: onErrorDismissed,
               )
             : null;
         final panelChildren = <Widget>[
@@ -14146,10 +14175,12 @@ class _PlanLimitErrorBanner extends StatelessWidget {
   const _PlanLimitErrorBanner({
     required this.message,
     required this.launchExternalUrl,
+    this.onDismissed,
   });
 
   final String? message;
   final ExternalUrlLauncher launchExternalUrl;
+  final VoidCallback? onDismissed;
 
   @override
   Widget build(BuildContext context) {
@@ -14207,6 +14238,19 @@ class _PlanLimitErrorBanner extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onDismissed != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  key: const Key('plan-limit-error-dismiss-action'),
+                  tooltip: 'Dismiss',
+                  onPressed: onDismissed,
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: HeyBeanTheme.muted,
+                    size: 20,
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 12),
@@ -14225,20 +14269,45 @@ class _PlanLimitErrorBanner extends StatelessWidget {
   }
 }
 
-class _InlinePlanLimitError extends StatelessWidget {
+class _InlinePlanLimitError extends StatefulWidget {
   const _InlinePlanLimitError({
     super.key,
     required this.message,
     this.launchExternalUrl = _defaultLaunchExternalUrl,
+    this.onDismissed,
   });
 
   final String message;
   final ExternalUrlLauncher launchExternalUrl;
+  final VoidCallback? onDismissed;
+
+  @override
+  State<_InlinePlanLimitError> createState() => _InlinePlanLimitErrorState();
+}
+
+class _InlinePlanLimitErrorState extends State<_InlinePlanLimitError> {
+  bool _dismissed = false;
+
+  @override
+  void didUpdateWidget(covariant _InlinePlanLimitError oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.message != widget.message) {
+      _dismissed = false;
+    }
+  }
+
+  void _dismiss() {
+    widget.onDismissed?.call();
+    if (widget.onDismissed == null) {
+      setState(() => _dismissed = true);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (!_isPlanLimitMessage(message)) {
-      return Text(message, style: TextStyle(color: Colors.redAccent));
+    if (_dismissed) return const SizedBox.shrink();
+    if (!_isPlanLimitMessage(widget.message)) {
+      return Text(widget.message, style: TextStyle(color: Colors.redAccent));
     }
 
     return Container(
@@ -14251,16 +14320,32 @@ class _InlinePlanLimitError extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Upgrade to keep going',
-            style: TextStyle(
-              color: HeyBeanTheme.text,
-              fontWeight: FontWeight.w900,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Upgrade to keep going',
+                  style: TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              IconButton(
+                key: const Key('inline-plan-limit-dismiss-action'),
+                tooltip: 'Dismiss',
+                onPressed: _dismiss,
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: HeyBeanTheme.muted,
+                  size: 20,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 4),
           Text(
-            message,
+            widget.message,
             style: TextStyle(
               color: HeyBeanTheme.muted,
               fontWeight: FontWeight.w700,
@@ -14272,7 +14357,7 @@ class _InlinePlanLimitError extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: FilledButton.icon(
               key: const Key('inline-plan-limit-upgrade-action'),
-              onPressed: () => launchExternalUrl(_pricingUrl),
+              onPressed: () => widget.launchExternalUrl(_pricingUrl),
               icon: Icon(Icons.arrow_upward_rounded),
               label: Text('Upgrade plan'),
             ),
@@ -26294,6 +26379,7 @@ class _SettingsView extends StatelessWidget {
     required this.onOpenBeanKnowledge,
     required this.onWorkspacesChanged,
     this.error,
+    this.onErrorDismissed,
   });
 
   final HermesApiClient apiClient;
@@ -26319,6 +26405,7 @@ class _SettingsView extends StatelessWidget {
   final VoidCallback onOpenBeanKnowledge;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
+  final VoidCallback? onErrorDismissed;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -26345,6 +26432,7 @@ class _SettingsView extends StatelessWidget {
               _InlinePlanLimitError(
                 message: error!,
                 launchExternalUrl: launchExternalUrl,
+                onDismissed: onErrorDismissed,
               ),
               const SizedBox(height: 12),
             ],

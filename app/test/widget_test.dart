@@ -1122,6 +1122,18 @@ void main() {
     expect(launchedUrls.single.host, 'heybean.org');
     expect(launchedUrls.single.path, '/pricing');
     expect(launchedUrls.single.queryParameters['source'], 'flutter');
+
+    await tester.ensureVisible(
+      find.byKey(const Key('inline-plan-limit-dismiss-action')),
+    );
+    await tester.tap(find.byKey(const Key('inline-plan-limit-dismiss-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Upgrade to keep going'), findsNothing);
+    expect(
+      find.textContaining('Your current plan includes up to 2 workspaces.'),
+      findsNothing,
+    );
   });
 
   testWidgets('beta users can submit feedback from the banner', (
@@ -3416,6 +3428,53 @@ void main() {
     },
   );
 
+  testWidgets(
+    'calendar history limit banner can be dismissed and clears on navigation',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _HistoryLimitedFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('calendar-month-chevron')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-month-pill-0')),
+      );
+      await tester.tap(find.byKey(const Key('calendar-month-pill-0')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('plan-limit-error-banner')), findsOneWidget);
+      expect(
+        find.text('Your current plan includes 30 days of calendar history.'),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const Key('plan-limit-error-dismiss-action')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('plan-limit-error-banner')), findsNothing);
+
+      await tester.ensureVisible(
+        find.byKey(const Key('calendar-month-pill-0')),
+      );
+      await tester.tap(find.byKey(const Key('calendar-month-pill-0')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('plan-limit-error-banner')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('nav-tasks')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('plan-limit-error-banner')), findsNothing);
+    },
+  );
+
   testWidgets('task and reminder editors can assign event-style categories', (
     WidgetTester tester,
   ) async {
@@ -5507,31 +5566,32 @@ void main() {
     expect(api.todaySummaryCalls, greaterThan(1));
   });
 
-  testWidgets('connected Google Calendar status does not full-sync on pull refresh', (
-    WidgetTester tester,
-  ) async {
-    final api = _GoogleCalendarAutoSyncFakeHermesApiClient();
-    await tester.pumpWidget(
-      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-    );
-    await tester.pumpAndSettle();
-    await _openTodayView(tester);
+  testWidgets(
+    'connected Google Calendar status does not full-sync on pull refresh',
+    (WidgetTester tester) async {
+      final api = _GoogleCalendarAutoSyncFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
-    expect(api.googleCalendarSyncCalls, 0);
-    expect(find.textContaining('Imported Google event'), findsNothing);
+      expect(api.googleCalendarSyncCalls, 0);
+      expect(find.textContaining('Imported Google event'), findsNothing);
 
-    final refreshScrollTopLeft = tester.getTopLeft(
-      find.byKey(const Key('signed-in-refresh-scroll')),
-    );
-    await tester.dragFrom(
-      refreshScrollTopLeft + const Offset(40, 20),
-      const Offset(0, 360),
-    );
-    await tester.pumpAndSettle();
+      final refreshScrollTopLeft = tester.getTopLeft(
+        find.byKey(const Key('signed-in-refresh-scroll')),
+      );
+      await tester.dragFrom(
+        refreshScrollTopLeft + const Offset(40, 20),
+        const Offset(0, 360),
+      );
+      await tester.pumpAndSettle();
 
-    expect(api.googleCalendarSyncCalls, 0);
-    expect(find.textContaining('Imported Google event'), findsNothing);
-  });
+      expect(api.googleCalendarSyncCalls, 0);
+      expect(find.textContaining('Imported Google event'), findsNothing);
+    },
+  );
 
   testWidgets('create menu creates a new event', (WidgetTester tester) async {
     final api = _EditableCalendarFakeHermesApiClient();
@@ -7825,6 +7885,24 @@ class _PastTasksUnavailableHermesApiClient extends _FakeHermesApiClient {
 class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {
   _SignedInFakeHermesApiClient() {
     bearerToken = 'existing-token';
+  }
+}
+
+class _HistoryLimitedFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  @override
+  Future<HermesUser> me() async {
+    final user = await super.me();
+    final cutoff = DateTime.now().subtract(const Duration(days: 30));
+    return user.copyWith(
+      planLimits: HermesPlanLimits(
+        tier: 'base',
+        workspaceLimit: 1,
+        calendarConnectionLimit: 1,
+        connectedAccountLimit: 1,
+        historyDays: 30,
+        historyCutoff: cutoff.toIso8601String(),
+      ),
+    );
   }
 }
 

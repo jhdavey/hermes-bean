@@ -2341,6 +2341,31 @@
     background: var(--hb-surface);
 }
 
+.hb-paywall-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.hb-paywall-dismiss {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    color: var(--hb-muted);
+    border-color: rgba(var(--hb-accent-rgb), .18);
+    background: rgba(var(--hb-surface-rgb), .72);
+    font-size: 22px;
+    line-height: 1;
+}
+
+.hb-paywall-dismiss:hover,
+.hb-paywall-dismiss:focus-visible {
+    color: var(--hb-text);
+    border-color: rgba(var(--hb-accent-rgb), .32);
+    background: rgba(var(--hb-accent-rgb), .12);
+}
+
 .hb-success {
     background: rgba(var(--hb-accent-rgb), .10);
     color: var(--hb-accent-strong);
@@ -7076,8 +7101,12 @@
         flex-direction: column;
     }
 
-    .hb-paywall-error .hb-paywall-cta {
+    .hb-paywall-actions {
         width: 100%;
+    }
+
+    .hb-paywall-error .hb-paywall-cta {
+        flex: 1 1 auto;
     }
 
     .hb-member-row {
