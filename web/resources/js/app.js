@@ -3821,12 +3821,43 @@ if (mount) {
         return `${weekdayShort(parsed)} ${monthDayLabel(parsed)}`;
     }
 
+    function eventMetadata(event = {}) {
+        return event?.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata) ? event.metadata : {};
+    }
+
+    function eventNotesText(event = {}) {
+        return String(event?.description || event?.notes || eventMetadata(event).notes || '').trim();
+    }
+
+    function eventLocationText(event = {}) {
+        return String(event?.location || eventMetadata(event).place_formatted_address || eventMetadata(event).placeFormattedAddress || '').trim();
+    }
+
+    function eventTitleText(event = {}) {
+        return event.title || event.name || 'Untitled';
+    }
+
+    function eventPillIndicatorsMarkup(event = {}) {
+        const indicators = [];
+        if (eventLocationText(event)) {
+            indicators.push(`<span class="hb-event-pill-icon" title="Has location" aria-label="Has location">${icons.pin}</span>`);
+        }
+        if (eventNotesText(event)) {
+            indicators.push(`<span class="hb-event-pill-icon" title="Has notes" aria-label="Has notes">${icons.notes}</span>`);
+        }
+        return indicators.length ? `<span class="hb-event-pill-icons">${indicators.join('')}</span>` : '';
+    }
+
+    function eventPillTitleMarkup(event = {}, className = 'hb-event-title') {
+        return `<span class="${className}"><span class="hb-event-title-inner">${criticalStarMarkup(event)}${escapeHtml(eventTitleText(event))}</span>${eventPillIndicatorsMarkup(event)}</span>`;
+    }
+
     function glanceEventMarkup(event) {
         const color = itemColor(event);
         return `
             <button class="hb-glance-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
-                <div class="hb-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+                ${eventPillTitleMarkup(event)}
             </button>`;
     }
 
@@ -4089,7 +4120,7 @@ if (mount) {
         const color = itemColor(event);
         return `
             <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <span class="hb-month-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+                ${eventPillTitleMarkup(event, 'hb-month-event-title')}
             </button>`;
     }
 
@@ -4099,7 +4130,7 @@ if (mount) {
         return `
             <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 ${time ? `<span class="hb-month-event-time">${escapeHtml(time)}</span>` : ''}
-                <span class="hb-month-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+                ${eventPillTitleMarkup(event, 'hb-month-event-title')}
             </button>`;
     }
 
@@ -4108,7 +4139,7 @@ if (mount) {
         return `
             <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <span class="hb-month-event-time">${escapeHtml(eventStartTime(event))}</span>
-                <span class="hb-month-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+                ${eventPillTitleMarkup(event, 'hb-month-event-title')}
             </button>`;
     }
 
@@ -4264,7 +4295,7 @@ if (mount) {
         return `
             <button class="hb-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 <div class="hb-event-time">${escapeHtml(eventTime(event))}</div>
-                <div class="hb-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+                ${eventPillTitleMarkup(event)}
             </button>`;
     }
 
@@ -4277,13 +4308,13 @@ if (mount) {
         return `
             <button class="hb-event hb-timed-event${shortClass}" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
                 <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
-                <div class="hb-event-title">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</div>
+                ${eventPillTitleMarkup(event)}
             </button>`;
     }
 
     function allDayEventMarkup(event) {
         const color = itemColor(event);
-        return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</button>`;
+        return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${eventPillTitleMarkup(event, 'hb-all-day-event-title')}</button>`;
     }
 
     function multiDayEventMarkup(event, day) {
@@ -4292,7 +4323,7 @@ if (mount) {
         return `
             <button class="hb-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 ${time ? `<span class="hb-multi-day-event-time">${escapeHtml(time)}</span>` : ''}
-                <span>${criticalStarMarkup(event)}${escapeHtml(event.title || event.name || 'Untitled')}</span>
+                ${eventPillTitleMarkup(event, 'hb-multi-day-event-title')}
             </button>`;
     }
 
@@ -4572,7 +4603,7 @@ if (mount) {
                         ${criticalToggleMarkup(item)}
                         ${editing && !taskParentId(item) ? `<button class="hb-button-ghost hb-inline-action" type="button" data-create-subtask="${item.id}">Add sub-task</button>` : ''}
                     `) : ''}
-                    ${isEvent ? formSectionMarkup('Event details', 'Location, description, and status', eventDetailFieldsMarkup(item)) : ''}
+                    ${isEvent ? formSectionMarkup('Event details', 'Location, notes, and status', eventDetailFieldsMarkup(item)) : ''}
                     ${formSectionMarkup('Organize', 'Category, color, and workspace', `
                         <div class="hb-field-row hb-compact-field-row">
                             ${categorySelectMarkup(item)}
@@ -4632,14 +4663,36 @@ if (mount) {
     }
 
     function eventDetailFieldsMarkup(item = null) {
+        const metadata = eventMetadata(item);
+        const placeId = metadata.place_id || metadata.placeId || '';
+        const placeAddress = metadata.place_formatted_address || metadata.placeFormattedAddress || item?.location || '';
+        const placeLat = metadata.place_lat ?? metadata.placeLat ?? metadata.latitude ?? '';
+        const placeLng = metadata.place_lng ?? metadata.placeLng ?? metadata.longitude ?? '';
+        const googleMapsUri = metadata.google_maps_uri || metadata.googleMapsUri || '';
         return `
             <div class="hb-field-row">
-                ${labelInput('Location', 'location', 'text', item?.location || '')}
+                <div class="hb-location-field" data-event-location-field>
+                    ${labelInput('Location', 'location', 'text', item?.location || '', 'autocomplete="off" data-event-location-input')}
+                    <input type="hidden" name="placeId" value="${escapeAttr(placeId)}" data-event-place-id>
+                    <input type="hidden" name="placeFormattedAddress" value="${escapeAttr(placeAddress)}" data-event-place-address>
+                    <input type="hidden" name="placeLat" value="${escapeAttr(placeLat)}" data-event-place-lat>
+                    <input type="hidden" name="placeLng" value="${escapeAttr(placeLng)}" data-event-place-lng>
+                    <input type="hidden" name="googleMapsUri" value="${escapeAttr(googleMapsUri)}" data-event-google-maps-uri>
+                    <div class="hb-location-suggestions" data-location-suggestions hidden></div>
+                    <div class="hb-location-status" data-location-status hidden></div>
+                    <div class="hb-location-map" data-location-map hidden>
+                        <div class="hb-location-map-image" data-location-map-image></div>
+                        <div class="hb-location-map-footer">
+                            <span data-location-map-address>${escapeHtml(placeAddress)}</span>
+                            <button class="hb-button-secondary hb-location-directions" type="button" data-location-directions>${String(state.user?.preferred_map_app || state.user?.preferredMapApp || 'google') === 'apple' ? 'Apple Maps' : 'Google Maps'}</button>
+                        </div>
+                    </div>
+                </div>
                 <label class="hb-label">Status<select class="hb-select" name="status">
                     ${['confirmed', 'tentative', 'cancelled'].map((status) => `<option value="${status}" ${String(item?.status || 'confirmed') === status ? 'selected' : ''}>${capitalize(status)}</option>`).join('')}
                 </select></label>
             </div>
-            <label class="hb-label">Description<textarea class="hb-textarea" name="description" placeholder="Add notes, agenda, links, or anything useful for this event">${escapeHtml(item?.description || '')}</textarea></label>`;
+            <label class="hb-label">Notes<textarea class="hb-textarea" name="description" placeholder="Add notes, agenda, links, or anything useful for this event">${escapeHtml(item?.description || '')}</textarea></label>`;
     }
 
     function eventReminderFieldsMarkup() {
@@ -4885,11 +4938,16 @@ if (mount) {
     }
 
     function profileModalMarkup() {
+        const preferredMapApp = String(state.user?.preferred_map_app || state.user?.preferredMapApp || 'google') === 'apple' ? 'apple' : 'google';
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="profile">
-                    ${sectionTitle(icons.user, 'Account email', '')}
+                    ${sectionTitle(icons.user, 'Account settings', '')}
                     ${labelInput('Email', 'email', 'email', state.user?.email || '', 'required')}
+                    <label class="hb-label">Preferred maps app<select class="hb-select" name="preferredMapApp">
+                        <option value="google" ${preferredMapApp === 'google' ? 'selected' : ''}>Google Maps</option>
+                        <option value="apple" ${preferredMapApp === 'apple' ? 'selected' : ''}>Apple Maps</option>
+                    </select></label>
                     <div class="hb-modal-actions"><button class="hb-button-secondary" type="button" data-close-modal>Cancel</button><button class="hb-button" type="submit">Save</button></div>
                 </form>
             </div>`;
@@ -5950,6 +6008,7 @@ if (mount) {
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
         mount.querySelector('[data-preview-tts-voice]')?.addEventListener('click', previewSelectedTtsVoice);
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventTimeInputs);
+        mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventLocationInput);
         mount.querySelectorAll('[data-primary-workspace-select]').forEach((select) => select.addEventListener('change', handlePrimaryWorkspaceChange));
         mount.querySelectorAll('input[name="syncWorkspaceIds"]').forEach((input) => input.addEventListener('change', handleSyncWorkspaceChange));
         mount.querySelectorAll('[data-recurrence-select]').forEach((select) => {
@@ -6075,6 +6134,170 @@ if (mount) {
         if (!form) return;
         const enabled = Boolean(form.querySelector('[data-event-reminder-toggle]')?.checked);
         setFieldGroupState(form.querySelector('[data-event-reminder-fields]'), enabled);
+    }
+
+    function bindEventLocationInput(form) {
+        const field = form?.querySelector('[data-event-location-field]');
+        const input = field?.querySelector('[data-event-location-input]');
+        if (!field || !input) return;
+        const suggestions = field.querySelector('[data-location-suggestions]');
+        const status = field.querySelector('[data-location-status]');
+        const directions = field.querySelector('[data-location-directions]');
+        let timer = null;
+        let sessionToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+        const selectedAddress = field.querySelector('[data-event-place-address]')?.value || '';
+        if (selectedAddress && field.querySelector('[data-event-place-lat]')?.value && field.querySelector('[data-event-place-lng]')?.value) {
+            refreshEventLocationMapPreview(field);
+        }
+
+        input.addEventListener('input', () => {
+            const value = input.value.trim();
+            const savedAddress = field.querySelector('[data-event-place-address]')?.value || '';
+            if (value !== savedAddress) clearEventPlaceFields(field);
+            window.clearTimeout(timer);
+            hideLocationStatus(field);
+            if (value.length < 3) {
+                hideLocationSuggestions(field);
+                setLocationMapVisible(field, false);
+                return;
+            }
+            timer = window.setTimeout(() => searchEventLocations(field, value, sessionToken), 300);
+        });
+
+        suggestions?.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-place-id]');
+            if (!button) return;
+            selectEventLocationSuggestion(field, button.dataset.placeId, sessionToken);
+            sessionToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        });
+
+        directions?.addEventListener('click', () => {
+            const address = input.value.trim();
+            if (!address) return;
+            window.open(eventDirectionsUrl(address, field.querySelector('[data-event-place-id]')?.value || ''), '_blank', 'noopener');
+        });
+    }
+
+    async function searchEventLocations(field, query, sessionToken) {
+        setLocationStatus(field, 'Searching locations...');
+        try {
+            const result = await api(`/places/autocomplete?input=${encodeURIComponent(query)}&session_token=${encodeURIComponent(sessionToken)}`, { timeoutMs: 8000 });
+            const suggestions = normalizeList(result?.suggestions);
+            if (!suggestions.length) {
+                hideLocationSuggestions(field);
+                setLocationStatus(field, result?.enabled === false ? 'Location search is not configured yet.' : 'No matching locations found.');
+                return;
+            }
+            const container = field.querySelector('[data-location-suggestions]');
+            if (!container) return;
+            container.innerHTML = suggestions.map((suggestion) => `
+                <button class="hb-location-suggestion" type="button" data-place-id="${escapeAttr(suggestion.place_id || suggestion.placeId)}">
+                    <strong>${escapeHtml(suggestion.primary_text || suggestion.primaryText || suggestion.full_text || suggestion.fullText || 'Location')}</strong>
+                    ${suggestion.secondary_text || suggestion.secondaryText ? `<small>${escapeHtml(suggestion.secondary_text || suggestion.secondaryText)}</small>` : ''}
+                </button>
+            `).join('');
+            container.hidden = false;
+            hideLocationStatus(field);
+        } catch (error) {
+            hideLocationSuggestions(field);
+            setLocationStatus(field, friendlyError(error, 'load location suggestions'));
+        }
+    }
+
+    async function selectEventLocationSuggestion(field, placeId, sessionToken) {
+        if (!placeId) return;
+        setLocationStatus(field, 'Loading location...');
+        hideLocationSuggestions(field);
+        try {
+            const place = await api(`/places/details?place_id=${encodeURIComponent(placeId)}&session_token=${encodeURIComponent(sessionToken)}`, { timeoutMs: 8000 });
+            const address = place.formatted_address || place.formattedAddress || place.name || '';
+            field.querySelector('[data-event-location-input]').value = address;
+            field.querySelector('[data-event-place-id]').value = place.place_id || place.placeId || placeId;
+            field.querySelector('[data-event-place-address]').value = address;
+            field.querySelector('[data-event-place-lat]').value = place.latitude ?? '';
+            field.querySelector('[data-event-place-lng]').value = place.longitude ?? '';
+            field.querySelector('[data-event-google-maps-uri]').value = place.google_maps_uri || place.googleMapsUri || '';
+            hideLocationStatus(field);
+            refreshEventLocationMapPreview(field);
+        } catch (error) {
+            setLocationStatus(field, friendlyError(error, 'load that location'));
+        }
+    }
+
+    async function refreshEventLocationMapPreview(field) {
+        const lat = Number.parseFloat(field.querySelector('[data-event-place-lat]')?.value || '');
+        const lng = Number.parseFloat(field.querySelector('[data-event-place-lng]')?.value || '');
+        const address = field.querySelector('[data-event-place-address]')?.value || field.querySelector('[data-event-location-input]')?.value || '';
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            setLocationMapVisible(field, false);
+            return;
+        }
+        const map = field.querySelector('[data-location-map]');
+        const image = field.querySelector('[data-location-map-image]');
+        const addressNode = field.querySelector('[data-location-map-address]');
+        if (!map || !image) return;
+        if (addressNode) addressNode.textContent = address;
+        map.hidden = false;
+        image.classList.add('hb-location-map-loading');
+        image.textContent = '';
+        try {
+            const response = await fetchWithTimeout(`/api/places/static-map?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&theme=${resolvedThemeMode()}`, {
+                headers: {
+                    Accept: 'image/png',
+                    ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+                },
+            }, 10000);
+            if (!response.ok) throw new Error('Map preview failed.');
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            image.style.backgroundImage = `url("${url}")`;
+        } catch (_) {
+            image.style.backgroundImage = '';
+            image.textContent = 'Map preview unavailable';
+        } finally {
+            image.classList.remove('hb-location-map-loading');
+        }
+    }
+
+    function clearEventPlaceFields(field) {
+        ['[data-event-place-id]', '[data-event-place-address]', '[data-event-place-lat]', '[data-event-place-lng]', '[data-event-google-maps-uri]'].forEach((selector) => {
+            const input = field.querySelector(selector);
+            if (input) input.value = '';
+        });
+    }
+
+    function eventDirectionsUrl(address, placeId = '') {
+        const preferredMapApp = String(state.user?.preferred_map_app || state.user?.preferredMapApp || 'google') === 'apple' ? 'apple' : 'google';
+        if (preferredMapApp === 'apple') {
+            return `https://maps.apple.com/?q=${encodeURIComponent(address)}`;
+        }
+        const query = new URLSearchParams({ api: '1', query: address });
+        if (placeId) query.set('query_place_id', placeId);
+        return `https://www.google.com/maps/search/?${query.toString()}`;
+    }
+
+    function hideLocationSuggestions(field) {
+        const container = field.querySelector('[data-location-suggestions]');
+        if (!container) return;
+        container.hidden = true;
+        container.innerHTML = '';
+    }
+
+    function setLocationStatus(field, message) {
+        const status = field.querySelector('[data-location-status]');
+        if (!status) return;
+        status.hidden = !message;
+        status.textContent = message;
+    }
+
+    function hideLocationStatus(field) {
+        setLocationStatus(field, '');
+    }
+
+    function setLocationMapVisible(field, visible) {
+        const map = field.querySelector('[data-location-map]');
+        if (map) map.hidden = !visible;
     }
 
     function toggleInlineCategoryManager(event) {
@@ -6231,7 +6454,13 @@ if (mount) {
         const data = Object.fromEntries(new FormData(form).entries());
         try {
             if (kind === 'profile') {
-                state.user = await api('/auth/me', { method: 'PATCH', body: { email: data.email } });
+                state.user = await api('/auth/me', {
+                    method: 'PATCH',
+                    body: {
+                        email: data.email,
+                        preferred_map_app: data.preferredMapApp === 'apple' ? 'apple' : 'google',
+                    },
+                });
             } else if (kind === 'issue-report') {
                 await submitIssueReport(form);
                 return;
@@ -6668,6 +6897,7 @@ if (mount) {
             const metadata = {
                 ...existingMetadata,
                 ...recurrence.metadata,
+                ...eventPlaceMetadataFromFormData(data),
                 google_calendar_ids: googleCalendarIds,
                 google_calendar_id: googleCalendarIds[0] || null,
                 outlook_calendar_ids: outlookCalendarIds,
@@ -6707,6 +6937,27 @@ if (mount) {
             };
         }
         return { body: {}, path: '', options: {} };
+    }
+
+    function eventPlaceMetadataFromFormData(data = {}) {
+        const location = String(data.location || '').trim();
+        const address = String(data.placeFormattedAddress || '').trim();
+        if (!location || !address || location !== address) {
+            return {
+                place_id: null,
+                place_formatted_address: null,
+                place_lat: null,
+                place_lng: null,
+                google_maps_uri: null,
+            };
+        }
+        return {
+            place_id: String(data.placeId || '').trim() || null,
+            place_formatted_address: address,
+            place_lat: nullableNumber(data.placeLat),
+            place_lng: nullableNumber(data.placeLng),
+            google_maps_uri: String(data.googleMapsUri || '').trim() || null,
+        };
     }
 
     async function saveItemRequest(kind, request) {
