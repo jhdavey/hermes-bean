@@ -20,7 +20,6 @@ use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
 use App\Services\AgentProfileService;
 use App\Services\PlanLimitService;
-use App\Services\WelcomeConversationService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -50,6 +49,24 @@ class AuthController extends Controller
         'dark',
     ];
 
+    public function emailAvailability(Request $request): JsonResponse
+    {
+        $request->merge([
+            'email' => strtolower(trim((string) $request->input('email', ''))),
+        ]);
+
+        $data = $request->validate([
+            'email' => ['required', 'string', 'email:rfc', 'max:255'],
+        ]);
+
+        return response()->json([
+            'data' => [
+                'email' => $data['email'],
+                'available' => ! User::where('email', $data['email'])->exists(),
+            ],
+        ]);
+    }
+
     public function register(Request $request): JsonResponse
     {
         $request->merge([
@@ -75,7 +92,6 @@ class AuthController extends Controller
 
             app(AgentProfileService::class)->ensureForUser($user);
             app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
-            app(WelcomeConversationService::class)->ensureForUser($user);
             EarlyAccessSignup::updateOrCreate(
                 ['email' => $user->email],
                 [
@@ -116,7 +132,6 @@ class AuthController extends Controller
 
         app(AgentProfileService::class)->ensureForUser($user);
         app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
-        app(WelcomeConversationService::class)->ensureForUser($user);
 
         return response()->json(['data' => [
             'user' => $this->hydratedUser($user),

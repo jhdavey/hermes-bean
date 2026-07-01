@@ -50,6 +50,23 @@ class AuthAndAccountLifecycleTest extends TestCase
         ]);
     }
 
+    public function test_email_availability_reports_taken_and_available_addresses(): void
+    {
+        User::factory()->create(['email' => 'taken@example.com']);
+
+        $this->postJson('/api/auth/email-availability', [
+            'email' => ' Taken@Example.com ',
+        ])->assertOk()
+            ->assertJsonPath('data.email', 'taken@example.com')
+            ->assertJsonPath('data.available', false);
+
+        $this->postJson('/api/auth/email-availability', [
+            'email' => 'fresh@example.com',
+        ])->assertOk()
+            ->assertJsonPath('data.email', 'fresh@example.com')
+            ->assertJsonPath('data.available', true);
+    }
+
     public function test_converted_early_access_user_keeps_early_access_flag_while_signup_record_exists(): void
     {
         EarlyAccessSignup::create([
@@ -229,7 +246,12 @@ class AuthAndAccountLifecycleTest extends TestCase
 
     public function test_new_user_starts_with_empty_user_resources(): void
     {
-        $token = $this->registerToken('clean@example.com');
+        $token = $this->postJson('/api/auth/register', [
+            'name' => 'Clean User',
+            'email' => 'clean@example.com',
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertCreated()->json('data.token');
 
         $this->withToken($token)->getJson('/api/today')
             ->assertOk()
@@ -241,7 +263,7 @@ class AuthAndAccountLifecycleTest extends TestCase
             ->assertOk()
             ->assertJsonCount(0, 'data');
 
-        $this->assertDatabaseHas('conversation_sessions', [
+        $this->assertDatabaseMissing('conversation_sessions', [
             'user_id' => User::where('email', 'clean@example.com')->value('id'),
             'title' => 'Welcome to Bean',
             'runtime_mode' => 'onboarding',
@@ -252,7 +274,7 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseCount('activity_events', 0);
     }
 
-    public function test_login_backfills_welcome_conversation_without_resources(): void
+    public function test_login_does_not_backfill_retired_welcome_conversation(): void
     {
         $user = User::factory()->create([
             'name' => 'Existing User',
@@ -269,7 +291,7 @@ class AuthAndAccountLifecycleTest extends TestCase
             ->assertOk()
             ->assertJsonCount(0, 'data');
 
-        $this->assertDatabaseHas('conversation_sessions', [
+        $this->assertDatabaseMissing('conversation_sessions', [
             'user_id' => $user->id,
             'title' => 'Welcome to Bean',
             'runtime_mode' => 'onboarding',
