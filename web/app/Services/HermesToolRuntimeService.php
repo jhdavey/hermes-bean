@@ -512,7 +512,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $createdCalendarEventsByKey = [];
         $lastCreatedCalendarEventId = null;
         $successfulActions = [];
-        $failedWorkLabels = [];
+        $failedWorkItems = [];
 
         foreach ($actions as $index => $action) {
             if ($this->isCancellationRequested($session)) {
@@ -531,7 +531,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
             if (($toolOutput['ok'] ?? false) === true) {
                 $successfulActions = array_merge($successfulActions, $executed);
             } else {
-                $failedWorkLabels[] = (string) ($workItem['label'] ?? $this->workItemLabelForAction((string) ($action['type'] ?? ''), is_array($action['parameters'] ?? null) ? $action['parameters'] : []));
+                $failedWorkItems[] = [
+                    'label' => (string) ($workItem['label'] ?? $this->workItemLabelForAction((string) ($action['type'] ?? ''), is_array($action['parameters'] ?? null) ? $action['parameters'] : [])),
+                    'action_type' => (string) ($toolOutput['action_type'] ?? $action['type'] ?? ''),
+                    'message' => (string) ($toolOutput['message'] ?? ''),
+                    'error_code' => (string) ($toolOutput['error_code'] ?? ''),
+                ];
             }
 
             if (($toolOutput['ok'] ?? false) === true && in_array((string) ($action['type'] ?? ''), ['calendar_event.create', 'calendar.create'], true)) {
@@ -549,7 +554,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $allWritesSucceeded = $this->toolOutputsAllSuccessfulWrites($toolOutputs);
         $assistantContent = $allWritesSucceeded
             ? $this->nativeActionFallbackContent($executedActions)
-            : $this->partialCrudPlannerContent($successfulActions, $failedWorkLabels, count($actions));
+            : $this->partialCrudPlannerContent($successfulActions, $failedWorkItems, count($actions));
         $prompt = json_encode($promptPayload, JSON_THROW_ON_ERROR);
         $responses = [$response];
         $finalResponse = $response;
@@ -767,6 +772,11 @@ PROMPT;
             ?? $this->sessionDisplayTimezone($session);
         $matches = [];
 
+        $calendarListActions = $this->deterministicDatedCalendarListActions($content, $contextPayload, $timezone);
+        if ($calendarListActions !== []) {
+            return $calendarListActions;
+        }
+
         $this->collectDeterministicCreateMatches(
             $matches,
             $content,
@@ -815,6 +825,182 @@ PROMPT;
         }
 
         return $actions;
+    }
+
+    private function deterministicDatedCalendarListActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(add|create|schedule|put|block|book)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(calendar|schedule|event|events|appointment|appointments|meeting|meetings|block|items)\b/u', $normalized)) {
+            return [];
+        }
+
+        if (! preg_match_all('/\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?)\b/u', $content, $dateMatches, PREG_OFFSET_CAPTURE)) {
+            return [];
+        }
+        if (count($dateMatches[0]) < 2) {
+            return [];
+        }
+
+        $actions = [];
+        $dateTokens = $dateMatches[0];
+        foreach ($dateTokens as $index => $dateMatch) {
+            $dateText = (string) ($dateMatch[0] ?? '');
+            $segmentStart = (int) ($dateMatch[1] ?? 0) + strlen($dateText);
+            $segmentEnd = isset($dateTokens[$index + 1])
+                ? (int) ($dateTokens[$index + 1][1] ?? strlen($content))
+                : strlen($content);
+            $segment = substr($content, $segmentStart, max(0, $segmentEnd - $segmentStart));
+            $parsed = $this->deterministicCalendarListSegment($dateText, $segment, $contextPayload, $timezone);
+            if ($parsed === null) {
+                continue;
+            }
+
+            $actions[] = [
+                'type' => 'calendar_event.create',
+                'risk' => 'low',
+                'client_action_key' => 'event_'.$index,
+                'parameters' => $parsed,
+            ];
+        }
+
+        return count($actions) === count($dateTokens) ? $actions : [];
+    }
+
+    private function deterministicCalendarListSegment(string $dateText, string $segment, array $contextPayload, string $timezone): ?array
+    {
+        $cleaned = trim($segment);
+        $cleaned = preg_replace('/^\s*(?:,|;|\band\b|\bthen\b)+\s*/iu', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\s*(?:,|;|\band\b)+\s*$/iu', '', $cleaned) ?? $cleaned;
+        $cleaned = trim($cleaned);
+        if ($cleaned === '') {
+            return null;
+        }
+
+        if (! preg_match_all('/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/iu', $cleaned, $timeMatches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            return null;
+        }
+
+        $timeMatch = $timeMatches[count($timeMatches) - 1];
+        $timeText = (string) ($timeMatch[0][0] ?? '');
+        $timeOffset = (int) ($timeMatch[0][1] ?? 0);
+        $beforeTime = trim(substr($cleaned, 0, $timeOffset));
+        $beforeTime = preg_replace('/\s*(?:,|;|\band\b)+\s*$/iu', '', $beforeTime) ?? $beforeTime;
+        $beforeTime = preg_replace('/\s+\bat\s*$/iu', '', $beforeTime) ?? $beforeTime;
+        $beforeTime = trim($beforeTime, " \t\n\r\0\x0B,;.");
+        if ($beforeTime === '') {
+            return null;
+        }
+
+        $title = $beforeTime;
+        $location = null;
+        if (preg_match('/^(.+?)\s+at\s+(.+)$/iu', $beforeTime, $locationMatch)) {
+            $candidateTitle = trim((string) ($locationMatch[1] ?? ''));
+            $candidateLocation = trim((string) ($locationMatch[2] ?? ''), " \t\n\r\0\x0B,;.");
+            if ($candidateTitle !== '' && $this->looksLikeLocationText($candidateLocation)) {
+                $title = $candidateTitle;
+                $location = $candidateLocation;
+            }
+        }
+
+        $startsAt = $this->deterministicLocalIsoFromDateAndTime($dateText, $timeText, $contextPayload, $timezone);
+        if ($startsAt === null) {
+            return null;
+        }
+
+        $parameters = [
+            'title' => $this->cleanDeterministicTitle($title),
+            'starts_at' => $startsAt,
+        ];
+        if ($parameters['title'] === '') {
+            return null;
+        }
+        if ($location !== null && $location !== '') {
+            $parameters['location'] = $location;
+        }
+
+        return $parameters;
+    }
+
+    private function looksLikeLocationText(string $text): bool
+    {
+        if ($text === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/\d/u', $text)
+            || (bool) preg_match('/\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|ct|court|cir|circle|way|place|pl|pkwy|parkway|hwy|highway|suite|ste|unit|apt)\b\.?/iu', $text);
+    }
+
+    private function deterministicLocalIsoFromDateAndTime(string $dateText, string $timeText, array $contextPayload, string $timezone): ?string
+    {
+        $now = $this->deterministicNow($contextPayload, $timezone);
+        $date = $this->deterministicDateFromToken($dateText, $now, $timezone);
+        if ($date === null) {
+            return null;
+        }
+        if (! preg_match('/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/iu', $timeText, $timeMatch)) {
+            return null;
+        }
+
+        $hour = (int) ($timeMatch[1] ?? 0);
+        $minute = (int) ($timeMatch[2] ?? 0);
+        $meridiem = mb_strtolower((string) ($timeMatch[3] ?? ''));
+        if ($hour < 1 || $hour > 12 || $minute < 0 || $minute > 59) {
+            return null;
+        }
+        if ($meridiem === 'pm' && $hour !== 12) {
+            $hour += 12;
+        } elseif ($meridiem === 'am' && $hour === 12) {
+            $hour = 0;
+        }
+
+        return $date->setTime($hour, $minute)->toIso8601String();
+    }
+
+    private function deterministicDateFromToken(string $dateText, Carbon $now, string $timezone): ?Carbon
+    {
+        $dateText = trim($dateText);
+        try {
+            if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})$/u', $dateText, $match)) {
+                return Carbon::create((int) $match[1], (int) $match[2], (int) $match[3], 0, 0, 0, $timezone);
+            }
+
+            if (preg_match('/^(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?$/u', $dateText, $match)) {
+                $year = isset($match[3]) && $match[3] !== ''
+                    ? (int) $match[3]
+                    : (int) $now->year;
+                if ($year < 100) {
+                    $year += 2000;
+                }
+                $date = Carbon::create($year, (int) $match[1], (int) $match[2], 0, 0, 0, $timezone);
+                if (! isset($match[3]) && $date->lt($now->copy()->startOfDay())) {
+                    $date->addYear();
+                }
+
+                return $date;
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return null;
+    }
+
+    private function deterministicNow(array $contextPayload, string $timezone): Carbon
+    {
+        $clientNow = data_get($contextPayload, 'temporal_context.client_context.current_local_time');
+        if (is_string($clientNow) && trim($clientNow) !== '') {
+            try {
+                return Carbon::parse($clientNow, $timezone)->setTimezone($timezone);
+            } catch (\Throwable) {
+                // Fall through to server time in the same display timezone.
+            }
+        }
+
+        return now()->setTimezone($timezone);
     }
 
     private function textRequestsDelete(string $normalized): bool
@@ -3402,11 +3588,14 @@ PROMPT;
         return 'Done - '.$this->joinSummaryPhrases($phrases->all()).'.';
     }
 
-    private function partialCrudPlannerContent(array $successfulActions, array $failedWorkLabels, int $totalActionCount): string
+    private function partialCrudPlannerContent(array $successfulActions, array $failedWorkItems, int $totalActionCount): string
     {
         $completedCount = count($successfulActions);
-        $failedLabels = collect($failedWorkLabels)
-            ->map(fn (string $label): string => trim($label))
+        $failedItems = collect($failedWorkItems)
+            ->map(fn (mixed $item): array => is_array($item) ? $item : ['label' => (string) $item])
+            ->values();
+        $failedLabels = $failedItems
+            ->map(fn (array $item): string => trim((string) ($item['label'] ?? '')))
             ->filter()
             ->unique()
             ->values();
@@ -3419,11 +3608,65 @@ PROMPT;
             $completed .= ' '.$this->nativeActionFallbackContent($successfulActions);
         }
 
+        $upgradeMessage = $this->planUpgradeMessageForFailedWorkItems($failedItems->all());
+        if ($upgradeMessage !== null) {
+            return $completedCount > 0
+                ? $completed.' '.$upgradeMessage
+                : $upgradeMessage;
+        }
+
         if ($failedLabels->isEmpty()) {
             return $completed.' Some remaining changes could not be completed. Please try those again.';
         }
 
         return $completed.' I could not complete: '.$this->joinSummaryPhrases($failedLabels->all()).'. Please try those again.';
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $failedWorkItems
+     */
+    private function planUpgradeMessageForFailedWorkItems(array $failedWorkItems): ?string
+    {
+        $entitlementFailures = collect($failedWorkItems)
+            ->filter(function (array $item): bool {
+                $message = (string) ($item['message'] ?? '');
+                $errorCode = (string) ($item['error_code'] ?? '');
+
+                return $errorCode === 'subscription_limit_reached'
+                    || str_contains($message, 'available on Premium, Pro, and Enterprise plans');
+            })
+            ->values();
+
+        if ($entitlementFailures->isEmpty()) {
+            return null;
+        }
+
+        $allFailuresAreEntitlements = $entitlementFailures->count() === count($failedWorkItems);
+        if (! $allFailuresAreEntitlements) {
+            return null;
+        }
+
+        $hasNoteFailure = $entitlementFailures->contains(function (array $item): bool {
+            $actionType = (string) ($item['action_type'] ?? '');
+            $message = (string) ($item['message'] ?? '');
+            $label = (string) ($item['label'] ?? '');
+
+            return str_starts_with($actionType, 'note.')
+                || str_starts_with($actionType, 'note_folder.')
+                || str_contains($message, 'Notes are available')
+                || str_contains(mb_strtolower($label), 'note');
+        });
+
+        if ($hasNoteFailure) {
+            return 'Notes are available on Premium, Pro, and Enterprise plans. Upgrade your plan to create and manage notes.';
+        }
+
+        $message = trim((string) ($entitlementFailures->first()['message'] ?? ''));
+        if ($message === '') {
+            return 'That feature needs an upgraded plan. Upgrade your plan to keep going.';
+        }
+
+        return rtrim($message, '.').'. Upgrade your plan to use this feature.';
     }
 
     private function combinedDeleteFallbackContent(array $actions): ?string

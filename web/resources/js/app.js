@@ -3535,9 +3535,12 @@ if (mount) {
                     <label class="hb-switch-row"><input type="checkbox" data-pref="reminder_email" ${prefs.reminder_email === true ? 'checked' : ''}> Reminder emails</label>
                 </div>
                 <div class="hb-surface-soft hb-card-pad hb-settings-section">
-                    ${settingsSectionHeader(icons.spaces, 'Workspaces', 'Switch the space Bean uses for calendar, tasks, and reminders.')}
+                    <div class="hb-settings-header-with-action">
+                        ${settingsSectionHeader(icons.spaces, 'Workspaces', 'Switch the space Bean uses for calendar, tasks, and reminders.')}
+                        <button class="hb-workspace-create-action" type="button" data-create-workspace aria-label="Create workspace" title="Create workspace">${icons.add}</button>
+                    </div>
                     ${workspaceSwitcherMarkup(workspaceItems, activeWorkspaceId)}
-                    <div class="hb-list" style="margin-top:10px">${workspaceItems.map((workspace) => {
+                    <div class="hb-list hb-workspace-list" style="margin-top:10px">${workspaceItems.map((workspace) => {
                         const workspaceId = String(workspace.id || '');
                         const active = workspaceId === activeWorkspaceId || workspace.active || workspace.is_default || workspace.isDefault;
                         return `
@@ -3555,7 +3558,6 @@ if (mount) {
                     `;
                     }).join('') || '<div class="hb-empty">No workspaces loaded</div>'}</div>
                     <div class="hb-account-actions">
-                        <button class="hb-button-secondary" type="button" data-create-workspace>Create household</button>
                         <button class="hb-button-secondary" type="button" data-accept-workspace>Accept invite</button>
                     </div>
                 </div>
@@ -4998,8 +5000,8 @@ if (mount) {
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="${create ? 'workspace-create' : rename ? 'workspace-rename' : invite ? 'workspace-invite' : 'workspace-accept'}">
-                    ${sectionTitle(icons.calendar, create ? 'Create household' : rename ? 'Rename household' : invite ? `Invite to ${workspace?.name || 'workspace'}` : 'Accept workspace invitation', '')}
-                    ${labelInput(create || rename ? 'Household name' : invite ? 'Email' : 'Invitation token or link', create || rename ? 'name' : invite ? 'email' : 'token', invite ? 'email' : 'text', rename ? workspace?.name || '' : '', 'required')}
+                    ${sectionTitle(icons.calendar, create ? 'Create Workspace' : rename ? 'Rename household' : invite ? `Invite to ${workspace?.name || 'workspace'}` : 'Accept workspace invitation', '')}
+                    ${labelInput(create ? 'Workspace name' : rename ? 'Household name' : invite ? 'Email' : 'Invitation token or link', create || rename ? 'name' : invite ? 'email' : 'token', invite ? 'email' : 'text', rename ? workspace?.name || '' : '', 'required')}
                     <input type="hidden" name="workspaceId" value="${escapeAttr(workspace?.id || '')}">
                     <div class="hb-modal-actions"><button class="hb-button-secondary" type="button" data-close-modal>Cancel</button><button class="hb-button" type="submit">${create ? 'Create' : rename ? 'Save' : invite ? 'Invite' : 'Accept'}</button></div>
                 </form>

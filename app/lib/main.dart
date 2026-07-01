@@ -9829,7 +9829,7 @@ class _GuidedBeanOnboardingScreenState
   String _email = '';
   String _password = '';
   String _themeModeKey = 'auto';
-  String _personality = 'balanced';
+  String? _personality;
   String? _homeCity;
   bool _busy = false;
   bool _listening = false;
@@ -10134,7 +10134,7 @@ class _GuidedBeanOnboardingScreenState
       (item) => item.key == key,
       orElse: () => _agentPersonalityOptions.first,
     );
-    _personality = option.key;
+    setState(() => _personality = option.key);
     _addUser(
       _guidedPersonalityLabel(option),
       scrollBehavior: _GuidedScrollBehavior.none,
@@ -10222,8 +10222,13 @@ class _GuidedBeanOnboardingScreenState
   }
 
   Future<void> _savePreferences() {
+    final personality = _personality;
+    if (personality == null) {
+      _setError('Choose a personality before continuing.');
+      return Future.value();
+    }
     final personalityLabel = _agentPersonalityOptions
-        .firstWhere((option) => option.key == _personality)
+        .firstWhere((option) => option.key == personality)
         .label;
     final context = [
       'Completed guided Bean signup onboarding.',
@@ -10231,7 +10236,7 @@ class _GuidedBeanOnboardingScreenState
       if (_homeCity != null) 'City-level location: $_homeCity.',
     ].join(' ');
     return widget.onSavePreferences(
-      agentPersonality: _personality,
+      agentPersonality: personality,
       onboardingContext: context,
       homeCity: _homeCity,
     );
@@ -10959,7 +10964,7 @@ class _GuidedPersonalityPicker extends StatelessWidget {
     required this.onSelected,
   });
 
-  final String selected;
+  final String? selected;
   final bool enabled;
   final ValueChanged<String> onSelected;
 
@@ -27773,8 +27778,8 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
     final name = await showDialog<String>(
       context: context,
       builder: (context) => const _WorkspaceTextInputDialog(
-        title: 'Create household',
-        labelText: 'Household name',
+        title: 'Create Workspace',
+        labelText: 'Workspace name',
         fieldKey: Key('workspace-create-name-field'),
         submitKey: Key('workspace-create-save'),
         submitLabel: 'Create',
@@ -27783,7 +27788,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
     if (name == null || name.trim().isEmpty) return;
     await _run(
       () => widget.apiClient.createWorkspace(name: name.trim()),
-      'Household created.',
+      'Workspace created.',
     );
   }
 
@@ -28114,6 +28119,22 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                     'Workspace calendar choices control which connected calendars appear in that workspace.',
                   ],
                 ),
+                IconButton(
+                  key: const Key('workspace-create-household-action'),
+                  tooltip: 'Create workspace',
+                  onPressed: _busy ? null : _createHousehold,
+                  icon: Icon(Icons.add_rounded),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    disabledBackgroundColor: Colors.transparent,
+                    foregroundColor: HeyBeanTheme.accentStrong,
+                    disabledForegroundColor: HeyBeanTheme.muted,
+                    side: BorderSide.none,
+                    fixedSize: const Size.square(40),
+                    minimumSize: const Size.square(40),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               ],
             ),
             if (_message != null) ...[
@@ -28150,13 +28171,21 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
             for (final workspace in workspaces)
               Container(
                 key: Key('workspace-row-${workspace.id}'),
-                margin: const EdgeInsets.only(top: 10),
-                padding: const EdgeInsets.only(top: 10),
-                decoration: BoxDecoration(
-                  border: Border(
-                    top: BorderSide(color: _sectionDividerColor(alpha: .18)),
-                  ),
+                margin: EdgeInsets.only(
+                  top: workspace.id == workspaces.first.id ? 0 : 10,
                 ),
+                padding: EdgeInsets.only(
+                  top: workspace.id == workspaces.first.id ? 0 : 10,
+                ),
+                decoration: workspace.id == workspaces.first.id
+                    ? null
+                    : BoxDecoration(
+                        border: Border(
+                          top: BorderSide(
+                            color: _sectionDividerColor(alpha: .18),
+                          ),
+                        ),
+                      ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -28339,11 +28368,6 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _ThemedPlusButton(
-                  key: const Key('workspace-create-household-action'),
-                  onPressed: _busy ? null : _createHousehold,
-                  tooltip: 'Add household',
-                ),
                 OutlinedButton.icon(
                   key: const Key('workspace-accept-invitation-action'),
                   onPressed: _busy ? null : _acceptInvitation,

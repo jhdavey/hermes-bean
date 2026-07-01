@@ -7,11 +7,13 @@ use App\Models\EarlyAccessSignup;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password as PasswordBroker;
+use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
 class AuthAndAccountLifecycleTest extends TestCase
@@ -20,6 +22,8 @@ class AuthAndAccountLifecycleTest extends TestCase
 
     public function test_register_creates_user_auth_token_and_early_access_signup(): void
     {
+        Notification::fake();
+
         $response = $this->postJson('/api/auth/register', [
             'name' => 'Bean User',
             'email' => 'bean@example.com',
@@ -48,6 +52,35 @@ class AuthAndAccountLifecycleTest extends TestCase
             'requested_plan' => 'pro',
             'source' => 'app_register',
         ]);
+
+        $user = User::where('email', 'bean@example.com')->firstOrFail();
+        Notification::assertSentTo($user, VerifyEmail::class);
+    }
+
+    public function test_registration_verification_link_marks_email_verified(): void
+    {
+        Notification::fake();
+
+        $this->postJson('/api/auth/register', [
+            'name' => 'Verify User',
+            'email' => 'verify@example.com',
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertCreated()
+            ->assertJsonPath('data.user.email_verified', false);
+
+        $user = User::where('email', 'verify@example.com')->firstOrFail();
+        $this->assertFalse($user->hasVerifiedEmail());
+        Notification::assertSentTo($user, VerifyEmail::class);
+
+        $verificationUrl = URL::temporarySignedRoute('verification.verify', now()->addMinutes(60), [
+            'id' => $user->id,
+            'hash' => sha1($user->getEmailForVerification()),
+        ]);
+
+        $this->get($verificationUrl)->assertRedirect('/login?verified=1');
+
+        $this->assertTrue($user->fresh()->hasVerifiedEmail());
     }
 
     public function test_email_availability_reports_taken_and_available_addresses(): void

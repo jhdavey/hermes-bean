@@ -703,6 +703,20 @@ void main() {
       find.byKey(const Key('guided-personality-balanced')),
       findsOneWidget,
     );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('guided-personality-balanced')),
+        matching: find.byIcon(Icons.check_circle_rounded),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('guided-personality-balanced')),
+        matching: find.byIcon(Icons.radio_button_unchecked_rounded),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Balanced helper'), findsOneWidget);
     expect(
       find.text(

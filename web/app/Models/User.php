@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Services\PlanLimitService;
 use Database\Factories\UserFactory;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,7 +15,7 @@ use Illuminate\Notifications\Notifiable;
 
 #[Fillable(['name', 'email', 'password', 'onboard_complete', 'is_admin', 'subscription_tier', 'default_workspace_id', 'notification_preferences', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id', 'subscription_status', 'subscription_current_period_end', 'subscription_trial_ends_at', 'subscription_cancel_at_period_end'])]
 #[Hidden(['password', 'remember_token', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id'])]
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;

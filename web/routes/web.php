@@ -4,6 +4,7 @@ use App\Models\EarlyAccessSignup;
 use App\Models\User;
 use App\Services\WorkspaceService;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -67,6 +68,18 @@ Route::post('/reset-password', function (Request $request) {
 
     return response()->view('auth.reset-complete');
 })->name('password.update');
+
+Route::get('/email/verify/{id}/{hash}', function (Request $request, int $id, string $hash) {
+    $user = User::findOrFail($id);
+
+    abort_unless(hash_equals((string) $hash, sha1($user->getEmailForVerification())), 403);
+
+    if (! $user->hasVerifiedEmail() && $user->markEmailAsVerified()) {
+        event(new Verified($user));
+    }
+
+    return redirect('/login?verified=1');
+})->middleware('signed')->name('verification.verify');
 
 Route::get('/workspace-invitations/{token}/accept', function (string $token) {
     try {

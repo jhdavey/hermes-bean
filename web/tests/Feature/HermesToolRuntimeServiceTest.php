@@ -2244,41 +2244,14 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_app_crud_planner_creates_each_dated_calendar_event_in_one_request(): void
     {
-        Http::fakeSequence()
-            ->push($this->plannerResponse([
-                [
-                    'type' => 'calendar_event.create',
-                    'client_action_key' => 'event_1',
-                    'parameters' => [
-                        'title' => 'Dr Chan Cardio',
-                        'location' => '100 N Dean Rd',
-                        'starts_at' => '2026-07-09T15:00:00-04:00',
-                    ],
-                ],
-                [
-                    'type' => 'calendar_event.create',
-                    'client_action_key' => 'event_2',
-                    'parameters' => [
-                        'title' => 'Ventura',
-                        'starts_at' => '2026-07-15T18:00:00-04:00',
-                    ],
-                ],
-                [
-                    'type' => 'calendar_event.create',
-                    'client_action_key' => 'event_3',
-                    'parameters' => [
-                        'title' => 'Azalea Lane',
-                        'starts_at' => '2026-07-19T14:00:00-04:00',
-                    ],
-                ],
-            ]), 200);
+        Http::fake();
 
         $token = $this->apiToken('tool-multi-dated-events@example.com');
         $user = User::where('email', 'tool-multi-dated-events@example.com')->firstOrFail();
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
         $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Please add the following events to my calendar: 7/9 Dr Chan Cardio at 100 N Dean Rd. 3pm, 7/15 Ventura 6pm, 7/19 Azalea Lane 2pm',
+            'content' => 'Ok, please add the following items to my calendar: 7/9 Dr Chen Cardio at 100 N Dean Rd. at 3pm, 7/15 Ventura at 6pm, and 7/19 Azalea Lane at 2pm',
             'metadata' => [
                 'client_context' => [
                     'current_local_time' => '2026-06-30T22:19:29-04:00',
@@ -2294,9 +2267,10 @@ class HermesToolRuntimeServiceTest extends TestCase
         $events = collect($response->json('data.events'));
         $this->assertCount(3, $events->where('event_type', 'assistant.work_item.planned'));
         $this->assertCount(3, $events->where('event_type', 'assistant.calendar_event.created'));
-        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Dr Chan Cardio', 'location' => '100 N Dean Rd']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Dr Chen Cardio', 'location' => '100 N Dean Rd']);
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Ventura']);
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Azalea Lane']);
+        Http::assertSentCount(0);
     }
 
     public function test_app_crud_planner_reports_partial_failure_without_falling_back_or_duplicating_completed_writes(): void
@@ -2347,6 +2321,36 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Normal appointment']);
         $this->assertDatabaseMissing('calendar_events', ['user_id' => $user->id, 'title' => 'Recurring appointment']);
         Http::assertSentCount(1);
+    }
+
+    public function test_app_crud_planner_returns_upgrade_message_for_base_plan_note_requests(): void
+    {
+        Http::fakeSequence()
+            ->push($this->plannerResponse([
+                [
+                    'type' => 'note.create',
+                    'parameters' => [
+                        'title' => 'hello',
+                        'plain_text' => 'hello',
+                    ],
+                ],
+            ]), 200);
+
+        $token = $this->apiToken('tool-base-note-plan@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'create a new note called hello',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Notes are available on Premium, Pro, and Enterprise plans. Upgrade your plan to create and manage notes.')
+            ->assertJsonFragment(['event_type' => 'assistant.action.failed'])
+            ->assertJsonFragment(['reason' => 'Notes are available on Premium, Pro, and Enterprise plans.']);
+
+        $this->assertStringNotContainsString('Please try those again', $response->json('data.assistant_message.content'));
+        $this->assertDatabaseMissing('notes', [
+            'title' => 'hello',
+        ]);
     }
 
     private function plannerResponse(array $actions): array
