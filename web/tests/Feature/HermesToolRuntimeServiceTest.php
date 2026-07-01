@@ -2262,6 +2262,39 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(0);
     }
 
+    public function test_app_crud_planner_accepts_dash_separated_calendar_dates(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->apiToken('tool-dash-dated-events@example.com');
+        $user = User::where('email', 'tool-dash-dated-events@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Ok, please add the following items to my calendar: 7-9 Dr Chen Cardio at 100 N Dean Rd. at 3pm, 7-15 Ventura at 6pm, and 7-19 Azalea Lane at 2pm',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-06-30T22:19:29-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $events = collect($response->json('data.events'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.work_item.planned'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.calendar_event.created'));
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Dr Chen Cardio', 'location' => '100 N Dean Rd']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Ventura']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Azalea Lane']);
+        Http::assertSentCount(0);
+    }
+
     public function test_app_crud_planner_reports_partial_failure_without_falling_back_or_duplicating_completed_writes(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
