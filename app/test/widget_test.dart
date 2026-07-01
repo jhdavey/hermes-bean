@@ -5013,6 +5013,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Persisted task'), findsOneWidget);
+
+      await _openTodayView(tester);
       expect(find.textContaining('Persisted calendar event'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('nav-reminders')));
