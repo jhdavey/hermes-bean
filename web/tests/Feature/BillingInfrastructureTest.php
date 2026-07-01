@@ -150,7 +150,8 @@ class BillingInfrastructureTest extends TestCase
                 $data = $request->data();
                 $this->assertSame('cus_mobile_123', $data['customer']);
                 $this->assertSame('off_session', $data['usage']);
-                $this->assertSame(['card'], $data['payment_method_types']);
+                $this->assertTrue($data['automatic_payment_methods']['enabled']);
+                $this->assertSame('always', $data['automatic_payment_methods']['allow_redirects']);
                 $this->assertSame('subscription', $data['metadata']['purpose']);
                 $this->assertSame('premium', $data['metadata']['plan']);
 
@@ -368,7 +369,7 @@ class BillingInfrastructureTest extends TestCase
             $data = $request->data();
             $this->assertSame('setup', $data['mode']);
             $this->assertSame('cus_payment_checkout_123', $data['customer']);
-            $this->assertSame(['card'], $data['payment_method_types']);
+            $this->assertSame(['card', 'us_bank_account'], $data['payment_method_types']);
             $this->assertStringContainsString('/app?billing=payment_success', $data['success_url']);
             $this->assertStringContainsString('/app?billing=payment_cancel', $data['cancel_url']);
             $this->assertSame('payment_method_update', $data['metadata']['purpose']);

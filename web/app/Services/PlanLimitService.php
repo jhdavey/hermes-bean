@@ -21,6 +21,7 @@ class PlanLimitService
         'recurring_reminders_enabled',
         'recurring_calendar_enabled',
         'email_reminders_enabled',
+        'notes_enabled',
         'priority_background_work',
     ];
 
@@ -167,6 +168,7 @@ class PlanLimitService
             'recurring_reminders_enabled' => (bool) ($limits['recurring_reminders_enabled'] ?? false),
             'recurring_calendar_enabled' => (bool) ($limits['recurring_calendar_enabled'] ?? false),
             'email_reminders_enabled' => (bool) ($limits['email_reminders_enabled'] ?? false),
+            'notes_enabled' => (bool) ($limits['notes_enabled'] ?? false),
             'priority_background_work' => (bool) ($limits['priority_background_work'] ?? false),
         ];
     }
@@ -174,6 +176,11 @@ class PlanLimitService
     public function canUseEmailReminders(User $user): bool
     {
         return (bool) ($this->limitsFor($user)['email_reminders_enabled'] ?? false);
+    }
+
+    public function canUseNotes(User $user): bool
+    {
+        return (bool) ($this->limitsFor($user)['notes_enabled'] ?? false);
     }
 
     public function canUseRecurringTasks(User $user): bool
@@ -288,6 +295,7 @@ class PlanLimitService
                 'recurring_reminders_enabled' => true,
                 'recurring_calendar_enabled' => true,
                 'email_reminders_enabled' => true,
+                'notes_enabled' => true,
                 'priority_background_work' => false,
             ],
             'pro' => [
@@ -301,6 +309,7 @@ class PlanLimitService
                 'recurring_reminders_enabled' => true,
                 'recurring_calendar_enabled' => true,
                 'email_reminders_enabled' => true,
+                'notes_enabled' => true,
                 'priority_background_work' => true,
             ],
             default => [
@@ -314,6 +323,7 @@ class PlanLimitService
                 'recurring_reminders_enabled' => false,
                 'recurring_calendar_enabled' => false,
                 'email_reminders_enabled' => false,
+                'notes_enabled' => false,
                 'priority_background_work' => false,
             ],
         };
@@ -343,6 +353,7 @@ class PlanLimitService
             'recurring_reminders_enabled' => true,
             'recurring_calendar_enabled' => true,
             'email_reminders_enabled' => true,
+            'notes_enabled' => true,
             'priority_background_work' => true,
         ];
     }

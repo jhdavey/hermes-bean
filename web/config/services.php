@@ -44,6 +44,8 @@ return [
         'quick_reply_model' => env('HERMES_QUICK_REPLY_MODEL', 'gpt-5-nano'),
         'quick_reply_timeout' => (float) env('HERMES_QUICK_REPLY_TIMEOUT', 4),
         'quick_reply_max_completion_tokens' => (int) env('HERMES_QUICK_REPLY_MAX_COMPLETION_TOKENS', 90),
+        'crud_planner_model' => env('HERMES_CRUD_PLANNER_MODEL', env('HERMES_QUICK_REPLY_MODEL', 'gpt-5-nano')),
+        'crud_planner_timeout' => (float) env('HERMES_CRUD_PLANNER_TIMEOUT', 20),
         'api_key' => $openAiPublicKey,
         'api_key_source' => $openAiPublicKey !== '' ? 'OPENAI_PUBLIC_KEY' : null,
         'api_base' => $hermesApiBase,

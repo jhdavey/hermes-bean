@@ -18,6 +18,7 @@ class DashboardContextSnapshotService
         private readonly GoogleCalendarSyncService $googleCalendar,
         private readonly AgentProfileService $agentProfiles,
         private readonly OpenMeteoWeatherService $weather,
+        private readonly PlanLimitService $planLimits,
     ) {}
 
     public function snapshot(User $user, Workspace $workspace, ?array $clientContext = null): array
@@ -81,14 +82,19 @@ class DashboardContextSnapshotService
             ->reject(fn (CalendarEvent $event): bool => (bool) (($event->metadata ?? [])['recurrence_source_hidden'] ?? false))
             ->values();
 
-        $notesQuery = Note::query()
-            ->whereIn('workspace_id', $workspaceIds)
-            ->with('folder');
-        $notes = (clone $notesQuery)
-            ->orderByDesc('is_pinned')
-            ->latest('updated_at')
-            ->limit(30)
-            ->get();
+        $notesEnabled = $this->planLimits->canUseNotes($user);
+        $notesQuery = $notesEnabled
+            ? Note::query()
+                ->whereIn('workspace_id', $workspaceIds)
+                ->with('folder')
+            : null;
+        $notes = $notesQuery === null
+            ? collect()
+            : (clone $notesQuery)
+                ->orderByDesc('is_pinned')
+                ->latest('updated_at')
+                ->limit(30)
+                ->get();
 
         $weatherLocation = $this->defaultWeatherLocation($user, $workspace, $clientContext);
         $weatherCurrent = $weatherLocation !== null && (bool) config('services.hermes_runtime.weather_lookup_enabled', true)
@@ -118,7 +124,7 @@ class DashboardContextSnapshotService
                 'open_tasks' => (clone $tasksQuery)->count(),
                 'calendar_events_next_7_days' => $calendarEventsCount,
                 'reminders_next_7_days' => (clone $remindersQuery)->count(),
-                'notes' => (clone $notesQuery)->count(),
+                'notes' => $notesQuery === null ? 0 : (clone $notesQuery)->count(),
                 'workspaces' => count($workspaceIds),
             ],
             'weather_current' => $weatherCurrent,

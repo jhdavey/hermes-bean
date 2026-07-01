@@ -492,6 +492,12 @@ class StructuredHermesActionService
             $parameters = [];
         }
         $session = $this->sessionForAction($session, $parameters);
+        if (str_starts_with($type, 'note.')) {
+            $this->guardNotesAccess($session);
+        }
+        if (str_starts_with($type, 'note_folder.')) {
+            $this->guardNotesAccess($session);
+        }
 
         return match ($type) {
             'task.create' => collect([$this->createTask($session, $parameters)]),
@@ -502,7 +508,7 @@ class StructuredHermesActionService
             'reminder.delete' => collect([$this->deleteOwned(Reminder::class, $session, $parameters, 'assistant.reminder.deleted', 'reminders.delete', 'reminder_id')]),
             'calendar_event.create', 'calendar.create' => collect([$this->createCalendarEvent($session, $parameters)]),
             'calendar_event.update', 'calendar.update' => collect([$this->updateCalendarEvent($session, $parameters)]),
-            'calendar_event.delete', 'calendar.delete' => collect([$this->deleteOwned(CalendarEvent::class, $session, $parameters, 'assistant.calendar_event.deleted', 'calendar.delete', 'calendar_event_id')]),
+            'calendar_event.delete', 'calendar.delete' => $this->deleteCalendarEvent($session, $parameters),
             'note.create' => collect([$this->createNote($session, $parameters)]),
             'note.update' => collect([$this->updateNote($session, $parameters)]),
             'note.delete' => collect([$this->deleteNote($session, $parameters)]),
@@ -762,7 +768,30 @@ class StructuredHermesActionService
 
     private function exportCalendarEventBestEffort(ConversationSession $session, CalendarEvent $calendarEvent): void
     {
+        if (app()->runningUnitTests() || app()->environment('testing')) {
+            $this->exportCalendarEventNow($session, $calendarEvent);
+
+            return;
+        }
+
+        $sessionId = (int) $session->id;
+        $calendarEventId = (int) $calendarEvent->id;
+
+        defer(function () use ($sessionId, $calendarEventId): void {
+            $session = ConversationSession::query()->find($sessionId);
+            $calendarEvent = CalendarEvent::query()->find($calendarEventId);
+            if (! $session || ! $calendarEvent) {
+                return;
+            }
+
+            $this->exportCalendarEventNow($session, $calendarEvent);
+        });
+    }
+
+    private function exportCalendarEventNow(ConversationSession $session, CalendarEvent $calendarEvent): void
+    {
         try {
+            $calendarEvent = $this->withDefaultGoogleExportCalendar($calendarEvent);
             $this->googleCalendar->exportEvent($calendarEvent);
         } catch (\Throwable $exception) {
             $this->recordEvent($session, 'assistant.google_calendar.export_failed', [
@@ -772,6 +801,34 @@ class StructuredHermesActionService
                 'exception' => $exception->getMessage(),
             ], 'google_calendar.export', 'failed');
         }
+    }
+
+    private function withDefaultGoogleExportCalendar(CalendarEvent $calendarEvent): CalendarEvent
+    {
+        $metadata = $calendarEvent->metadata ?? [];
+        if (is_array($metadata['google_calendar_ids'] ?? null) || filled($metadata['google_calendar_id'] ?? null)) {
+            return $calendarEvent;
+        }
+
+        $connection = $calendarEvent->user?->googleCalendarConnection()->where('status', 'connected')->first();
+        if (! $connection) {
+            return $calendarEvent;
+        }
+
+        $selectedCalendarIds = $connection->metadata['selected_calendar_ids'] ?? [];
+        if (! is_array($selectedCalendarIds) || $selectedCalendarIds === []) {
+            $selectedCalendarIds = [$connection->calendar_id ?: 'primary'];
+        }
+
+        $calendarIds = array_values(array_filter(array_map('strval', $selectedCalendarIds)));
+        if ($calendarIds === []) {
+            return $calendarEvent;
+        }
+
+        $metadata['google_calendar_ids'] = $calendarIds;
+        $calendarEvent->forceFill(['metadata' => $metadata])->save();
+
+        return $calendarEvent->refresh();
     }
 
     private function createNote(ConversationSession $session, array $parameters): ActivityEvent
@@ -1217,9 +1274,56 @@ class StructuredHermesActionService
     {
         $model = $this->ownedModel($modelClass, $session, $parameters);
         $id = $model->id;
+        $title = $model->title ?? $model->name ?? null;
         $model->delete();
 
-        return $this->recordEvent($session, $eventType, [$payloadKey => $id], $toolName, 'succeeded');
+        return $this->recordEvent($session, $eventType, array_filter([
+            $payloadKey => $id,
+            'title' => is_scalar($title) ? (string) $title : null,
+        ], fn (mixed $value): bool => $value !== null), $toolName, 'succeeded');
+    }
+
+    /**
+     * @return Collection<int, ActivityEvent>
+     */
+    private function deleteCalendarEvent(ConversationSession $session, array $parameters): Collection
+    {
+        $calendarEvent = $this->ownedModel(CalendarEvent::class, $session, $parameters);
+        $deleteLinkedReminders = (bool) (
+            $parameters['delete_linked_reminders']
+            ?? $parameters['delete_related_reminders']
+            ?? $parameters['include_reminders']
+            ?? false
+        );
+        $linkedReminders = $deleteLinkedReminders
+            ? Reminder::query()
+                ->where('user_id', $session->user_id)
+                ->where('workspace_id', $calendarEvent->workspace_id)
+                ->where('calendar_event_id', $calendarEvent->id)
+                ->orderBy('id')
+                ->get()
+            : collect();
+
+        $calendarId = $calendarEvent->id;
+        $calendarTitle = $calendarEvent->title;
+        $calendarEvent->delete();
+        $events = collect([$this->recordEvent($session, 'assistant.calendar_event.deleted', [
+            'calendar_event_id' => $calendarId,
+            'title' => $calendarTitle,
+        ], 'calendar.delete', 'succeeded')]);
+
+        foreach ($linkedReminders as $reminder) {
+            $reminderId = $reminder->id;
+            $reminderTitle = $reminder->title;
+            $reminder->delete();
+            $events->push($this->recordEvent($session, 'assistant.reminder.deleted', [
+                'reminder_id' => $reminderId,
+                'title' => $reminderTitle,
+                'calendar_event_id' => $calendarId,
+            ], 'reminders.delete', 'succeeded'));
+        }
+
+        return $events;
     }
 
     private function ownedModel(string $modelClass, ConversationSession $session, array $parameters): mixed
@@ -1595,6 +1699,13 @@ class StructuredHermesActionService
     {
         if ($this->recurrenceRequested($recurrence) && ! $this->planLimits->canUseRecurringCalendar($this->sessionUser($session))) {
             throw new InvalidArgumentException('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
+        }
+    }
+
+    private function guardNotesAccess(ConversationSession $session): void
+    {
+        if (! $this->planLimits->canUseNotes($this->sessionUser($session))) {
+            throw new InvalidArgumentException('Notes are available on Premium, Pro, and Enterprise plans.');
         }
     }
 

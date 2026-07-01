@@ -50,7 +50,7 @@ class AssistantRunService
             return ['run' => $run, 'user_message' => $userMessage, 'event' => $event];
         });
 
-        ProcessAssistantRun::dispatch($queued['run']->id)->afterResponse();
+        ProcessAssistantRun::dispatch($queued['run']->id);
 
         return $queued;
     }

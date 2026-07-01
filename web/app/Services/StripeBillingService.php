@@ -121,7 +121,7 @@ class StripeBillingService
         $session = $this->stripePost('/checkout/sessions', [
             'mode' => 'setup',
             'customer' => $customerId,
-            'payment_method_types' => ['card'],
+            'payment_method_types' => ['card', 'us_bank_account'],
             'success_url' => url('/app?billing=payment_success'),
             'cancel_url' => url('/app?billing=payment_cancel'),
             'metadata' => [
@@ -708,7 +708,10 @@ class StripeBillingService
         $setupIntent = $this->stripePost('/setup_intents', [
             'customer' => $customerId,
             'usage' => 'off_session',
-            'payment_method_types' => ['card'],
+            'automatic_payment_methods' => [
+                'enabled' => true,
+                'allow_redirects' => 'always',
+            ],
             'metadata' => [
                 'heybean_user_id' => (string) $user->id,
                 'source' => 'flutter',
@@ -806,18 +809,30 @@ class StripeBillingService
         }
 
         $card = $paymentMethod['card'] ?? null;
-        if (! is_array($card)) {
-            return null;
+        if (is_array($card)) {
+            return [
+                'id' => $paymentMethod['id'] ?? null,
+                'type' => $paymentMethod['type'] ?? 'card',
+                'brand' => $card['brand'] ?? null,
+                'last4' => $card['last4'] ?? null,
+                'exp_month' => $card['exp_month'] ?? null,
+                'exp_year' => $card['exp_year'] ?? null,
+            ];
         }
 
-        return [
-            'id' => $paymentMethod['id'] ?? null,
-            'type' => $paymentMethod['type'] ?? 'card',
-            'brand' => $card['brand'] ?? null,
-            'last4' => $card['last4'] ?? null,
-            'exp_month' => $card['exp_month'] ?? null,
-            'exp_year' => $card['exp_year'] ?? null,
-        ];
+        $bank = $paymentMethod['us_bank_account'] ?? null;
+        if (is_array($bank)) {
+            return [
+                'id' => $paymentMethod['id'] ?? null,
+                'type' => $paymentMethod['type'] ?? 'us_bank_account',
+                'brand' => $bank['bank_name'] ?? 'Bank account',
+                'last4' => $bank['last4'] ?? null,
+                'exp_month' => null,
+                'exp_year' => null,
+            ];
+        }
+
+        return null;
     }
 
     private function stripeGet(string $path, array $payload = []): Response

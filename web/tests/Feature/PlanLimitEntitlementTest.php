@@ -11,12 +11,15 @@ use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\DashboardChange;
 use App\Models\EnterpriseCustomerLimit;
+use App\Models\Note;
+use App\Models\NoteFolder;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Services\AiUsageService;
+use App\Services\PlanLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -177,6 +180,141 @@ class PlanLimitEntitlementTest extends TestCase
             'notification_preferences' => ['reminder_email' => true],
         ])
             ->assertStatus(402);
+    }
+
+    public function test_notes_are_premium_and_up(): void
+    {
+        $baseToken = $this->apiToken('base-notes@example.com');
+        $premiumToken = $this->apiToken('premium-notes@example.com');
+        $premiumUser = User::where('email', 'premium-notes@example.com')->firstOrFail();
+        $premiumUser->forceFill(['subscription_tier' => 'premium'])->save();
+        $premiumWorkspace = Workspace::where('personal_owner_user_id', $premiumUser->id)->firstOrFail();
+
+        $this->withToken($baseToken)->getJson('/api/notes')
+            ->assertStatus(402)
+            ->assertJsonPath('error.code', 'subscription_limit_reached');
+
+        $this->withToken($baseToken)->postJson('/api/note-folders', [
+            'name' => 'Projects',
+        ])
+            ->assertStatus(402)
+            ->assertJsonPath('error.code', 'subscription_limit_reached');
+
+        $this->withToken($baseToken)->postJson('/api/notes', [
+            'title' => 'Blocked note',
+            'plain_text' => 'Base users need to upgrade for Notes.',
+        ])
+            ->assertStatus(402)
+            ->assertJsonPath('error.code', 'subscription_limit_reached');
+
+        $folder = $this->withToken($premiumToken)->postJson('/api/note-folders', [
+            'name' => 'Projects',
+        ])
+            ->assertCreated()
+            ->json('data');
+
+        $this->withToken($premiumToken)->postJson('/api/notes', [
+            'title' => 'Premium note',
+            'plain_text' => 'Premium users can write notes.',
+            'note_folder_id' => $folder['id'],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.title', 'Premium note');
+
+        $this->assertDatabaseHas('note_folders', [
+            'user_id' => $premiumUser->id,
+            'workspace_id' => $premiumWorkspace->id,
+            'name' => 'Projects',
+        ]);
+        $this->assertSame(1, Note::where('user_id', $premiumUser->id)->count());
+        $this->assertSame(1, NoteFolder::where('user_id', $premiumUser->id)->count());
+    }
+
+    public function test_admin_accounts_bypass_all_plan_limits(): void
+    {
+        $token = $this->apiToken('unlimited-admin@example.com');
+        $admin = User::where('email', 'unlimited-admin@example.com')->firstOrFail();
+        $admin->forceFill([
+            'is_admin' => true,
+            'subscription_tier' => 'base',
+            'subscription_status' => null,
+        ])->save();
+
+        $limits = app(PlanLimitService::class)->publicLimitsFor($admin->refresh());
+
+        $this->assertSame('admin', $limits['tier']);
+        $this->assertNull($limits['workspace_limit']);
+        $this->assertNull($limits['calendar_connection_limit']);
+        $this->assertNull($limits['connected_account_limit']);
+        $this->assertNull($limits['history_days']);
+        $this->assertTrue($limits['recurring_tasks_enabled']);
+        $this->assertTrue($limits['recurring_reminders_enabled']);
+        $this->assertTrue($limits['recurring_calendar_enabled']);
+        $this->assertTrue($limits['email_reminders_enabled']);
+        $this->assertTrue($limits['notes_enabled']);
+        $this->assertTrue($limits['priority_background_work']);
+
+        $this->withToken($token)->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.is_admin', true)
+            ->assertJsonPath('data.plan_limits.tier', 'admin')
+            ->assertJsonPath('data.plan_limits.notes_enabled', true)
+            ->assertJsonPath('data.plan_limits.recurring_tasks_enabled', true)
+            ->assertJsonPath('data.plan_limits.recurring_reminders_enabled', true)
+            ->assertJsonPath('data.plan_limits.recurring_calendar_enabled', true)
+            ->assertJsonPath('data.plan_limits.email_reminders_enabled', true);
+
+        $this->withToken($token)->postJson('/api/workspaces', ['name' => 'Admin Home'])
+            ->assertCreated();
+        $this->withToken($token)->postJson('/api/workspaces', ['name' => 'Admin Work'])
+            ->assertCreated();
+        $this->withToken($token)->postJson('/api/workspaces', ['name' => 'Admin Projects'])
+            ->assertCreated();
+
+        $this->withToken($token)->patchJson('/api/auth/me', [
+            'notification_preferences' => ['reminder_email' => true],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.notification_preferences.reminder_email', true);
+
+        $this->withToken($token)->postJson('/api/tasks', [
+            'title' => 'Admin recurring task',
+            'type' => 'todo',
+            'metadata' => ['recurrence' => 'weekly'],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.metadata.recurrence', 'weekly');
+
+        $this->withToken($token)->postJson('/api/reminders', [
+            'title' => 'Admin recurring reminder',
+            'remind_at' => now()->addHour()->toIso8601String(),
+            'metadata' => ['recurrence' => 'daily'],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.metadata.recurrence', 'daily');
+
+        $this->withToken($token)->postJson('/api/calendar-events', [
+            'title' => 'Admin recurring calendar',
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addDay()->addHour()->toIso8601String(),
+            'recurrence' => 'weekly',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.recurrence', 'weekly');
+
+        $folder = $this->withToken($token)->postJson('/api/note-folders', [
+            'name' => 'Admin Notes',
+        ])
+            ->assertCreated()
+            ->json('data');
+
+        $this->withToken($token)->postJson('/api/notes', [
+            'title' => 'Admin note',
+            'plain_text' => 'Admin accounts can use Notes without a paid plan.',
+            'note_folder_id' => $folder['id'],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.title', 'Admin note');
     }
 
     public function test_enterprise_customer_limits_drive_ai_budget_and_admins_have_unlimited_usage(): void
@@ -488,6 +626,7 @@ class PlanLimitEntitlementTest extends TestCase
             'recurring_reminders_enabled' => false,
             'recurring_calendar_enabled' => false,
             'email_reminders_enabled' => false,
+            'notes_enabled' => false,
             'priority_background_work' => false,
             ...$overrides,
         ];

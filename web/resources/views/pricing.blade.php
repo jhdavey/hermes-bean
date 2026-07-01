@@ -157,6 +157,7 @@
                         <li>Expanded Bean capacity for everyday planning</li>
                         <li>Push and email reminders working together</li>
                         <li>Recurring tasks and reminders for repeated routines</li>
+                        <li>Notes with folders for plans, lists, and longer writing</li>
                         <li>Multiple calendar connections</li>
                         <li>1 year of searchable context and history</li>
                         <li>The best fit for most busy households</li>
@@ -177,6 +178,7 @@
                         <li>Maximum Bean capacity for high-volume days</li>
                         <li>More room for connected tools and background work</li>
                         <li>Unlimited connected accounts</li>
+                        <li>Notes across every workspace</li>
                         <li>Full memory and history</li>
                         <li>Priority background work</li>
                         <li>Priority support</li>
