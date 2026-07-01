@@ -13052,7 +13052,8 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       _CommandCenterAgendaKind.task => 'Task',
       _CommandCenterAgendaKind.reminder => 'Reminder',
     };
-    final timeWidth = item.kind == _CommandCenterAgendaKind.event ? 78.0 : 58.0;
+    final hasEventNotes = item.event != null && _eventHasNotes(item.event!);
+    const timeWidth = 58.0;
 
     return Material(
       key: Key('command-center-agenda-${item.key}'),
@@ -13091,15 +13092,30 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: HeyBeanTheme.text,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: HeyBeanTheme.text,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        if (hasEventNotes) ...[
+                          const SizedBox(width: 6),
+                          Icon(
+                            Icons.notes_rounded,
+                            key: Key('command-center-event-notes-${item.key}'),
+                            size: 14,
+                            color: HeyBeanTheme.muted,
+                          ),
+                        ],
+                      ],
                     ),
                     if (item.subtitle.isNotEmpty)
                       Text(
