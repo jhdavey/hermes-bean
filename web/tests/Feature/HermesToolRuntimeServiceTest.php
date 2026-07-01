@@ -2241,4 +2241,131 @@ class HermesToolRuntimeServiceTest extends TestCase
                 && data_get($context, 'memory_context.summaries') === [];
         });
     }
+
+    public function test_app_crud_planner_creates_each_dated_calendar_event_in_one_request(): void
+    {
+        Http::fakeSequence()
+            ->push($this->plannerResponse([
+                [
+                    'type' => 'calendar_event.create',
+                    'client_action_key' => 'event_1',
+                    'parameters' => [
+                        'title' => 'Dr Chan Cardio',
+                        'location' => '100 N Dean Rd',
+                        'starts_at' => '2026-07-09T15:00:00-04:00',
+                    ],
+                ],
+                [
+                    'type' => 'calendar_event.create',
+                    'client_action_key' => 'event_2',
+                    'parameters' => [
+                        'title' => 'Ventura',
+                        'starts_at' => '2026-07-15T18:00:00-04:00',
+                    ],
+                ],
+                [
+                    'type' => 'calendar_event.create',
+                    'client_action_key' => 'event_3',
+                    'parameters' => [
+                        'title' => 'Azalea Lane',
+                        'starts_at' => '2026-07-19T14:00:00-04:00',
+                    ],
+                ],
+            ]), 200);
+
+        $token = $this->apiToken('tool-multi-dated-events@example.com');
+        $user = User::where('email', 'tool-multi-dated-events@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Please add the following events to my calendar: 7/9 Dr Chan Cardio at 100 N Dean Rd. 3pm, 7/15 Ventura 6pm, 7/19 Azalea Lane 2pm',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-06-30T22:19:29-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $events = collect($response->json('data.events'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.work_item.planned'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.calendar_event.created'));
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Dr Chan Cardio', 'location' => '100 N Dean Rd']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Ventura']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Azalea Lane']);
+    }
+
+    public function test_app_crud_planner_reports_partial_failure_without_falling_back_or_duplicating_completed_writes(): void
+    {
+        Http::fakeSequence()
+            ->push($this->plannerResponse([
+                [
+                    'type' => 'calendar_event.create',
+                    'client_action_key' => 'event_1',
+                    'parameters' => [
+                        'title' => 'Normal appointment',
+                        'starts_at' => '2026-07-09T15:00:00-04:00',
+                    ],
+                ],
+                [
+                    'type' => 'calendar_event.create',
+                    'client_action_key' => 'event_2',
+                    'parameters' => [
+                        'title' => 'Recurring appointment',
+                        'starts_at' => '2026-07-10T15:00:00-04:00',
+                        'recurrence' => 'weekly',
+                    ],
+                ],
+            ]), 200);
+
+        $token = $this->apiToken('tool-partial-planner@example.com');
+        $user = User::where('email', 'tool-partial-planner@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Please add events to my calendar: 7/9 Normal appointment 3pm, 7/10 Recurring appointment 3pm',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-06-30T22:19:29-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created'])
+            ->assertJsonFragment(['event_type' => 'assistant.action.failed']);
+
+        $this->assertStringContainsString('I completed 1 of 2 requested changes.', $response->json('data.assistant_message.content'));
+        $this->assertStringContainsString('Create calendar event: Recurring appointment', $response->json('data.assistant_message.content'));
+        $this->assertDatabaseCount('calendar_events', 1);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Normal appointment']);
+        $this->assertDatabaseMissing('calendar_events', ['user_id' => $user->id, 'title' => 'Recurring appointment']);
+        Http::assertSentCount(1);
+    }
+
+    private function plannerResponse(array $actions): array
+    {
+        return [
+            'id' => 'chatcmpl-crud-planner',
+            'model' => 'gpt-test-tools',
+            'choices' => [[
+                'finish_reason' => 'stop',
+                'message' => [
+                    'role' => 'assistant',
+                    'content' => json_encode(['actions' => $actions], JSON_THROW_ON_ERROR),
+                ],
+            ]],
+            'usage' => [
+                'prompt_tokens' => 10,
+                'completion_tokens' => 10,
+                'total_tokens' => 20,
+            ],
+        ];
+    }
 }

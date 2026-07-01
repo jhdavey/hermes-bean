@@ -49,6 +49,11 @@ class HermesApiClient {
   final HermesApiTransport _transport;
   String? bearerToken;
 
+  Map<String, String> get authenticatedHeaders =>
+      bearerToken == null ? const {} : {'Authorization': 'Bearer $bearerToken'};
+
+  Uri resolveApiUri(String path) => _resolveApiPath(path);
+
   Future<HermesAuthResult> register({
     required String name,
     required String email,
@@ -237,6 +242,7 @@ class HermesApiClient {
     String? theme,
     String? themeMode,
     String? commandCenterLabel,
+    String? preferredMapApp,
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
@@ -253,6 +259,7 @@ class HermesApiClient {
         if (themeMode != null) 'theme_mode': themeMode,
         if (commandCenterLabel != null)
           'command_center_label': commandCenterLabel,
+        if (preferredMapApp != null) 'preferred_map_app': preferredMapApp,
         if (agentPersonality != null) 'agent_personality': agentPersonality,
         if (onboardingPriorities != null)
           'onboarding_priorities': onboardingPriorities,
@@ -316,6 +323,37 @@ class HermesApiClient {
       }),
     );
     return HermesTodaySummary.fromJson(_expectMap(data['data']));
+  }
+
+  Future<List<HermesPlaceSuggestion>> autocompletePlaces({
+    required String input,
+    String? sessionToken,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/places/autocomplete', {
+        'input': input,
+        if (sessionToken != null) 'session_token': sessionToken,
+      }),
+    );
+    final payload = _expectMap(data['data']);
+    return _expectList(
+      payload['suggestions'] ?? const [],
+    ).map((json) => HermesPlaceSuggestion.fromJson(_expectMap(json))).toList();
+  }
+
+  Future<HermesPlaceDetails> placeDetails({
+    required String placeId,
+    String? sessionToken,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/places/details', {
+        'place_id': placeId,
+        if (sessionToken != null) 'session_token': sessionToken,
+      }),
+    );
+    return HermesPlaceDetails.fromJson(_expectMap(data['data']));
   }
 
   Future<List<HermesWorkspace>> listWorkspaces() async {
@@ -1770,6 +1808,68 @@ class HermesNotificationPreferences {
   );
 }
 
+class HermesPlaceSuggestion {
+  const HermesPlaceSuggestion({
+    required this.placeId,
+    required this.primaryText,
+    this.secondaryText,
+    this.fullText,
+  });
+
+  final String placeId;
+  final String primaryText;
+  final String? secondaryText;
+  final String? fullText;
+
+  factory HermesPlaceSuggestion.fromJson(Map<String, Object?> json) =>
+      HermesPlaceSuggestion(
+        placeId: _expectString(json['place_id'] ?? json['placeId']),
+        primaryText: _readStringOrDefault(
+          json['primary_text'] ?? json['primaryText'],
+          '',
+        ),
+        secondaryText: (json['secondary_text'] ?? json['secondaryText'])
+            ?.toString(),
+        fullText: (json['full_text'] ?? json['fullText'])?.toString(),
+      );
+}
+
+class HermesPlaceDetails {
+  const HermesPlaceDetails({
+    required this.placeId,
+    this.name,
+    this.formattedAddress,
+    this.latitude,
+    this.longitude,
+    this.googleMapsUri,
+  });
+
+  final String placeId;
+  final String? name;
+  final String? formattedAddress;
+  final double? latitude;
+  final double? longitude;
+  final String? googleMapsUri;
+
+  String get displayAddress => (formattedAddress?.trim().isNotEmpty ?? false)
+      ? formattedAddress!.trim()
+      : (name?.trim().isNotEmpty ?? false)
+      ? name!.trim()
+      : '';
+
+  factory HermesPlaceDetails.fromJson(Map<String, Object?> json) =>
+      HermesPlaceDetails(
+        placeId: _expectString(json['place_id'] ?? json['placeId']),
+        name: json['name']?.toString(),
+        formattedAddress:
+            (json['formatted_address'] ?? json['formattedAddress'])?.toString(),
+        latitude: _readDoubleOrNull(json['latitude']),
+        longitude: _readDoubleOrNull(json['longitude']),
+        googleMapsUri: (json['google_maps_uri'] ?? json['googleMapsUri'])
+            ?.toString(),
+      );
+}
+
 class HermesUser {
   const HermesUser({
     required this.id,
@@ -1781,6 +1881,7 @@ class HermesUser {
     this.theme = 'green',
     this.themeMode = 'auto',
     this.commandCenterLabel = 'Command Center',
+    this.preferredMapApp = 'google',
     this.homeCity,
     this.onboardComplete = false,
     this.agentProfile,
@@ -1806,6 +1907,7 @@ class HermesUser {
   final String theme;
   final String themeMode;
   final String commandCenterLabel;
+  final String preferredMapApp;
   final String? homeCity;
   final bool onboardComplete;
   final HermesAgentProfile? agentProfile;
@@ -1833,6 +1935,7 @@ class HermesUser {
     String? theme,
     String? themeMode,
     String? commandCenterLabel,
+    String? preferredMapApp,
     String? homeCity,
     bool? onboardComplete,
     HermesAgentProfile? agentProfile,
@@ -1858,6 +1961,7 @@ class HermesUser {
     theme: theme ?? this.theme,
     themeMode: themeMode ?? this.themeMode,
     commandCenterLabel: commandCenterLabel ?? this.commandCenterLabel,
+    preferredMapApp: preferredMapApp ?? this.preferredMapApp,
     homeCity: homeCity ?? this.homeCity,
     onboardComplete: onboardComplete ?? this.onboardComplete,
     agentProfile: agentProfile ?? this.agentProfile,
@@ -1897,6 +2001,10 @@ class HermesUser {
     commandCenterLabel: _readStringOrDefault(
       json['command_center_label'] ?? json['commandCenterLabel'],
       'Command Center',
+    ),
+    preferredMapApp: _readStringOrDefault(
+      json['preferred_map_app'] ?? json['preferredMapApp'],
+      'google',
     ),
     homeCity: (json['home_city'] ?? json['homeCity'])?.toString(),
     onboardComplete: json['onboard_complete'] == true,
@@ -3109,6 +3217,7 @@ class HermesAssistantRun {
     required this.source,
     this.assistantMessageId,
     this.assistantMessage,
+    this.error,
   });
 
   final int id;
@@ -3116,6 +3225,7 @@ class HermesAssistantRun {
   final String source;
   final int? assistantMessageId;
   final HermesMessage? assistantMessage;
+  final String? error;
 
   factory HermesAssistantRun.fromJson(Map<String, Object?> json) =>
       HermesAssistantRun(
@@ -3126,6 +3236,7 @@ class HermesAssistantRun {
         assistantMessage: json['assistant_message'] == null
             ? null
             : HermesMessage.fromJson(_expectMap(json['assistant_message'])),
+        error: json['error']?.toString(),
       );
 }
 
@@ -3337,6 +3448,13 @@ int? _readIntOrNull(Object? value) {
   if (value is num) return value.toInt();
   if (value is String) return int.tryParse(value);
   throw FormatException('Expected integer, got ${value.runtimeType}');
+}
+
+double? _readDoubleOrNull(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value);
+  throw FormatException('Expected number, got ${value.runtimeType}');
 }
 
 String _expectString(Object? value) {

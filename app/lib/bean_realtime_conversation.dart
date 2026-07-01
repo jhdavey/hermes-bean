@@ -1059,7 +1059,13 @@ class BeanRealtimeConversation {
       }
       if (run.status == 'failed') {
         _setBackgroundWorkActive(false);
-        _deliverBackgroundResult('I could not finish that request.', runId);
+        final failure = run.error?.trim();
+        _deliverBackgroundResult(
+          failure == null || failure.isEmpty
+              ? 'I could not finish that request.'
+              : 'I could not finish that request. $failure',
+          runId,
+        );
         return;
       }
       if (run.status == 'cancelled') {

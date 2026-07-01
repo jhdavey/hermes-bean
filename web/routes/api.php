@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\IssueReportController;
 use App\Http\Controllers\Api\OutlookCalendarController;
+use App\Http\Controllers\Api\PlaceController;
 use App\Http\Controllers\Api\PushNotificationDeviceTokenController;
 use App\Http\Controllers\Api\QuickVoiceReplyController;
 use App\Http\Controllers\Api\RealtimeSessionController;
@@ -88,6 +89,9 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/assistant/tts', [TextToSpeechController::class, 'store']);
 
         Route::get('/today', [TodaySummaryController::class, 'show']);
+        Route::get('/places/autocomplete', [PlaceController::class, 'autocomplete']);
+        Route::get('/places/details', [PlaceController::class, 'details']);
+        Route::get('/places/static-map', [PlaceController::class, 'staticMap']);
         Route::get('/dashboard-changes', [DashboardChangeController::class, 'index']);
         Route::post('/issue-reports', [IssueReportController::class, 'store']);
         Route::post('/push-notification-tokens', [PushNotificationDeviceTokenController::class, 'store']);

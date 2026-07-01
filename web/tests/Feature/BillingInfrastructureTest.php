@@ -150,7 +150,7 @@ class BillingInfrastructureTest extends TestCase
                 $data = $request->data();
                 $this->assertSame('cus_mobile_123', $data['customer']);
                 $this->assertSame('off_session', $data['usage']);
-                $this->assertTrue($data['automatic_payment_methods']['enabled']);
+                $this->assertSame('true', $data['automatic_payment_methods']['enabled']);
                 $this->assertSame('always', $data['automatic_payment_methods']['allow_redirects']);
                 $this->assertSame('subscription', $data['metadata']['purpose']);
                 $this->assertSame('premium', $data['metadata']['plan']);

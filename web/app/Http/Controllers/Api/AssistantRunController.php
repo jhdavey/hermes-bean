@@ -70,7 +70,11 @@ class AssistantRunController extends Controller
             ->with(['session', 'userMessage', 'assistantMessage'])
             ->findOrFail($run);
 
-        return response()->json(['data' => $ownedRun]);
+        return response()->json([
+            'data' => $this->runs
+                ->reconcileStaleRun($ownedRun)
+                ->load(['session', 'userMessage', 'assistantMessage']),
+        ]);
     }
 
     public function cancel(Request $request, string $run): JsonResponse

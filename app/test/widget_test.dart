@@ -704,17 +704,57 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Balanced helper'), findsOneWidget);
+    expect(
+      find.text(
+        'A calm, practical default that keeps replies concise and useful.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'An encouraging style that gives gentle nudges and helps you keep momentum.',
+      ),
+      findsOneWidget,
+    );
 
-    await tester.tap(find.byKey(const Key('guided-personality-balanced')));
+    await tester.ensureVisible(
+      find.byKey(const Key('guided-personality-balanced')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Balanced helper'));
+    await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('guided-location-skip')));
     await tester.pumpAndSettle();
     expect(api.updatedAgentPersonality, 'balanced');
     expect(api.updatedContext, contains('guided Bean signup onboarding'));
 
-    await tester.ensureVisible(find.byKey(const Key('guided-tour-skip')));
+    await tester.ensureVisible(find.byKey(const Key('guided-tour-start')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('guided-tour-skip')));
+    await tester.tap(find.byKey(const Key('guided-tour-start')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('guided-tour-next')), findsOneWidget);
+    expect(find.byKey(const Key('guided-tour-panel-skip')), findsNothing);
+    expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
+    expect(find.text('Command center'), findsOneWidget);
+    final tourNext = tester.widget<FilledButton>(
+      find.byKey(const Key('guided-tour-next')),
+    );
+    expect(tourNext.onPressed, isNotNull);
+
+    await tester.tap(find.byKey(const Key('guided-tour-next')));
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.text('Calendar views'), findsOneWidget);
+
+    for (var i = 0; i < 4; i++) {
+      await tester.ensureVisible(find.byKey(const Key('guided-tour-next')));
+      await tester.tap(find.byKey(const Key('guided-tour-next')));
+      await tester.pumpAndSettle();
+    }
+    await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('signup-plan-base')), findsOneWidget);
@@ -1866,6 +1906,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Edit reminder'), findsOneWidget);
   });
+
+  testWidgets(
+    'Command Center pins overdue tasks and reminders above upcoming items',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: _CommandCenterOverdueAgendaFakeHermesApiClient(),
+          tokenStore: _MemoryAuthTokenStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final task = find.byKey(const Key('command-center-agenda-task-511'));
+      final reminder = find.byKey(
+        const Key('command-center-agenda-reminder-512'),
+      );
+      final event = find.byKey(const Key('command-center-agenda-event-513'));
+
+      expect(task, findsOneWidget);
+      expect(reminder, findsOneWidget);
+      expect(event, findsOneWidget);
+      expect(find.text('overdue'), findsNWidgets(2));
+      expect(
+        tester.getTopLeft(reminder).dy,
+        lessThan(tester.getTopLeft(task).dy),
+      );
+      expect(tester.getTopLeft(task).dy, lessThan(tester.getTopLeft(event).dy));
+      await tester.pump(const Duration(milliseconds: 200));
+    },
+  );
 
   testWidgets(
     'Command Center keeps remaining agenda items during partial silent refresh after event delete',
@@ -7470,6 +7540,67 @@ class _CommandCenterAgendaFakeHermesApiClient
   }
 }
 
+class _CommandCenterOverdueAgendaFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  DateTime _relativeTime(int minuteOffset) {
+    final now = DateTime.now();
+    return DateTime(
+      now.year,
+      now.month,
+      now.day,
+      now.hour,
+      now.minute,
+    ).add(Duration(minutes: minuteOffset));
+  }
+
+  DateTime _todayFutureTime(int offsetMinutes) {
+    final now = DateTime.now();
+    final latestToday = DateTime(now.year, now.month, now.day, 23, 59);
+    final minutesLeft = math.max(1, latestToday.difference(now).inMinutes);
+    final clampedOffset = math.min(offsetMinutes, minutesLeft);
+    return now.add(Duration(minutes: clampedOffset));
+  }
+
+  @override
+  Future<List<HermesTask>> listTasks() async {
+    return [
+      HermesTask(
+        id: 511,
+        title: 'Overdue check-in',
+        status: 'open',
+        dueAt: _relativeTime(-30).toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<List<HermesReminder>> listReminders() async {
+    return [
+      HermesReminder(
+        id: 512,
+        title: 'Overdue nudge',
+        status: 'pending',
+        dueAt: _relativeTime(-60).toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
+    final start = _todayFutureTime(60);
+    return [
+      HermesCalendarEvent(
+        id: 513,
+        title: 'Upcoming sync',
+        startsAt: start.toIso8601String(),
+        endsAt: start.add(const Duration(minutes: 30)).toIso8601String(),
+      ),
+    ];
+  }
+}
+
 class _CommandCenterDeleteRefreshEmptyFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   int? deletedEventId;
@@ -8253,6 +8384,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   String updatedTheme = 'green';
   String updatedThemeMode = 'auto';
   String updatedCommandCenterLabel = 'Command Center';
+  String updatedPreferredMapApp = 'google';
   String subscriptionTier = 'base';
   String? currentSubscriptionStatus = 'active';
   String subscriptionCurrentPeriodEnd = '2026-06-25T00:00:00+00:00';
@@ -8342,6 +8474,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       theme: updatedTheme,
       themeMode: updatedThemeMode,
       commandCenterLabel: updatedCommandCenterLabel,
+      preferredMapApp: updatedPreferredMapApp,
       onboardComplete: !needsBeanOnboarding,
       agentProfile: profile,
       activeWorkspaceAgentProfile: profile,
@@ -8525,6 +8658,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? theme,
     String? themeMode,
     String? commandCenterLabel,
+    String? preferredMapApp,
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
@@ -8536,6 +8670,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     updatedTheme = theme ?? updatedTheme;
     updatedThemeMode = themeMode ?? updatedThemeMode;
     updatedCommandCenterLabel = commandCenterLabel ?? updatedCommandCenterLabel;
+    updatedPreferredMapApp = preferredMapApp ?? updatedPreferredMapApp;
     updatedAgentPersonality = agentPersonality ?? updatedAgentPersonality;
     updatedPriorities = onboardingPriorities ?? updatedPriorities;
     updatedContext = onboardingContext ?? updatedContext;
