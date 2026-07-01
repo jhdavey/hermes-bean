@@ -17,7 +17,9 @@ class ProcessAssistantRun implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 180;
+    public int $timeout = 60;
+
+    public bool $failOnTimeout = true;
 
     public function __construct(public readonly int $assistantRunId) {}
 
@@ -78,24 +80,18 @@ class ProcessAssistantRun implements ShouldQueue
                 'run_duration_ms' => $this->elapsedMilliseconds($run->started_at),
             ], 'hermes.runs', $run->status === 'completed' ? 'succeeded' : 'cancelled');
         } catch (\Throwable $exception) {
-            Log::error('Assistant run failed.', [
-                'run_id' => $run->id,
-                'session_id' => $run->conversation_session_id,
-                'exception' => $exception->getMessage(),
-            ]);
-
-            $run->update([
-                'status' => 'failed',
-                'error' => $exception->getMessage(),
-                'completed_at' => now(),
-            ]);
-            $run->session->update(['status' => 'active', 'last_activity_at' => now()]);
-
-            $this->recordEvent($run, 'runtime.run_failed', [
-                'run_id' => $run->id,
-                'reason' => $exception->getMessage(),
-            ], 'hermes.runs', 'failed');
+            $this->markFailed($run, $exception->getMessage());
         }
+    }
+
+    public function failed(\Throwable $exception): void
+    {
+        $run = AssistantRun::with('session')->find($this->assistantRunId);
+        if (! $run) {
+            return;
+        }
+
+        $this->markFailed($run, $exception->getMessage());
     }
 
     private function markCancelled(AssistantRun $run): void
@@ -107,6 +103,32 @@ class ProcessAssistantRun implements ShouldQueue
         ]);
         $run->session?->update(['status' => 'active', 'last_activity_at' => now()]);
         $this->recordEvent($run, 'runtime.run_cancelled', ['run_id' => $run->id], 'hermes.runs', 'cancelled');
+    }
+
+    private function markFailed(AssistantRun $run, string $reason): void
+    {
+        $run->refresh();
+        if (in_array($run->status, ['completed', 'failed', 'cancelled'], true)) {
+            return;
+        }
+
+        Log::error('Assistant run failed.', [
+            'run_id' => $run->id,
+            'session_id' => $run->conversation_session_id,
+            'exception' => $reason,
+        ]);
+
+        $run->update([
+            'status' => 'failed',
+            'error' => $reason,
+            'completed_at' => now(),
+        ]);
+        $run->session?->update(['status' => 'active', 'last_activity_at' => now()]);
+
+        $this->recordEvent($run, 'runtime.run_failed', [
+            'run_id' => $run->id,
+            'reason' => $reason,
+        ], 'hermes.runs', 'failed');
     }
 
     private function recordEvent(AssistantRun $run, string $eventType, array $payload = [], ?string $toolName = null, string $status = 'recorded'): ActivityEvent

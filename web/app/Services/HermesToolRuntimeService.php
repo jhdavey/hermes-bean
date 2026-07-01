@@ -511,6 +511,8 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $toolExecutionDurationsMs = [];
         $createdCalendarEventsByKey = [];
         $lastCreatedCalendarEventId = null;
+        $successfulActions = [];
+        $failedWorkLabels = [];
 
         foreach ($actions as $index => $action) {
             if ($this->isCancellationRequested($session)) {
@@ -526,6 +528,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
             $executedActions = array_merge($executedActions, $executed);
             $toolOutputs[] = $toolOutput;
 
+            if (($toolOutput['ok'] ?? false) === true) {
+                $successfulActions = array_merge($successfulActions, $executed);
+            } else {
+                $failedWorkLabels[] = (string) ($workItem['label'] ?? $this->workItemLabelForAction((string) ($action['type'] ?? ''), is_array($action['parameters'] ?? null) ? $action['parameters'] : []));
+            }
+
             if (($toolOutput['ok'] ?? false) === true && in_array((string) ($action['type'] ?? ''), ['calendar_event.create', 'calendar.create'], true)) {
                 $createdId = $this->createdCalendarEventIdFromEvents($events);
                 if ($createdId !== null) {
@@ -538,11 +546,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
             }
         }
 
-        if (! $this->toolOutputsAllSuccessfulWrites($toolOutputs)) {
-            return null;
-        }
-
-        $assistantContent = $this->nativeActionFallbackContent($executedActions);
+        $allWritesSucceeded = $this->toolOutputsAllSuccessfulWrites($toolOutputs);
+        $assistantContent = $allWritesSucceeded
+            ? $this->nativeActionFallbackContent($executedActions)
+            : $this->partialCrudPlannerContent($successfulActions, $failedWorkLabels, count($actions));
         $prompt = json_encode($promptPayload, JSON_THROW_ON_ERROR);
         $responses = [$response];
         $finalResponse = $response;
@@ -550,7 +557,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $toolMode = 'app_crud';
         $plannerUsed = true;
 
-        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $plannerRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $executedActions, $plannerUsed, $plannerSource): array {
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $plannerRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $executedActions, $plannerUsed, $plannerSource, $allWritesSucceeded): array {
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
                 'response_count' => count($responses),
@@ -568,7 +575,8 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'tool_execution_durations_ms' => $toolExecutionDurationsMs,
                 'final_response_ms' => $finalResponseDurationMs,
                 'action_count' => count($executedActions),
-            ], 'hermes.tools', 'succeeded');
+                'all_writes_succeeded' => $allWritesSucceeded,
+            ], 'hermes.tools', $allWritesSucceeded ? 'succeeded' : 'partial');
 
             $assistantMessage = ConversationMessage::create([
                 'user_id' => $session->user_id,
@@ -1483,13 +1491,43 @@ PROMPT;
 
     private function executePlannerAction(ConversationSession $session, array $action, ?array $workItem): array
     {
-        $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
-        if ($workItem !== null) {
-            $events = $events
-                ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
-                ->values();
+        $this->recordEvent($session, 'runtime.planner_action_started', $this->payloadWithWorkItem([
+            'action_type' => (string) ($action['type'] ?? ''),
+        ], $workItem), 'hermes.planner', 'started');
+
+        try {
+            $events = $this->executeActionEnvelopeAtomically($session, $action, $workItem);
+        } catch (\Throwable $exception) {
+            $event = $this->recordEvent($session, 'runtime.planner_action_failed', $this->payloadWithWorkItem([
+                'action_type' => (string) ($action['type'] ?? ''),
+                'reason' => $exception->getMessage(),
+            ], $workItem), 'hermes.planner', 'failed');
+
+            Log::error('Planner action failed.', [
+                'session_id' => $session->id,
+                'action_type' => (string) ($action['type'] ?? ''),
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return [[$action], collect([$event]), [
+                'ok' => false,
+                'action_type' => (string) ($action['type'] ?? ''),
+                'message' => $exception->getMessage(),
+                'events' => [[
+                    'event_type' => $event->event_type,
+                    'tool_name' => $event->tool_name,
+                    'status' => $event->status,
+                    'payload' => $event->payload,
+                ]],
+            ]];
         }
+
         $failed = $events->contains(fn (ActivityEvent $event): bool => $event->status === 'failed');
+
+        $this->recordEvent($session, 'runtime.planner_action_completed', $this->payloadWithWorkItem([
+            'action_type' => (string) ($action['type'] ?? ''),
+            'event_count' => $events->count(),
+        ], $workItem), 'hermes.planner', $failed ? 'failed' : 'succeeded');
 
         return [[$action], $events, [
             'ok' => ! $failed,
@@ -1501,6 +1539,21 @@ PROMPT;
                 'payload' => $event->payload,
             ])->values()->all(),
         ]];
+    }
+
+    private function executeActionEnvelopeAtomically(ConversationSession $session, array $action, ?array $workItem): Collection
+    {
+        return DB::transaction(function () use ($session, $action, $workItem): Collection {
+            $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
+
+            if ($workItem !== null) {
+                $events = $events
+                    ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
+                    ->values();
+            }
+
+            return $events;
+        });
     }
 
     private function createdCalendarEventIdFromEvents(Collection $events): ?int
@@ -1739,11 +1792,33 @@ PROMPT;
             }
         }
 
-        $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
-        if ($workItem !== null) {
-            $events = $events
-                ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
-                ->values();
+        try {
+            $events = $this->executeActionEnvelopeAtomically($session, $action, $workItem);
+        } catch (\Throwable $exception) {
+            $event = $this->recordEvent($session, 'assistant.action.failed', $this->payloadWithWorkItem([
+                'action_type' => $actionType,
+                'tool_name' => $name,
+                'reason' => $exception->getMessage(),
+            ], $workItem), $name, 'failed');
+
+            Log::error('Native tool action failed.', [
+                'session_id' => $session->id,
+                'tool_name' => $name,
+                'action_type' => $actionType,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return [[$action], collect([$event]), [
+                'ok' => false,
+                'action_type' => $actionType,
+                'message' => $exception->getMessage(),
+                'events' => [[
+                    'event_type' => $event->event_type,
+                    'tool_name' => $event->tool_name,
+                    'status' => $event->status,
+                    'payload' => $event->payload,
+                ]],
+            ]];
         }
         $failed = $events->contains(fn (ActivityEvent $event): bool => $event->status === 'failed');
 
@@ -3271,7 +3346,8 @@ PROMPT;
 
     private function expectedWriteActionCount(ConversationMessage $message): int
     {
-        $text = str((string) $message->content)
+        $rawText = str((string) $message->content)->lower()->squish()->toString();
+        $text = str($rawText)
             ->lower()
             ->replaceMatches('/[^\pL\pN\s:.-]+/u', ' ')
             ->squish()
@@ -3298,6 +3374,11 @@ PROMPT;
             $count = 1;
         }
 
+        $datedItemCount = preg_match_all('/\b(?:\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?|\d{4}-\d{2}-\d{2})\b/', $rawText);
+        if ($datedItemCount > 1 && preg_match('/\b(calendar|schedule|event|events|appointment|meeting|block)\b/', $text)) {
+            $count = max($count, $datedItemCount);
+        }
+
         return max(1, min($count, 6));
     }
 
@@ -3319,6 +3400,30 @@ PROMPT;
         }
 
         return 'Done - '.$this->joinSummaryPhrases($phrases->all()).'.';
+    }
+
+    private function partialCrudPlannerContent(array $successfulActions, array $failedWorkLabels, int $totalActionCount): string
+    {
+        $completedCount = count($successfulActions);
+        $failedLabels = collect($failedWorkLabels)
+            ->map(fn (string $label): string => trim($label))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $completed = $completedCount > 0
+            ? 'I completed '.$completedCount.' of '.$totalActionCount.' requested change'.($totalActionCount === 1 ? '' : 's').'.'
+            : 'I could not complete the requested change'.($totalActionCount === 1 ? '' : 's').'.';
+
+        if ($completedCount > 0) {
+            $completed .= ' '.$this->nativeActionFallbackContent($successfulActions);
+        }
+
+        if ($failedLabels->isEmpty()) {
+            return $completed.' Some remaining changes could not be completed. Please try those again.';
+        }
+
+        return $completed.' I could not complete: '.$this->joinSummaryPhrases($failedLabels->all()).'. Please try those again.';
     }
 
     private function combinedDeleteFallbackContent(array $actions): ?string

@@ -79,6 +79,44 @@ class AssistantRunService
         return $run->refresh();
     }
 
+    public function reconcileStaleRun(AssistantRun $run): AssistantRun
+    {
+        $run->refresh();
+        if (! in_array($run->status, ['queued', 'running'], true)) {
+            return $run;
+        }
+
+        $startedAt = $run->started_at ?: $run->created_at;
+        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 75);
+        if ($startedAt === null || $startedAt->gt(now()->subSeconds($staleAfterSeconds))) {
+            return $run;
+        }
+
+        DB::transaction(function () use ($run, $staleAfterSeconds): void {
+            $run->refresh();
+            if (! in_array($run->status, ['queued', 'running'], true)) {
+                return;
+            }
+
+            $reason = "Assistant run did not complete within {$staleAfterSeconds} seconds.";
+            $run->update([
+                'status' => 'failed',
+                'error' => $reason,
+                'completed_at' => now(),
+            ]);
+            $run->session?->update([
+                'status' => 'active',
+                'last_activity_at' => now(),
+            ]);
+            $this->recordEvent($run, 'runtime.run_stale_failed', [
+                'run_id' => $run->id,
+                'reason' => $reason,
+            ], 'hermes.runs', 'failed');
+        });
+
+        return $run->refresh();
+    }
+
     private function recordEvent(AssistantRun $run, string $eventType, array $payload = [], ?string $toolName = null, string $status = 'recorded'): ActivityEvent
     {
         return ActivityEvent::create([

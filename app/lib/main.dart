@@ -78,6 +78,12 @@ const double _beanChatComposerReservedHeight = 66;
 const double _beanChatComposerMaxHeight = 134;
 const double _beanBottomMenuSurfaceInset = 22;
 
+class _HeyBeanRuntimeServices {
+  static HermesApiClient? apiClient;
+  static ExternalUrlLauncher launchExternalUrl = _defaultLaunchExternalUrl;
+  static String preferredMapApp = 'google';
+}
+
 Color _sectionDividerColor({double? alpha}) => HeyBeanTheme.accent.withValues(
   alpha: alpha ?? (HeyBeanTheme.isDark ? .30 : .24),
 );
@@ -387,6 +393,9 @@ bool _isAllowedExternalUrl(Uri url) {
       host == 'accounts.google.com' ||
       host == 'oauth2.googleapis.com' ||
       host == 'calendar.google.com' ||
+      host == 'maps.apple.com' ||
+      host == 'google.com' ||
+      host == 'www.google.com' ||
       host == 'www.googleapis.com';
 }
 
@@ -5170,6 +5179,17 @@ ${_truncateDiagnostic(stack, 2200)}
             if (message != null &&
                 !_messages.any((candidate) => candidate.id == message.id)) {
               _messages.add(_displayableAssistantMessage(message));
+            } else if (run.status == 'failed') {
+              final failure = run.error?.trim();
+              _messages.add(
+                HermesMessage(
+                  id: _messages.length + 1,
+                  role: 'assistant',
+                  content: failure == null || failure.isEmpty
+                      ? 'I could not finish that request. No changes should be assumed complete unless they already appeared on your dashboard.'
+                      : 'I could not finish that request. $failure',
+                ),
+              );
             }
           });
           _refreshDashboardAfterBeanMutationEvents(finalEvents);
@@ -7775,6 +7795,47 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
+  Future<void> _updatePreferredMapApp(String preferredMapApp) async {
+    if (_busy) return;
+    final normalized = preferredMapApp == 'apple' ? 'apple' : 'google';
+    final previousUser = _user;
+    setState(() {
+      _busy = true;
+      _error = null;
+      if (previousUser != null) {
+        _user = previousUser.copyWith(preferredMapApp: normalized);
+        _HeyBeanRuntimeServices.preferredMapApp = normalized;
+      }
+    });
+    try {
+      final updatedUser = await widget.apiClient.updateMe(
+        preferredMapApp: normalized,
+      );
+      if (!mounted) return;
+      _applyUserTheme(updatedUser);
+      _HeyBeanRuntimeServices.preferredMapApp = updatedUser.preferredMapApp;
+      setState(() {
+        _user = updatedUser;
+        _busy = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _user = previousUser;
+        if (previousUser != null) {
+          _HeyBeanRuntimeServices.preferredMapApp =
+              previousUser.preferredMapApp;
+        }
+        _busy = false;
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'update your map preference',
+        );
+      });
+    }
+  }
+
   Future<void> _logout() async {
     if (_busy) return;
     final authGeneration = ++_authGeneration;
@@ -8209,6 +8270,9 @@ ${_truncateDiagnostic(stack, 2200)}
       );
     }
     final user = _user!;
+    _HeyBeanRuntimeServices.apiClient = widget.apiClient;
+    _HeyBeanRuntimeServices.launchExternalUrl = widget.launchExternalUrl;
+    _HeyBeanRuntimeServices.preferredMapApp = user.preferredMapApp;
     _scheduleApprovalSheet();
     final showAgentOnboarding = _showAgentOnboardingOverlay;
     final editingAgentPreferences = _editingAgentPreferences;
@@ -8376,6 +8440,7 @@ ${_truncateDiagnostic(stack, 2200)}
     onThemeChanged: _updateTheme,
     onThemeModeChanged: _updateThemeMode,
     onCommandCenterLabelChanged: _updateCommandCenterLabel,
+    onPreferredMapAppChanged: _updatePreferredMapApp,
     launchExternalUrl: widget.launchExternalUrl,
     stripePaymentHandler: widget.stripePaymentHandler,
     onBillingChanged: () =>
@@ -9177,7 +9242,8 @@ const List<_AgentPersonalityOption> _agentPersonalityOptions = [
   _AgentPersonalityOption(
     key: 'balanced',
     label: 'Balanced',
-    description: 'Calm, practical, and concise.',
+    description:
+        'A calm, practical default that keeps replies concise and useful.',
     infoTitle: 'A steady everyday helper',
     infoDetails: [
       'Keeps answers simple and low-drama.',
@@ -9189,7 +9255,8 @@ const List<_AgentPersonalityOption> _agentPersonalityOptions = [
   _AgentPersonalityOption(
     key: 'coach',
     label: 'Coach',
-    description: 'Encouraging with gentle accountability.',
+    description:
+        'An encouraging style that gives gentle nudges and helps you keep momentum.',
     infoTitle: 'A motivating helper for momentum',
     infoDetails: [
       'Celebrates small wins and helps you move forward.',
@@ -9201,7 +9268,8 @@ const List<_AgentPersonalityOption> _agentPersonalityOptions = [
   _AgentPersonalityOption(
     key: 'organizer',
     label: 'Organizer',
-    description: 'Structured, precise, schedule-first.',
+    description:
+        'A structured planner that pays close attention to dates, times, and follow-up.',
     infoTitle: 'A detail-focused planner',
     infoDetails: [
       'Keeps summaries tidy and schedule-aware.',
@@ -9213,7 +9281,8 @@ const List<_AgentPersonalityOption> _agentPersonalityOptions = [
   _AgentPersonalityOption(
     key: 'creative',
     label: 'Creative',
-    description: 'Idea-forward while staying useful.',
+    description:
+        'A brainstorming partner that turns ideas into practical lists, notes, and plans.',
     infoTitle: 'A warm brainstorming partner',
     infoDetails: [
       'Helps with ideas, names, themes, checklists, and plans.',
@@ -9225,7 +9294,8 @@ const List<_AgentPersonalityOption> _agentPersonalityOptions = [
   _AgentPersonalityOption(
     key: 'direct',
     label: 'Direct',
-    description: 'Crisp, decisive, and action-first.',
+    description:
+        'A brief, action-first style that leads with the answer or completed work.',
     infoTitle: 'A concise operator',
     infoDetails: [
       'Leads with the answer or completed action.',
@@ -9237,7 +9307,8 @@ const List<_AgentPersonalityOption> _agentPersonalityOptions = [
   _AgentPersonalityOption(
     key: 'gentle',
     label: 'Gentle',
-    description: 'Patient, reassuring, and low-pressure.',
+    description:
+        'A patient, low-pressure style that keeps busy days feeling manageable.',
     infoTitle: 'A calm companion',
     infoDetails: [
       'Keeps the tone soft and settled.',
@@ -9744,6 +9815,8 @@ class _GuidedBeanOnboardingScreenState
   final _inputFocus = FocusNode();
   final _scrollController = ScrollController();
   final _planIntroKey = GlobalKey();
+  final _personalityIntroKey = GlobalKey();
+  final _locationIntroKey = GlobalKey();
   final stt.SpeechToText _speech = stt.SpeechToText();
   final List<_GuidedOnboardingMessage> _messages = [
     const _GuidedOnboardingMessage(
@@ -9769,10 +9842,7 @@ class _GuidedBeanOnboardingScreenState
   int _responseVariationIndex = 0;
 
   bool get _inputLocked =>
-      _busy ||
-      _beanThinking ||
-      _step == _GuidedOnboardingStep.plan ||
-      _step == _GuidedOnboardingStep.tour;
+      _busy || _beanThinking || _step == _GuidedOnboardingStep.plan;
 
   bool get _textOnlyStep =>
       _step == _GuidedOnboardingStep.name ||
@@ -9797,8 +9867,13 @@ class _GuidedBeanOnboardingScreenState
     scrollBehavior: scrollBehavior,
   );
 
-  void _addUser(String text, {bool masked = false}) => _addMessage(
+  void _addUser(
+    String text, {
+    bool masked = false,
+    _GuidedScrollBehavior scrollBehavior = _GuidedScrollBehavior.bottom,
+  }) => _addMessage(
     _GuidedOnboardingMessage(bean: false, text: text, masked: masked),
+    scrollBehavior: scrollBehavior,
   );
 
   Future<void> _respondBean(
@@ -9844,6 +9919,23 @@ class _GuidedBeanOnboardingScreenState
         _scrollController.position.maxScrollExtent,
         duration: duration,
         curve: Curves.easeOut,
+      );
+    });
+  }
+
+  void _scrollGuidedWidgetIntoView(
+    GlobalKey key, {
+    Duration duration = const Duration(milliseconds: 260),
+    double alignment = 0.08,
+  }) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = key.currentContext;
+      if (context == null || !_scrollController.hasClients) return;
+      Scrollable.ensureVisible(
+        context,
+        duration: duration,
+        curve: Curves.easeOutCubic,
+        alignment: alignment,
       );
     });
   }
@@ -10012,8 +10104,11 @@ class _GuidedBeanOnboardingScreenState
           'All set — your account is created. If email verification is needed, you can do that later without losing this setup. What personality type should I use?',
           'Done, your account is ready. You can handle email verification later if needed. Next, choose the personality style you want from me.',
         ]),
+        scrollBehavior: _GuidedScrollBehavior.none,
+        widgetKey: _personalityIntroKey,
       );
       setState(() => _step = _GuidedOnboardingStep.personality);
+      _scrollGuidedWidgetIntoView(_personalityIntroKey);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -10040,22 +10135,21 @@ class _GuidedBeanOnboardingScreenState
       orElse: () => _agentPersonalityOptions.first,
     );
     _personality = option.key;
-    _addUser(_guidedPersonalityLabel(option));
-    await _respondBean(
-      _nextResponseVariation([
-        'Perfect. You can also select different voices in the settings menu later!',
-        'Good choice. You can change my personality or voice later in Settings.',
-        'That works. I will use that style, and you can always adjust it later.',
-      ]),
+    _addUser(
+      _guidedPersonalityLabel(option),
+      scrollBehavior: _GuidedScrollBehavior.none,
     );
     await _respondBean(
       _nextResponseVariation([
-        'Next, can I access your location so I can see what city we are in? This will help with weather related questions, and for planning.',
-        'One more helpful setup step: may I check your city? It helps me answer weather questions and plan around local context.',
-        'Would you like to share your location now? I only need city-level context for weather and planning help.',
+        'Perfect. You can also select different voices in the settings menu later. Next, can I access your location so I can see what city we are in? This helps with weather related questions and planning.',
+        'Good choice. You can change my personality or voice later in Settings. One more helpful setup step: may I check your city? It helps me answer weather questions and plan around local context.',
+        'That works. I will use that style, and you can always adjust it later. Would you like to share your location now? I only need city-level context for weather and planning help.',
       ]),
+      scrollBehavior: _GuidedScrollBehavior.none,
+      widgetKey: _locationIntroKey,
     );
     setState(() => _step = _GuidedOnboardingStep.location);
+    _scrollGuidedWidgetIntoView(_locationIntroKey);
   }
 
   Future<void> _allowLocation() async {
@@ -10167,17 +10261,13 @@ class _GuidedBeanOnboardingScreenState
   }
 
   Future<void> _startTour() async {
-    await _respondBean(
-      _nextResponseVariation([
-        _guidedTourSteps.first.beanScript,
-        'Great, I will walk you through the basics quickly. First up: your command center.',
-        'Sure. Let me show you the main parts, starting with the command center.',
-      ]),
-    );
     setState(() {
       _step = _GuidedOnboardingStep.tour;
       _tourIndex = 0;
     });
+    _scrollGuidedConversationToBottom(
+      duration: const Duration(milliseconds: 220),
+    );
   }
 
   Future<void> _nextTour() async {
@@ -10185,15 +10275,7 @@ class _GuidedBeanOnboardingScreenState
       await _goToPlan();
       return;
     }
-    final nextIndex = _tourIndex + 1;
-    await _respondBean(
-      _nextResponseVariation([
-        _guidedTourSteps[nextIndex].beanScript,
-        'Next, ${_guidedTourSteps[nextIndex].title.toLowerCase()} works like this.',
-        'Here is the next part: ${_guidedTourSteps[nextIndex].title.toLowerCase()}.',
-      ]),
-    );
-    setState(() => _tourIndex = nextIndex);
+    setState(() => _tourIndex += 1);
   }
 
   Future<void> _goToPlan({bool skipTour = false}) async {
@@ -10406,11 +10488,12 @@ class _GuidedBeanOnboardingScreenState
 
   @override
   Widget build(BuildContext context) {
-    const guidedBeanBottom = 44.0;
+    const guidedBeanBottom = 10.0;
     const guidedBeanSize = 98.0;
     const guidedInputBottom = guidedBeanBottom + guidedBeanSize;
     const guidedInstructionBottom = guidedInputBottom + 14;
-    const guidedConversationBottomPadding = guidedInputBottom + 150;
+    const guidedComposerShieldHeight = guidedInputBottom + 122;
+    const guidedConversationBottomPadding = guidedComposerShieldHeight + 24;
     final showInstruction =
         _messages.length == 1 &&
         _step == _GuidedOnboardingStep.name &&
@@ -10489,7 +10572,6 @@ class _GuidedBeanOnboardingScreenState
                           total: _guidedTourSteps.length,
                           enabled: !_inputLocked,
                           onNext: () => unawaited(_nextTour()),
-                          onSkip: () => unawaited(_goToPlan()),
                         ),
                       if (_step == _GuidedOnboardingStep.plan)
                         _GuidedPlanPicker(
@@ -10511,6 +10593,29 @@ class _GuidedBeanOnboardingScreenState
               ],
             ),
           ),
+          if (showAnchoredComposer)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: guidedComposerShieldHeight,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        HeyBeanTheme.bg0.withValues(alpha: 0),
+                        HeyBeanTheme.bg0.withValues(alpha: .94),
+                        HeyBeanTheme.bg0,
+                      ],
+                      stops: const [0, .32, .68],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (showInstruction)
             Positioned(
               left: 34,
@@ -10860,20 +10965,112 @@ class _GuidedPersonalityPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _GuidedInlinePanel(
-    child: Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: _agentPersonalityOptions.map((option) {
-        return ChoiceChip(
-          key: Key('guided-personality-${option.key}'),
-          selected: selected == option.key,
-          label: Text(_guidedPersonalityLabel(option)),
-          avatar: Icon(option.icon, size: 18),
-          onSelected: enabled ? (_) => onSelected(option.key) : null,
-        );
-      }).toList(),
+    child: Column(
+      children: [
+        for (var index = 0; index < _agentPersonalityOptions.length; index++)
+          Padding(
+            padding: EdgeInsets.only(
+              bottom: index == _agentPersonalityOptions.length - 1 ? 0 : 10,
+            ),
+            child: _GuidedPersonalityOptionTile(
+              option: _agentPersonalityOptions[index],
+              selected: selected == _agentPersonalityOptions[index].key,
+              enabled: enabled,
+              onSelected: onSelected,
+            ),
+          ),
+      ],
     ),
   );
+}
+
+class _GuidedPersonalityOptionTile extends StatelessWidget {
+  const _GuidedPersonalityOptionTile({
+    required this.option,
+    required this.selected,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final _AgentPersonalityOption option;
+  final bool selected;
+  final bool enabled;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = selected
+        ? HeyBeanTheme.accentStrong
+        : HeyBeanTheme.border;
+    final iconColor = selected ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted;
+    final backgroundColor = selected
+        ? HeyBeanTheme.accent.withValues(alpha: .14)
+        : HeyBeanTheme.surface;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: Key('guided-personality-${option.key}'),
+        borderRadius: BorderRadius.circular(18),
+        onTap: enabled ? () => onSelected(option.key) : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: borderColor, width: selected ? 1.4 : 1),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(option.icon, color: iconColor, size: 23),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _guidedPersonalityLabel(option),
+                      style: TextStyle(
+                        color: HeyBeanTheme.text,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      option.description,
+                      style: TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontWeight: FontWeight.w600,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              AnimatedOpacity(
+                duration: const Duration(milliseconds: 140),
+                opacity: selected ? 1 : .45,
+                child: Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: selected
+                      ? HeyBeanTheme.accentStrong
+                      : HeyBeanTheme.muted,
+                  size: 21,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _GuidedThemeModePicker extends StatelessWidget {
@@ -11039,7 +11236,7 @@ const List<_GuidedTourStep> _guidedTourSteps = [
     title: 'Command center',
     subtitle: 'Talk to Bean and see today update.',
     beanScript:
-        'This is your command center. Ask Bean for what you need, and your events, tasks, and reminders stay visible as the day changes.',
+        "This is your command center. I'm always here to help, just tell me what you need, and above, you'll see today's events, tasks, and reminders.",
     icon: Icons.dashboard_customize_rounded,
     items: [
       '7:30 AM School drop-off',
@@ -11059,7 +11256,7 @@ const List<_GuidedTourStep> _guidedTourSteps = [
     title: 'Tasks',
     subtitle: 'Create work, then check it off.',
     beanScript:
-        'Tasks are for things you need to complete. Bean can create them from a sentence, and you can check them off when done.',
+        'Tasks are for things you need to complete. I can create them from a sentence, and you can check them off when done.',
     icon: Icons.task_alt_rounded,
     items: ['Review launch notes', 'Order air filters', 'Send invoice'],
   ),
@@ -11067,7 +11264,7 @@ const List<_GuidedTourStep> _guidedTourSteps = [
     title: 'Reminders',
     subtitle: 'Get nudged at the right time.',
     beanScript:
-        'Reminders are lightweight nudges. Use them for quick time-based follow-up without cluttering your task list.',
+        'Reminders are lightweight nudges. I can help you set quick time-based follow-up without cluttering your task list, and you can receive them as push reminders or email reminders.',
     icon: Icons.notifications_active_rounded,
     items: ['Take vitamins at 8 AM', 'Move laundry at 7 PM', 'Call Mom Sunday'],
   ),
@@ -11088,7 +11285,6 @@ class _GuidedTourPanel extends StatelessWidget {
     required this.total,
     required this.enabled,
     required this.onNext,
-    required this.onSkip,
   });
 
   final _GuidedTourStep step;
@@ -11096,73 +11292,251 @@ class _GuidedTourPanel extends StatelessWidget {
   final int total;
   final bool enabled;
   final VoidCallback onNext;
-  final VoidCallback onSkip;
 
   @override
   Widget build(BuildContext context) => _GuidedInlinePanel(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Icon(step.icon, color: HeyBeanTheme.accentStrong, size: 30),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        ClipRect(
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 340),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              layoutBuilder: (currentChild, previousChildren) => Stack(
+                alignment: Alignment.topCenter,
                 children: [
-                  Text(
-                    step.title,
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
-                  ),
-                  Text(
-                    step.subtitle,
-                    style: TextStyle(color: HeyBeanTheme.muted),
-                  ),
+                  ...previousChildren,
+                  if (currentChild != null) currentChild,
                 ],
               ),
-            ),
-            Text(
-              '${index + 1}/$total',
-              style: TextStyle(
-                color: HeyBeanTheme.muted,
-                fontWeight: FontWeight.w800,
+              transitionBuilder: (child, animation) {
+                final incoming = child.key == ValueKey<int>(index);
+                final offset = Tween<Offset>(
+                  begin: incoming ? const Offset(1, 0) : const Offset(-1, 0),
+                  end: Offset.zero,
+                ).animate(animation);
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(position: offset, child: child),
+                );
+              },
+              child: _GuidedTourStepCard(
+                key: ValueKey<int>(index),
+                step: step,
+                index: index,
+                total: total,
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: HeyBeanTheme.bg0,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: HeyBeanTheme.border),
-          ),
-          child: Column(
-            children: [
-              for (var i = 0; i < step.items.length; i++) ...[
-                _GuidedDemoRow(
-                  label: step.items[i],
-                  highlighted: i == index % step.items.length,
-                ),
-                if (i != step.items.length - 1) const SizedBox(height: 8),
-              ],
-            ],
           ),
         ),
         const SizedBox(height: 14),
         Row(
           children: [
-            TextButton(onPressed: enabled ? onSkip : null, child: Text('Skip')),
-            const Spacer(),
-            FilledButton(
+            Expanded(
+              child: Row(
+                children: [
+                  for (var i = 0; i < total; i++) ...[
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      width: i == index ? 24 : 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: i == index
+                            ? HeyBeanTheme.accentStrong
+                            : HeyBeanTheme.border,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    if (i != total - 1) const SizedBox(width: 6),
+                  ],
+                ],
+              ),
+            ),
+            FilledButton.icon(
               key: const Key('guided-tour-next'),
               onPressed: enabled ? onNext : null,
-              child: Text(index == total - 1 ? 'Plan setup' : 'Next'),
+              icon: Icon(
+                index == total - 1
+                    ? Icons.check_rounded
+                    : Icons.arrow_forward_rounded,
+              ),
+              label: Text(index == total - 1 ? 'Plan setup' : 'Next'),
             ),
           ],
         ),
+      ],
+    ),
+  );
+}
+
+class _GuidedTourStepCard extends StatelessWidget {
+  const _GuidedTourStepCard({
+    super.key,
+    required this.step,
+    required this.index,
+    required this.total,
+  });
+
+  final _GuidedTourStep step;
+  final int index;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _GuidedTourBeanResponse(text: step.beanScript),
+      const SizedBox(height: 16),
+      Row(
+        children: [
+          _GuidedTourAppIcon(step: step),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  step.title,
+                  style: TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 20,
+                    height: 1.05,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  step.subtitle,
+                  style: TextStyle(
+                    color: HeyBeanTheme.muted,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '${index + 1}/$total',
+            style: TextStyle(
+              color: HeyBeanTheme.muted,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 14),
+      _GuidedTourPreview(step: step, index: index),
+    ],
+  );
+}
+
+class _GuidedTourBeanResponse extends StatelessWidget {
+  const _GuidedTourBeanResponse({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.accent.withValues(alpha: .1),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .28)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Bean',
+          style: TextStyle(
+            color: HeyBeanTheme.accentStrong,
+            fontWeight: FontWeight.w900,
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          text,
+          style: TextStyle(
+            color: HeyBeanTheme.text,
+            fontWeight: FontWeight.w600,
+            height: 1.35,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _GuidedTourAppIcon extends StatelessWidget {
+  const _GuidedTourAppIcon({required this.step});
+
+  final _GuidedTourStep step;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 46,
+    height: 46,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: HeyBeanTheme.accent.withValues(alpha: .12),
+      border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .3)),
+    ),
+    child: Center(
+      child: step.title == 'Command center'
+          ? Image.asset(
+              HeyBeanTheme.isDark
+                  ? 'assets/images/bean/bean-logo-white-overlay.png'
+                  : 'assets/images/bean/bean-logo.png',
+              width: 28,
+              height: 28,
+              fit: BoxFit.contain,
+            )
+          : Icon(step.icon, color: HeyBeanTheme.accentStrong, size: 27),
+    ),
+  );
+}
+
+class _GuidedTourPreview extends StatelessWidget {
+  const _GuidedTourPreview({required this.step, required this.index});
+
+  final _GuidedTourStep step;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.bg0,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: HeyBeanTheme.border),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(
+            alpha: HeyBeanTheme.isDark ? .18 : .06,
+          ),
+          blurRadius: 18,
+          offset: const Offset(0, 10),
+        ),
+      ],
+    ),
+    child: Column(
+      children: [
+        for (var i = 0; i < step.items.length; i++) ...[
+          _GuidedDemoRow(
+            label: step.items[i],
+            highlighted: i == index % step.items.length,
+          ),
+          if (i != step.items.length - 1) const SizedBox(height: 8),
+        ],
       ],
     ),
   );
@@ -11679,6 +12053,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onThemeChanged,
     required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
+    required this.onPreferredMapAppChanged,
     required this.launchExternalUrl,
     required this.stripePaymentHandler,
     required this.onBillingChanged,
@@ -11864,6 +12239,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(String themeKey) onThemeChanged;
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
+  final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final StripePaymentHandler stripePaymentHandler;
   final Future<void> Function() onBillingChanged;
@@ -12006,6 +12382,7 @@ class _CommandCenterContent extends StatelessWidget {
             onThemeChanged: onThemeChanged,
             onThemeModeChanged: onThemeModeChanged,
             onCommandCenterLabelChanged: onCommandCenterLabelChanged,
+            onPreferredMapAppChanged: onPreferredMapAppChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onOpenBeanKnowledge: () =>
                 onSelectDestination(_HomeDestination.memory),
@@ -15772,6 +16149,7 @@ class _MultiDayEventSpan extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _calendarEventColor(event);
+    final hasNotes = _eventHasNotes(event);
     return InkWell(
       key: Key('calendar-multi-day-event-${event.id}'),
       borderRadius: BorderRadius.circular(12),
@@ -15863,6 +16241,17 @@ class _MultiDayEventSpan extends StatelessWidget {
                   size: 14,
                 ),
               ),
+            if (hasNotes)
+              Positioned(
+                left: event.isCritical ? 26 : 8,
+                top: 8,
+                child: Icon(
+                  Icons.notes_rounded,
+                  key: Key('event-notes-icon-${event.id}'),
+                  color: Colors.black.withValues(alpha: .82),
+                  size: 13,
+                ),
+              ),
             for (var dayIndex = 0; dayIndex < daySpan; dayIndex++)
               Positioned(
                 left: dayIndex == 0 ? 0 : (dayIndex * columnWidth) - 6,
@@ -15877,7 +16266,9 @@ class _MultiDayEventSpan extends StatelessWidget {
                 ),
                 child: Padding(
                   padding: EdgeInsets.only(
-                    left: dayIndex == 0 && event.isCritical ? 26 : 10,
+                    left: dayIndex == 0
+                        ? 10 + (event.isCritical ? 18 : 0) + (hasNotes ? 18 : 0)
+                        : 10,
                     right: 10,
                   ),
                   child: Align(
@@ -16085,6 +16476,15 @@ class _AllDayEventRow extends StatelessWidget {
                     key: Key('event-critical-star-${event.id}'),
                     color: HeyBeanTheme.warning,
                     size: 14,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                if (_eventHasNotes(event)) ...[
+                  Icon(
+                    Icons.notes_rounded,
+                    key: Key('event-notes-icon-${event.id}'),
+                    color: Colors.black.withValues(alpha: .82),
+                    size: 13,
                   ),
                   const SizedBox(width: 4),
                 ],
@@ -16316,6 +16716,15 @@ class _TimelineEventBlock extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
               ],
+              if (_eventHasNotes(event)) ...[
+                Icon(
+                  Icons.notes_rounded,
+                  key: Key('event-notes-icon-${event.id}'),
+                  color: Colors.black.withValues(alpha: .82),
+                  size: 13,
+                ),
+                const SizedBox(width: 4),
+              ],
               Expanded(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -16530,6 +16939,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   bool _saving = false;
   bool _savingCategory = false;
   bool _showCategoryManager = false;
+  Timer? _placeSearchDebounce;
+  List<HermesPlaceSuggestion> _placeSuggestions = const [];
+  HermesPlaceDetails? _selectedPlace;
+  String? _placeLookupError;
+  String? _placeSessionToken;
+  bool _loadingPlaceSuggestions = false;
+  bool _loadingPlaceDetails = false;
 
   static const _colors = <({String value, String label})>[
     (value: _beanGreenCategoryColor, label: 'Green'),
@@ -16606,6 +17022,9 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
     _notes = TextEditingController(text: event.notes ?? '');
     _location = TextEditingController(text: event.location ?? '');
+    _selectedPlace = _placeDetailsFromEvent(event);
+    _location.addListener(_handleLocationTextChanged);
+    _placeSessionToken = DateTime.now().microsecondsSinceEpoch.toString();
     _categories = [...widget.eventCategories];
     _category = TextEditingController(text: event.category ?? '');
     _eventInterval = TextEditingController(
@@ -16674,6 +17093,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
 
   @override
   void dispose() {
+    _placeSearchDebounce?.cancel();
+    _location.removeListener(_handleLocationTextChanged);
     _title.dispose();
     _startsAt.dispose();
     _endsAt.dispose();
@@ -16682,6 +17103,149 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _category.dispose();
     _eventInterval.dispose();
     super.dispose();
+  }
+
+  HermesApiClient? get _placesApiClient => _HeyBeanRuntimeServices.apiClient;
+
+  void _handleLocationTextChanged() {
+    final query = _location.text.trim();
+    final selectedAddress = _selectedPlace?.displayAddress ?? '';
+    if (_selectedPlace != null &&
+        selectedAddress.isNotEmpty &&
+        query != selectedAddress) {
+      setState(() => _selectedPlace = null);
+    }
+
+    _placeSearchDebounce?.cancel();
+    if (query.length < 3 || _placesApiClient == null) {
+      if (_placeSuggestions.isNotEmpty ||
+          _loadingPlaceSuggestions ||
+          _placeLookupError != null) {
+        setState(() {
+          _placeSuggestions = const [];
+          _loadingPlaceSuggestions = false;
+          _placeLookupError = null;
+        });
+      }
+      return;
+    }
+
+    _placeSearchDebounce = Timer(const Duration(milliseconds: 350), () {
+      unawaited(_loadPlaceSuggestions(query));
+    });
+  }
+
+  Future<void> _loadPlaceSuggestions(String query) async {
+    final apiClient = _placesApiClient;
+    if (apiClient == null) return;
+    setState(() {
+      _loadingPlaceSuggestions = true;
+      _placeLookupError = null;
+    });
+    try {
+      final suggestions = await apiClient.autocompletePlaces(
+        input: query,
+        sessionToken: _placeSessionToken,
+      );
+      if (!mounted || _location.text.trim() != query) return;
+      setState(() {
+        _placeSuggestions = suggestions;
+        _loadingPlaceSuggestions = false;
+      });
+    } on HermesApiException catch (error) {
+      if (!mounted || _location.text.trim() != query) return;
+      setState(() {
+        _placeSuggestions = const [];
+        _loadingPlaceSuggestions = false;
+        _placeLookupError = switch (error.statusCode) {
+          401 => 'Sign in again to search locations.',
+          404 => 'Location search is not available on this API server yet.',
+          _ => 'Could not load location suggestions (${error.statusCode}).',
+        };
+      });
+    } catch (_) {
+      if (!mounted || _location.text.trim() != query) return;
+      setState(() {
+        _placeSuggestions = const [];
+        _loadingPlaceSuggestions = false;
+        _placeLookupError = 'Could not load location suggestions.';
+      });
+    }
+  }
+
+  Future<void> _selectPlaceSuggestion(HermesPlaceSuggestion suggestion) async {
+    final apiClient = _placesApiClient;
+    if (apiClient == null) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _loadingPlaceDetails = true;
+      _placeLookupError = null;
+      _placeSuggestions = const [];
+    });
+    try {
+      final details = await apiClient.placeDetails(
+        placeId: suggestion.placeId,
+        sessionToken: _placeSessionToken,
+      );
+      if (!mounted) return;
+      final selectedText = details.displayAddress.isNotEmpty
+          ? details.displayAddress
+          : suggestion.fullText ?? suggestion.primaryText;
+      setState(() {
+        _selectedPlace = HermesPlaceDetails(
+          placeId: details.placeId,
+          name: details.name,
+          formattedAddress: selectedText,
+          latitude: details.latitude,
+          longitude: details.longitude,
+          googleMapsUri: details.googleMapsUri,
+        );
+        _location.text = selectedText;
+        _loadingPlaceDetails = false;
+        _placeSessionToken = DateTime.now().microsecondsSinceEpoch.toString();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingPlaceDetails = false;
+        _placeLookupError = 'Could not load that location.';
+      });
+    }
+  }
+
+  Future<void> _openEventDirections() async {
+    final address = _location.text.trim();
+    if (address.isEmpty) return;
+    final uri = _eventDirectionsUri(
+      address: address,
+      preferredMapApp: _HeyBeanRuntimeServices.preferredMapApp,
+      googlePlaceId: _selectedPlace?.placeId,
+    );
+    await _HeyBeanRuntimeServices.launchExternalUrl(uri);
+  }
+
+  Map<String, Object?> _placeMetadataForSave() {
+    final selectedPlace = _selectedPlace;
+    final locationText = _location.text.trim();
+    if (selectedPlace == null ||
+        locationText.isEmpty ||
+        selectedPlace.displayAddress != locationText) {
+      return const {
+        'place_id': null,
+        'place_formatted_address': null,
+        'place_lat': null,
+        'place_lng': null,
+        'google_maps_uri': null,
+      };
+    }
+
+    return {
+      'place_id': selectedPlace.placeId,
+      'place_formatted_address': selectedPlace.formattedAddress,
+      'place_lat': selectedPlace.latitude,
+      'place_lng': selectedPlace.longitude,
+      'google_maps_uri': selectedPlace.googleMapsUri,
+    };
   }
 
   Future<void> _save() async {
@@ -16784,6 +17348,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         'interval': eventInterval,
       if (_recurrence == 'specific_days' || _recurrence == 'interval')
         'unit': _eventIntervalUnit,
+      ..._placeMetadataForSave(),
     };
 
     setState(() {
@@ -17398,6 +17963,107 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     });
   }
 
+  Widget _buildLocationEditor() {
+    final apiClient = _placesApiClient;
+    final selectedPlace = _selectedPlace;
+    final showMap =
+        selectedPlace?.latitude != null && selectedPlace?.longitude != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          key: const Key('event-location-field'),
+          controller: _location,
+          textInputAction: TextInputAction.next,
+          decoration: InputDecoration(
+            labelText: 'Location',
+            prefixIcon: const Icon(Icons.place_rounded),
+            suffixIcon: _loadingPlaceSuggestions || _loadingPlaceDetails
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : _location.text.trim().isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Clear location',
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () {
+                      setState(() {
+                        _location.clear();
+                        _selectedPlace = null;
+                        _placeSuggestions = const [];
+                        _placeLookupError = null;
+                      });
+                    },
+                  ),
+          ),
+        ),
+        if (_placeLookupError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _placeLookupError!,
+            style: TextStyle(
+              color: HeyBeanTheme.destructive,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+        if (_placeSuggestions.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            key: const Key('event-location-suggestions'),
+            decoration: BoxDecoration(
+              color: HeyBeanTheme.surface,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: HeyBeanTheme.border),
+            ),
+            child: Column(
+              children: [
+                for (var index = 0; index < _placeSuggestions.length; index++)
+                  _LocationSuggestionTile(
+                    suggestion: _placeSuggestions[index],
+                    showDivider: index != _placeSuggestions.length - 1,
+                    onTap: () => unawaited(
+                      _selectPlaceSuggestion(_placeSuggestions[index]),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        if (showMap && apiClient != null) ...[
+          const SizedBox(height: 10),
+          _EventLocationMapPreview(
+            apiClient: apiClient,
+            place: selectedPlace!,
+            onDirections: _openEventDirections,
+          ),
+        ] else if (_location.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('event-directions-button'),
+              onPressed: _openEventDirections,
+              icon: const Icon(Icons.directions_rounded),
+              label: Text(
+                _HeyBeanRuntimeServices.preferredMapApp == 'apple'
+                    ? 'Open in Apple Maps'
+                    : 'Open in Google Maps',
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -17589,21 +18255,13 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                       const SizedBox(height: 14),
                       _MobileFormSection(
                         title: 'Event details',
-                        subtitle: 'Location, description, and status',
+                        subtitle: 'Location, notes, and status',
                         iconWidget: _BeanNotesIcon(
                           size: 18,
                           color: HeyBeanTheme.accentStrong,
                         ),
                         children: [
-                          TextField(
-                            key: const Key('event-location-field'),
-                            controller: _location,
-                            textInputAction: TextInputAction.next,
-                            decoration: const InputDecoration(
-                              labelText: 'Location',
-                              prefixIcon: Icon(Icons.place_rounded),
-                            ),
-                          ),
+                          _buildLocationEditor(),
                           DropdownButtonFormField<String>(
                             key: const Key('event-status-field'),
                             initialValue: _status,
@@ -17623,29 +18281,38 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               setState(() => _status = value);
                             },
                           ),
-                          TextField(
-                            key: const Key('event-notes-field'),
-                            controller: _notes,
-                            minLines: 3,
-                            maxLines: 6,
-                            decoration: _longFormInputDecoration(
-                              labelText: 'Description',
-                              hintText: 'Add event description',
-                              prefixIcon: const SizedBox(
-                                width: 52,
-                                child: Align(
-                                  alignment: Alignment.topCenter,
-                                  heightFactor: 1,
-                                  child: Padding(
-                                    padding: EdgeInsets.only(top: 18),
-                                    child: Icon(
-                                      Icons.description_outlined,
-                                      size: 24,
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.notes_rounded,
+                                    color: HeyBeanTheme.accentStrong,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Notes',
+                                    style: TextStyle(
+                                      color: HeyBeanTheme.text,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
                                     ),
                                   ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              TextField(
+                                key: const Key('event-notes-field'),
+                                controller: _notes,
+                                minLines: 3,
+                                maxLines: 6,
+                                decoration: _longFormInputDecoration(
+                                  hintText: 'Add event notes',
                                 ),
                               ),
-                            ),
+                            ],
                           ),
                         ],
                       ),
@@ -18179,6 +18846,138 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   }
 }
 
+class _LocationSuggestionTile extends StatelessWidget {
+  const _LocationSuggestionTile({
+    required this.suggestion,
+    required this.showDivider,
+    required this.onTap,
+  });
+
+  final HermesPlaceSuggestion suggestion;
+  final bool showDivider;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      ListTile(
+        dense: true,
+        leading: Icon(Icons.place_outlined, color: HeyBeanTheme.accentStrong),
+        title: Text(
+          suggestion.primaryText,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle:
+            suggestion.secondaryText == null ||
+                suggestion.secondaryText!.trim().isEmpty
+            ? null
+            : Text(
+                suggestion.secondaryText!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+        onTap: onTap,
+      ),
+      if (showDivider)
+        Divider(height: 1, thickness: 1, color: HeyBeanTheme.border),
+    ],
+  );
+}
+
+class _EventLocationMapPreview extends StatelessWidget {
+  const _EventLocationMapPreview({
+    required this.apiClient,
+    required this.place,
+    required this.onDirections,
+  });
+
+  final HermesApiClient apiClient;
+  final HermesPlaceDetails place;
+  final VoidCallback onDirections;
+
+  @override
+  Widget build(BuildContext context) {
+    final lat = place.latitude;
+    final lng = place.longitude;
+    if (lat == null || lng == null) return const SizedBox.shrink();
+    final mapUri = apiClient.resolveApiUri(
+      '/places/static-map?lat=${Uri.encodeComponent(lat.toString())}&lng=${Uri.encodeComponent(lng.toString())}',
+    );
+    return Container(
+      key: const Key('event-location-map-preview'),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AspectRatio(
+            aspectRatio: 2.45,
+            child: Image.network(
+              mapUri.toString(),
+              headers: apiClient.authenticatedHeaders,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  const _MapPreviewFallback(),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    place.displayAddress,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: HeyBeanTheme.text,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                FilledButton.icon(
+                  key: const Key('event-directions-button'),
+                  onPressed: onDirections,
+                  icon: const Icon(Icons.directions_rounded, size: 18),
+                  label: Text(
+                    _HeyBeanRuntimeServices.preferredMapApp == 'apple'
+                        ? 'Apple Maps'
+                        : 'Google Maps',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapPreviewFallback extends StatelessWidget {
+  const _MapPreviewFallback();
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(color: HeyBeanTheme.surface2),
+    child: Center(
+      child: Icon(
+        Icons.location_pin,
+        color: HeyBeanTheme.accentStrong,
+        size: 38,
+      ),
+    ),
+  );
+}
+
 class _EventCategoryChip extends StatelessWidget {
   const _EventCategoryChip({
     required this.chipKey,
@@ -18205,80 +19004,92 @@ class _EventCategoryChip extends StatelessWidget {
   final VoidCallback onDeleted;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: Colors.white,
-    shape: StadiumBorder(
-      side: BorderSide(
-        color: selected ? HeyBeanTheme.accent : HeyBeanTheme.border,
-        width: selected ? 1.8 : 1.2,
+  Widget build(BuildContext context) {
+    final backgroundColor = selected
+        ? HeyBeanTheme.accent.withValues(alpha: HeyBeanTheme.isDark ? .18 : .10)
+        : HeyBeanTheme.surface;
+    final borderColor = selected
+        ? HeyBeanTheme.accentStrong.withValues(alpha: .70)
+        : HeyBeanTheme.border;
+    final textColor = selected ? HeyBeanTheme.text : HeyBeanTheme.text;
+
+    return Material(
+      color: backgroundColor,
+      shape: StadiumBorder(
+        side: BorderSide(color: borderColor, width: selected ? 1.8 : 1.2),
       ),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.only(left: 4, right: 4, top: 4, bottom: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          InkWell(
-            key: chipKey,
-            borderRadius: BorderRadius.circular(999),
-            onTap: saving ? null : onSelected,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(radius: 6, backgroundColor: color),
-                  const SizedBox(width: 7),
-                  Text(
-                    category.name,
-                    style: TextStyle(
-                      color: HeyBeanTheme.text,
-                      fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 4, right: 4, top: 4, bottom: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              key: chipKey,
+              borderRadius: BorderRadius.circular(999),
+              onTap: saving ? null : onSelected,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(radius: 6, backgroundColor: color),
+                    const SizedBox(width: 7),
+                    Text(
+                      category.name,
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: selected
+                            ? FontWeight.w900
+                            : FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  if (selected) ...[
-                    const SizedBox(width: 5),
-                    Icon(
-                      Icons.check_circle_rounded,
-                      size: 15,
-                      color: HeyBeanTheme.accent,
-                    ),
+                    if (selected) ...[
+                      const SizedBox(width: 5),
+                      Icon(
+                        Icons.check_circle_rounded,
+                        size: 15,
+                        color: HeyBeanTheme.accent,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
-          if (category.id >= 0)
+            if (category.id >= 0)
+              IconButton(
+                key: editKey,
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 28,
+                  height: 28,
+                ),
+                tooltip: 'Edit ${category.name}',
+                onPressed: saving ? null : onEdited,
+                icon: Icon(
+                  Icons.edit_rounded,
+                  size: 16,
+                  color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
+                ),
+              ),
             IconButton(
-              key: editKey,
+              key: deleteKey,
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-              tooltip: 'Edit ${category.name}',
-              onPressed: saving ? null : onEdited,
+              tooltip: 'Delete ${category.name}',
+              onPressed: saving ? null : onDeleted,
               icon: Icon(
-                Icons.edit_rounded,
-                size: 16,
-                color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
+                Icons.close_rounded,
+                size: 18,
+                color: saving ? HeyBeanTheme.muted : HeyBeanTheme.destructive,
               ),
             ),
-          IconButton(
-            key: deleteKey,
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            tooltip: 'Delete ${category.name}',
-            onPressed: saving ? null : onDeleted,
-            icon: Icon(
-              Icons.close_rounded,
-              size: 18,
-              color: saving ? HeyBeanTheme.muted : HeyBeanTheme.destructive,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ColorSwatchButton extends StatelessWidget {
@@ -18655,6 +19466,71 @@ Color _calendarEventColor(HermesCalendarEvent event) {
   final value = event.color;
   if (value == null) return _colorFromHex(_beanGreenCategoryColor);
   return _colorFromHex(value);
+}
+
+bool _eventHasNotes(HermesCalendarEvent event) =>
+    (event.notes ?? '').trim().isNotEmpty;
+
+HermesPlaceDetails? _placeDetailsFromEvent(HermesCalendarEvent event) {
+  final metadata = event.metadata;
+  if (metadata == null) return null;
+  final placeId =
+      _metadataString(metadata, 'place_id') ??
+      _metadataString(metadata, 'placeId');
+  final lat =
+      _metadataDouble(metadata, 'place_lat') ??
+      _metadataDouble(metadata, 'placeLat') ??
+      _metadataDouble(metadata, 'latitude');
+  final lng =
+      _metadataDouble(metadata, 'place_lng') ??
+      _metadataDouble(metadata, 'placeLng') ??
+      _metadataDouble(metadata, 'longitude');
+  final address =
+      _metadataString(metadata, 'place_formatted_address') ??
+      _metadataString(metadata, 'placeFormattedAddress') ??
+      event.location;
+  if ((placeId == null || placeId.isEmpty) && lat == null && lng == null) {
+    return null;
+  }
+  return HermesPlaceDetails(
+    placeId: placeId ?? '',
+    formattedAddress: address,
+    latitude: lat,
+    longitude: lng,
+    googleMapsUri:
+        _metadataString(metadata, 'google_maps_uri') ??
+        _metadataString(metadata, 'googleMapsUri'),
+  );
+}
+
+String? _metadataString(Map<String, Object?> metadata, String key) {
+  final value = metadata[key];
+  if (value == null) return null;
+  final text = value.toString().trim();
+  return text.isEmpty ? null : text;
+}
+
+double? _metadataDouble(Map<String, Object?> metadata, String key) {
+  final value = metadata[key];
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  return double.tryParse(value.toString());
+}
+
+Uri _eventDirectionsUri({
+  required String address,
+  required String preferredMapApp,
+  String? googlePlaceId,
+}) {
+  final normalizedAddress = address.trim();
+  if (preferredMapApp == 'apple') {
+    return Uri.https('maps.apple.com', '/', {'q': normalizedAddress});
+  }
+  final query = <String, String>{'api': '1', 'query': normalizedAddress};
+  if (googlePlaceId != null && googlePlaceId.trim().isNotEmpty) {
+    query['query_place_id'] = googlePlaceId.trim();
+  }
+  return Uri.https('www.google.com', '/maps/search/', query);
 }
 
 String _eventSubtitle(HermesCalendarEvent event) {
@@ -19709,12 +20585,13 @@ class _MonthGrid extends StatelessWidget {
     final totalCells = leadingBlanks + daysInMonth;
     final rowCount = (totalCells / 7).ceil();
     final eventDays = <int>{};
+    final eventNoteDays = <int>{};
     for (var day = 1; day <= daysInMonth; day++) {
       final date = DateTime(visibleMonth.year, visibleMonth.month, day);
       for (final event in calendar) {
         if (_eventFallsOnDay(event, date)) {
           eventDays.add(day);
-          break;
+          if (_eventHasNotes(event)) eventNoteDays.add(day);
         }
       }
     }
@@ -19765,6 +20642,7 @@ class _MonthGrid extends StatelessWidget {
                         isSelected:
                             date != null && _sameCalendarDay(date, selectedDay),
                         hasEvent: day != null && eventDays.contains(day),
+                        hasNotes: day != null && eventNoteDays.contains(day),
                         onTap: date == null ? null : () => onDateSelected(date),
                       );
                     },
@@ -19791,6 +20669,7 @@ class _MonthDayCell extends StatelessWidget {
     required this.isToday,
     required this.isSelected,
     required this.hasEvent,
+    required this.hasNotes,
     required this.onTap,
   });
 
@@ -19798,6 +20677,7 @@ class _MonthDayCell extends StatelessWidget {
   final bool isToday;
   final bool isSelected;
   final bool hasEvent;
+  final bool hasNotes;
   final VoidCallback? onTap;
 
   @override
@@ -19835,13 +20715,30 @@ class _MonthDayCell extends StatelessWidget {
                     ),
                   ),
                   if (hasEvent)
-                    Container(
-                      width: 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: isToday ? Colors.white : HeyBeanTheme.accent,
-                        shape: BoxShape.circle,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 5,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: isToday ? Colors.white : HeyBeanTheme.accent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        if (hasNotes) ...[
+                          const SizedBox(width: 3),
+                          Icon(
+                            Icons.notes_rounded,
+                            key: Key('month-day-notes-icon-$day'),
+                            size: 8,
+                            color: isToday
+                                ? Colors.white
+                                : HeyBeanTheme.accentStrong,
+                          ),
+                        ],
+                      ],
                     ),
                 ],
               ),
@@ -25361,6 +26258,7 @@ class _SettingsView extends StatelessWidget {
     required this.onThemeChanged,
     required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
+    required this.onPreferredMapAppChanged,
     required this.onEditAgentOnboarding,
     required this.onOpenBeanKnowledge,
     required this.onWorkspacesChanged,
@@ -25385,6 +26283,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(String themeKey) onThemeChanged;
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
+  final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
   final VoidCallback onEditAgentOnboarding;
   final VoidCallback onOpenBeanKnowledge;
   final Future<void> Function() onWorkspacesChanged;
@@ -25455,6 +26354,10 @@ class _SettingsView extends StatelessWidget {
             _NotificationPreferencesCard(
               preferences: user.notificationPreferences,
               onChanged: onNotificationPreferencesChanged,
+            ),
+            _MapPreferencesCard(
+              preferredMapApp: user.preferredMapApp,
+              onChanged: onPreferredMapAppChanged,
             ),
             const SizedBox(height: 8),
             _WorkspacesSettingsCard(
@@ -26638,6 +27541,131 @@ class _NotificationPreferencesCardState
     ),
   );
 }
+
+class _MapPreferencesCard extends StatefulWidget {
+  const _MapPreferencesCard({
+    required this.preferredMapApp,
+    required this.onChanged,
+  });
+
+  final String preferredMapApp;
+  final Future<void> Function(String preferredMapApp) onChanged;
+
+  @override
+  State<_MapPreferencesCard> createState() => _MapPreferencesCardState();
+}
+
+class _MapPreferencesCardState extends State<_MapPreferencesCard> {
+  late String _preferredMapApp;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _preferredMapApp = _normalizedMapApp(widget.preferredMapApp);
+  }
+
+  @override
+  void didUpdateWidget(covariant _MapPreferencesCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_saving) _preferredMapApp = _normalizedMapApp(widget.preferredMapApp);
+  }
+
+  Future<void> _save(String preferredMapApp) async {
+    final normalized = _normalizedMapApp(preferredMapApp);
+    setState(() {
+      _preferredMapApp = normalized;
+      _saving = true;
+    });
+    try {
+      await widget.onChanged(normalized);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('map-preferences-card'),
+    margin: const EdgeInsets.only(top: 4),
+    padding: const EdgeInsets.only(top: 14, bottom: 12),
+    decoration: _sectionDividerDecoration(),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.near_me_outlined, color: HeyBeanTheme.accentStrong),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Map preference',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Used when opening event directions.',
+                    style: TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        SegmentedButton<String>(
+          key: const Key('preferred-map-selector'),
+          segments: const [
+            ButtonSegment<String>(
+              value: 'google',
+              icon: Icon(Icons.map_rounded, size: 18),
+              label: Text('Google Maps'),
+            ),
+            ButtonSegment<String>(
+              value: 'apple',
+              icon: Icon(Icons.near_me_rounded, size: 18),
+              label: Text('Apple Maps'),
+            ),
+          ],
+          selected: {_preferredMapApp},
+          showSelectedIcon: false,
+          onSelectionChanged: _saving
+              ? null
+              : (selection) => unawaited(_save(selection.first)),
+          style: ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            foregroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? HeyBeanTheme.accentInk
+                  : HeyBeanTheme.text,
+            ),
+            backgroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? HeyBeanTheme.accent
+                  : HeyBeanTheme.surface,
+            ),
+            side: WidgetStateProperty.resolveWith(
+              (states) => BorderSide(
+                color: states.contains(WidgetState.selected)
+                    ? HeyBeanTheme.accentStrong.withValues(alpha: .42)
+                    : HeyBeanTheme.border,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+String _normalizedMapApp(String value) => value == 'apple' ? 'apple' : 'google';
 
 class _WorkspacesSettingsCard extends StatefulWidget {
   const _WorkspacesSettingsCard({
@@ -29167,17 +30195,29 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
   for (final task in tasks) {
     if (_taskIsCompleted(task) || _taskIsSubtask(task)) continue;
     final due = _parseTaskDueDate(task);
-    if (due == null || !_sameCalendarDay(due, today)) continue;
+    final dueDay = due == null ? null : _dateOnly(due);
+    if (due == null || dueDay == null || dueDay.isAfter(today)) continue;
     final dateOnly = _wireValueLooksDateOnly(task.dueAt);
-    if (!dateOnly && due.isBefore(now)) continue;
+    final overdue = dueDay.isBefore(today) || (!dateOnly && due.isBefore(now));
     items.add(
       _CommandCenterAgendaItem(
         key: 'task-${task.id}',
         kind: _CommandCenterAgendaKind.task,
         title: task.title,
-        time: dateOnly ? endOfToday.subtract(const Duration(minutes: 1)) : due,
-        timeLabel: dateOnly ? 'Today' : _naturalTimeLabel(due),
-        subtitle: (task.category ?? '').trim(),
+        time: overdue
+            ? due
+            : dateOnly
+            ? endOfToday.subtract(const Duration(minutes: 1))
+            : due,
+        timeLabel: overdue && dateOnly
+            ? 'Overdue'
+            : dateOnly
+            ? 'Today'
+            : _naturalTimeLabel(due),
+        subtitle: [
+          if (overdue) 'overdue',
+          if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
+        ].join(' · '),
         task: task,
       ),
     );
@@ -29186,17 +30226,30 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
   for (final reminder in reminders) {
     if (_reminderIsCompleted(reminder)) continue;
     final due = _parseReminderDueDate(reminder);
-    if (due == null || !_sameCalendarDay(due, today)) continue;
+    final dueDay = due == null ? null : _dateOnly(due);
+    if (due == null || dueDay == null || dueDay.isAfter(today)) continue;
     final dateOnly = _wireValueLooksDateOnly(reminder.dueAt);
-    if (!dateOnly && due.isBefore(now)) continue;
+    final overdue = dueDay.isBefore(today) || (!dateOnly && due.isBefore(now));
     items.add(
       _CommandCenterAgendaItem(
         key: 'reminder-${reminder.id}',
         kind: _CommandCenterAgendaKind.reminder,
         title: reminder.title,
-        time: dateOnly ? endOfToday.subtract(const Duration(minutes: 1)) : due,
-        timeLabel: dateOnly ? 'Today' : _naturalTimeLabel(due),
-        subtitle: (reminder.category ?? '').trim(),
+        time: overdue
+            ? due
+            : dateOnly
+            ? endOfToday.subtract(const Duration(minutes: 1))
+            : due,
+        timeLabel: overdue && dateOnly
+            ? 'Overdue'
+            : dateOnly
+            ? 'Today'
+            : _naturalTimeLabel(due),
+        subtitle: [
+          if (overdue) 'overdue',
+          if ((reminder.category ?? '').trim().isNotEmpty)
+            reminder.category!.trim(),
+        ].join(' · '),
         reminder: reminder,
       ),
     );

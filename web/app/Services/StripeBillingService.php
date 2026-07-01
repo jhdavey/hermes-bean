@@ -860,6 +860,8 @@ class StripeBillingService
             ->acceptJson()
             ->baseUrl('https://api.stripe.com/v1');
 
+        $payload = $this->stripeFormPayload($payload);
+
         $response = $method === 'get'
             ? $request->get($path, $payload)
             : $request->post($path, $payload);
@@ -881,6 +883,19 @@ class StripeBillingService
         }
 
         return $response;
+    }
+
+    private function stripeFormPayload(array $payload): array
+    {
+        foreach ($payload as $key => $value) {
+            if (is_bool($value)) {
+                $payload[$key] = $value ? 'true' : 'false';
+            } elseif (is_array($value)) {
+                $payload[$key] = $this->stripeFormPayload($value);
+            }
+        }
+
+        return $payload;
     }
 
     private function publishableKey(): string

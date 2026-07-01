@@ -49,6 +49,11 @@ class AuthController extends Controller
         'dark',
     ];
 
+    private const MAP_APP_KEYS = [
+        'google',
+        'apple',
+    ];
+
     public function emailAvailability(Request $request): JsonResponse
     {
         $request->merge([
@@ -190,6 +195,7 @@ class AuthController extends Controller
             'theme' => ['sometimes', 'string', Rule::in(self::THEME_KEYS)],
             'theme_mode' => ['sometimes', 'string', Rule::in(self::THEME_MODE_KEYS)],
             'command_center_label' => ['sometimes', 'required', 'string', 'max:80'],
+            'preferred_map_app' => ['sometimes', 'string', Rule::in(self::MAP_APP_KEYS)],
             'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
             'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
             'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
@@ -205,7 +211,7 @@ class AuthController extends Controller
         $homeCityData = array_key_exists('home_city', $data) ? ['home_city' => $data['home_city']] : [];
         $profileData = collect($data)->only($profileKeys)->all();
         $ttsData = collect($data)->only($ttsKeys)->all();
-        $userData = collect($data)->only(['name', 'email', 'theme', 'theme_mode', 'command_center_label'])->all();
+        $userData = collect($data)->only(['name', 'email', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app'])->all();
         if (array_key_exists('notification_preferences', $data)) {
             $planLimits = app(PlanLimitService::class);
             if (($data['notification_preferences']['reminder_email'] ?? false) && ! $planLimits->canUseEmailReminders($user)) {
