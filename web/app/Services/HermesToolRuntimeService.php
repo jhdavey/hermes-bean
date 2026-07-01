@@ -1718,6 +1718,7 @@ PROMPT;
         return [[$action], $events, [
             'ok' => ! $failed,
             'action_type' => (string) ($action['type'] ?? ''),
+            'message' => $failed ? $this->failedEventMessage($events) : '',
             'events' => $events->map(fn (ActivityEvent $event): array => [
                 'event_type' => $event->event_type,
                 'tool_name' => $event->tool_name,
@@ -2011,6 +2012,7 @@ PROMPT;
         return [[$action], $events, [
             'ok' => ! $failed,
             'action_type' => $actionType,
+            'message' => $failed ? $this->failedEventMessage($events) : '',
             'events' => $events->map(fn (ActivityEvent $event): array => [
                 'event_type' => $event->event_type,
                 'tool_name' => $event->tool_name,
@@ -2018,6 +2020,27 @@ PROMPT;
                 'payload' => $event->payload,
             ])->values()->all(),
         ]];
+    }
+
+    private function failedEventMessage(Collection $events): string
+    {
+        foreach ($events as $event) {
+            if (! $event instanceof ActivityEvent || $event->status !== 'failed') {
+                continue;
+            }
+
+            $reason = data_get($event->payload ?? [], 'reason');
+            if (is_string($reason) && trim($reason) !== '') {
+                return trim($reason);
+            }
+
+            $message = data_get($event->payload ?? [], 'message');
+            if (is_string($message) && trim($message) !== '') {
+                return trim($message);
+            }
+        }
+
+        return '';
     }
 
     private function decodeToolArguments(string $arguments): array
