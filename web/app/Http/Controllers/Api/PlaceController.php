@@ -68,6 +68,7 @@ class PlaceController extends Controller
         $data = $request->validate([
             'lat' => ['required', 'numeric', 'between:-90,90'],
             'lng' => ['required', 'numeric', 'between:-180,180'],
+            'theme' => ['sometimes', 'nullable', 'in:light,dark'],
         ]);
 
         if (! $this->placesConfigured()) {
@@ -76,19 +77,25 @@ class PlaceController extends Controller
 
         $lat = (float) $data['lat'];
         $lng = (float) $data['lng'];
+        $theme = $data['theme'] ?? 'light';
+        $query = [
+            'center' => "{$lat},{$lng}",
+            'zoom' => 15,
+            'size' => '640x260',
+            'scale' => 2,
+            'maptype' => 'roadmap',
+            'markers' => "color:0x78d58c|{$lat},{$lng}",
+            'key' => $this->googleMapsApiKey(),
+        ];
+        $url = 'https://maps.googleapis.com/maps/api/staticmap?'.http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        foreach ($this->staticMapStyles($theme) as $style) {
+            $url .= '&style='.rawurlencode($style);
+        }
 
         try {
             $response = Http::connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
                 ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
-                ->get('https://maps.googleapis.com/maps/api/staticmap', [
-                    'center' => "{$lat},{$lng}",
-                    'zoom' => 15,
-                    'size' => '640x260',
-                    'scale' => 2,
-                    'maptype' => 'roadmap',
-                    'markers' => "color:green|{$lat},{$lng}",
-                    'key' => $this->googleMapsApiKey(),
-                ]);
+                ->get($url);
         } catch (ConnectionException $exception) {
             Log::warning('Google Static Map failed', [
                 'lat' => $lat,
@@ -118,6 +125,36 @@ class PlaceController extends Controller
     {
         return (bool) config('services.hermes_runtime.google_places_enabled', true)
             && $this->googleMapsApiKey() !== '';
+    }
+
+    /**
+     * Google Static Maps expects repeated style parameters, not PHP array query keys.
+     *
+     * @return list<string>
+     */
+    private function staticMapStyles(string $theme): array
+    {
+        if ($theme !== 'dark') {
+            return [];
+        }
+
+        return [
+            'element:geometry|color:0x111820',
+            'element:labels.text.fill|color:0xd7dee8',
+            'element:labels.text.stroke|color:0x111820',
+            'feature:administrative|element:geometry.stroke|color:0x2d3a46',
+            'feature:landscape|element:geometry|color:0x111820',
+            'feature:poi|element:geometry|color:0x18232d',
+            'feature:poi|element:labels.text.fill|color:0xaab5c3',
+            'feature:road|element:geometry|color:0x27323d',
+            'feature:road|element:geometry.stroke|color:0x111820',
+            'feature:road|element:labels.text.fill|color:0xc0c8d3',
+            'feature:road.highway|element:geometry|color:0x394654',
+            'feature:road.highway|element:geometry.stroke|color:0x1d2731',
+            'feature:transit|element:geometry|color:0x1d2b35',
+            'feature:water|element:geometry|color:0x0a2230',
+            'feature:water|element:labels.text.fill|color:0x8fb3c8',
+        ];
     }
 
     private function autocompleteWithPlacesApiNew(array $body): array
