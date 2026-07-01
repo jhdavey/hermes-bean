@@ -2166,4 +2166,79 @@ class HermesToolRuntimeServiceTest extends TestCase
             'title' => 'Buy milk',
         ]);
     }
+
+    public function test_app_crud_turn_uses_slim_tool_context_and_records_timings(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-slim-tool-call',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_task',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_task',
+                                'arguments' => json_encode([
+                                    'title' => 'Buy milk',
+                                    'type' => 'todo',
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-slim-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Done - I added Buy milk.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-slim-crud@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'add buy milk to my tasks',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.task.created']);
+
+        $events = collect($response->json('data.events'));
+        $started = $events->firstWhere('event_type', 'runtime.tool_model_started');
+        $completed = $events->firstWhere('event_type', 'runtime.tool_model_completed');
+
+        $this->assertSame('app_crud', data_get($started, 'payload.tool_mode'));
+        $this->assertSame('app_crud', data_get($completed, 'payload.tool_mode'));
+        $this->assertIsInt(data_get($completed, 'payload.duration_ms'));
+        $this->assertIsInt(data_get($completed, 'payload.model_call_ms'));
+        $this->assertIsInt(data_get($completed, 'payload.tool_execution_ms'));
+        $this->assertSame(2, data_get($completed, 'payload.model_call_count'));
+        $this->assertSame(1, data_get($completed, 'payload.tool_execution_count'));
+
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+            $toolNames = collect($payload['tools'] ?? [])
+                ->map(fn (array $tool): ?string => data_get($tool, 'function.name'));
+            $context = json_decode(str_replace("Runtime context:\n", '', (string) data_get($payload, 'messages.1.content')), true, flags: JSON_THROW_ON_ERROR);
+
+            return $request->url() === 'https://api.openai.test/v1/chat/completions'
+                && $toolNames->contains('create_task')
+                && $toolNames->contains('create_calendar_event')
+                && ! $toolNames->contains('external_lookup')
+                && ! $toolNames->contains('remember_memory')
+                && ! $toolNames->contains('update_agent_profile')
+                && data_get($context, 'memory_context.items') === []
+                && data_get($context, 'memory_context.summaries') === [];
+        });
+    }
 }

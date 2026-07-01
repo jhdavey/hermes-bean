@@ -52,6 +52,7 @@ class ProcessAssistantRun implements ShouldQueue
                 'run_id' => $run->id,
                 'source' => $run->source,
                 'message_id' => $run->user_message_id,
+                'queue_wait_ms' => $this->elapsedMilliseconds($run->created_at),
             ], 'hermes.runs', 'started');
         });
 
@@ -74,6 +75,7 @@ class ProcessAssistantRun implements ShouldQueue
                 'run_id' => $run->id,
                 'status' => $run->status,
                 'assistant_message_id' => $run->assistant_message_id,
+                'run_duration_ms' => $this->elapsedMilliseconds($run->started_at),
             ], 'hermes.runs', $run->status === 'completed' ? 'succeeded' : 'cancelled');
         } catch (\Throwable $exception) {
             Log::error('Assistant run failed.', [
@@ -118,5 +120,14 @@ class ProcessAssistantRun implements ShouldQueue
             'status' => $status,
             'payload' => $payload ?: null,
         ]);
+    }
+
+    private function elapsedMilliseconds(mixed $startedAt): ?int
+    {
+        if (! $startedAt) {
+            return null;
+        }
+
+        return max(0, (int) $startedAt->diffInMilliseconds(now(), true));
     }
 }

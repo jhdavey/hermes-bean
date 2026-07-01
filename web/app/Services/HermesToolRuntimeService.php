@@ -28,6 +28,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         private readonly AdminSettingsService $adminSettings,
         private readonly BeanMemoryService $memoryService,
         private readonly LiveLookupService $liveLookup,
+        private readonly PlanLimitService $planLimits,
     ) {}
 
     public function startSession(array $attributes = []): ConversationSession
@@ -125,6 +126,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         array $modelRoute,
         string $prompt
     ): array {
+        $runtimeStartedAt = microtime(true);
         $apiKey = $this->providerApiKey();
         if ($apiKey === '') {
             return $this->toolRuntimeFailed($session, $userMessage, collect([$received]), 'Bean is not configured to contact the agent model yet.', [
@@ -140,25 +142,66 @@ class HermesToolRuntimeService implements HermesRuntimeService
             ]);
         }
 
+        $toolMode = $this->toolRoutingMode($userMessage);
+        $contextStartedAt = microtime(true);
+        $contextPayload = $this->toolContextPayload($session, $userMessage, $toolMode);
+        $conversationMessages = $this->modelConversationMessages($session, $userMessage);
+        $contextBuildMs = $this->elapsedMs($contextStartedAt);
+        $toolCount = count($this->nativeToolDefinitions($toolMode));
+
         $started = $this->recordEvent($session, 'runtime.tool_model_started', [
             'message_id' => $userMessage->id,
             'provider' => config('services.hermes_runtime.default_provider'),
             'model' => $modelRoute['model'],
             'model_route' => $modelRoute,
+            'tool_mode' => $toolMode,
+            'tool_count' => $toolCount,
+            'history_message_count' => count($conversationMessages),
+            'context_build_ms' => $contextBuildMs,
         ], 'hermes.tools', 'started');
         $session->update(['status' => 'running', 'last_activity_at' => now()]);
 
         $messages = [
             ['role' => 'system', 'content' => $this->toolSystemInstructions()],
-            ['role' => 'system', 'content' => "Runtime context:\n".json_encode($this->toolContextPayload($session, $userMessage), JSON_THROW_ON_ERROR)],
-            ...$this->modelConversationMessages($session, $userMessage),
+            ['role' => 'system', 'content' => "Runtime context:\n".json_encode($contextPayload, JSON_THROW_ON_ERROR)],
+            ...$conversationMessages,
         ];
+
+        if ($toolMode === 'app_crud' && $this->canUseCrudPlanner($userMessage)) {
+            try {
+                $plannedResult = $this->tryRunCrudPlanner(
+                    $session,
+                    $userMessage,
+                    $received,
+                    $started,
+                    $modelRoute,
+                    $contextPayload,
+                    $conversationMessages,
+                    $runtimeStartedAt,
+                    $contextBuildMs
+                );
+                if ($plannedResult !== null) {
+                    return $plannedResult;
+                }
+            } catch (\Throwable $exception) {
+                Log::warning('Hermes CRUD planner fell back to native tool loop.', [
+                    'session_id' => $session->id,
+                    'message_id' => $userMessage->id,
+                    'exception' => $exception->getMessage(),
+                ]);
+            }
+        }
+
         $responses = [];
         $domainEvents = collect();
         $actions = [];
         $toolOutputs = [];
         $assistantContent = '';
         $finalResponse = null;
+        $modelCallDurationsMs = [];
+        $toolExecutionDurationsMs = [];
+        $finalResponseDurationMs = null;
+        $expectedWriteActionCount = $this->expectedWriteActionCount($userMessage);
 
         try {
             for ($turn = 0; $turn < 3; $turn++) {
@@ -166,7 +209,9 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started]));
                 }
 
-                $response = $this->chatCompletion($modelRoute, $messages, true);
+                $modelCallStartedAt = microtime(true);
+                $response = $this->chatCompletion($modelRoute, $messages, true, $toolMode);
+                $modelCallDurationsMs[] = $this->elapsedMs($modelCallStartedAt);
                 $responses[] = $response;
                 $finalResponse = $response;
                 $modelRoute['model'] = (string) data_get($response, 'model', $modelRoute['model']);
@@ -175,6 +220,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
                 if ($toolCalls === []) {
                     $candidateContent = $this->normalizedAssistantContent(data_get($message, 'content', ''));
+                    if ($actions !== [] && $this->toolOutputsAllSuccessfulWrites($toolOutputs)) {
+                        $assistantContent = $this->nativeActionFallbackContent($actions);
+                        $finalResponseDurationMs ??= 0;
+                        break;
+                    }
+
                     if ($this->shouldContinueAfterUnverifiedCompletionClaim($userMessage, $candidateContent, $actions, $toolOutputs, $turn)) {
                         $messages[] = [
                             'role' => 'assistant',
@@ -228,12 +279,14 @@ class HermesToolRuntimeService implements HermesRuntimeService
                         continue;
                     }
                     $toolCallId = (string) ($toolCall['id'] ?? '');
+                    $toolStartedAt = microtime(true);
                     [$toolActions, $toolEvents, $toolOutput] = $this->executeNativeToolCall(
                         $session,
                         $userMessage,
                         $toolCall,
                         is_array($plannedWorkByToolCall[$toolCallId] ?? null) ? $plannedWorkByToolCall[$toolCallId] : null
                     );
+                    $toolExecutionDurationsMs[] = $this->elapsedMs($toolStartedAt);
                     $actions = array_merge($actions, $toolActions);
                     $toolOutputs[] = $toolOutput;
                     $domainEvents = $domainEvents->concat($toolEvents);
@@ -243,25 +296,43 @@ class HermesToolRuntimeService implements HermesRuntimeService
                         'content' => json_encode($toolOutput, JSON_THROW_ON_ERROR),
                     ];
                 }
+
+                if (
+                    $actions !== []
+                    && count($actions) >= $expectedWriteActionCount
+                    && $this->toolOutputsAllSuccessfulWrites($toolOutputs)
+                ) {
+                    $assistantContent = $this->nativeActionFallbackContent($actions);
+                    $finalResponseDurationMs = 0;
+                    break;
+                }
             }
 
             if ($assistantContent === '' && $actions !== []) {
-                try {
-                    if ($this->isCancellationRequested($session)) {
-                        return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
-                    }
+                if ($this->toolOutputsAllSuccessfulWrites($toolOutputs)) {
+                    $assistantContent = $this->nativeActionFallbackContent($actions);
+                    $finalResponseDurationMs = 0;
+                } else {
+                    try {
+                        if ($this->isCancellationRequested($session)) {
+                            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
+                        }
 
-                    $response = $this->chatCompletion($modelRoute, $messages, false);
-                    $responses[] = $response;
-                    $finalResponse = $response;
-                    $modelRoute['model'] = (string) data_get($response, 'model', $modelRoute['model']);
-                    $assistantContent = $this->normalizedAssistantContent(data_get($response, 'choices.0.message.content', ''));
-                } catch (\Throwable $exception) {
-                    Log::warning('Hermes final response call failed after successful tool execution.', [
-                        'session_id' => $session->id,
-                        'message_id' => $userMessage->id,
-                        'exception' => $exception->getMessage(),
-                    ]);
+                        $finalResponseStartedAt = microtime(true);
+                        $response = $this->chatCompletion($modelRoute, $messages, false);
+                        $finalResponseDurationMs = $this->elapsedMs($finalResponseStartedAt);
+                        $modelCallDurationsMs[] = $finalResponseDurationMs;
+                        $responses[] = $response;
+                        $finalResponse = $response;
+                        $modelRoute['model'] = (string) data_get($response, 'model', $modelRoute['model']);
+                        $assistantContent = $this->normalizedAssistantContent(data_get($response, 'choices.0.message.content', ''));
+                    } catch (\Throwable $exception) {
+                        Log::warning('Hermes final response call failed after successful tool execution.', [
+                            'session_id' => $session->id,
+                            'message_id' => $userMessage->id,
+                            'exception' => $exception->getMessage(),
+                        ]);
+                    }
                 }
             }
         } catch (\Throwable $exception) {
@@ -295,11 +366,22 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 : $this->nativeReadFallbackContent($toolOutputs);
         }
 
-        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse): array {
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $actions): array {
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
                 'response_count' => count($responses),
                 'finish_reason' => data_get($finalResponse, 'choices.0.finish_reason'),
+                'tool_mode' => $toolMode,
+                'duration_ms' => $this->elapsedMs($runtimeStartedAt),
+                'context_build_ms' => $contextBuildMs,
+                'model_call_count' => count($modelCallDurationsMs),
+                'model_call_ms' => array_sum($modelCallDurationsMs),
+                'model_call_durations_ms' => $modelCallDurationsMs,
+                'tool_execution_count' => count($toolExecutionDurationsMs),
+                'tool_execution_ms' => array_sum($toolExecutionDurationsMs),
+                'tool_execution_durations_ms' => $toolExecutionDurationsMs,
+                'final_response_ms' => $finalResponseDurationMs,
+                'action_count' => count($actions),
             ], 'hermes.tools', 'succeeded');
 
             $assistantMessage = ConversationMessage::create([
@@ -350,14 +432,14 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $result;
     }
 
-    private function chatCompletion(array $modelRoute, array $messages, bool $allowTools): array
+    private function chatCompletion(array $modelRoute, array $messages, bool $allowTools, string $toolMode = 'full'): array
     {
         $payload = [
             'model' => (string) $modelRoute['model'],
             'messages' => $messages,
         ];
         if ($allowTools) {
-            $payload['tools'] = $this->nativeToolDefinitions();
+            $payload['tools'] = $this->nativeToolDefinitions($toolMode);
             $payload['tool_choice'] = 'auto';
         }
 
@@ -377,6 +459,1069 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         return $decoded;
+    }
+
+    private function tryRunCrudPlanner(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        ActivityEvent $received,
+        ActivityEvent $started,
+        array $baseModelRoute,
+        array $contextPayload,
+        array $conversationMessages,
+        float $runtimeStartedAt,
+        int $contextBuildMs
+    ): ?array {
+        $expectedWriteActionCount = $this->expectedWriteActionCount($userMessage);
+        $plannerRoute = $this->crudPlannerModelRoute($baseModelRoute);
+        if (! filled($plannerRoute['model'] ?? null)) {
+            return null;
+        }
+
+        $promptPayload = $this->crudPlannerPromptPayload($session, $userMessage, $contextPayload, $conversationMessages, $expectedWriteActionCount);
+        $plannerSource = 'local';
+        $actions = $this->deterministicCrudActions($session, $userMessage, $contextPayload);
+        $response = $this->localPlannerResponse($plannerRoute, $actions);
+        $modelCallDurationsMs = [];
+
+        if (! $this->plannerActionsMeetExpected($actions, $expectedWriteActionCount)) {
+            $plannerSource = 'model';
+            $plannerMessages = [
+                ['role' => 'system', 'content' => $this->crudPlannerSystemInstructions()],
+                ['role' => 'user', 'content' => json_encode($promptPayload, JSON_THROW_ON_ERROR)],
+            ];
+
+            $modelStartedAt = microtime(true);
+            $response = $this->crudPlannerCompletion($plannerRoute, $plannerMessages);
+            $modelCallDurationsMs = [$this->elapsedMs($modelStartedAt)];
+            $actions = $this->plannerActionsFromResponse($response);
+        }
+
+        if (! $this->plannerActionsMeetExpected($actions, $expectedWriteActionCount)) {
+            return null;
+        }
+
+        $plannedWork = $this->recordPlannedCrudWorkItems($session, $userMessage, $actions);
+        $domainEvents = collect($plannedWork)
+            ->pluck('event')
+            ->filter(fn (mixed $event): bool => $event instanceof ActivityEvent)
+            ->values();
+        $executedActions = [];
+        $toolOutputs = [];
+        $toolExecutionDurationsMs = [];
+        $createdCalendarEventsByKey = [];
+        $lastCreatedCalendarEventId = null;
+
+        foreach ($actions as $index => $action) {
+            if ($this->isCancellationRequested($session)) {
+                return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
+            }
+
+            $workItem = is_array($plannedWork[$index] ?? null) ? $plannedWork[$index] : null;
+            $action = $this->correlatePlannerAction($action, $createdCalendarEventsByKey, $lastCreatedCalendarEventId);
+            $toolStartedAt = microtime(true);
+            [$executed, $events, $toolOutput] = $this->executePlannerAction($session, $action, $workItem);
+            $toolExecutionDurationsMs[] = $this->elapsedMs($toolStartedAt);
+            $domainEvents = $domainEvents->concat($events);
+            $executedActions = array_merge($executedActions, $executed);
+            $toolOutputs[] = $toolOutput;
+
+            if (($toolOutput['ok'] ?? false) === true && in_array((string) ($action['type'] ?? ''), ['calendar_event.create', 'calendar.create'], true)) {
+                $createdId = $this->createdCalendarEventIdFromEvents($events);
+                if ($createdId !== null) {
+                    $lastCreatedCalendarEventId = $createdId;
+                    $clientKey = $this->plannerActionKey($action);
+                    if ($clientKey !== '') {
+                        $createdCalendarEventsByKey[$clientKey] = $createdId;
+                    }
+                }
+            }
+        }
+
+        if (! $this->toolOutputsAllSuccessfulWrites($toolOutputs)) {
+            return null;
+        }
+
+        $assistantContent = $this->nativeActionFallbackContent($executedActions);
+        $prompt = json_encode($promptPayload, JSON_THROW_ON_ERROR);
+        $responses = [$response];
+        $finalResponse = $response;
+        $finalResponseDurationMs = 0;
+        $toolMode = 'app_crud';
+        $plannerUsed = true;
+
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $plannerRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $executedActions, $plannerUsed, $plannerSource): array {
+            $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
+                'message_id' => $userMessage->id,
+                'response_count' => count($responses),
+                'finish_reason' => data_get($finalResponse, 'choices.0.finish_reason'),
+                'tool_mode' => $toolMode,
+                'planner_used' => $plannerUsed,
+                'planner_source' => $plannerSource,
+                'duration_ms' => $this->elapsedMs($runtimeStartedAt),
+                'context_build_ms' => $contextBuildMs,
+                'model_call_count' => count($modelCallDurationsMs),
+                'model_call_ms' => array_sum($modelCallDurationsMs),
+                'model_call_durations_ms' => $modelCallDurationsMs,
+                'tool_execution_count' => count($toolExecutionDurationsMs),
+                'tool_execution_ms' => array_sum($toolExecutionDurationsMs),
+                'tool_execution_durations_ms' => $toolExecutionDurationsMs,
+                'final_response_ms' => $finalResponseDurationMs,
+                'action_count' => count($executedActions),
+            ], 'hermes.tools', 'succeeded');
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $assistantContent,
+                'metadata' => [
+                    'runtime' => 'tools',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $plannerRoute['model'],
+                    'model_route' => $plannerRoute,
+                    'planner_used' => $plannerUsed,
+                    'planner_source' => $plannerSource,
+                ],
+            ]);
+
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+            ]);
+
+            $usageLog = $this->usageService->recordCompletion(
+                $session,
+                $userMessage,
+                $assistantMessage,
+                $plannerRoute,
+                $prompt,
+                json_encode($responses, JSON_THROW_ON_ERROR),
+                $domainEvents
+            );
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => collect([$received, $started, $completed])->concat($domainEvents)->push($messageCompleted),
+                'usage' => $usageLog,
+                'blocker' => null,
+            ];
+        });
+
+        $assistantMessage = $result['assistant_message'] ?? null;
+        if ($assistantMessage instanceof ConversationMessage) {
+            $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
+        }
+
+        return $result;
+    }
+
+    private function crudPlannerCompletion(array $modelRoute, array $messages): array
+    {
+        $response = Http::withToken($this->providerApiKey())
+            ->acceptJson()
+            ->asJson()
+            ->timeout((float) config('services.hermes_runtime.crud_planner_timeout', 20))
+            ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/chat/completions', [
+                'model' => (string) $modelRoute['model'],
+                'messages' => $messages,
+                'response_format' => ['type' => 'json_object'],
+            ]);
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('CRUD planner returned HTTP '.$response->status().': '.mb_substr($response->body(), 0, 1000));
+        }
+
+        $decoded = $response->json();
+        if (! is_array($decoded)) {
+            throw new \RuntimeException('CRUD planner returned a non-JSON response.');
+        }
+
+        return $decoded;
+    }
+
+    private function crudPlannerModelRoute(array $baseModelRoute): array
+    {
+        $model = (string) config('services.hermes_runtime.crud_planner_model', config('services.hermes_runtime.quick_reply_model', $baseModelRoute['model'] ?? ''));
+
+        return array_merge($baseModelRoute, [
+            'mode' => 'crud_planner',
+            'tier' => 'quick',
+            'model' => $model,
+            'billing_model' => $model,
+            'context_mode' => 'crud_planner',
+            'reason' => 'Fast create-only app CRUD planner used before native tool execution.',
+        ]);
+    }
+
+    private function canUseCrudPlanner(ConversationMessage $message): bool
+    {
+        if (! $this->messageAppearsToRequestAppWrite($message)) {
+            return false;
+        }
+
+        $text = str((string) $message->content)
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s:.-]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($text === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(what|when|where|who|which|find|search|show|list|look up|look for|did i|have i)\b/u', $text)) {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(add|create|make|schedule|book|set|put|block|remind|update|edit|change|move|reschedule|rename|delete|remove|cancel|clear|complete|finish|mark)\b/u', $text);
+    }
+
+    private function crudPlannerPromptPayload(ConversationSession $session, ConversationMessage $message, array $contextPayload, array $conversationMessages, int $expectedWriteActionCount): array
+    {
+        $timezone = $this->sessionDisplayTimezone($session);
+        $clientContext = data_get($contextPayload, 'temporal_context.client_context');
+
+        return [
+            'task' => 'Plan visible HeyBean create actions for one user request. Return JSON only.',
+            'user_message' => (string) $message->content,
+            'expected_min_actions' => $expectedWriteActionCount,
+            'local_timezone' => $timezone,
+            'now_local' => now()->setTimezone($timezone)->toIso8601String(),
+            'client_context' => is_array($clientContext) ? $clientContext : null,
+            'workspace' => data_get($contextPayload, 'workspace'),
+            'accessible_workspaces' => data_get($contextPayload, 'accessible_workspaces', []),
+            'recent_conversation' => collect($conversationMessages)->take(-4)->values()->all(),
+            'schema' => [
+                'actions' => [
+                    [
+                        'type' => 'calendar_event.create | calendar_event.update | calendar_event.delete | reminder.create | reminder.update | reminder.delete | task.create | task.update | task.delete | note.create | note.update | note.delete',
+                        'client_action_key' => 'short unique key like event_1, reminder_1, task_1',
+                        'related_action_key' => 'optional key of same-request event a reminder is for',
+                        'parameters' => [
+                            'id' => 'required for update/delete when known from context',
+                            'title' => 'user-visible title',
+                            'match_title' => 'title hint when id is unavailable',
+                            'starts_at' => 'local ISO-8601 for calendar events',
+                            'ends_at' => 'local ISO-8601 for calendar events when duration is known',
+                            'remind_at' => 'local ISO-8601 for reminders',
+                            'due_at' => 'local ISO-8601 for tasks when due date/time is known',
+                            'plain_text' => 'note body when useful',
+                        ],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    private function crudPlannerSystemInstructions(): string
+    {
+        return <<<'PROMPT'
+You are a strict JSON planner for HeyBean app CRUD requests.
+Return one JSON object with an "actions" array and no prose.
+Allowed actions: calendar_event.create, calendar_event.update, calendar_event.delete, reminder.create, reminder.update, reminder.delete, task.create, task.update, task.delete, note.create, note.update, note.delete.
+Resolve relative dates/times using now_local, local_timezone, and client_context. Emit local ISO-8601 timestamps with offsets.
+Plan every independent app change the user asked for, in the same order the user asked for it.
+Calendar blocks, appointments, meetings, schedule items, and events use calendar_event.*.
+Reminder alarms use reminder.*. Tasks or to-dos use task.*. Notes/lists/writing use note.*.
+If a reminder is for a same-request calendar event, include related_action_key pointing to that event's client_action_key.
+Use concise user-visible titles. Do not invent extra actions or optional reminders.
+If the request is not a clear app CRUD request, return {"actions":[]}.
+PROMPT;
+    }
+
+    private function deterministicCrudActions(ConversationSession $session, ConversationMessage $message, array $contextPayload): array
+    {
+        $content = str((string) $message->content)->squish()->toString();
+        if ($content === '') {
+            return [];
+        }
+
+        $normalized = str($content)
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s:.-]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($this->textRequestsDelete($normalized)) {
+            return $this->deterministicDeleteActions($session, $content, $contextPayload);
+        }
+
+        if ($this->textRequestsUpdate($normalized)) {
+            return $this->deterministicUpdateActions($session, $content, $contextPayload);
+        }
+
+        $timezone = $this->displayTimezoneFromClientContext((array) data_get($contextPayload, 'temporal_context.client_context', []))
+            ?? $this->sessionDisplayTimezone($session);
+        $matches = [];
+
+        $this->collectDeterministicCreateMatches(
+            $matches,
+            $content,
+            '/\bcreate\s+(?:a\s+)?(?:calendar\s+)?(?:event|block)\s+titled\s+(.+?)\s+for\s+(.+?)\s+to\s+(.+?)(?=,\s*(?:and\s+)?(?:create|set)\b|\.\s*$|$)/iu',
+            'calendar_event.create',
+            $timezone
+        );
+        $this->collectDeterministicCreateMatches(
+            $matches,
+            $content,
+            '/\b(?:create|set)\s+(?:a\s+)?reminder\s+titled\s+(.+?)\s+for\s+(.+?)(?=,\s*(?:and\s+)?(?:create|set)\b|\.\s*$|$)/iu',
+            'reminder.create',
+            $timezone
+        );
+        $this->collectDeterministicCreateMatches(
+            $matches,
+            $content,
+            '/\bcreate\s+(?:a\s+)?task\s+titled\s+(.+?)\s+due\s+(.+?)(?=,\s*(?:and\s+)?(?:create|set)\b|\.\s*$|$)/iu',
+            'task.create',
+            $timezone
+        );
+
+        usort($matches, fn (array $left, array $right): int => ($left['offset'] ?? 0) <=> ($right['offset'] ?? 0));
+
+        $actions = [];
+        $lastCalendarKey = null;
+        foreach ($matches as $index => $match) {
+            $action = $match['action'];
+            $key = match ($action['type']) {
+                'calendar_event.create' => 'event_'.$index,
+                'reminder.create' => 'reminder_'.$index,
+                'task.create' => 'task_'.$index,
+                default => 'action_'.$index,
+            };
+            $action['client_action_key'] = $key;
+
+            if ($action['type'] === 'calendar_event.create') {
+                $lastCalendarKey = $key;
+            } elseif ($action['type'] === 'reminder.create' && $lastCalendarKey !== null) {
+                $action['related_action_key'] = $lastCalendarKey;
+            }
+
+            if ($this->plannerActionHasRequiredFields($action)) {
+                $actions[] = $action;
+            }
+        }
+
+        return $actions;
+    }
+
+    private function textRequestsDelete(string $normalized): bool
+    {
+        return (bool) preg_match('/\b(delete|remove|cancel|clear)\b/u', $normalized);
+    }
+
+    private function textRequestsUpdate(string $normalized): bool
+    {
+        return (bool) preg_match('/\b(update|edit|change|move|reschedule|rename|complete|finish|mark)\b/u', $normalized);
+    }
+
+    private function deterministicDeleteActions(ConversationSession $session, string $content, array $contextPayload): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        $wantsCalendar = (bool) preg_match('/\b(calendar|event|events|appointment|meeting|block|schedule)\b/u', $normalized);
+        $wantsReminder = (bool) preg_match('/\b(reminder|reminders|remind)\b/u', $normalized);
+        $wantsTask = (bool) preg_match('/\b(task|tasks|todo|to-do|to do)\b/u', $normalized);
+        $wantsNote = (bool) preg_match('/\b(note|notes|list)\b/u', $normalized);
+        $targetDate = $this->deterministicTargetDate($content, $contextPayload);
+        $actions = [];
+        $resolvedCalendar = null;
+
+        if ($wantsCalendar) {
+            $resolvedCalendar = $this->resolveCalendarEventForText($session, $content, $targetDate);
+            if ($resolvedCalendar instanceof CalendarEvent) {
+                $actions[] = [
+                    'type' => 'calendar_event.delete',
+                    'risk' => 'low',
+                    'client_action_key' => 'delete_event_0',
+                    'parameters' => [
+                        'id' => $resolvedCalendar->id,
+                        'title' => $resolvedCalendar->title,
+                        'delete_linked_reminders' => ! $wantsReminder,
+                    ],
+                ];
+            }
+        }
+
+        if ($wantsReminder) {
+            $resolvedReminder = $this->resolveReminderForText($session, $content, $targetDate, $resolvedCalendar);
+            if ($resolvedReminder instanceof Reminder) {
+                $actions[] = [
+                    'type' => 'reminder.delete',
+                    'risk' => 'low',
+                    'client_action_key' => 'delete_reminder_'.count($actions),
+                    'parameters' => [
+                        'id' => $resolvedReminder->id,
+                        'title' => $resolvedReminder->title,
+                    ],
+                ];
+            }
+        }
+
+        if ($wantsTask) {
+            $resolvedTask = $this->resolveTaskForText($session, $content, $targetDate);
+            if ($resolvedTask instanceof Task) {
+                $actions[] = [
+                    'type' => 'task.delete',
+                    'risk' => 'low',
+                    'client_action_key' => 'delete_task_'.count($actions),
+                    'parameters' => [
+                        'id' => $resolvedTask->id,
+                        'title' => $resolvedTask->title,
+                    ],
+                ];
+            }
+        }
+
+        if ($wantsNote) {
+            $resolvedNote = $this->resolveNoteForText($session, $content);
+            if ($resolvedNote instanceof Note) {
+                $actions[] = [
+                    'type' => 'note.delete',
+                    'risk' => 'low',
+                    'client_action_key' => 'delete_note_'.count($actions),
+                    'parameters' => [
+                        'id' => $resolvedNote->id,
+                        'title' => $resolvedNote->title,
+                    ],
+                ];
+            }
+        }
+
+        return $actions;
+    }
+
+    private function deterministicUpdateActions(ConversationSession $session, string $content, array $contextPayload): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        $targetDate = $this->deterministicTargetDate($content, $contextPayload);
+        $actions = [];
+
+        if (preg_match('/\b(mark|complete|finish)\b/u', $normalized)) {
+            if (preg_match('/\b(task|tasks|todo|to-do|to do)\b/u', $normalized)) {
+                $task = $this->resolveTaskForText($session, $content, $targetDate);
+                if ($task instanceof Task) {
+                    return [[
+                        'type' => 'task.update',
+                        'risk' => 'low',
+                        'client_action_key' => 'update_task_0',
+                        'parameters' => [
+                            'id' => $task->id,
+                            'title' => $task->title,
+                            'status' => 'completed',
+                        ],
+                    ]];
+                }
+            }
+
+            if (preg_match('/\b(reminder|reminders)\b/u', $normalized)) {
+                $reminder = $this->resolveReminderForText($session, $content, $targetDate);
+                if ($reminder instanceof Reminder) {
+                    return [[
+                        'type' => 'reminder.update',
+                        'risk' => 'low',
+                        'client_action_key' => 'update_reminder_0',
+                        'parameters' => [
+                            'id' => $reminder->id,
+                            'title' => $reminder->title,
+                            'status' => 'completed',
+                        ],
+                    ]];
+                }
+            }
+        }
+
+        if (preg_match('/\brename\b.+?\bto\b\s+(.+)$/iu', $content, $match)) {
+            $newTitle = $this->cleanDeterministicTitle((string) ($match[1] ?? ''));
+            if ($newTitle !== '') {
+                if (preg_match('/\b(calendar|event|appointment|meeting|block)\b/u', $normalized)) {
+                    $event = $this->resolveCalendarEventForText($session, $content, $targetDate);
+                    if ($event instanceof CalendarEvent) {
+                        $actions[] = [
+                            'type' => 'calendar_event.update',
+                            'risk' => 'low',
+                            'client_action_key' => 'update_event_0',
+                            'parameters' => ['id' => $event->id, 'title' => $newTitle],
+                        ];
+                    }
+                } elseif (preg_match('/\b(reminder|reminders)\b/u', $normalized)) {
+                    $reminder = $this->resolveReminderForText($session, $content, $targetDate);
+                    if ($reminder instanceof Reminder) {
+                        $actions[] = [
+                            'type' => 'reminder.update',
+                            'risk' => 'low',
+                            'client_action_key' => 'update_reminder_0',
+                            'parameters' => ['id' => $reminder->id, 'title' => $newTitle],
+                        ];
+                    }
+                } elseif (preg_match('/\b(task|tasks|todo|to-do|to do)\b/u', $normalized)) {
+                    $task = $this->resolveTaskForText($session, $content, $targetDate);
+                    if ($task instanceof Task) {
+                        $actions[] = [
+                            'type' => 'task.update',
+                            'risk' => 'low',
+                            'client_action_key' => 'update_task_0',
+                            'parameters' => ['id' => $task->id, 'title' => $newTitle],
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $actions;
+    }
+
+    private function collectDeterministicCreateMatches(array &$matches, string $content, string $pattern, string $type, string $timezone): void
+    {
+        if (! preg_match_all($pattern, $content, $found, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            return;
+        }
+
+        foreach ($found as $match) {
+            $title = $this->cleanDeterministicTitle((string) ($match[1][0] ?? ''));
+            if ($title === '') {
+                continue;
+            }
+
+            $parameters = ['title' => $title];
+            if ($type === 'calendar_event.create') {
+                $startsAt = $this->deterministicLocalIso((string) ($match[2][0] ?? ''), $timezone);
+                $endsAt = $this->deterministicLocalIso((string) ($match[3][0] ?? ''), $timezone);
+                if ($startsAt === null) {
+                    continue;
+                }
+                $parameters['starts_at'] = $startsAt;
+                if ($endsAt !== null) {
+                    $parameters['ends_at'] = $endsAt;
+                }
+            } elseif ($type === 'reminder.create') {
+                $remindAt = $this->deterministicLocalIso((string) ($match[2][0] ?? ''), $timezone);
+                if ($remindAt === null) {
+                    continue;
+                }
+                $parameters['remind_at'] = $remindAt;
+            } elseif ($type === 'task.create') {
+                $dueAt = $this->deterministicLocalIso((string) ($match[2][0] ?? ''), $timezone);
+                if ($dueAt !== null) {
+                    $parameters['due_at'] = $dueAt;
+                }
+            }
+
+            $matches[] = [
+                'offset' => (int) ($match[0][1] ?? 0),
+                'action' => [
+                    'type' => $type,
+                    'risk' => 'low',
+                    'parameters' => $parameters,
+                ],
+            ];
+        }
+    }
+
+    private function deterministicTargetDate(string $content, array $contextPayload): ?Carbon
+    {
+        $timezone = $this->displayTimezoneFromClientContext((array) data_get($contextPayload, 'temporal_context.client_context', []))
+            ?? (string) data_get($contextPayload, 'agent_profile.settings.timezone', config('app.timezone', 'UTC'));
+        if (! $this->validTimezone($timezone)) {
+            $timezone = (string) config('app.timezone', 'UTC');
+        }
+
+        $now = now()->setTimezone($timezone);
+        $clientNow = data_get($contextPayload, 'temporal_context.client_context.current_local_time');
+        if (is_string($clientNow) && trim($clientNow) !== '') {
+            try {
+                $now = Carbon::parse($clientNow, $timezone);
+            } catch (\Throwable) {
+                $now = now()->setTimezone($timezone);
+            }
+        }
+
+        $lower = mb_strtolower($content);
+        $phrase = null;
+        if (preg_match('/\b(today|tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*\d{4})?)\b/iu', $lower, $match)) {
+            $phrase = (string) $match[1];
+        }
+
+        if ($phrase === null) {
+            return null;
+        }
+
+        try {
+            if ($phrase === 'today') {
+                return $now->copy()->startOfDay();
+            }
+            if ($phrase === 'tomorrow') {
+                return $now->copy()->addDay()->startOfDay();
+            }
+            if (preg_match('/^next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/iu', $phrase, $weekdayMatch)) {
+                return $this->nextWeekdayFrom($now, (string) $weekdayMatch[1]);
+            }
+            if (preg_match('/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/iu', $phrase, $weekdayMatch)) {
+                return $this->nextWeekdayFrom($now, (string) $weekdayMatch[1], allowToday: true);
+            }
+
+            return Carbon::parse($phrase, $timezone)->startOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function nextWeekdayFrom(Carbon $now, string $weekday, bool $allowToday = false): Carbon
+    {
+        $target = [
+            'sunday' => Carbon::SUNDAY,
+            'monday' => Carbon::MONDAY,
+            'tuesday' => Carbon::TUESDAY,
+            'wednesday' => Carbon::WEDNESDAY,
+            'thursday' => Carbon::THURSDAY,
+            'friday' => Carbon::FRIDAY,
+            'saturday' => Carbon::SATURDAY,
+        ][mb_strtolower($weekday)] ?? null;
+
+        if ($target === null) {
+            return $now->copy()->startOfDay();
+        }
+
+        $date = $now->copy()->startOfDay();
+        if (! $allowToday || $date->dayOfWeek !== $target) {
+            do {
+                $date->addDay();
+            } while ($date->dayOfWeek !== $target);
+        }
+
+        return $date;
+    }
+
+    private function resolveCalendarEventForText(ConversationSession $session, string $content, ?Carbon $targetDate): ?CalendarEvent
+    {
+        $query = CalendarEvent::query()
+            ->where('user_id', $session->user_id);
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+        if ($targetDate instanceof Carbon) {
+            $query->whereBetween('starts_at', [
+                $targetDate->copy()->startOfDay()->utc(),
+                $targetDate->copy()->endOfDay()->utc(),
+            ]);
+        } else {
+            $query->where('starts_at', '>=', now()->subDays(7));
+        }
+
+        return $this->bestScoredModelForText($query->latest('starts_at')->limit(20)->get(), $content, ['title']);
+    }
+
+    private function resolveReminderForText(ConversationSession $session, string $content, ?Carbon $targetDate, ?CalendarEvent $calendarEvent = null): ?Reminder
+    {
+        if ($calendarEvent instanceof CalendarEvent) {
+            $linked = Reminder::query()
+                ->where('user_id', $session->user_id)
+                ->where('workspace_id', $calendarEvent->workspace_id)
+                ->where('calendar_event_id', $calendarEvent->id)
+                ->orderBy('remind_at')
+                ->first();
+            if ($linked instanceof Reminder) {
+                return $linked;
+            }
+        }
+
+        $query = Reminder::query()
+            ->where('user_id', $session->user_id);
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+        if ($targetDate instanceof Carbon) {
+            $query->whereBetween('remind_at', [
+                $targetDate->copy()->subDay()->startOfDay()->utc(),
+                $targetDate->copy()->endOfDay()->utc(),
+            ]);
+        } else {
+            $query->where('remind_at', '>=', now()->subDays(7));
+        }
+
+        return $this->bestScoredModelForText($query->orderBy('remind_at')->limit(30)->get(), $content, ['title', 'notes']);
+    }
+
+    private function resolveTaskForText(ConversationSession $session, string $content, ?Carbon $targetDate): ?Task
+    {
+        $query = Task::query()
+            ->where('user_id', $session->user_id)
+            ->where('status', '!=', 'completed');
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+        if ($targetDate instanceof Carbon) {
+            $query->where(function ($query) use ($targetDate): void {
+                $query->whereBetween('due_at', [
+                    $targetDate->copy()->startOfDay()->utc(),
+                    $targetDate->copy()->endOfDay()->utc(),
+                ])->orWhereNull('due_at');
+            });
+        }
+
+        return $this->bestScoredModelForText($query->latest('updated_at')->limit(30)->get(), $content, ['title', 'notes']);
+    }
+
+    private function resolveNoteForText(ConversationSession $session, string $content): ?Note
+    {
+        $query = Note::query()
+            ->where('user_id', $session->user_id);
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+
+        return $this->bestScoredModelForText($query->latest('updated_at')->limit(30)->get(), $content, ['title', 'plain_text']);
+    }
+
+    private function bestScoredModelForText(Collection $models, string $content, array $fields): mixed
+    {
+        $tokens = $this->significantTextTokens($content);
+        if ($tokens === [] || $models->isEmpty()) {
+            return null;
+        }
+
+        $scored = $models
+            ->map(function (mixed $model) use ($tokens, $fields): array {
+                $haystack = collect($fields)
+                    ->map(fn (string $field): string => mb_strtolower((string) data_get($model, $field, '')))
+                    ->implode(' ');
+                $score = collect($tokens)
+                    ->filter(fn (string $token): bool => str_contains($haystack, $token))
+                    ->count();
+
+                return ['model' => $model, 'score' => $score];
+            })
+            ->filter(fn (array $row): bool => $row['score'] >= min(2, count($tokens)))
+            ->sortByDesc('score')
+            ->values();
+
+        if ($scored->isEmpty()) {
+            return null;
+        }
+
+        $topScore = $scored->first()['score'];
+        $top = $scored->filter(fn (array $row): bool => $row['score'] === $topScore)->values();
+
+        return $top->count() === 1 ? $top->first()['model'] : null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function significantTextTokens(string $content): array
+    {
+        $stopWords = [
+            'the', 'a', 'an', 'and', 'or', 'for', 'that', 'this', 'those', 'these', 'my', 'our',
+            'please', 'can', 'you', 'to', 'from', 'on', 'in', 'at', 'of', 'with', 'next', 'today',
+            'tomorrow', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+            'remove', 'delete', 'cancel', 'clear', 'update', 'edit', 'change', 'move', 'reschedule',
+            'rename', 'mark', 'complete', 'finish', 'event', 'events', 'calendar', 'block', 'schedule',
+            'appointment', 'meeting', 'reminder', 'reminders', 'remind', 'task', 'tasks', 'todo',
+            'note', 'notes', 'list', 'due',
+        ];
+
+        return collect(preg_split('/[^\pL\pN]+/u', mb_strtolower($content)) ?: [])
+            ->map(fn (string $token): string => trim($token))
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 3 && ! in_array($token, $stopWords, true))
+            ->unique()
+            ->take(8)
+            ->values()
+            ->all();
+    }
+
+    private function cleanDeterministicTitle(string $title): string
+    {
+        return str($title)
+            ->replaceMatches('/\s+/', ' ')
+            ->trim(" \t\n\r\0\x0B,.;:")
+            ->toString();
+    }
+
+    private function deterministicLocalIso(string $value, string $timezone): ?string
+    {
+        $value = trim($value, " \t\n\r\0\x0B,.;");
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value, $timezone)->toIso8601String();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function localPlannerResponse(array $plannerRoute, array $actions): array
+    {
+        return [
+            'id' => 'local-crud-planner',
+            'model' => (string) ($plannerRoute['model'] ?? 'local-crud-planner'),
+            'choices' => [[
+                'finish_reason' => 'stop',
+                'message' => [
+                    'role' => 'assistant',
+                    'content' => json_encode(['actions' => $actions], JSON_THROW_ON_ERROR),
+                ],
+            ]],
+            'usage' => [
+                'prompt_tokens' => 0,
+                'completion_tokens' => 0,
+                'total_tokens' => 0,
+            ],
+        ];
+    }
+
+    private function plannerActionsFromResponse(array $response): array
+    {
+        $content = $this->normalizedPlannerJson((string) data_get($response, 'choices.0.message.content', ''));
+        if ($content === '') {
+            return [];
+        }
+
+        try {
+            $decoded = json_decode($content, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $rawActions = is_array($decoded) && is_array($decoded['actions'] ?? null) ? $decoded['actions'] : [];
+
+        return collect($rawActions)
+            ->map(fn (mixed $action, int $index): ?array => is_array($action) ? $this->normalizePlannerAction($action, $index) : null)
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function normalizedPlannerJson(string $content): string
+    {
+        $trimmed = trim($content);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        if (preg_match('/```(?:json)?\s*(\{.*\})\s*```/s', $trimmed, $match)) {
+            return trim($match[1]);
+        }
+
+        $start = strpos($trimmed, '{');
+        $end = strrpos($trimmed, '}');
+        if ($start !== false && $end !== false && $end >= $start) {
+            return substr($trimmed, $start, $end - $start + 1);
+        }
+
+        return $trimmed;
+    }
+
+    private function normalizePlannerAction(array $action, int $index): ?array
+    {
+        $type = $this->normalizePlannerActionType((string) ($action['type'] ?? $action['action_type'] ?? ''));
+        if (! in_array($type, [
+            'calendar_event.create',
+            'calendar_event.update',
+            'calendar_event.delete',
+            'reminder.create',
+            'reminder.update',
+            'reminder.delete',
+            'task.create',
+            'task.update',
+            'task.delete',
+            'note.create',
+            'note.update',
+            'note.delete',
+        ], true)) {
+            return null;
+        }
+
+        $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+        if (! isset($parameters['title']) && isset($action['title'])) {
+            $parameters['title'] = $action['title'];
+        }
+
+        $normalized = [
+            'type' => $type,
+            'risk' => 'low',
+            'parameters' => $parameters,
+            'client_action_key' => is_scalar($action['client_action_key'] ?? null) ? (string) $action['client_action_key'] : 'action_'.$index,
+        ];
+
+        if (is_scalar($action['related_action_key'] ?? null)) {
+            $normalized['related_action_key'] = (string) $action['related_action_key'];
+        }
+        if (is_scalar($parameters['related_action_key'] ?? null)) {
+            $normalized['related_action_key'] = (string) $parameters['related_action_key'];
+            unset($normalized['parameters']['related_action_key']);
+        }
+
+        return $this->plannerActionHasRequiredFields($normalized) ? $normalized : null;
+    }
+
+    private function normalizePlannerActionType(string $type): string
+    {
+        $type = strtolower(trim($type));
+
+        return match ($type) {
+            'calendar.create', 'event.create', 'schedule.create', 'block.create', 'calendar_event' => 'calendar_event.create',
+            'calendar.update', 'event.update', 'schedule.update', 'block.update' => 'calendar_event.update',
+            'calendar.delete', 'event.delete', 'schedule.delete', 'block.delete' => 'calendar_event.delete',
+            'reminder', 'reminder.add' => 'reminder.create',
+            'reminder.edit' => 'reminder.update',
+            'reminder.remove' => 'reminder.delete',
+            'task', 'todo.create', 'to_do.create', 'task.add' => 'task.create',
+            'todo.update', 'to_do.update', 'task.edit' => 'task.update',
+            'todo.delete', 'to_do.delete', 'task.remove' => 'task.delete',
+            'note', 'note.add' => 'note.create',
+            'note.edit' => 'note.update',
+            'note.remove' => 'note.delete',
+            default => $type,
+        };
+    }
+
+    private function plannerActionHasRequiredFields(array $action): bool
+    {
+        $type = (string) ($action['type'] ?? '');
+        $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+        $hasTitle = filled($parameters['title'] ?? null);
+
+        return match ($type) {
+            'calendar_event.create' => $hasTitle && filled($parameters['starts_at'] ?? null),
+            'calendar_event.update' => filled($parameters['id'] ?? null) && $this->plannerActionHasUpdateFields($parameters, ['id']),
+            'calendar_event.delete' => filled($parameters['id'] ?? null),
+            'reminder.create' => $hasTitle && filled($parameters['remind_at'] ?? null),
+            'reminder.update' => filled($parameters['id'] ?? null) && $this->plannerActionHasUpdateFields($parameters, ['id']),
+            'reminder.delete' => filled($parameters['id'] ?? null),
+            'task.create', 'note.create' => $hasTitle,
+            'task.update', 'note.update' => filled($parameters['id'] ?? null) && $this->plannerActionHasUpdateFields($parameters, ['id']),
+            'task.delete', 'note.delete' => filled($parameters['id'] ?? null),
+            default => false,
+        };
+    }
+
+    private function plannerActionHasUpdateFields(array $parameters, array $excluded): bool
+    {
+        foreach ($parameters as $key => $value) {
+            if (in_array((string) $key, $excluded, true)) {
+                continue;
+            }
+            if (filled($value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function plannerActionsMeetExpected(array $actions, int $expectedWriteActionCount): bool
+    {
+        if ($actions === [] || count($actions) < $expectedWriteActionCount) {
+            return false;
+        }
+
+        return ! collect($actions)->contains(fn (mixed $action): bool => ! is_array($action) || ! $this->plannerActionHasRequiredFields($action));
+    }
+
+    private function recordPlannedCrudWorkItems(ConversationSession $session, ConversationMessage $message, array $actions): array
+    {
+        $planned = [];
+
+        foreach ($actions as $order => $action) {
+            if (! is_array($action)) {
+                continue;
+            }
+
+            $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+            $label = $this->workItemLabelForAction((string) ($action['type'] ?? ''), $parameters);
+            if ($label === '') {
+                continue;
+            }
+
+            $workItem = [
+                'work_item_id' => 'crud-plan-'.$message->id.'-'.$order,
+                'work_order' => $order,
+                'action_type' => (string) ($action['type'] ?? ''),
+                'label' => $label,
+            ];
+            $workItem['event'] = $this->recordEvent(
+                $session,
+                'assistant.work_item.planned',
+                $workItem,
+                'assistant.work',
+                'planned'
+            );
+
+            $planned[$order] = $workItem;
+        }
+
+        return $planned;
+    }
+
+    private function correlatePlannerAction(array $action, array $createdCalendarEventsByKey, ?int $lastCreatedCalendarEventId): array
+    {
+        if (($action['type'] ?? null) !== 'reminder.create') {
+            return $action;
+        }
+
+        $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+        if (! empty($parameters['calendar_event_id'])) {
+            return $action;
+        }
+
+        $relatedKey = is_scalar($action['related_action_key'] ?? null) ? (string) $action['related_action_key'] : '';
+        if ($relatedKey !== '' && isset($createdCalendarEventsByKey[$relatedKey])) {
+            $parameters['calendar_event_id'] = $createdCalendarEventsByKey[$relatedKey];
+        } elseif ($lastCreatedCalendarEventId !== null) {
+            $parameters['calendar_event_id'] = $lastCreatedCalendarEventId;
+        }
+
+        $action['parameters'] = $parameters;
+
+        return $action;
+    }
+
+    private function executePlannerAction(ConversationSession $session, array $action, ?array $workItem): array
+    {
+        $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
+        if ($workItem !== null) {
+            $events = $events
+                ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
+                ->values();
+        }
+        $failed = $events->contains(fn (ActivityEvent $event): bool => $event->status === 'failed');
+
+        return [[$action], $events, [
+            'ok' => ! $failed,
+            'action_type' => (string) ($action['type'] ?? ''),
+            'events' => $events->map(fn (ActivityEvent $event): array => [
+                'event_type' => $event->event_type,
+                'tool_name' => $event->tool_name,
+                'status' => $event->status,
+                'payload' => $event->payload,
+            ])->values()->all(),
+        ]];
+    }
+
+    private function createdCalendarEventIdFromEvents(Collection $events): ?int
+    {
+        foreach ($events as $event) {
+            if (! $event instanceof ActivityEvent || $event->event_type !== 'assistant.calendar_event.created') {
+                continue;
+            }
+
+            $id = data_get($event->payload ?? [], 'calendar_event_id');
+            if (is_numeric($id)) {
+                return (int) $id;
+            }
+        }
+
+        return null;
+    }
+
+    private function plannerActionKey(array $action): string
+    {
+        return is_scalar($action['client_action_key'] ?? null) ? (string) $action['client_action_key'] : '';
     }
 
     private function recordPlannedNativeWorkItems(ConversationSession $session, array $toolCalls): array
@@ -1033,6 +2178,15 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     private function searchNotesForTool(ConversationSession $session, array $arguments): array
     {
+        if (! $this->planLimits->canUseNotes(User::findOrFail($session->user_id))) {
+            return [
+                'ok' => false,
+                'tool' => 'search_notes',
+                'error_code' => 'subscription_limit_reached',
+                'message' => 'Notes are available on Premium, Pro, and Enterprise plans.',
+            ];
+        }
+
         $workspaceId = $this->toolWorkspaceId($session, $arguments);
         $query = Note::query()->where('user_id', $session->user_id)->where('workspace_id', $workspaceId)->with('folder');
         if (filled($arguments['query'] ?? null)) {
@@ -1379,6 +2533,61 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return (string) config('services.hermes_runtime.api_key', '');
     }
 
+    private function elapsedMs(float $startedAt): int
+    {
+        return max(0, (int) round((microtime(true) - $startedAt) * 1000));
+    }
+
+    private function toolRoutingMode(ConversationMessage $message): string
+    {
+        $text = mb_strtolower((string) $message->content);
+        if ($text === '') {
+            return 'full';
+        }
+
+        $externalTerms = [
+            'weather', 'traffic', 'news', 'price', 'prices', 'stock', 'flight', 'hotel',
+            'store hours', 'current', 'latest', 'near me', 'web', 'internet', 'look up',
+        ];
+        foreach ($externalTerms as $term) {
+            if (str_contains($text, $term)) {
+                return 'full';
+            }
+        }
+
+        $profileOrMemoryTerms = [
+            'remember that', 'forget that', 'forget my', 'bean preference', 'personality',
+            'voice', 'model', 'workspace memory', 'what did i ask', 'what did i say',
+        ];
+        foreach ($profileOrMemoryTerms as $term) {
+            if (str_contains($text, $term)) {
+                return 'full';
+            }
+        }
+
+        $appTerms = [
+            'task', 'todo', 'to-do', 'reminder', 'remind', 'calendar', 'schedule',
+            'event', 'block', 'appointment', 'meeting', 'note', 'list', 'due',
+        ];
+        foreach ($appTerms as $term) {
+            if (str_contains($text, $term)) {
+                return 'app_crud';
+            }
+        }
+
+        $writeTerms = [
+            'add ', 'create ', 'make ', 'set ', 'delete ', 'remove ', 'update ',
+            'change ', 'move ', 'reschedule ', 'complete ', 'mark ',
+        ];
+        foreach ($writeTerms as $term) {
+            if (str_contains($text, $term)) {
+                return 'app_crud';
+            }
+        }
+
+        return 'full';
+    }
+
     private function toolPromptFor(ConversationSession $session, ConversationMessage $message, array $modelRoute): string
     {
         return json_encode([
@@ -1418,7 +2627,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $history;
     }
 
-    private function toolContextPayload(ConversationSession $session, ConversationMessage $message): array
+    private function toolContextPayload(ConversationSession $session, ConversationMessage $message, string $toolMode = 'full'): array
     {
         $user = User::find($session->user_id);
         $workspace = $this->workspaceForSession($session, $user);
@@ -1427,7 +2636,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
             $user = $this->agentProfileService->syncUserOnboardingFlag($user, $profile);
         }
         $profileSettings = $profile->settings ?? [];
-        $memoryContext = ($user && $workspace)
+        $memoryContext = ($toolMode !== 'app_crud' && $user && $workspace)
             ? $this->memoryService->runtimeContext($user, $workspace, (string) $message->content, 8)
             : ['items' => [], 'summaries' => []];
 
@@ -1474,7 +2683,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 ],
             ] : null,
             'memory_context' => $memoryContext,
-            'recent_assistant_actions' => $this->recentAssistantActionsForContext($session),
+            'recent_assistant_actions' => $this->recentAssistantActionsForContext($session, $toolMode === 'app_crud' ? 5 : 10),
             'temporal_context' => [
                 'server_now_utc' => now()->utc()->toIso8601String(),
                 'server_today' => now()->toDateString(),
@@ -1489,13 +2698,13 @@ class HermesToolRuntimeService implements HermesRuntimeService
         ];
     }
 
-    private function recentAssistantActionsForContext(ConversationSession $session): array
+    private function recentAssistantActionsForContext(ConversationSession $session, int $limit = 10): array
     {
         return $session->activityEvents()
             ->where('event_type', 'like', 'assistant.%')
             ->whereIn('status', ['succeeded', 'recorded'])
             ->latest('id')
-            ->limit(10)
+            ->limit($limit)
             ->get()
             ->sortBy('id')
             ->map(fn (ActivityEvent $event): array => [
@@ -1523,6 +2732,7 @@ Conversation history and recent_assistant_actions can be stale because the user 
 When a user asks what/when/where about an item and the type is ambiguous, search the relevant app records before saying it is not found. For task-like words or chores, search tasks; for reminder-like alarms, search reminders; for note, list, idea, writing, or saved text requests, search notes; if unclear, search the likely record types.
 
 Use read tools when you need current app state. Use write tools when app state should change. Do not describe a dashboard change as complete unless a write tool result confirms it succeeded.
+For clear create/update/delete requests with multiple independent app changes, emit every necessary write tool call in the same assistant tool response and in the user's requested order. Do not wait for one write result before planning the next unless the later write truly needs a database id that cannot be inferred. For a same-request reminder tied to a same-request calendar event, still plan both changes together with matching titles/times; Laravel can correlate the created records.
 
 Laravel owns app mechanics: workspace access, database writes, validation, syncing, and tool results. Trust tool results. If a read/write tool says not found, ambiguous, or failed, respond naturally from that result.
 Timed read-tool *_at timestamps are formatted in the tool result timezone and match the user-visible app. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date.
@@ -1531,17 +2741,7 @@ Use external_lookup for live information outside HeyBean, including current stor
 Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no extra notes unless the user says otherwise. For note requests, create/update/delete Notes records with note tools rather than memory unless the user explicitly asks Bean to remember a preference/fact. For durable user preferences, stable constraints, identity facts, project context, or explicit "remember/forget" requests, use search_memory plus remember_memory/update_memory/forget_memory. Do not save ordinary one-off requests as durable memory. For "what did I ask/say/do" recall questions, use get_request_history or get_activity_timeline instead of guessing from recent context. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
 When setting recurrence, always use recurrence as one of: none, daily, weekly, monthly, yearly, specific_days, or interval. For custom intervals like "every 3 days", set recurrence to interval and put interval plus interval_unit in metadata. Never put an object in recurrence.
 
-Use the current workspace unless the user clearly names another accessible workspace. Adapt tone to agent_profile settings and memory. If onboarding is incomplete, run a quick onboarding interview and use update_agent_profile when enough preferences are provided.
-
-For the onboarding interview, collect only:
-- the user's name
-- optional location at city level only, not a street address or precise location. Ask this exact location question after learning the user's name, replacing {name}: Nice to meet you, {name}! What city are you in? This will help me be more useful, like when you ask about the weather, or for planning purposes. You can skip this if you'd like to keep your location private, just say "skip". If the user says "skip" or otherwise declines, do not ask for location again, do not store a city, and continue the onboarding interview.
-- what matters most day to day
-- what kind of personality the user wants Bean to have
-
-Ask one concise question at a time, except for the personality step. For the personality step, list these supported choices with short descriptions so the user understands the options: Balanced helper, Motivating coach, Detail organizer, Creative partner, Direct operator, and Gentle companion. Also tell the user they can select different voices in Settings > Bean preferences.
-
-When the user has provided enough onboarding details, call update_agent_profile with settings.onboarding.completed=true, settings.onboarding.name, settings.onboarding.city if a city was provided, settings.onboarding.priorities/context, and settings.personality_type set to one of: balanced, coach, organizer, creative, direct, gentle. A skipped location still counts as enough onboarding detail once the other required preferences are collected.
+Use the current workspace unless the user clearly names another accessible workspace. Adapt tone to agent_profile settings and memory. Do not run a first-login onboarding interview in normal chat; guided signup collects account and Bean preferences before the user reaches the dashboard. If the user explicitly asks to change Bean preferences later, use update_agent_profile with the requested settings.
 
 If runtime_context.voice_context.quick_reply is present, Bean already said that sentence aloud in this same voice turn. Do not repeat it, paraphrase it, recap it, or begin with the same acknowledgement. Continue naturally from it with only new information, the result of any work, or a concise next step.
 If runtime_context.voice_context.quick_reply_pending is true, a separate live voice sentence may be spoken while you work. Avoid generic openings and first-thought filler; give the substantive answer or result directly.
@@ -1552,9 +2752,9 @@ Respond to the user in natural language only. Never output JSON, tool arguments,
 PROMPT;
     }
 
-    private function nativeToolDefinitions(): array
+    private function nativeToolDefinitions(string $toolMode = 'full'): array
     {
-        return [
+        $tools = [
             $this->nativeTool('search_tasks', 'Search tasks in the current or specified workspace. Use this before updating a task when the matching item is not already known.', $this->searchTaskProperties()),
             $this->nativeTool('search_reminders', 'Search reminders in the current or specified workspace.', $this->searchReminderProperties()),
             $this->nativeTool('search_calendar_events', 'Search calendar events in the current or specified workspace.', $this->searchCalendarEventProperties()),
@@ -1608,6 +2808,35 @@ PROMPT;
                 'payload' => ['type' => 'object', 'additionalProperties' => true],
             ], ['event_type']),
         ];
+
+        if ($toolMode !== 'app_crud') {
+            return $tools;
+        }
+
+        $allowed = [
+            'search_tasks',
+            'search_reminders',
+            'search_calendar_events',
+            'search_notes',
+            'get_day_context',
+            'create_task',
+            'update_task',
+            'delete_task',
+            'create_reminder',
+            'update_reminder',
+            'delete_reminder',
+            'create_calendar_event',
+            'update_calendar_event',
+            'delete_calendar_event',
+            'create_note',
+            'update_note',
+            'delete_note',
+        ];
+
+        return collect($tools)
+            ->filter(fn (array $tool): bool => in_array((string) data_get($tool, 'function.name'), $allowed, true))
+            ->values()
+            ->all();
     }
 
     private function nativeTool(string $name, string $description, array $properties, array $required = []): array
@@ -2025,26 +3254,218 @@ PROMPT;
         return $this->workspaceService->resolveWorkspace($user, $session->workspace_id ?: null);
     }
 
+    private function toolOutputsAllSuccessfulWrites(array $toolOutputs): bool
+    {
+        if ($toolOutputs === []) {
+            return false;
+        }
+
+        foreach ($toolOutputs as $output) {
+            if (! is_array($output) || ($output['ok'] ?? false) !== true || ! filled($output['action_type'] ?? null)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function expectedWriteActionCount(ConversationMessage $message): int
+    {
+        $text = str((string) $message->content)
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s:.-]+/u', ' ')
+            ->squish()
+            ->toString();
+        if ($text === '') {
+            return 1;
+        }
+
+        $count = 0;
+        if (preg_match('/\b(task|tasks|todo|to do|to-do)\b/', $text)) {
+            $count++;
+        }
+        if (preg_match('/\b(reminder|reminders|remind me|remind)\b/', $text)) {
+            $count++;
+        }
+        if (preg_match('/\b(calendar|schedule|event|events|appointment|meeting|block)\b/', $text)) {
+            $count++;
+        }
+        if (preg_match('/\b(note|notes|folder|folders)\b/', $text)) {
+            $count++;
+        }
+
+        if ($count === 0 && preg_match('/\b(add|create|make|set|update|change|move|delete|remove|complete|mark)\b/', $text)) {
+            $count = 1;
+        }
+
+        return max(1, min($count, 6));
+    }
+
     private function nativeActionFallbackContent(array $actions): string
     {
-        if (count($actions) !== 1 || ! is_array($actions[0] ?? null)) {
+        $combinedDelete = $this->combinedDeleteFallbackContent($actions);
+        if ($combinedDelete !== null) {
+            return $combinedDelete;
+        }
+
+        $phrases = collect($actions)
+            ->filter(fn (mixed $action): bool => is_array($action))
+            ->map(fn (array $action): ?string => $this->nativeActionSummaryPhrase($action))
+            ->filter()
+            ->values();
+
+        if ($phrases->isEmpty()) {
             return 'Done.';
         }
 
-        $action = $actions[0];
-        $title = trim((string) data_get($action, 'parameters.title', ''));
-        $name = trim((string) data_get($action, 'parameters.name', ''));
+        return 'Done - '.$this->joinSummaryPhrases($phrases->all()).'.';
+    }
 
-        return match ((string) ($action['type'] ?? '')) {
-            'calendar_event.create', 'calendar.create' => $title !== '' ? "I added {$title} to your calendar." : 'I added that to your calendar.',
-            'task.create' => $title !== '' ? "I added {$title} to your tasks." : 'I added that to your tasks.',
-            'task.update' => $title !== '' ? "I updated {$title}." : 'I updated that task.',
-            'reminder.create' => $title !== '' ? "I set the reminder: {$title}." : 'I set that reminder.',
-            'note.create' => $title !== '' ? "I created the note {$title}." : 'I created that note.',
-            'note.update' => $title !== '' ? "I updated {$title}." : 'I updated that note.',
-            'event_category.create' => $name !== '' ? "I created {$name}." : 'I created that.',
-            default => 'Done.',
+    private function combinedDeleteFallbackContent(array $actions): ?string
+    {
+        $typed = collect($actions)
+            ->filter(fn (mixed $action): bool => is_array($action))
+            ->map(function (array $action): ?array {
+                $type = (string) ($action['type'] ?? '');
+                if (! str_ends_with($type, '.delete') && ! in_array($type, ['calendar.delete'], true)) {
+                    return null;
+                }
+
+                $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+                $kind = match ($type) {
+                    'calendar_event.delete', 'calendar.delete' => 'calendar event',
+                    'reminder.delete' => 'reminder',
+                    'task.delete' => 'task',
+                    'note.delete' => 'note',
+                    default => null,
+                };
+
+                return $kind === null ? null : [
+                    'kind' => $kind,
+                    'title' => $this->summaryTitle($parameters),
+                ];
+            })
+            ->filter()
+            ->values();
+
+        if ($typed->count() < 2 || $typed->count() !== count($actions)) {
+            return null;
+        }
+
+        $titles = $typed->pluck('title')->filter()->unique()->values();
+        if ($titles->count() !== 1) {
+            return null;
+        }
+
+        $kinds = $typed->pluck('kind')->unique()->values()->all();
+
+        return 'Done - I deleted the '.$this->joinSummaryPhrases($kinds).' for '.$titles->first().'.';
+    }
+
+    private function nativeActionSummaryPhrase(array $action): ?string
+    {
+        $type = (string) ($action['type'] ?? '');
+        $parameters = is_array($action['parameters'] ?? null) ? $action['parameters'] : [];
+        $title = $this->summaryTitle($parameters);
+
+        return match ($type) {
+            'calendar_event.create', 'calendar.create' => 'I added '.$this->summaryObject($title, 'the event').' to your calendar'.$this->calendarTimeSummary($parameters),
+            'calendar_event.update', 'calendar.update' => 'I updated '.$this->summaryObject($title, 'the calendar event').$this->calendarTimeSummary($parameters),
+            'calendar_event.delete', 'calendar.delete' => 'I deleted '.$this->summaryObject($title, 'the calendar event'),
+            'task.create' => 'I added '.$this->summaryObject($title, 'the task').' to your tasks'.$this->singleTimeSummary($parameters['due_at'] ?? null, ' due '),
+            'task.update' => 'I updated '.$this->summaryObject($title, 'the task').$this->singleTimeSummary($parameters['due_at'] ?? null, ' due '),
+            'task.delete' => 'I deleted '.$this->summaryObject($title, 'the task'),
+            'reminder.create' => 'I set '.$this->summaryObject($title, 'the reminder').$this->singleTimeSummary($parameters['remind_at'] ?? null, ' for '),
+            'reminder.update' => 'I updated '.$this->summaryObject($title, 'the reminder').$this->singleTimeSummary($parameters['remind_at'] ?? null, ' for '),
+            'reminder.delete' => 'I deleted '.$this->summaryObject($title, 'the reminder'),
+            'note.create' => 'I created '.$this->summaryObject($title, 'the note'),
+            'note.update' => 'I updated '.$this->summaryObject($title, 'the note'),
+            'note.delete' => 'I deleted '.$this->summaryObject($title, 'the note'),
+            'note_folder.create' => 'I created '.$this->summaryObject($title, 'the folder'),
+            'note_folder.update' => 'I updated '.$this->summaryObject($title, 'the folder'),
+            'note_folder.delete' => 'I deleted '.$this->summaryObject($title, 'the folder'),
+            'event_category.create' => 'I created '.$this->summaryObject($title, 'the event category'),
+            'event_category.update' => 'I updated '.$this->summaryObject($title, 'the event category'),
+            'event_category.delete' => 'I deleted '.$this->summaryObject($title, 'the event category'),
+            'memory.create' => 'I saved that to Bean knowledge',
+            'memory.update' => 'I updated Bean knowledge',
+            'memory.delete' => 'I removed that from Bean knowledge',
+            'agent_profile.update' => 'I updated Bean settings',
+            'workspace_memory.note' => 'I saved that workspace knowledge',
+            default => null,
         };
+    }
+
+    private function summaryTitle(array $parameters): string
+    {
+        foreach (['title', 'name', 'match_title', 'summary', 'reason', 'content'] as $key) {
+            $value = trim((string) ($parameters[$key] ?? ''));
+            if ($value !== '') {
+                return str($value)->squish()->limit(80, '')->toString();
+            }
+        }
+
+        return '';
+    }
+
+    private function summaryObject(string $title, string $fallback): string
+    {
+        return $title !== '' ? $title : $fallback;
+    }
+
+    private function calendarTimeSummary(array $parameters): string
+    {
+        $startsAt = $this->summaryDateTime($parameters['starts_at'] ?? $parameters['start_at'] ?? null);
+        $endsAt = $this->summaryDateTime($parameters['ends_at'] ?? $parameters['end_at'] ?? null);
+        if ($startsAt === null) {
+            return '';
+        }
+
+        if ($endsAt === null) {
+            return ' for '.$startsAt;
+        }
+
+        return ' from '.$startsAt.' to '.$endsAt;
+    }
+
+    private function singleTimeSummary(mixed $value, string $prefix): string
+    {
+        $dateTime = $this->summaryDateTime($value);
+
+        return $dateTime === null ? '' : $prefix.$dateTime;
+    }
+
+    private function summaryDateTime(mixed $value): ?string
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($raw)->format('M j, g:i A');
+        } catch (\Throwable) {
+            return str($raw)->squish()->limit(60, '')->toString();
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $phrases
+     */
+    private function joinSummaryPhrases(array $phrases): string
+    {
+        $phrases = array_values(array_filter($phrases, fn (string $phrase): bool => trim($phrase) !== ''));
+        if (count($phrases) <= 1) {
+            return $phrases[0] ?? 'Done';
+        }
+
+        if (count($phrases) === 2) {
+            return $phrases[0].' and '.$phrases[1];
+        }
+
+        $last = array_pop($phrases);
+
+        return implode(', ', $phrases).', and '.$last;
     }
 
     private function normalizedAssistantContent(mixed $content): string

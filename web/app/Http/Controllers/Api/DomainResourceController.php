@@ -163,6 +163,10 @@ class DomainResourceController extends Controller
 
     public function listNoteFolders(Request $request): JsonResponse
     {
+        if ($response = $this->enforceNotesAccess($request)) {
+            return $response;
+        }
+
         return $this->listed(
             $this->scoped(NoteFolder::query(), $request)
                 ->orderBy('sort_order')
@@ -174,6 +178,10 @@ class DomainResourceController extends Controller
 
     public function storeNoteFolder(Request $request): JsonResponse
     {
+        if ($response = $this->enforceNotesAccess($request)) {
+            return $response;
+        }
+
         $attributes = $this->owned($request, $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
@@ -193,6 +201,10 @@ class DomainResourceController extends Controller
 
     public function updateNoteFolder(Request $request, string $noteFolder): JsonResponse
     {
+        if ($response = $this->enforceNotesAccess($request)) {
+            return $response;
+        }
+
         $model = $this->scoped(NoteFolder::query(), $request, false)->findOrFail($noteFolder);
         $model->update($request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:120'],
@@ -205,6 +217,10 @@ class DomainResourceController extends Controller
 
     public function destroyNoteFolder(Request $request, string $noteFolder): JsonResponse
     {
+        if ($response = $this->enforceNotesAccess($request)) {
+            return $response;
+        }
+
         $model = $this->scoped(NoteFolder::query(), $request, false)->findOrFail($noteFolder);
         Note::query()
             ->where('user_id', $request->user()->id)
@@ -216,6 +232,10 @@ class DomainResourceController extends Controller
 
     public function listNotes(Request $request): JsonResponse
     {
+        if ($response = $this->enforceNotesAccess($request)) {
+            return $response;
+        }
+
         $query = $this->scoped(Note::query()->with('folder'), $request);
         if ($request->filled('folder_id')) {
             $query->where('note_folder_id', $request->integer('folder_id'));
@@ -244,6 +264,10 @@ class DomainResourceController extends Controller
 
     public function storeNote(Request $request): JsonResponse
     {
+        if ($response = $this->enforceNotesAccess($request)) {
+            return $response;
+        }
+
         $workspace = $this->workspace($request);
         $validated = $request->validate([
             'title' => ['nullable', 'string', 'max:255'],
@@ -269,6 +293,10 @@ class DomainResourceController extends Controller
 
     public function updateNote(Request $request, string $note): JsonResponse
     {
+        if ($response = $this->enforceNotesAccess($request)) {
+            return $response;
+        }
+
         $model = $this->scoped(Note::query(), $request, false)->findOrFail($note);
         $validated = $request->validate([
             'title' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -295,6 +323,10 @@ class DomainResourceController extends Controller
 
     public function destroyNote(Request $request, string $note): JsonResponse
     {
+        if ($response = $this->enforceNotesAccess($request)) {
+            return $response;
+        }
+
         $model = $this->scoped(Note::query(), $request, false)->findOrFail($note);
 
         return $this->destroyLinkedItems($request, $model, 'notes');
@@ -1822,6 +1854,13 @@ class DomainResourceController extends Controller
                 report($error);
             }
         });
+    }
+
+    private function enforceNotesAccess(Request $request): ?JsonResponse
+    {
+        return $this->planLimits->canUseNotes($request->user())
+            ? null
+            : $this->planLimits->limitResponse('Notes are available on Premium, Pro, and Enterprise plans.');
     }
 
     /**

@@ -63,12 +63,13 @@ if (mount) {
             label: 'Premium',
             price: '$19.99',
             yearlyPrice: '$199.99',
-            summary: '5 workspaces, expanded Bean capacity, email reminders, recurring routines, multiple calendars, and 1 year of history.',
+            summary: '5 workspaces, expanded Bean capacity, Notes, email reminders, recurring routines, multiple calendars, and 1 year of history.',
             trial: 'Premium 14-day free trial selected',
             bestFor: 'Best for busy households and daily routines.',
             popular: true,
             features: [
                 '5 workspaces for home, work, school, and projects',
+                'Notes with folders for plans, lists, and longer writing',
                 'Push and email reminders with recurring routines',
                 'Multiple calendars and 1 year of history',
             ],
@@ -77,11 +78,12 @@ if (mount) {
             label: 'Pro',
             price: '$49.99',
             yearlyPrice: '$499.99',
-            summary: 'Unlimited workspaces, maximum Bean capacity, unlimited connected accounts, full history, and priority background work.',
+            summary: 'Unlimited workspaces, maximum Bean capacity, Notes, unlimited connected accounts, full history, and priority background work.',
             trial: 'Pro 14-day free trial selected',
             bestFor: 'For running Bean across every part of life.',
             features: [
                 'Unlimited workspaces and connected accounts',
+                'Notes across every workspace',
                 'Highest Bean usage and external tool budget',
                 "Full Bean's Knowledge, priority background work, priority support",
             ],
@@ -559,6 +561,7 @@ if (mount) {
     }
 
     function currentThemeKey() {
+        if (state.phase !== 'signedIn' && state.phase !== 'subscription') return 'green';
         return normalizeThemeKey(state.user?.theme);
     }
 
@@ -568,6 +571,7 @@ if (mount) {
     }
 
     function currentThemeModeKey() {
+        if (state.phase !== 'signedIn' && state.phase !== 'subscription') return 'auto';
         return normalizeThemeModeKey(state.user?.theme_mode || state.user?.themeMode);
     }
 
@@ -672,14 +676,15 @@ if (mount) {
                 // Chat history should hydrate opportunistically and never block the app shell.
             });
 
+            const notesAllowed = notesEnabled();
             const [summary, tasks, pastTasks, reminders, calendar, noteFolders, notes, memoryItems, memorySummaries, memoryHistory, categories, googleStatus, outlookStatus, subscription, billingPayment] = await Promise.all([
                 recover(api(workspaceScopedPath('/today')), state.summary || {}),
                 recover(api(workspaceScopedPath('/tasks')), state.tasks),
                 recover(api(workspaceScopedPath('/tasks/past')), []),
                 recover(api(workspaceScopedPath('/reminders')), state.reminders),
                 recover(api(workspaceScopedPath('/calendar-events?skip_google_sync=1&skip_outlook_sync=1')), state.calendar),
-                recover(api(workspaceScopedPath('/note-folders')), state.noteFolders),
-                recover(api(workspaceScopedPath('/notes')), state.notes),
+                notesAllowed ? recover(api(workspaceScopedPath('/note-folders')), state.noteFolders) : Promise.resolve([]),
+                notesAllowed ? recover(api(workspaceScopedPath('/notes')), state.notes) : Promise.resolve([]),
                 recover(api(workspaceScopedPath('/memory-items')), state.memoryItems),
                 recover(api(workspaceScopedPath('/memory-summaries')), state.memorySummaries),
                 recover(api(workspaceScopedPath('/memory/request-history?limit=10')), state.memoryHistory),
@@ -1065,10 +1070,7 @@ if (mount) {
     }
 
     function needsBeanOnboarding() {
-        if (state.user?.needs_bean_onboarding !== undefined) return state.user.needs_bean_onboarding === true;
-        if (state.user?.needsBeanOnboarding !== undefined) return state.user.needsBeanOnboarding === true;
-        const userComplete = state.user?.onboard_complete === true || state.user?.onboardComplete === true;
-        return !userComplete || !profilePreferencesReady();
+        return false;
     }
 
     function onboardingIntroMessage() {
@@ -1816,7 +1818,19 @@ if (mount) {
             </section>`;
     }
 
+    function planLimitUpgradeMarkup(message) {
+        return `
+            <section class="hb-card hb-card-pad hb-board-card">
+                ${sectionTitle(icons.notes, 'Upgrade to keep going', message)}
+                <a class="hb-button" href="/pricing">View plans</a>
+            </section>`;
+    }
+
     function notesMarkup() {
+        if (!notesEnabled()) {
+            return planLimitUpgradeMarkup('Notes are available on Premium, Pro, and Enterprise plans.');
+        }
+
         const folders = normalizeNoteFolders(state.noteFolders);
         const notes = filteredNotes();
         const selected = selectedNote();
@@ -2424,6 +2438,7 @@ if (mount) {
                 ${adminSwitchMarkup('recurring_reminders_enabled', 'Recurring reminders', 'Allow recurring reminders for this tier/customer.', Boolean(limits.recurring_reminders_enabled ?? limits.recurringRemindersEnabled))}
                 ${adminSwitchMarkup('recurring_calendar_enabled', 'Recurring calendar events', 'Allow recurring calendar event series.', Boolean(limits.recurring_calendar_enabled ?? limits.recurringCalendarEnabled))}
                 ${adminSwitchMarkup('email_reminders_enabled', 'Email reminders', 'Allow reminder delivery by email.', Boolean(limits.email_reminders_enabled ?? limits.emailRemindersEnabled))}
+                ${adminSwitchMarkup('notes_enabled', 'Notes', 'Allow Notes and note folders.', Boolean(limits.notes_enabled ?? limits.notesEnabled))}
                 ${adminSwitchMarkup('priority_background_work', 'Priority background work', 'Prefer this tier/customer for priority background handling.', Boolean(limits.priority_background_work ?? limits.priorityBackgroundWork))}
             </div>`;
     }
@@ -6499,6 +6514,7 @@ if (mount) {
             recurring_reminders_enabled: checked('recurring_reminders_enabled'),
             recurring_calendar_enabled: checked('recurring_calendar_enabled'),
             email_reminders_enabled: checked('email_reminders_enabled'),
+            notes_enabled: checked('notes_enabled'),
             priority_background_work: checked('priority_background_work'),
         };
     }
@@ -12040,6 +12056,8 @@ if (mount) {
         clearToken();
         state.phase = 'signedOut';
         state.authMode = 'login';
+        state.user = null;
+        state.summary = null;
         history.pushState({}, '', '/login');
         render();
     }
@@ -12053,6 +12071,8 @@ if (mount) {
             clearToken();
             state.phase = 'signedOut';
             state.authMode = 'login';
+            state.user = null;
+            state.summary = null;
             state.notice = 'Your account has been deleted.';
             history.pushState({}, '', '/login');
             render();
@@ -12557,6 +12577,12 @@ if (mount) {
 
     function currentPlanLimits() {
         return state.user?.plan_limits || state.user?.planLimits || {};
+    }
+
+    function notesEnabled() {
+        if (userIsAdmin()) return true;
+        const limits = currentPlanLimits();
+        return Boolean(limits.notes_enabled ?? limits.notesEnabled);
     }
 
     function calendarHistoryCutoffDate() {

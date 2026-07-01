@@ -11,7 +11,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' as stripe;
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:url_launcher/url_launcher.dart';
 
 import 'bean_realtime_conversation.dart';
@@ -46,8 +49,8 @@ class DefaultStripePaymentHandler implements StripePaymentHandler {
         customerEphemeralKeySecret: setup.customerEphemeralKeySecret,
         merchantDisplayName: 'HeyBean',
         primaryButtonLabel: primaryButtonLabel,
-        allowsDelayedPaymentMethods: false,
-        style: ThemeMode.light,
+        allowsDelayedPaymentMethods: true,
+        style: ThemeMode.system,
         billingDetails: stripe.BillingDetails(
           name: user.name,
           email: user.email,
@@ -774,6 +777,7 @@ class _HermesBeanAppState extends State<HermesBeanApp> {
     return MaterialApp(
       title: 'Hermes Bean',
       debugShowCheckedModeBanner: false,
+      themeAnimationDuration: Duration.zero,
       theme: HeyBeanTheme.themeDataFor(_themeKey, Brightness.light),
       darkTheme: HeyBeanTheme.themeDataFor(_themeKey, Brightness.dark),
       themeMode: heyBeanThemeModeForKey(_themeModeKey).materialThemeMode,
@@ -1343,17 +1347,30 @@ class HeyBeanTheme {
           vertical: 14,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: borderColor),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: borderColor),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(
             color: accentColor.withValues(alpha: .62),
+            width: 1.2,
+          ),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: isDarkTheme ? darkDestructive : lightDestructive,
+          ),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: isDarkTheme ? darkDestructive : lightDestructive,
             width: 1.2,
           ),
         ),
@@ -1665,7 +1682,13 @@ Future<List<Object>?> _confirmWorkspaceDeleteSelection(
   );
 }
 
-enum _AuthPhase { loading, signedOut, planSelection, signedIn }
+enum _AuthPhase {
+  loading,
+  signedOut,
+  guidedOnboarding,
+  planSelection,
+  signedIn,
+}
 
 enum _HomeDestination { today, tasks, bean, reminders, notes, memory, settings }
 
@@ -1921,6 +1944,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _beanWorkEventFloorId = 0;
   bool _beanWorkFinalized = false;
   final Set<int> _beanWorkAppliedEventIds = <int>{};
+  final Set<int> _beanDashboardRefreshEventIds = <int>{};
   final Set<String> _beanWorkStagedCompletionIds = <String>{};
   final Set<Timer> _beanWorkStageTimers = <Timer>{};
   Timer? _beanWorkStatusClearTimer;
@@ -1980,6 +2004,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void _applyUserTheme(HermesUser? user) {
     widget.onThemeChanged(user?.theme ?? 'green');
     widget.onThemeModeChanged(user?.themeMode ?? 'auto');
+  }
+
+  bool get _notesEnabled {
+    final user = _user;
+    return user != null && (user.isAdmin || user.planLimits.notesEnabled);
   }
 
   void _markDashboardDataMutated() {
@@ -2522,7 +2551,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _beanWorkItems = [
         for (var i = 0; i < _beanWorkItems.length; i++)
           if (i == placeholderIndex)
-            _beanWorkItems[i].copyWith(
+            _BeanWorkItem(
+              id: id,
               label: cleanLabel,
               status: cleanStatus,
               resolvedByEvent: true,
@@ -2611,6 +2641,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       (maxId, event) => math.max(maxId, event.id),
     );
     _beanWorkAppliedEventIds.clear();
+    _beanDashboardRefreshEventIds.clear();
     _beanWorkFinalized = false;
     _beanWorkStagedCompletionIds.clear();
     _cancelBeanWorkStageTimers();
@@ -2635,9 +2666,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _beanWorkPlaceholderIndex(String label) {
     final target = _beanWorkTargetForLabel(label);
     final subjectKey = _beanWorkSubjectKeyForLabel(label);
-    return _beanWorkItems.indexWhere((item) {
+    final preciseIndex = _beanWorkItems.indexWhere((item) {
       return _beanWorkItemCanResolvePlaceholder(item, target, subjectKey);
     });
+    if (preciseIndex >= 0) return preciseIndex;
+    if (target.isEmpty) return -1;
+    final targetOnlyMatches = <int>[];
+    for (var index = 0; index < _beanWorkItems.length; index++) {
+      final item = _beanWorkItems[index];
+      if ((!item.id.startsWith('request-') && item.id != 'realtime-request') ||
+          item.resolvedByEvent ||
+          item.done) {
+        continue;
+      }
+      final placeholderTarget = _beanWorkTargetForLabel(item.label);
+      if (placeholderTarget == target) targetOnlyMatches.add(index);
+    }
+    return targetOnlyMatches.length == 1 ? targetOnlyMatches.first : -1;
   }
 
   bool _beanWorkHasPendingPlaceholderForLabel(String label) {
@@ -2748,11 +2793,491 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     caseSensitive: false,
   ).hasMatch(label.trim());
 
-  void _ensureBeanRequestWorkItem(String content, {bool freshRequest = false}) {
+  void _ensureBeanRequestWorkItem(
+    String content, {
+    String status = 'running',
+    bool freshRequest = false,
+  }) {
     if (_beanRequestIsCapabilityQuestion(content)) return;
+    final labels = _beanWorkLabelsForTurn(content);
+    if (labels.isEmpty) return;
     if (freshRequest) {
       _prepareBeanWorkForFreshRequest();
     }
+    for (var index = 0; index < labels.length; index++) {
+      _upsertBeanWorkItem('request-$index', labels[index], status: status);
+    }
+  }
+
+  List<String> _beanWorkLabelsForTurn(String content) {
+    final directLabels = _beanWorkLabelsForRequest(content);
+    if (directLabels.isNotEmpty) return directLabels;
+    if (!_beanWorkIsAffirmativeFollowUp(content)) return const [];
+    final lastAssistant = _messages.reversed.where(
+      (message) =>
+          message.role == 'assistant' &&
+          (message.content ?? '').trim().isNotEmpty,
+    );
+    if (lastAssistant.isEmpty) return const [];
+    return _beanWorkLabelsForAssistantProposal(
+      lastAssistant.first.content ?? '',
+    );
+  }
+
+  List<String> _beanWorkLabelsForRequest(String content) {
+    final command = _normalizedVoiceCommand(content);
+    if (command.isEmpty) return const [];
+    if (_beanCommandIsCapabilityQuestion(command)) return const [];
+    final clauses = _beanWorkRequestClauses(command);
+    final labels = <String>[];
+    String? inheritedSubject;
+    for (final clause in clauses) {
+      final clauseTarget = _beanWorkTargetForClause(clause);
+      final label = _beanWorkLabelForClause(
+        clause,
+        inheritedTarget: clauseTarget,
+        inheritedSubject: inheritedSubject,
+        scheduleContext: _beanWorkClauseHasScheduleContext(clause),
+      );
+      inheritedSubject = _beanWorkSubjectForClause(clause) ?? inheritedSubject;
+      if (label == null || _isGenericBeanWorkLabel(label)) continue;
+      if (labels.contains(label)) continue;
+      labels.add(label);
+    }
+    if (labels.isNotEmpty) return labels.take(6).toList();
+    final fallback = _beanWorkLabelForClause(
+      command,
+      inheritedTarget: _beanWorkTargetForClause(command),
+      scheduleContext: _beanWorkClauseHasScheduleContext(command),
+    );
+    return fallback == null || _isGenericBeanWorkLabel(fallback)
+        ? const []
+        : [fallback];
+  }
+
+  bool _beanWorkClauseHasScheduleContext(String command) =>
+      RegExp(
+        r'\b(schedule|calendar|event|appointment|meeting)\b|\bblock\s+on\s+(?:my\s+|the\s+)?schedule\b',
+      ).hasMatch(command) ||
+      _beanWorkClauseLooksLikeScheduleBlock(command);
+
+  bool _beanWorkIsAffirmativeFollowUp(String content) {
+    final command = _normalizedVoiceCommand(content);
+    if (command.isEmpty) return false;
+    return RegExp(
+      r'^(yes|yeah|yep|yup|sure|ok|okay|please|yes please|sure please|do it|go ahead|that works|sounds good)$',
+    ).hasMatch(command);
+  }
+
+  List<String> _beanWorkLabelsForAssistantProposal(String content) {
+    final text = content.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return const [];
+    final normalized = _normalizedVoiceCommand(text);
+    final labels = <String>[];
+
+    final calendarMatch = RegExp(
+      r'\badd\s+(.+?)\s+to\s+(?:your\s+|my\s+)?calendar\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (calendarMatch != null) {
+      final eventNames = _beanWorkProposalItems(calendarMatch.group(1) ?? '');
+      for (final name in eventNames) {
+        labels.add('Creating calendar event: $name');
+      }
+      if (RegExp(r'\breminder(?:s)?\b.*\bfor each\b').hasMatch(normalized)) {
+        for (final name in eventNames) {
+          labels.add('Creating reminder: $name');
+        }
+      } else if (RegExp(r'\breminder(?:s)?\b').hasMatch(normalized) &&
+          eventNames.isNotEmpty) {
+        labels.add('Creating reminder: ${eventNames.first}');
+      }
+    }
+
+    final taskMatch = RegExp(
+      r'\badd\s+(.+?)\s+to\s+(?:your\s+|my\s+)?tasks\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (taskMatch != null) {
+      for (final name in _beanWorkProposalItems(taskMatch.group(1) ?? '')) {
+        labels.add('Creating task: $name');
+      }
+    }
+
+    final noteMatch = RegExp(
+      r'\b(?:create|add)\s+(.+?)\s+(?:as\s+)?(?:a\s+)?note\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (noteMatch != null) {
+      for (final name in _beanWorkProposalItems(noteMatch.group(1) ?? '')) {
+        labels.add('Creating note: $name');
+      }
+    }
+
+    return labels
+        .where((label) => label.trim().isNotEmpty)
+        .toSet()
+        .take(6)
+        .toList();
+  }
+
+  List<String> _beanWorkProposalItems(String raw) {
+    var text = raw
+        .replaceAll(RegExp(r'\([^)]*\)'), ' ')
+        .replaceAll(RegExp(r'\bnow\b', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    text = text.replaceAll(RegExp(r'^(the|a|an)\s+', caseSensitive: false), '');
+    if (text.isEmpty) return const [];
+    return text
+        .split(RegExp(r'\s*,\s*|\s+\band\b\s+', caseSensitive: false))
+        .map((item) => item.trim())
+        .where((item) => item.length >= 2)
+        .map((item) => item[0].toUpperCase() + item.substring(1))
+        .toList();
+  }
+
+  List<String> _beanWorkRequestClauses(String command) {
+    final normalized = command
+        .replaceAll(RegExp(r'\b(?:and then|then)\b'), ' and ')
+        .replaceAll(RegExp(r'\s*,\s*'), ' and ');
+    final clauses = normalized
+        .split(RegExp(r'\s+\band\b\s+', caseSensitive: false))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    return clauses.isEmpty ? [command] : clauses;
+  }
+
+  String? _beanWorkLabelForClause(
+    String clause, {
+    required String inheritedTarget,
+    String? inheritedSubject,
+    bool scheduleContext = false,
+  }) {
+    final command = clause.trim();
+    if (command.isEmpty) return null;
+    final clauseTarget = _beanWorkTargetForClause(command);
+    final effectiveTarget = clauseTarget.isEmpty
+        ? inheritedTarget
+        : clauseTarget;
+    final targetsEvent =
+        RegExp(
+          r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
+        ).hasMatch(command) ||
+        effectiveTarget == 'event';
+    final targetsTask =
+        RegExp(r'\b(task|tasks|todo|to-do)\b').hasMatch(command) ||
+        effectiveTarget == 'task';
+    final targetsReminder =
+        RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command) ||
+        effectiveTarget == 'reminder';
+    final targetsNote =
+        RegExp(
+          r'\b(note|notes|folder|folders|list|lists)\b',
+        ).hasMatch(command) ||
+        effectiveTarget == 'note';
+    final targetsMemory =
+        RegExp(
+          r'\b(remember|memory|forget|preference|preferences)\b',
+        ).hasMatch(command) ||
+        effectiveTarget == 'memory';
+    final parsedSubject = _beanWorkSubjectForClause(command);
+    final subject =
+        targetsReminder &&
+            inheritedSubject != null &&
+            _beanWorkReminderClauseUsesInheritedSubject(command, parsedSubject)
+        ? inheritedSubject
+        : parsedSubject ?? inheritedSubject;
+    String withSubject(String base) =>
+        subject == null ? base : '$base: ${_beanWorkFormatSubject(subject)}';
+    final scheduleActivityAsEvent =
+        scheduleContext &&
+        effectiveTarget == 'event' &&
+        _beanWorkLooksLikeSchedulableActivity(command);
+    if (RegExp(r'\b(delete|remove|cancel)\b').hasMatch(command)) {
+      if (targetsMemory) return withSubject('Forgetting knowledge');
+      if (targetsEvent) return withSubject('Deleting event');
+      if (targetsReminder) return withSubject('Deleting reminder');
+      if (targetsTask) return withSubject('Deleting task');
+      if (targetsNote) return withSubject('Deleting note');
+      return 'Deleting item';
+    }
+    if (RegExp(r'\b(move|reschedule|update|change)\b').hasMatch(command)) {
+      if (targetsMemory) return withSubject('Updating knowledge');
+      if (targetsEvent) return withSubject('Updating event');
+      if (targetsReminder) return withSubject('Updating reminder');
+      if (targetsTask) return withSubject('Updating task');
+      if (targetsNote) return withSubject('Updating note');
+      return 'Updating item';
+    }
+    if (RegExp(
+          r'\b(add|create|put|schedule|write|save|set)\b',
+        ).hasMatch(command) ||
+        scheduleActivityAsEvent) {
+      if (subject == null && _beanWorkClauseReferencesPriorItems(command)) {
+        return null;
+      }
+      if (targetsMemory) return withSubject('Saving knowledge');
+      if (targetsEvent) return withSubject('Creating event');
+      if (targetsReminder) return withSubject('Creating reminder');
+      if (targetsTask) return withSubject('Creating task');
+      if (targetsNote) return withSubject('Creating note');
+      return 'Creating item';
+    }
+    if (RegExp(r'\b(complete|finish|mark)\b').hasMatch(command)) {
+      if (targetsTask) return withSubject('Updating task');
+      if (targetsReminder) return withSubject('Updating reminder');
+      return 'Updating item';
+    }
+    if (RegExp(r'\b(remember|memory)\b').hasMatch(command)) {
+      return 'Saving knowledge';
+    }
+    if (RegExp(r'\b(plan|organize|prioritize)\b').hasMatch(command)) {
+      return 'Planning request';
+    }
+    return 'Working on request';
+  }
+
+  bool _beanWorkReminderClauseUsesInheritedSubject(
+    String command,
+    String? parsedSubject,
+  ) {
+    if (parsedSubject == null) return true;
+    if (RegExp(
+      r'\b(called|named|titled|labelled|labeled|that says|saying|with title|with the title)\b',
+    ).hasMatch(command)) {
+      return false;
+    }
+    if (_beanWorkSubjectLooksLikeTiming(parsedSubject)) return true;
+    return RegExp(
+      r'\b(today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|night)\b',
+    ).hasMatch(parsedSubject);
+  }
+
+  String _beanWorkFormatSubject(String subject) {
+    final text = subject.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return text;
+    return text[0].toUpperCase() + text.substring(1);
+  }
+
+  bool _beanWorkClauseReferencesPriorItems(String command) =>
+      RegExp(
+        r'\b(these|those|them|that|it|the above|all of that)\b',
+      ).hasMatch(command) &&
+      RegExp(r'\b(add|create|put|schedule|save|write|set)\b').hasMatch(command);
+
+  String _beanWorkTargetForClause(String command) {
+    if (RegExp(
+      r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
+    ).hasMatch(command)) {
+      return 'event';
+    }
+    if (RegExp(
+      r'\bblock\s+on\s+(?:my\s+|the\s+)?schedule\b|\bput\s+.+\s+on\s+(?:my\s+|the\s+)?schedule\b',
+    ).hasMatch(command)) {
+      return 'event';
+    }
+    if (_beanWorkClauseLooksLikeScheduleBlock(command)) {
+      return 'event';
+    }
+    if (RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command)) {
+      return 'reminder';
+    }
+    if (RegExp(r'\b(task|tasks|todo|to-do)\b').hasMatch(command)) {
+      return 'task';
+    }
+    if (RegExp(
+      r'\b(note|notes|folder|folders|list|lists)\b',
+    ).hasMatch(command)) {
+      return 'note';
+    }
+    if (RegExp(
+      r'\b(remember|memory|forget|preference|preferences)\b',
+    ).hasMatch(command)) {
+      return 'memory';
+    }
+    return '';
+  }
+
+  bool _beanWorkClauseLooksLikeScheduleBlock(String command) {
+    if (!RegExp(r'\bblock\b').hasMatch(command)) return false;
+    return RegExp(
+      r'\b(today|tomorrow|tonight|next|this|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|night|from|at|am|pm)\b|\b\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?\b',
+    ).hasMatch(command);
+  }
+
+  String? _beanWorkSubjectForClause(String clause) {
+    final semanticSubject = _beanWorkSemanticSubjectForClause(clause);
+    if (semanticSubject != null) return semanticSubject;
+    var text = _beanWorkExplicitSubjectForClause(clause) ?? clause;
+    text = text
+        .replaceAll(
+          RegExp(
+            r"\b(hey bean|can you|could you|would you|please|i need to|i want to|i need|i want|need to|want to|i have to|have to|lets|let's)\b",
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(add|create|make|put|schedule|write|save|set|move|reschedule|update|change|delete|remove|cancel|complete|finish|mark)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(to|on|in|from)?\s*(my|the|a|an)?\s*(calendar|event|events|appointment|appointments|meeting|meetings|task|tasks|todo|to-do|reminder|reminders|note|notes|folder|folders|list|lists)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(to be|be|after that|before that|for me|for that recipe|for the recipe|as a note|the rest of my day|rest of my day|these|this|that|it|today|tomorrow|tonight|later|soon|sometime|this morning|this afternoon|this evening|early morning|late morning|early afternoon|late afternoon|late evening)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(r'\bat\s+\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?\b'),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(r'\bfor\s+\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?\b'),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\bfrom\s+\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?\b',
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    text = text.replaceAll(RegExp(r'^(called|named|titled)\s+'), '').trim();
+    text = text
+        .replaceAll(RegExp(r'^(for|to|at|on|in|by|before|after|around)\s+'), '')
+        .replaceAll(RegExp(r'\s+(for|to|at|on|in|by|before|after|around)$'), '')
+        .trim();
+    if (text.length < 3 || RegExp(r'^(it|that|this|item)$').hasMatch(text)) {
+      return null;
+    }
+    if (RegExp(r'^\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?$').hasMatch(text)) {
+      return null;
+    }
+    if (text.length > 42) text = '${text.substring(0, 42).trim()}...';
+    return text;
+  }
+
+  bool _beanWorkLooksLikeSchedulableActivity(String clause) {
+    final text = clause.toLowerCase();
+    if (RegExp(
+      r'\b(recipe|grocery list|shopping list|note)\b',
+    ).hasMatch(text)) {
+      return false;
+    }
+    return RegExp(
+      r'\b(workout|exercise|gym|grocery store|grocery shopping|groceries|run to (?:the )?grocery|cook dinner|cooking dinner|make dinner|dinner)\b',
+    ).hasMatch(text);
+  }
+
+  String? _beanWorkSemanticSubjectForClause(String clause) {
+    final text = clause.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return null;
+    if (RegExp(
+      r'\b(grocery|shopping)\s+list\b|\blist\b.*\bgrocer',
+    ).hasMatch(text)) {
+      return 'Grocery list';
+    }
+    if (RegExp(r'\b(workout|exercise|gym)\b').hasMatch(text)) {
+      return 'Workout';
+    }
+    if (RegExp(
+      r'\b(grocery store|grocery shopping|groceries|run to (?:the )?grocery)\b',
+    ).hasMatch(text)) {
+      return 'Grocery shopping';
+    }
+    if (RegExp(
+      r'\b(cook dinner|cooking dinner|make dinner)\b',
+    ).hasMatch(text)) {
+      return 'Cook dinner';
+    }
+    return null;
+  }
+
+  String? _beanWorkExplicitSubjectForClause(String clause) {
+    final text = clause.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return null;
+    final titleMarker = RegExp(
+      r'\b(?:called|named|titled|labelled|labeled|that says|saying|with title|with the title)\s+(.+)$',
+    ).firstMatch(text);
+    if (titleMarker != null) {
+      final value = titleMarker.group(1)?.trim();
+      if (value != null && value.length >= 3) return value;
+    }
+
+    final forParts = text.split(RegExp(r'\bfor\s+', caseSensitive: false));
+    if (forParts.length > 1) {
+      final value = forParts.last.trim();
+      if (value.length >= 3) {
+        final cleaned = _beanWorkCleanExplicitSubject(value);
+        if (cleaned != null && !_beanWorkSubjectLooksLikeTiming(cleaned)) {
+          return cleaned;
+        }
+      }
+    }
+
+    final toMatches = RegExp(r'\bto\s+(.+)$').allMatches(text).toList();
+    if (toMatches.isEmpty) return null;
+    final last = toMatches.last.group(1)?.trim();
+    if (last == null || last.length < 3) return null;
+    if (RegExp(
+      r'^(be\s+)?(?:after|before|at|on|in|by|around)\b',
+    ).hasMatch(last)) {
+      return null;
+    }
+    final cleanedLast = _beanWorkCleanExplicitSubject(last);
+    if (cleanedLast == null || _beanWorkSubjectLooksLikeTiming(cleanedLast)) {
+      return null;
+    }
+    final before = text.substring(0, toMatches.last.start);
+    final looksLikeTaskTitle =
+        RegExp(r'\b(task|todo|to-do|reminder|note|list)\b').hasMatch(before) ||
+        RegExp(
+          r'\b(today|tomorrow|tonight|later|morning|afternoon|evening)\b',
+        ).hasMatch(before);
+    return looksLikeTaskTitle ? cleanedLast : null;
+  }
+
+  String? _beanWorkCleanExplicitSubject(String value) {
+    var text = value
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'^(the|a|an)\s+', caseSensitive: false), '')
+        .trim();
+    text = text.replaceAll(RegExp(r'\s+(please|thanks|thank you)$'), '').trim();
+    return text.length < 3 ? null : text;
+  }
+
+  bool _beanWorkSubjectLooksLikeTiming(String value) {
+    final text = value.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (RegExp(
+      r'^(today|tomorrow|tonight|next\s+\w+|this\s+\w+|that\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(morning|afternoon|evening|night))?(?:\s+at\s+\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?)?$',
+    ).hasMatch(text)) {
+      return true;
+    }
+    if (RegExp(r'^\d{1,2}(?::|\s+)?\d{0,2}\s*(?:am|pm)?$').hasMatch(text)) {
+      return true;
+    }
+    if (RegExp(
+      r'^\d+\s+(?:minute|minutes|hour|hours)\s+before(?:\s+.*)?$',
+    ).hasMatch(text)) {
+      return true;
+    }
+    return false;
   }
 
   bool _beanRequestIsCapabilityQuestion(String content) =>
@@ -2812,9 +3337,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (item == null) continue;
       _beanWorkAppliedEventIds.add(event.id);
       _beanWorkEventFloorId = math.max(_beanWorkEventFloorId, event.id);
-      if (item.resolvedByEvent) {
-        _removeLocalBeanWorkPlaceholders();
-      }
       final shouldStageCompletion =
           item.done &&
           !_beanWorkItems.any((existing) => existing.id == item.id) &&
@@ -2836,16 +3358,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         resolvedByEvent: true,
       );
     }
-  }
-
-  void _removeLocalBeanWorkPlaceholders() {
-    if (!_beanWorkItems.any((item) => item.id.startsWith('request-'))) {
-      return;
-    }
-    _beanWorkItems = [
-      for (final item in _beanWorkItems)
-        if (!item.id.startsWith('request-')) item,
-    ];
   }
 
   void _stageBeanWorkCompletion(_BeanWorkItem item) {
@@ -3649,11 +4161,18 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }) async {
     final dataVersion = _dashboardDataVersion;
     try {
+      final notesEnabled = _notesEnabled;
       final results = await Future.wait<Object>([
-        widget.apiClient.listNoteFolders().catchError(
-          (_) => const <HermesNoteFolder>[],
-        ),
-        widget.apiClient.listNotes().catchError((_) => const <HermesNote>[]),
+        notesEnabled
+            ? widget.apiClient.listNoteFolders().catchError(
+                (_) => const <HermesNoteFolder>[],
+              )
+            : Future<Object>.value(const <HermesNoteFolder>[]),
+        notesEnabled
+            ? widget.apiClient.listNotes().catchError(
+                (_) => const <HermesNote>[],
+              )
+            : Future<Object>.value(const <HermesNote>[]),
         widget.apiClient.listMemoryItems().catchError(
           (_) => const <HermesMemoryItem>[],
         ),
@@ -3726,42 +4245,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  Future<void> _register(String name, String email, String password) async {
-    setState(() {
-      _busy = true;
-      _error = null;
-      _authNotice = null;
-    });
-    try {
-      final auth = await widget.apiClient.register(
-        name: name,
-        email: email,
-        password: password,
-      );
-      await widget.tokenStore.saveRememberMe(true);
-      await widget.tokenStore.saveToken(auth.token);
-      if (!mounted) return;
-      _applyUserTheme(auth.user);
-      setState(() {
-        _user = auth.user;
-        _phase = _AuthPhase.planSelection;
-        _authNotice = null;
-        _error = null;
-        _checkoutError = null;
-        _dashboardDataLoading = false;
-      });
-    } catch (error) {
-      setState(
-        () => _error = beanFriendlyErrorMessage(
-          error,
-          action: 'create your account',
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   Future<void> _startTrialCheckoutForInterval(
     String plan,
     String billingInterval,
@@ -3816,11 +4299,72 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     await widget.apiClient.requestPasswordReset(email: email);
   }
 
+  void _startGuidedOnboarding() {
+    setState(() {
+      _phase = _AuthPhase.guidedOnboarding;
+      _error = null;
+      _authNotice = null;
+      _checkoutError = null;
+      _checkoutBusyPlan = null;
+    });
+  }
+
+  Future<HermesAuthResult> _registerFromGuidedOnboarding(
+    String name,
+    String email,
+    String password,
+    String themeModeKey,
+  ) async {
+    final auth = await widget.apiClient.register(
+      name: name,
+      email: email,
+      password: password,
+    );
+    await widget.tokenStore.saveRememberMe(true);
+    await widget.tokenStore.saveToken(auth.token);
+    if (!mounted) return auth;
+    final normalizedThemeModeKey = heyBeanThemeModeForKey(themeModeKey).key;
+    var user = auth.user;
+    if (user.themeMode != normalizedThemeModeKey) {
+      user = await widget.apiClient.updateMe(themeMode: normalizedThemeModeKey);
+    }
+    _applyUserTheme(user);
+    setState(() {
+      _user = user;
+      _authNotice = null;
+      _error = null;
+      _checkoutError = null;
+      _dashboardDataLoading = false;
+      _forceAgentOnboarding = false;
+      _editingAgentPreferences = false;
+    });
+    return HermesAuthResult(token: auth.token, user: user);
+  }
+
+  Future<HermesUser> _saveGuidedOnboardingPreferences({
+    required String agentPersonality,
+    required String onboardingContext,
+    String? homeCity,
+  }) async {
+    await _completeAgentOnboarding(
+      agentPersonality: agentPersonality,
+      onboardingPriorities: const ['Planning', 'Reminders', 'Focus'],
+      onboardingContext: onboardingContext,
+      homeCity: homeCity,
+    );
+    final user = _user;
+    if (user == null) {
+      throw StateError('Guided onboarding preferences saved before account.');
+    }
+    return user;
+  }
+
   Future<void> _completeAgentOnboarding({
     required String agentPersonality,
     required List<String> onboardingPriorities,
     String? onboardingContext,
     String? name,
+    String? homeCity,
   }) async {
     final wasEditingAgentPreferences = _editingAgentPreferences;
     setState(() {
@@ -3833,6 +4377,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         agentPersonality: agentPersonality,
         onboardingPriorities: onboardingPriorities,
         onboardingContext: onboardingContext,
+        homeCity: homeCity,
       );
       if (!mounted) return;
       final savedPriorities = List<String>.from(onboardingPriorities);
@@ -3901,16 +4446,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   bool get _needsBeanIntroduction {
-    final user = _user;
-    if (user == null) return false;
-    return _userNeedsBeanIntroduction(user);
+    return false;
   }
 
   bool _userNeedsBeanIntroduction(HermesUser user) {
-    final serverValue = user.needsBeanOnboarding;
-    if (serverValue != null) return serverValue;
-    return !user.onboardComplete ||
-        !(user.currentAgentProfile?.preferencesReady ?? false);
+    return false;
   }
 
   bool get _showAgentOnboardingOverlay =>
@@ -3965,23 +4505,20 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     HermesUser user, {
     String source = 'flutter',
   }) async {
-    final onboarding = _userNeedsBeanIntroduction(user);
-    if (!onboarding) {
-      final today = DateTime.now().toIso8601String().substring(0, 10);
-      final sessions = await widget.apiClient.listConversationSessions(
-        date: today,
-        workspaceId: user.activeWorkspace?.numericId,
-        limit: 30,
-      );
-      final todaySession = sessions.todaySession;
-      if (todaySession != null) {
-        return widget.apiClient.resumeSessionDetails(todaySession.id);
-      }
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final sessions = await widget.apiClient.listConversationSessions(
+      date: today,
+      workspaceId: user.activeWorkspace?.numericId,
+      limit: 30,
+    );
+    final todaySession = sessions.todaySession;
+    if (todaySession != null) {
+      return widget.apiClient.resumeSessionDetails(todaySession.id);
     }
 
     final session = await widget.apiClient.startSession(
-      title: onboarding ? 'Welcome to Bean' : 'Today with Bean',
-      runtimeMode: onboarding ? 'onboarding' : 'chat',
+      title: 'Today with Bean',
+      runtimeMode: 'chat',
       workspaceId: user.activeWorkspace?.numericId,
       metadata: _flutterChatMetadata(additional: {'reason': source}),
     );
@@ -4330,6 +4867,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _chatRunState = 'working...';
           _events = _mergeEvents(result.events, _events);
           _applyBeanWorkEvents(result.events);
+          _applyBeanDashboardMutationEvents(result.events);
         });
         final run = result.run;
         if (run != null) {
@@ -4418,6 +4956,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _approvals = refreshedSummary.approvals;
         _events = _mergeEvents(result.events, refreshedEvents);
         _applyBeanWorkEvents(_events);
+        _applyBeanDashboardMutationEvents(result.events);
         _completeActiveBeanWorkItems();
       });
       if (completedBeanIntroduction) {
@@ -4568,31 +5107,45 @@ ${_truncateDiagnostic(stack, 2200)}
 
   Future<void> _pollQueuedRun(int runId, int runToken) async {
     for (var attempt = 0; attempt < 30; attempt++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await Future<void>.delayed(
+        attempt == 0
+            ? const Duration(milliseconds: 150)
+            : const Duration(milliseconds: 250),
+      );
       if (!mounted || runToken != _chatRunToken) return;
       try {
-        final run = await widget.apiClient.getAssistantRun(runId);
-        if (!mounted || runToken != _chatRunToken) return;
         final sessionId = _session?.id;
         if (sessionId != null) {
           final events = await widget.apiClient
-              .pollActivityEvents(sessionId)
+              .pollActivityEvents(
+                sessionId,
+                after: _latestActivityEventId(),
+                waitSeconds: 2,
+              )
               .catchError((_) => const <HermesActivityEvent>[]);
           if (!mounted || runToken != _chatRunToken) return;
           if (events.isNotEmpty) {
             setState(() {
               _events = _mergeEvents(events, _events);
               _applyBeanWorkEvents(events);
+              _applyBeanDashboardMutationEvents(events);
             });
+            _refreshDashboardAfterBeanMutationEvents(events);
           }
         }
+        final run = await widget.apiClient.getAssistantRun(runId);
+        if (!mounted || runToken != _chatRunToken) return;
         if (run.status == 'completed' ||
             run.status == 'failed' ||
             run.status == 'cancelled') {
           final finalEvents = sessionId == null
               ? const <HermesActivityEvent>[]
               : await widget.apiClient
-                    .pollActivityEvents(sessionId)
+                    .pollActivityEvents(
+                      sessionId,
+                      after: _latestActivityEventId(),
+                      waitSeconds: 1,
+                    )
                     .catchError((_) => const <HermesActivityEvent>[]);
           await _refreshSignedInViews(showLoading: false);
           if (!mounted || runToken != _chatRunToken) return;
@@ -4601,6 +5154,7 @@ ${_truncateDiagnostic(stack, 2200)}
             if (finalEvents.isNotEmpty) {
               _events = _mergeEvents(finalEvents, _events);
               _applyBeanWorkEvents(finalEvents);
+              _applyBeanDashboardMutationEvents(finalEvents);
             }
             _chatRunState = switch (run.status) {
               'completed' => 'Updated',
@@ -4618,6 +5172,7 @@ ${_truncateDiagnostic(stack, 2200)}
               _messages.add(_displayableAssistantMessage(message));
             }
           });
+          _refreshDashboardAfterBeanMutationEvents(finalEvents);
           return;
         }
       } catch (_) {
@@ -4631,6 +5186,104 @@ ${_truncateDiagnostic(stack, 2200)}
       _chatRunState = 'Timed out';
       _beanWorkItems = const [];
     });
+  }
+
+  void _refreshDashboardAfterBeanMutationEvents(
+    List<HermesActivityEvent> events,
+  ) {
+    if (!_beanActivityEventsIncludeFreshDashboardMutation(events)) return;
+    unawaited(_refreshSignedInViews(showLoading: false));
+  }
+
+  void _applyBeanDashboardMutationEvents(List<HermesActivityEvent> events) {
+    if (events.isEmpty) return;
+    var mutated = false;
+
+    for (final event in events) {
+      if (!_beanActivityEventMutatesDashboard(event)) continue;
+      final mutationVersion = ++_dashboardDataVersion;
+      final type = event.eventType;
+      final payload = event.payload;
+
+      if (type == 'assistant.task.deleted') {
+        final id = _intFromPayload(payload, 'task_id');
+        if (id == null) continue;
+        _rememberPendingTaskDelete(id, mutationVersion);
+        _tasks = _tasks.where((task) => task.id != id).toList();
+        _pastTasks = _pastTasks.where((task) => task.id != id).toList();
+        mutated = true;
+        continue;
+      }
+
+      if (type == 'assistant.reminder.deleted') {
+        final id = _intFromPayload(payload, 'reminder_id');
+        if (id == null) continue;
+        _rememberPendingReminderDelete(id, mutationVersion);
+        _reminders = _reminders.where((reminder) => reminder.id != id).toList();
+        mutated = true;
+        continue;
+      }
+
+      if (type == 'assistant.calendar_event.deleted') {
+        final id = _intFromPayload(payload, 'calendar_event_id');
+        if (id == null) continue;
+        _rememberPendingCalendarEventDelete(id, mutationVersion);
+        _calendar = _calendar.where((event) => event.id != id).toList();
+        mutated = true;
+        continue;
+      }
+
+      if (type == 'assistant.note.deleted') {
+        final id = _intFromPayload(payload, 'note_id');
+        if (id == null) continue;
+        _notes = _notes.where((note) => note.id != id).toList();
+        mutated = true;
+        continue;
+      }
+
+      if (type == 'assistant.note_folder.deleted') {
+        final id = _intFromPayload(payload, 'note_folder_id');
+        if (id == null) continue;
+        _noteFolders = _noteFolders.where((folder) => folder.id != id).toList();
+        mutated = true;
+      }
+    }
+
+    if (mutated) {
+      _markDashboardDataMutated();
+    }
+  }
+
+  int? _intFromPayload(Map<String, Object?> payload, String key) {
+    final value = payload[key];
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  bool _beanActivityEventsIncludeFreshDashboardMutation(
+    List<HermesActivityEvent> events,
+  ) {
+    var shouldRefresh = false;
+    for (final event in events) {
+      if (_beanDashboardRefreshEventIds.contains(event.id)) continue;
+      if (!_beanActivityEventMutatesDashboard(event)) continue;
+      _beanDashboardRefreshEventIds.add(event.id);
+      shouldRefresh = true;
+    }
+    return shouldRefresh;
+  }
+
+  bool _beanActivityEventMutatesDashboard(HermesActivityEvent event) {
+    final type = event.eventType;
+    if (!type.startsWith('assistant.')) return false;
+    if (!_beanWorkStatusDone(_beanWorkEventStatus(event.status ?? ''))) {
+      return false;
+    }
+    return RegExp(
+      r'\.(?:task|reminder|calendar_event|note|note_folder|memory|approval|blocker)\.(?:created|updated|deleted)$',
+    ).hasMatch(type);
   }
 
   HermesMessage _displayableAssistantMessage(HermesMessage message) {
@@ -4668,7 +5321,37 @@ ${_truncateDiagnostic(stack, 2200)}
     } catch (_) {
       // Plain-text assistant messages are already displayable.
     }
+    final cleaned = _removeLeadingJsonLines(trimmed);
+    if (cleaned != null) return cleaned;
     return content;
+  }
+
+  String? _removeLeadingJsonLines(String content) {
+    final lines = content.split('\n');
+    var firstNaturalLine = 0;
+    while (firstNaturalLine < lines.length) {
+      final line = lines[firstNaturalLine].trim();
+      if (line.isEmpty) {
+        firstNaturalLine++;
+        continue;
+      }
+      if (!_looksLikeStandaloneJsonObject(line)) break;
+      firstNaturalLine++;
+    }
+    if (firstNaturalLine == 0 || firstNaturalLine >= lines.length) {
+      return null;
+    }
+    final cleaned = lines.skip(firstNaturalLine).join('\n').trim();
+    return cleaned.isEmpty ? null : cleaned;
+  }
+
+  bool _looksLikeStandaloneJsonObject(String value) {
+    if (!value.startsWith('{') || !value.endsWith('}')) return false;
+    try {
+      return jsonDecode(value) is Map<String, Object?>;
+    } catch (_) {
+      return false;
+    }
   }
 
   String? _readBlockerReason(Map<String, Object?>? blocker) {
@@ -4701,6 +5384,14 @@ ${_truncateDiagnostic(stack, 2200)}
       byKey['${event.id}:${event.eventType}'] = event;
     }
     return byKey.values.toList();
+  }
+
+  int _latestActivityEventId() {
+    var latest = 0;
+    for (final event in _events) {
+      if (event.id > latest) latest = event.id;
+    }
+    return latest;
   }
 
   void _returnToToday() {
@@ -6155,6 +6846,12 @@ ${_truncateDiagnostic(stack, 2200)}
     Map<String, Object?>? metadata,
     List<Object>? syncToWorkspaceIds,
   }) async {
+    if (!_notesEnabled) {
+      throw HermesApiException(
+        402,
+        'Notes are available on Premium, Pro, and Enterprise plans.',
+      );
+    }
     final saved = note == null
         ? await widget.apiClient.createNote(
             title: title,
@@ -6182,6 +6879,12 @@ ${_truncateDiagnostic(stack, 2200)}
   }
 
   Future<void> _createNoteFromTopMenu() async {
+    if (!_notesEnabled) {
+      if (mounted) {
+        setState(() => _selectedDestination = _HomeDestination.notes);
+      }
+      return;
+    }
     if (mounted) {
       setState(() => _selectedDestination = _HomeDestination.notes);
     }
@@ -7116,6 +7819,7 @@ ${_truncateDiagnostic(stack, 2200)}
       await widget.apiClient.deleteAccount();
       await widget.tokenStore.clearToken();
       if (mounted) {
+        _applyUserTheme(null);
         setState(() {
           _busy = false;
           _phase = _AuthPhase.signedOut;
@@ -7459,13 +8163,36 @@ ${_truncateDiagnostic(stack, 2200)}
     if (_phase == _AuthPhase.signedOut) {
       return _SignedOutScreen(
         onLogin: _login,
-        onRegister: _register,
+        onStartSignup: _startGuidedOnboarding,
         onForgotPassword: _requestPasswordReset,
         tokenStore: widget.tokenStore,
         launchExternalUrl: widget.launchExternalUrl,
         busy: _busy,
         error: _error,
         notice: _authNotice,
+      );
+    }
+    if (_phase == _AuthPhase.guidedOnboarding) {
+      return _GuidedBeanOnboardingScreen(
+        apiClient: widget.apiClient,
+        stripePaymentHandler: widget.stripePaymentHandler,
+        busyPlan: _checkoutBusyPlan,
+        checkoutError: _checkoutError,
+        onCreateAccount: _registerFromGuidedOnboarding,
+        onSavePreferences: _saveGuidedOnboardingPreferences,
+        onSelectPlan: _startTrialCheckoutForInterval,
+        onContactEnterprise: () {
+          widget.launchExternalUrl(_enterpriseContactUrl);
+        },
+        onPreviewThemeMode: widget.onThemeModeChanged,
+        onBackToLogin: () {
+          _applyUserTheme(null);
+          setState(() {
+            _phase = _AuthPhase.signedOut;
+            _error = null;
+            _checkoutError = null;
+          });
+        },
       );
     }
     if (_phase == _AuthPhase.planSelection) {
@@ -7827,8 +8554,6 @@ class _CreateItemMenuRow extends StatelessWidget {
   );
 }
 
-typedef _RegisterHandler =
-    Future<void> Function(String name, String email, String password);
 typedef _ForgotPasswordHandler = Future<void> Function(String email);
 
 const List<_SignupPlanOption> _signupPlanOptions = [
@@ -7849,7 +8574,6 @@ const List<_SignupPlanOption> _signupPlanOptions = [
       '1 connected calendar',
       'Push reminders for the things you cannot miss',
       'Recent history so Bean can follow the thread of your day',
-      'A calm entry point for keeping daily logistics together',
     ],
   ),
   _SignupPlanOption(
@@ -7868,6 +8592,7 @@ const List<_SignupPlanOption> _signupPlanOptions = [
       'Expanded Bean capacity for everyday planning',
       'Push and email reminders working together',
       'Recurring tasks and reminders for repeating routines',
+      'Notes with folders for plans, lists, and longer writing',
       'Multiple calendar connections',
       '1 year of searchable context and history',
       'The best fit for most households and busy personal lives',
@@ -7891,6 +8616,7 @@ const List<_SignupPlanOption> _signupPlanOptions = [
       'Maximum Bean capacity for high-volume days',
       'More room for connected tools and background work',
       'Unlimited connected accounts',
+      'Notes across every workspace',
       "Full Bean's Knowledge and history",
       'Priority background work when Bean is handling more',
       'Priority support',
@@ -8163,29 +8889,27 @@ class _SignupPlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final prominent = plan.popular;
-    final foreground = prominent ? Colors.white : HeyBeanTheme.text;
-    final muted = prominent
-        ? Colors.white.withValues(alpha: .76)
-        : HeyBeanTheme.muted;
+    final foreground = HeyBeanTheme.text;
+    final muted = HeyBeanTheme.muted;
+    final cardColor = prominent
+        ? HeyBeanTheme.accent.withValues(alpha: HeyBeanTheme.isDark ? .16 : .10)
+        : HeyBeanTheme.surface;
+    final borderColor = prominent
+        ? HeyBeanTheme.accent.withValues(alpha: .42)
+        : HeyBeanTheme.border;
     return Container(
       key: Key('signup-plan-${plan.key}'),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: prominent
-            ? HeyBeanTheme.text
-            : Colors.white.withValues(alpha: .84),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: prominent
-              ? HeyBeanTheme.accent.withValues(alpha: .4)
-              : HeyBeanTheme.border,
-        ),
+        color: cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor),
         boxShadow: prominent
             ? [
                 BoxShadow(
-                  color: HeyBeanTheme.text.withValues(alpha: .18),
-                  blurRadius: 28,
-                  offset: const Offset(0, 14),
+                  color: HeyBeanTheme.accent.withValues(alpha: .12),
+                  blurRadius: 22,
+                  offset: const Offset(0, 10),
                 ),
               ]
             : null,
@@ -8276,9 +9000,7 @@ class _SignupPlanCard extends StatelessWidget {
                 ? _planTrialText(billingInterval)
                 : plan.trialText,
             style: TextStyle(
-              color: prominent
-                  ? const Color(0xFFBBF7D0)
-                  : HeyBeanTheme.accentStrong,
+              color: HeyBeanTheme.accentStrong,
               fontSize: 13,
               fontWeight: FontWeight.w900,
             ),
@@ -8293,18 +9015,14 @@ class _SignupPlanCard extends StatelessWidget {
                   Icon(
                     Icons.check_circle_rounded,
                     size: 18,
-                    color: prominent
-                        ? const Color(0xFFBBF7D0)
-                        : HeyBeanTheme.accentStrong,
+                    color: HeyBeanTheme.accentStrong,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       feature,
                       style: TextStyle(
-                        color: prominent
-                            ? Colors.white.withValues(alpha: .9)
-                            : HeyBeanTheme.text,
+                        color: HeyBeanTheme.text,
                         height: 1.3,
                         fontWeight: FontWeight.w700,
                       ),
@@ -8373,7 +9091,7 @@ class _BillingIntervalToggle extends StatelessWidget {
       key: const Key('billing-interval-toggle'),
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .84),
+        color: HeyBeanTheme.surface,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: HeyBeanTheme.border),
       ),
@@ -8939,10 +9657,1606 @@ class _PersonalityInfoRow extends StatelessWidget {
   );
 }
 
+enum _GuidedOnboardingStep {
+  name,
+  themeMode,
+  email,
+  password,
+  personality,
+  location,
+  tourChoice,
+  tour,
+  plan,
+}
+
+class _GuidedOnboardingMessage {
+  const _GuidedOnboardingMessage({
+    required this.bean,
+    required this.text,
+    this.masked = false,
+    this.widgetKey,
+  });
+
+  final bool bean;
+  final String text;
+  final bool masked;
+  final Key? widgetKey;
+}
+
+enum _GuidedScrollBehavior { bottom, none }
+
+class _GuidedLocationIssue implements Exception {
+  const _GuidedLocationIssue(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+typedef _GuidedCreateAccount =
+    Future<HermesAuthResult> Function(
+      String name,
+      String email,
+      String password,
+      String themeModeKey,
+    );
+typedef _GuidedSavePreferences =
+    Future<HermesUser> Function({
+      required String agentPersonality,
+      required String onboardingContext,
+      String? homeCity,
+    });
+
+class _GuidedBeanOnboardingScreen extends StatefulWidget {
+  const _GuidedBeanOnboardingScreen({
+    required this.apiClient,
+    required this.stripePaymentHandler,
+    required this.busyPlan,
+    required this.checkoutError,
+    required this.onCreateAccount,
+    required this.onSavePreferences,
+    required this.onSelectPlan,
+    required this.onContactEnterprise,
+    required this.onBackToLogin,
+    required this.onPreviewThemeMode,
+  });
+
+  final HermesApiClient apiClient;
+  final StripePaymentHandler stripePaymentHandler;
+  final String? busyPlan;
+  final String? checkoutError;
+  final _GuidedCreateAccount onCreateAccount;
+  final _GuidedSavePreferences onSavePreferences;
+  final Future<void> Function(String plan, String billingInterval) onSelectPlan;
+  final VoidCallback onContactEnterprise;
+  final VoidCallback onBackToLogin;
+  final ValueChanged<String> onPreviewThemeMode;
+
+  @override
+  State<_GuidedBeanOnboardingScreen> createState() =>
+      _GuidedBeanOnboardingScreenState();
+}
+
+class _GuidedBeanOnboardingScreenState
+    extends State<_GuidedBeanOnboardingScreen> {
+  final _input = TextEditingController();
+  final _inputFocus = FocusNode();
+  final _scrollController = ScrollController();
+  final _planIntroKey = GlobalKey();
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  final List<_GuidedOnboardingMessage> _messages = [
+    const _GuidedOnboardingMessage(
+      bean: true,
+      text: 'Hello, please enter your name below.',
+    ),
+  ];
+  _GuidedOnboardingStep _step = _GuidedOnboardingStep.name;
+  String _name = '';
+  String _email = '';
+  String _password = '';
+  String _themeModeKey = 'auto';
+  String _personality = 'balanced';
+  String? _homeCity;
+  bool _busy = false;
+  bool _listening = false;
+  bool _speechReady = false;
+  bool _showNameComposer = true;
+  bool _beanThinking = false;
+  String? _error;
+  String _billingInterval = 'monthly';
+  int _tourIndex = 0;
+  int _responseVariationIndex = 0;
+
+  bool get _inputLocked =>
+      _busy ||
+      _beanThinking ||
+      _step == _GuidedOnboardingStep.plan ||
+      _step == _GuidedOnboardingStep.tour;
+
+  bool get _textOnlyStep =>
+      _step == _GuidedOnboardingStep.name ||
+      _step == _GuidedOnboardingStep.email ||
+      _step == _GuidedOnboardingStep.password;
+
+  @override
+  void dispose() {
+    _input.dispose();
+    _inputFocus.dispose();
+    _scrollController.dispose();
+    _speech.stop();
+    super.dispose();
+  }
+
+  void _addBean(
+    String text, {
+    _GuidedScrollBehavior scrollBehavior = _GuidedScrollBehavior.bottom,
+    Key? widgetKey,
+  }) => _addMessage(
+    _GuidedOnboardingMessage(bean: true, text: text, widgetKey: widgetKey),
+    scrollBehavior: scrollBehavior,
+  );
+
+  void _addUser(String text, {bool masked = false}) => _addMessage(
+    _GuidedOnboardingMessage(bean: false, text: text, masked: masked),
+  );
+
+  Future<void> _respondBean(
+    String text, {
+    _GuidedScrollBehavior scrollBehavior = _GuidedScrollBehavior.bottom,
+    Key? widgetKey,
+  }) async {
+    await _showBeanThinking();
+    if (!mounted) return;
+    _addBean(text, scrollBehavior: scrollBehavior, widgetKey: widgetKey);
+  }
+
+  Future<void> _showBeanThinking() async {
+    if (!mounted) return;
+    setState(() => _beanThinking = true);
+    _scrollGuidedConversationToBottom(
+      duration: const Duration(milliseconds: 180),
+    );
+    await Future<void>.delayed(_nextBeanResponseDelay());
+    if (!mounted) return;
+    setState(() => _beanThinking = false);
+  }
+
+  Duration _nextBeanResponseDelay() {
+    final delay = Duration(
+      milliseconds: 2000 + ((_responseVariationIndex * 431) % 900),
+    );
+    return delay;
+  }
+
+  String _nextResponseVariation(List<String> options) {
+    final value = options[_responseVariationIndex % options.length];
+    _responseVariationIndex++;
+    return value;
+  }
+
+  void _scrollGuidedConversationToBottom({
+    Duration duration = const Duration(milliseconds: 220),
+  }) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: duration,
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  void _addMessage(
+    _GuidedOnboardingMessage message, {
+    _GuidedScrollBehavior scrollBehavior = _GuidedScrollBehavior.bottom,
+  }) {
+    setState(() => _messages.add(message));
+    switch (scrollBehavior) {
+      case _GuidedScrollBehavior.bottom:
+        _scrollGuidedConversationToBottom();
+      case _GuidedScrollBehavior.none:
+        break;
+    }
+  }
+
+  Future<void> _submitDraft([String? override]) async {
+    if (_inputLocked) return;
+    final value = (override ?? _input.text).trim();
+    if (value.isEmpty) return;
+    _input.clear();
+    setState(() => _error = null);
+
+    switch (_step) {
+      case _GuidedOnboardingStep.name:
+        await _handleName(value);
+      case _GuidedOnboardingStep.themeMode:
+        await _handleThemeMode(value);
+      case _GuidedOnboardingStep.email:
+        await _handleEmail(value);
+      case _GuidedOnboardingStep.password:
+        await _handlePassword(value);
+      case _GuidedOnboardingStep.personality:
+        await _handlePersonality(value);
+      case _GuidedOnboardingStep.location:
+        if (_isSkip(value)) {
+          await _skipLocation();
+        } else {
+          _setError('Tap Allow location or Skip so Bean handles this cleanly.');
+        }
+      case _GuidedOnboardingStep.tourChoice:
+        await _handleTourChoice(value);
+      case _GuidedOnboardingStep.tour:
+      case _GuidedOnboardingStep.plan:
+        break;
+    }
+  }
+
+  Future<void> _handleName(String value) async {
+    final name = value.trim();
+    if (name.length < 2) {
+      _setError('Please enter the name you want Bean to use.');
+      return;
+    }
+    _name = name;
+    _addUser(name);
+    await _respondBean(
+      _nextResponseVariation([
+        'Nice to meet you, $_name. Do you prefer light or dark mode? You can also choose Auto, and you can change this anytime in Appearance settings.',
+        'Hi $_name, it is good to meet you. Would you like Light, Dark, or Auto mode? You can change this anytime in Appearance settings.',
+        'Got it, $_name. Pick Light, Dark, or Auto for your theme mode. You can always change it later in Appearance settings.',
+      ]),
+    );
+    setState(() => _step = _GuidedOnboardingStep.themeMode);
+    _focusInput();
+  }
+
+  Future<void> _handleThemeMode(String value) async {
+    final mode = _themeModeFromText(value);
+    if (mode == null) {
+      _setError('Choose Light, Dark, or Auto.');
+      return;
+    }
+    await _selectThemeMode(mode.key);
+  }
+
+  Future<void> _selectThemeMode(String themeModeKey) async {
+    final mode = heyBeanThemeModeForKey(themeModeKey);
+    setState(() {
+      _themeModeKey = mode.key;
+      _error = null;
+    });
+    widget.onPreviewThemeMode(mode.key);
+    _addUser(mode.label);
+    await _respondBean(
+      _nextResponseVariation([
+        '${mode.label} it is. What email address would you like to use for your account? Please text it here.',
+        'Done, I switched to ${mode.label}. What email address should I use for your account? Please text it here.',
+        'You got it — ${mode.label}. What email address would you like tied to this account? Please send it here.',
+      ]),
+    );
+    setState(() => _step = _GuidedOnboardingStep.email);
+    _focusInput();
+  }
+
+  Future<void> _handleEmail(String value) async {
+    final email = value.toLowerCase();
+    final valid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+    if (!valid) {
+      _setError(
+        'That email does not look valid. Please text the address you want to use.',
+      );
+      return;
+    }
+    _addUser(email);
+    setState(() => _busy = true);
+    HermesEmailAvailability availability;
+    try {
+      availability = await widget.apiClient.checkEmailAvailability(
+        email: email,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = null;
+      });
+      await _respondBean(
+        'I could not check that email right now. Please try the email again in a moment.',
+      );
+      _focusInput();
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (!availability.available) {
+      await _respondBean(
+        _nextResponseVariation([
+          'That email is already taken. Please send a different email address for this account.',
+          'There is already an account using that email. Please try another email address.',
+          'That email is already connected to an account. Send me a different one and I will check it.',
+        ]),
+      );
+      _focusInput();
+      return;
+    }
+
+    _email = availability.email;
+    await _respondBean(
+      _nextResponseVariation([
+        'Great. Now choose a password. Please text it here and I will keep it hidden.',
+        'Perfect. Next, send the password you want to use. I will keep it hidden.',
+        'Thanks. Now text the password you would like for this account. I will mask it here.',
+      ]),
+    );
+    setState(() => _step = _GuidedOnboardingStep.password);
+    _focusInput();
+  }
+
+  Future<void> _handlePassword(String value) async {
+    if (value.length < 12) {
+      _setError('Use at least 12 characters so your account is protected.');
+      return;
+    }
+    _password = value;
+    _addUser('Password saved', masked: true);
+    setState(() => _busy = true);
+    try {
+      await widget.onCreateAccount(_name, _email, _password, _themeModeKey);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      await _respondBean(
+        _nextResponseVariation([
+          'Your account has been created. If email verification is required, you can handle it later without losing your setup. Now, what personality type would you like me to have?',
+          'All set — your account is created. If email verification is needed, you can do that later without losing this setup. What personality type should I use?',
+          'Done, your account is ready. You can handle email verification later if needed. Next, choose the personality style you want from me.',
+        ]),
+      );
+      setState(() => _step = _GuidedOnboardingStep.personality);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = beanFriendlyErrorMessage(error, action: 'create your account');
+      });
+    }
+  }
+
+  Future<void> _handlePersonality(String value) async {
+    final selected = _personalityFromText(value);
+    if (selected == null) {
+      _setError(
+        'Pick one of the personality options, or type the one you want.',
+      );
+      return;
+    }
+    await _selectPersonality(selected);
+  }
+
+  Future<void> _selectPersonality(String key) async {
+    final option = _agentPersonalityOptions.firstWhere(
+      (item) => item.key == key,
+      orElse: () => _agentPersonalityOptions.first,
+    );
+    _personality = option.key;
+    _addUser(_guidedPersonalityLabel(option));
+    await _respondBean(
+      _nextResponseVariation([
+        'Perfect. You can also select different voices in the settings menu later!',
+        'Good choice. You can change my personality or voice later in Settings.',
+        'That works. I will use that style, and you can always adjust it later.',
+      ]),
+    );
+    await _respondBean(
+      _nextResponseVariation([
+        'Next, can I access your location so I can see what city we are in? This will help with weather related questions, and for planning.',
+        'One more helpful setup step: may I check your city? It helps me answer weather questions and plan around local context.',
+        'Would you like to share your location now? I only need city-level context for weather and planning help.',
+      ]),
+    );
+    setState(() => _step = _GuidedOnboardingStep.location);
+  }
+
+  Future<void> _allowLocation() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final city = await _currentCity();
+      if (!mounted) return;
+      _homeCity = city;
+      _addUser(city == null ? 'Location skipped' : 'Shared city: $city');
+      await _savePreferences();
+      setState(() => _busy = false);
+      await _respondBean(
+        city == null
+            ? _nextResponseVariation([
+                'No problem. I will continue without location. Would you like me to show you how to use your dashboard, or send you straight in?',
+                'That is okay. We can skip location for now. Want a quick dashboard tour, or should I take you straight to setup your plan?',
+                'No worries. You can add location later. Would you like a short dashboard tour before plan setup?',
+              ])
+            : _nextResponseVariation([
+                'Great, I will keep $city in mind for weather related topics. Next, would you like me to show you how to use your dashboard, or just send you straight in?',
+                'Thanks. I will remember $city for weather and local planning. Want a quick dashboard tour, or should we go straight to plan setup?',
+                'Got it — I will use $city for local context. Would you like me to show you the dashboard next?',
+              ]),
+      );
+      setState(() => _step = _GuidedOnboardingStep.tourChoice);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = error is _GuidedLocationIssue
+            ? error.message
+            : 'I could not read your city. You can skip this and add it later in Settings.';
+      });
+    }
+  }
+
+  Future<void> _skipLocation() async {
+    _addUser('Skip location');
+    setState(() {
+      _homeCity = null;
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _savePreferences();
+      if (!mounted) return;
+      setState(() => _busy = false);
+      await _respondBean(
+        _nextResponseVariation([
+          'No problem. Would you like me to show you how to use your dashboard, or just send you straight in?',
+          'All good. You can add a city later. Want a quick dashboard tour, or should I send you straight in?',
+          'No worries. We can skip that for now. Would you like a quick tour before plan setup?',
+        ]),
+      );
+      setState(() => _step = _GuidedOnboardingStep.tourChoice);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'save your Bean preferences',
+        );
+      });
+    }
+  }
+
+  Future<void> _savePreferences() {
+    final personalityLabel = _agentPersonalityOptions
+        .firstWhere((option) => option.key == _personality)
+        .label;
+    final context = [
+      'Completed guided Bean signup onboarding.',
+      'Preferred Bean personality: $personalityLabel.',
+      if (_homeCity != null) 'City-level location: $_homeCity.',
+    ].join(' ');
+    return widget.onSavePreferences(
+      agentPersonality: _personality,
+      onboardingContext: context,
+      homeCity: _homeCity,
+    );
+  }
+
+  Future<void> _handleTourChoice(String value) async {
+    final normalized = value.toLowerCase();
+    final yes = RegExp(
+      r'\b(yes|yeah|yep|sure|show|tour)\b',
+    ).hasMatch(normalized);
+    final no = RegExp(
+      r'\b(no|skip|straight|dashboard|plan)\b',
+    ).hasMatch(normalized);
+    if (yes) {
+      _addUser(value);
+      await _startTour();
+      return;
+    }
+    if (no) {
+      _addUser(value);
+      await _goToPlan(skipTour: true);
+      return;
+    }
+    _setError(
+      'Please answer yes for a quick tour, or no to go straight to plan setup.',
+    );
+  }
+
+  Future<void> _startTour() async {
+    await _respondBean(
+      _nextResponseVariation([
+        _guidedTourSteps.first.beanScript,
+        'Great, I will walk you through the basics quickly. First up: your command center.',
+        'Sure. Let me show you the main parts, starting with the command center.',
+      ]),
+    );
+    setState(() {
+      _step = _GuidedOnboardingStep.tour;
+      _tourIndex = 0;
+    });
+  }
+
+  Future<void> _nextTour() async {
+    if (_tourIndex >= _guidedTourSteps.length - 1) {
+      await _goToPlan();
+      return;
+    }
+    final nextIndex = _tourIndex + 1;
+    await _respondBean(
+      _nextResponseVariation([
+        _guidedTourSteps[nextIndex].beanScript,
+        'Next, ${_guidedTourSteps[nextIndex].title.toLowerCase()} works like this.',
+        'Here is the next part: ${_guidedTourSteps[nextIndex].title.toLowerCase()}.',
+      ]),
+    );
+    setState(() => _tourIndex = nextIndex);
+  }
+
+  Future<void> _goToPlan({bool skipTour = false}) async {
+    await _respondBean(
+      skipTour
+          ? _nextResponseVariation([
+              'Ok, no problem, lets just finish setting up your plan, and you will be all set to start your free trial! Select the option that fits your needs.',
+              'No problem. Let us finish your plan setup so your free trial is ready. Choose the option that fits best.',
+              'Sounds good. We will skip the tour and finish setup with your plan. Pick whichever option fits your needs.',
+            ])
+          : _nextResponseVariation([
+              'Now, we just need to finish setting up your plan, and you will be all set to start your free trial! Select the option that fits your needs.',
+              'That is the quick tour. Last step: choose your plan so your free trial is ready.',
+              'You are almost set. Pick the plan that fits you best, then we will start your trial.',
+            ]),
+      scrollBehavior: _GuidedScrollBehavior.none,
+      widgetKey: _planIntroKey,
+    );
+    setState(() => _step = _GuidedOnboardingStep.plan);
+    _scrollPlanIntroIntoView();
+  }
+
+  void _scrollPlanIntroIntoView() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _planIntroKey.currentContext;
+      if (context == null || !_scrollController.hasClients) return;
+      Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: 0.06,
+      );
+    });
+  }
+
+  Future<String?> _currentCity() async {
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied) {
+      throw const _GuidedLocationIssue(
+        'Location permission was not granted. You can tap Allow location again, or skip and add a city later in Settings.',
+      );
+    }
+    if (permission == LocationPermission.deniedForever) {
+      await Geolocator.openAppSettings();
+      throw const _GuidedLocationIssue(
+        'Location permission is blocked for HeyBean. I opened app settings so you can allow it, or you can skip this for now.',
+      );
+    }
+
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      await Geolocator.openLocationSettings();
+      throw const _GuidedLocationIssue(
+        'Location services are turned off on this device. I opened location settings so you can enable them, or you can skip this for now.',
+      );
+    }
+
+    final position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.low,
+        timeLimit: Duration(seconds: 8),
+      ),
+    );
+    final placemarks = await placemarkFromCoordinates(
+      position.latitude,
+      position.longitude,
+    ).timeout(const Duration(seconds: 8));
+    if (placemarks.isEmpty) {
+      throw const _GuidedLocationIssue(
+        'I got permission, but could not identify the city from this location. You can skip and add a city later in Settings.',
+      );
+    }
+    final place = placemarks.first;
+    final city = [place.locality, place.administrativeArea]
+        .whereType<String>()
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .join(', ');
+    if (city.isEmpty) {
+      throw const _GuidedLocationIssue(
+        'I got permission, but could not identify the city from this location. You can skip and add a city later in Settings.',
+      );
+    }
+    return city;
+  }
+
+  Future<void> _startListening() async {
+    if (_inputLocked || _textOnlyStep || _listening) return;
+    setState(() => _error = null);
+    _speechReady =
+        _speechReady ||
+        await _speech.initialize(
+          onError: (_) {
+            if (mounted) setState(() => _listening = false);
+          },
+          onStatus: (status) {
+            if (mounted && status == 'done') setState(() => _listening = false);
+          },
+        );
+    if (!_speechReady) {
+      _setError(
+        'Voice input is not available. Tap the input to text Bean instead.',
+      );
+      return;
+    }
+    setState(() => _listening = true);
+    await _speech.listen(
+      listenOptions: stt.SpeechListenOptions(
+        listenMode: stt.ListenMode.confirmation,
+      ),
+      onResult: (result) {
+        if (!mounted) return;
+        _input.text = result.recognizedWords;
+        _input.selection = TextSelection.collapsed(offset: _input.text.length);
+        if (result.finalResult) {
+          setState(() => _listening = false);
+        }
+      },
+    );
+  }
+
+  Future<void> _stopListening({bool submit = true}) async {
+    if (_listening) {
+      await _speech.stop();
+      if (!mounted) return;
+      setState(() => _listening = false);
+    }
+    if (submit && _input.text.trim().isNotEmpty) {
+      await _submitDraft();
+    }
+  }
+
+  String? _personalityFromText(String value) {
+    final normalized = value.toLowerCase();
+    for (final option in _agentPersonalityOptions) {
+      if (normalized.contains(option.key) ||
+          normalized.contains(option.label.toLowerCase().split(' ').first)) {
+        return option.key;
+      }
+    }
+    if (normalized.contains('balanced')) return 'balanced';
+    if (normalized.contains('coach') || normalized.contains('motivat')) {
+      return 'coach';
+    }
+    if (normalized.contains('organizer') || normalized.contains('detail')) {
+      return 'organizer';
+    }
+    if (normalized.contains('creative')) return 'creative';
+    if (normalized.contains('direct') || normalized.contains('operator')) {
+      return 'direct';
+    }
+    if (normalized.contains('gentle') || normalized.contains('companion')) {
+      return 'gentle';
+    }
+    return null;
+  }
+
+  HeyBeanThemeModeOption? _themeModeFromText(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    if (normalized == 'system' ||
+        normalized == 'device' ||
+        normalized == 'automatic') {
+      return heyBeanThemeModeForKey('auto');
+    }
+    for (final mode in heyBeanThemeModes) {
+      if (mode.key == normalized || mode.label.toLowerCase() == normalized) {
+        return mode;
+      }
+    }
+    return null;
+  }
+
+  bool _isSkip(String value) =>
+      RegExp(r'\b(skip|no|not now|later)\b').hasMatch(value.toLowerCase());
+
+  void _setError(String message) {
+    setState(() {
+      if (_step == _GuidedOnboardingStep.name) {
+        _showNameComposer = true;
+      }
+      _error = message;
+    });
+  }
+
+  void _focusInput() {
+    if (_step == _GuidedOnboardingStep.name && !_showNameComposer) {
+      setState(() => _showNameComposer = true);
+    }
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _inputFocus.requestFocus(),
+    );
+  }
+
+  String get _inputHint => switch (_step) {
+    _GuidedOnboardingStep.name => 'Name',
+    _GuidedOnboardingStep.themeMode => 'Choose Light, Dark, or Auto...',
+    _GuidedOnboardingStep.email => 'Text your email address...',
+    _GuidedOnboardingStep.password => 'Text your password...',
+    _GuidedOnboardingStep.personality => 'Type a personality choice...',
+    _GuidedOnboardingStep.location => 'Type skip, or tap Allow location...',
+    _GuidedOnboardingStep.tourChoice => 'Yes for tour, no for plan setup...',
+    _GuidedOnboardingStep.tour => 'Tour in progress...',
+    _GuidedOnboardingStep.plan => 'Select a plan above...',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    const guidedBeanBottom = 44.0;
+    const guidedBeanSize = 98.0;
+    const guidedInputBottom = guidedBeanBottom + guidedBeanSize;
+    const guidedInstructionBottom = guidedInputBottom + 14;
+    const guidedConversationBottomPadding = guidedInputBottom + 150;
+    final showInstruction =
+        _messages.length == 1 &&
+        _step == _GuidedOnboardingStep.name &&
+        !_showNameComposer;
+    final showNameStep = _step == _GuidedOnboardingStep.name;
+    final showAnchoredComposer =
+        _step != _GuidedOnboardingStep.tour &&
+        _step != _GuidedOnboardingStep.plan;
+    final showFloatingInput =
+        showAnchoredComposer && (!showNameStep || _showNameComposer);
+    return SafeArea(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Column(
+              children: [
+                if (!showAnchoredComposer)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _busy ? null : widget.onBackToLogin,
+                        icon: Icon(Icons.arrow_back_rounded),
+                        label: Text('Login'),
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: ListView(
+                    controller: _scrollController,
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      showAnchoredComposer ? 58 : 18,
+                      20,
+                      showAnchoredComposer
+                          ? guidedConversationBottomPadding
+                          : 220,
+                    ),
+                    children: [
+                      for (final message in _messages)
+                        _GuidedOnboardingBubble(
+                          key: message.widgetKey,
+                          message: message,
+                        ),
+                      if (_beanThinking) const _GuidedThinkingBubble(),
+                      if (_step == _GuidedOnboardingStep.personality)
+                        _GuidedPersonalityPicker(
+                          selected: _personality,
+                          enabled: !_inputLocked,
+                          onSelected: (key) =>
+                              unawaited(_selectPersonality(key)),
+                        ),
+                      if (_step == _GuidedOnboardingStep.themeMode)
+                        _GuidedThemeModePicker(
+                          selected: _themeModeKey,
+                          enabled: !_inputLocked,
+                          onSelected: (key) => unawaited(_selectThemeMode(key)),
+                        ),
+                      if (_step == _GuidedOnboardingStep.location)
+                        _GuidedLocationActions(
+                          enabled: !_inputLocked,
+                          onAllow: () => unawaited(_allowLocation()),
+                          onSkip: () => unawaited(_skipLocation()),
+                        ),
+                      if (_step == _GuidedOnboardingStep.tourChoice)
+                        _GuidedTourChoiceActions(
+                          enabled: !_inputLocked,
+                          onTour: () => unawaited(_startTour()),
+                          onSkip: () => unawaited(_goToPlan(skipTour: true)),
+                        ),
+                      if (_step == _GuidedOnboardingStep.tour)
+                        _GuidedTourPanel(
+                          step: _guidedTourSteps[_tourIndex],
+                          index: _tourIndex,
+                          total: _guidedTourSteps.length,
+                          enabled: !_inputLocked,
+                          onNext: () => unawaited(_nextTour()),
+                          onSkip: () => unawaited(_goToPlan()),
+                        ),
+                      if (_step == _GuidedOnboardingStep.plan)
+                        _GuidedPlanPicker(
+                          billingInterval: _billingInterval,
+                          busyPlan: widget.busyPlan,
+                          error: widget.checkoutError,
+                          onBillingChanged: (value) => setState(
+                            () => _billingInterval = _normalizedBillingInterval(
+                              value,
+                            ),
+                          ),
+                          onSelect: (plan) =>
+                              widget.onSelectPlan(plan, _billingInterval),
+                          onContactEnterprise: widget.onContactEnterprise,
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (showInstruction)
+            Positioned(
+              left: 34,
+              right: 34,
+              bottom: guidedInstructionBottom,
+              child: _GuidedBeanInstructionCard(),
+            ),
+          if (showFloatingInput)
+            Positioned(
+              left: 24,
+              right: 24,
+              bottom: guidedInputBottom,
+              child: _GuidedFloatingInputPill(
+                controller: _input,
+                focusNode: _inputFocus,
+                hint: _inputHint,
+                enabled: !_inputLocked,
+                obscureText: _step == _GuidedOnboardingStep.password,
+                listening: _listening,
+                error: _error,
+                onSubmit: () => unawaited(_submitDraft()),
+              ),
+            ),
+          if (showAnchoredComposer)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: guidedBeanBottom,
+              child: Center(
+                child: _BeanFab(
+                  widgetKey: const Key('guided-initial-bean-button'),
+                  selected: true,
+                  listening: _listening,
+                  semanticLabel: 'Start Bean onboarding',
+                  onPressed: _inputLocked ? () {} : _focusInput,
+                  longPressEnabled: !_inputLocked && !_textOnlyStep,
+                  onLongPressStart: _inputLocked
+                      ? () {}
+                      : () => unawaited(_startListening()),
+                  onLongPressEnd: _inputLocked
+                      ? () {}
+                      : () => unawaited(_stopListening()),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GuidedOnboardingBubble extends StatelessWidget {
+  const _GuidedOnboardingBubble({super.key, required this.message});
+
+  final _GuidedOnboardingMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final align = message.bean ? Alignment.centerLeft : Alignment.centerRight;
+    final bg = message.bean
+        ? HeyBeanTheme.surface2
+        : HeyBeanTheme.accent.withValues(
+            alpha: HeyBeanTheme.isDark ? .22 : .14,
+          );
+    final border = message.bean
+        ? HeyBeanTheme.border
+        : HeyBeanTheme.accent.withValues(alpha: .32);
+    return Align(
+      alignment: align,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 330),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message.bean ? 'Bean' : 'You',
+              style: TextStyle(
+                color: message.bean
+                    ? HeyBeanTheme.accentStrong
+                    : HeyBeanTheme.accent,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              message.masked ? '************' : message.text,
+              style: TextStyle(
+                color: HeyBeanTheme.text,
+                fontSize: 16,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GuidedThinkingBubble extends StatefulWidget {
+  const _GuidedThinkingBubble();
+
+  @override
+  State<_GuidedThinkingBubble> createState() => _GuidedThinkingBubbleState();
+}
+
+class _GuidedThinkingBubbleState extends State<_GuidedThinkingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Container(
+      key: const Key('guided-bean-thinking'),
+      constraints: const BoxConstraints(maxWidth: 220),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      decoration: BoxDecoration(
+        color: HeyBeanTheme.surface2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: HeyBeanTheme.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              'Bean is thinking',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: HeyBeanTheme.muted,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          AnimatedBuilder(
+            animation: _controller,
+            builder: (context, child) {
+              final activeDot = (_controller.value * 3).floor().clamp(0, 2);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var index = 0; index < 3; index++)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      width: 6,
+                      height: 6,
+                      margin: EdgeInsets.only(left: index == 0 ? 0 : 4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: HeyBeanTheme.accentStrong.withValues(
+                          alpha: index == activeDot ? .95 : .30,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _GuidedBeanInstructionCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .35)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: HeyBeanTheme.isDark ? .24 : .10,
+              ),
+              blurRadius: 24,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.touch_app_rounded, color: HeyBeanTheme.accentStrong),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                'Please hold to talk, or tap to text',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ],
+        ),
+      ),
+      Icon(
+        Icons.arrow_drop_down_rounded,
+        color: HeyBeanTheme.accentStrong,
+        size: 34,
+      ),
+    ],
+  );
+}
+
+class _GuidedFloatingInputPill extends StatelessWidget {
+  const _GuidedFloatingInputPill({
+    required this.controller,
+    required this.focusNode,
+    required this.hint,
+    required this.enabled,
+    required this.obscureText,
+    required this.listening,
+    required this.onSubmit,
+    this.error,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String hint;
+  final bool enabled;
+  final bool obscureText;
+  final bool listening;
+  final String? error;
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (error != null) ...[
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(
+            color: HeyBeanTheme.destructive.withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: HeyBeanTheme.destructive.withValues(alpha: .32),
+            ),
+          ),
+          child: Text(
+            error!,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: HeyBeanTheme.destructive,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+      ],
+      Container(
+        constraints: const BoxConstraints(maxWidth: 390),
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: listening ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
+            width: listening ? 2 : 1.2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: HeyBeanTheme.isDark ? .28 : .12,
+              ),
+              blurRadius: 24,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                key: const Key('guided-onboarding-input'),
+                controller: controller,
+                focusNode: focusNode,
+                enabled: enabled,
+                obscureText: obscureText,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => onSubmit(),
+                decoration: InputDecoration(
+                  hintText: listening ? 'Listening...' : hint,
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: IconButton.filled(
+                key: const Key('guided-onboarding-send'),
+                onPressed: enabled ? onSubmit : null,
+                icon: Icon(Icons.arrow_upward_rounded),
+                tooltip: 'Send',
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+class _GuidedPersonalityPicker extends StatelessWidget {
+  const _GuidedPersonalityPicker({
+    required this.selected,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final String selected;
+  final bool enabled;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) => _GuidedInlinePanel(
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: _agentPersonalityOptions.map((option) {
+        return ChoiceChip(
+          key: Key('guided-personality-${option.key}'),
+          selected: selected == option.key,
+          label: Text(_guidedPersonalityLabel(option)),
+          avatar: Icon(option.icon, size: 18),
+          onSelected: enabled ? (_) => onSelected(option.key) : null,
+        );
+      }).toList(),
+    ),
+  );
+}
+
+class _GuidedThemeModePicker extends StatelessWidget {
+  const _GuidedThemeModePicker({
+    required this.selected,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  static const _orderedThemeModeKeys = ['light', 'dark', 'auto'];
+
+  final String selected;
+  final bool enabled;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) => _GuidedInlinePanel(
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final key in _orderedThemeModeKeys)
+          Builder(
+            builder: (context) {
+              final mode = heyBeanThemeModeForKey(key);
+              return ChoiceChip(
+                key: Key('guided-theme-mode-${mode.key}'),
+                selected: selected == mode.key,
+                label: Text(mode.label),
+                avatar: Icon(_themeModeIcon(mode.key), size: 18),
+                onSelected: enabled ? (_) => onSelected(mode.key) : null,
+              );
+            },
+          ),
+      ],
+    ),
+  );
+}
+
+String _guidedPersonalityLabel(_AgentPersonalityOption option) {
+  switch (option.key) {
+    case 'balanced':
+      return 'Balanced helper';
+    case 'coach':
+      return 'Motivating coach';
+    case 'organizer':
+      return 'Detail organizer';
+    case 'creative':
+      return 'Creative partner';
+    case 'direct':
+      return 'Direct operator';
+    case 'gentle':
+      return 'Gentle companion';
+    default:
+      return option.label;
+  }
+}
+
+class _GuidedLocationActions extends StatelessWidget {
+  const _GuidedLocationActions({
+    required this.enabled,
+    required this.onAllow,
+    required this.onSkip,
+  });
+
+  final bool enabled;
+  final VoidCallback onAllow;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) => _GuidedInlinePanel(
+    child: Row(
+      children: [
+        Expanded(
+          child: FilledButton.icon(
+            key: const Key('guided-location-allow'),
+            onPressed: enabled ? onAllow : null,
+            icon: Icon(Icons.location_on_rounded),
+            label: Text('Allow location'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        OutlinedButton(
+          key: const Key('guided-location-skip'),
+          onPressed: enabled ? onSkip : null,
+          child: Text('Skip'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _GuidedTourChoiceActions extends StatelessWidget {
+  const _GuidedTourChoiceActions({
+    required this.enabled,
+    required this.onTour,
+    required this.onSkip,
+  });
+
+  final bool enabled;
+  final VoidCallback onTour;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) => _GuidedInlinePanel(
+    child: Row(
+      children: [
+        Expanded(
+          child: FilledButton.icon(
+            key: const Key('guided-tour-start'),
+            onPressed: enabled ? onTour : null,
+            icon: Icon(Icons.play_circle_rounded),
+            label: Text('Show me'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        OutlinedButton(
+          key: const Key('guided-tour-skip'),
+          onPressed: enabled ? onSkip : null,
+          child: Text('Skip tour'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _GuidedInlinePanel extends StatelessWidget {
+  const _GuidedInlinePanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 14),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: HeyBeanTheme.surface2,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: HeyBeanTheme.border),
+    ),
+    child: child,
+  );
+}
+
+class _GuidedTourStep {
+  const _GuidedTourStep({
+    required this.title,
+    required this.subtitle,
+    required this.beanScript,
+    required this.icon,
+    required this.items,
+  });
+
+  final String title;
+  final String subtitle;
+  final String beanScript;
+  final IconData icon;
+  final List<String> items;
+}
+
+const List<_GuidedTourStep> _guidedTourSteps = [
+  _GuidedTourStep(
+    title: 'Command center',
+    subtitle: 'Talk to Bean and see today update.',
+    beanScript:
+        'This is your command center. Ask Bean for what you need, and your events, tasks, and reminders stay visible as the day changes.',
+    icon: Icons.dashboard_customize_rounded,
+    items: [
+      '7:30 AM School drop-off',
+      '12:15 PM Pay insurance',
+      '6:00 PM Dinner reminder',
+    ],
+  ),
+  _GuidedTourStep(
+    title: 'Calendar views',
+    subtitle: 'Jump between day and month.',
+    beanScript:
+        'Calendar buttons at the top help you move between today, day view, and month view without losing your place.',
+    icon: Icons.calendar_month_rounded,
+    items: ['Today', 'Day view', 'Month view'],
+  ),
+  _GuidedTourStep(
+    title: 'Tasks',
+    subtitle: 'Create work, then check it off.',
+    beanScript:
+        'Tasks are for things you need to complete. Bean can create them from a sentence, and you can check them off when done.',
+    icon: Icons.task_alt_rounded,
+    items: ['Review launch notes', 'Order air filters', 'Send invoice'],
+  ),
+  _GuidedTourStep(
+    title: 'Reminders',
+    subtitle: 'Get nudged at the right time.',
+    beanScript:
+        'Reminders are lightweight nudges. Use them for quick time-based follow-up without cluttering your task list.',
+    icon: Icons.notifications_active_rounded,
+    items: ['Take vitamins at 8 AM', 'Move laundry at 7 PM', 'Call Mom Sunday'],
+  ),
+  _GuidedTourStep(
+    title: 'Notes',
+    subtitle: 'Keep longer plans organized.',
+    beanScript:
+        'Notes hold plans, lists, and longer writing. Folders keep them organized, and formatting helps structure what matters.',
+    icon: Icons.article_rounded,
+    items: ['House projects', 'Trip plan', 'Meeting notes'],
+  ),
+];
+
+class _GuidedTourPanel extends StatelessWidget {
+  const _GuidedTourPanel({
+    required this.step,
+    required this.index,
+    required this.total,
+    required this.enabled,
+    required this.onNext,
+    required this.onSkip,
+  });
+
+  final _GuidedTourStep step;
+  final int index;
+  final int total;
+  final bool enabled;
+  final VoidCallback onNext;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) => _GuidedInlinePanel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(step.icon, color: HeyBeanTheme.accentStrong, size: 30),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    step.title,
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
+                  ),
+                  Text(
+                    step.subtitle,
+                    style: TextStyle(color: HeyBeanTheme.muted),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              '${index + 1}/$total',
+              style: TextStyle(
+                color: HeyBeanTheme.muted,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: HeyBeanTheme.bg0,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: HeyBeanTheme.border),
+          ),
+          child: Column(
+            children: [
+              for (var i = 0; i < step.items.length; i++) ...[
+                _GuidedDemoRow(
+                  label: step.items[i],
+                  highlighted: i == index % step.items.length,
+                ),
+                if (i != step.items.length - 1) const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            TextButton(onPressed: enabled ? onSkip : null, child: Text('Skip')),
+            const Spacer(),
+            FilledButton(
+              key: const Key('guided-tour-next'),
+              onPressed: enabled ? onNext : null,
+              child: Text(index == total - 1 ? 'Plan setup' : 'Next'),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+class _GuidedDemoRow extends StatelessWidget {
+  const _GuidedDemoRow({required this.label, required this.highlighted});
+
+  final String label;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: const Duration(milliseconds: 220),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: highlighted
+          ? HeyBeanTheme.accent.withValues(alpha: .16)
+          : HeyBeanTheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(
+        color: highlighted
+            ? HeyBeanTheme.accent.withValues(alpha: .38)
+            : HeyBeanTheme.border,
+      ),
+    ),
+    child: Row(
+      children: [
+        Icon(
+          highlighted
+              ? Icons.radio_button_checked_rounded
+              : Icons.radio_button_unchecked_rounded,
+          color: highlighted ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
+          size: 18,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(label, style: TextStyle(fontWeight: FontWeight.w800)),
+        ),
+      ],
+    ),
+  );
+}
+
+class _GuidedPlanPicker extends StatelessWidget {
+  const _GuidedPlanPicker({
+    required this.billingInterval,
+    required this.busyPlan,
+    required this.error,
+    required this.onBillingChanged,
+    required this.onSelect,
+    required this.onContactEnterprise,
+  });
+
+  final String billingInterval;
+  final String? busyPlan;
+  final String? error;
+  final ValueChanged<String> onBillingChanged;
+  final ValueChanged<String> onSelect;
+  final VoidCallback onContactEnterprise;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _BillingIntervalToggle(
+        selected: billingInterval,
+        onChanged: onBillingChanged,
+      ),
+      const SizedBox(height: 12),
+      if (error != null) ...[
+        _InlinePlanLimitError(message: error!),
+        const SizedBox(height: 12),
+      ],
+      for (final plan in _signupPlanOptions) ...[
+        _SignupPlanCard(
+          plan: plan,
+          billingInterval: billingInterval,
+          busy: busyPlan == plan.key,
+          disabled: busyPlan != null && busyPlan != plan.key,
+          onPressed: plan.startsCheckout
+              ? () => onSelect(plan.key)
+              : onContactEnterprise,
+        ),
+        const SizedBox(height: 12),
+      ],
+    ],
+  );
+}
+
 class _SignedOutScreen extends StatefulWidget {
   const _SignedOutScreen({
     required this.onLogin,
-    required this.onRegister,
+    required this.onStartSignup,
     required this.onForgotPassword,
     required this.tokenStore,
     required this.launchExternalUrl,
@@ -8957,7 +11271,7 @@ class _SignedOutScreen extends StatefulWidget {
     required bool rememberMe,
   })
   onLogin;
-  final _RegisterHandler onRegister;
+  final VoidCallback onStartSignup;
   final _ForgotPasswordHandler onForgotPassword;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
@@ -8970,10 +11284,8 @@ class _SignedOutScreen extends StatefulWidget {
 }
 
 class _SignedOutScreenState extends State<_SignedOutScreen> {
-  final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
-  bool _registerMode = false;
   bool _rememberMe = false;
 
   @override
@@ -8986,7 +11298,6 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
 
   @override
   void dispose() {
-    _name.dispose();
     _email.dispose();
     _password.dispose();
     super.dispose();
@@ -9002,22 +11313,12 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
     );
   }
 
-  void _toggleMode() {
-    setState(() => _registerMode = !_registerMode);
-  }
-
   Future<void> _submit() {
-    if (_registerMode) {
-      return widget.onRegister(_name.text, _email.text, _password.text);
-    }
     return widget.onLogin(_email.text, _password.text, rememberMe: _rememberMe);
   }
 
   @override
   Widget build(BuildContext context) {
-    final title = _registerMode ? 'Create your account' : 'Login';
-    const subtitle = '';
-
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
@@ -9044,25 +11345,19 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                             mainAxisSize: MainAxisSize.max,
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              if (_registerMode)
-                                Icon(
-                                  Icons.person_add_alt_1_rounded,
-                                  color: HeyBeanTheme.accentStrong,
-                                )
-                              else
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.asset(
-                                    'assets/images/bean/bean-logo.png',
-                                    key: const Key('login-header-logo'),
-                                    width: 28,
-                                    height: 28,
-                                  ),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.asset(
+                                  'assets/images/bean/bean-logo.png',
+                                  key: const Key('login-header-logo'),
+                                  width: 28,
+                                  height: 28,
                                 ),
+                              ),
                               const SizedBox(width: 10),
                               Flexible(
                                 child: Text(
-                                  title,
+                                  'Login',
                                   textAlign: TextAlign.center,
                                   softWrap: true,
                                   style: Theme.of(context).textTheme.titleMedium
@@ -9071,27 +11366,9 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                               ),
                             ],
                           ),
-                          if (subtitle.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              subtitle,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: HeyBeanTheme.muted),
-                            ),
-                          ],
                         ],
                       ),
                       const SizedBox(height: 16),
-                      if (_registerMode) ...[
-                        TextField(
-                          key: const Key('auth-name'),
-                          controller: _name,
-                          textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(labelText: 'Name'),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
                       TextField(
                         key: const Key('auth-email'),
                         controller: _email,
@@ -9106,29 +11383,23 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                         obscureText: true,
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => widget.busy ? null : _submit(),
-                        decoration: InputDecoration(
+                        decoration: const InputDecoration(
                           labelText: 'Password',
-                          helperText: _registerMode
-                              ? 'Minimum 12 characters'
-                              : null,
                         ),
                       ),
-                      if (!_registerMode) ...[
-                        const SizedBox(height: 8),
-                        CheckboxListTile(
-                          key: const Key('remember-me-checkbox'),
-                          value: _rememberMe,
-                          onChanged: widget.busy
-                              ? null
-                              : (value) => setState(
-                                  () => _rememberMe = value ?? false,
-                                ),
-                          title: Text('Remember me'),
-                          contentPadding: EdgeInsets.zero,
-                          controlAffinity: ListTileControlAffinity.leading,
-                          dense: true,
-                        ),
-                      ],
+                      const SizedBox(height: 8),
+                      CheckboxListTile(
+                        key: const Key('remember-me-checkbox'),
+                        value: _rememberMe,
+                        onChanged: widget.busy
+                            ? null
+                            : (value) =>
+                                  setState(() => _rememberMe = value ?? false),
+                        title: Text('Remember me'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        dense: true,
+                      ),
                       if (widget.error != null) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -9151,42 +11422,37 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                       FilledButton(
                         key: const Key('auth-submit'),
                         onPressed: widget.busy ? null : _submit,
-                        child: Text(
-                          widget.busy
-                              ? (_registerMode
-                                    ? 'Creating account…'
-                                    : 'Signing in…')
-                              : (_registerMode ? 'Create account' : 'Sign in'),
+                        child: Text(widget.busy ? 'Signing in…' : 'Sign in'),
+                      ),
+                      const SizedBox(height: 14),
+                      OutlinedButton.icon(
+                        key: const Key('guided-signup-action'),
+                        onPressed: widget.busy ? null : widget.onStartSignup,
+                        icon: Icon(Icons.auto_awesome_rounded),
+                        label: Text('Sign up with Bean'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(54),
+                          textStyle: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
+                          side: BorderSide(
+                            color: HeyBeanTheme.accent.withValues(alpha: .42),
+                            width: 1.4,
+                          ),
+                          backgroundColor: HeyBeanTheme.accent.withValues(
+                            alpha: HeyBeanTheme.isDark ? .12 : .08,
+                          ),
+                          foregroundColor: HeyBeanTheme.accentStrong,
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        alignment: WrapAlignment.spaceBetween,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          TextButton(
-                            key: Key(
-                              _registerMode
-                                  ? 'show-login-mode'
-                                  : 'show-register-mode',
-                            ),
-                            onPressed: widget.busy ? null : _toggleMode,
-                            child: Text(
-                              _registerMode
-                                  ? 'Already have an account? Sign in'
-                                  : 'Create an account',
-                            ),
-                          ),
-                          TextButton(
-                            key: const Key('forgot-login-action'),
-                            onPressed: widget.busy
-                                ? null
-                                : _showForgotPasswordDialog,
-                            child: Text('Forgot password?'),
-                          ),
-                        ],
+                      const SizedBox(height: 6),
+                      TextButton(
+                        key: const Key('forgot-login-action'),
+                        onPressed: widget.busy
+                            ? null
+                            : _showForgotPasswordDialog,
+                        child: Text('Forgot password?'),
                       ),
                       const SizedBox(height: 8),
                       Wrap(
@@ -9695,17 +11961,24 @@ class _CommandCenterContent extends StatelessWidget {
             workspaces: user.workspaces,
             activeWorkspaceId: user.activeWorkspace?.id,
           ),
-          _HomeDestination.notes => _NotesView(
-            folders: noteFolders,
-            notes: notes,
-            workspaces: user.workspaces,
-            activeWorkspaceId: user.activeWorkspace?.id,
-            openNoteId: noteToOpenId,
-            onFolderCreated: onNoteFolderCreated,
-            onFolderDeleted: onNoteFolderDeleted,
-            onNoteSaved: onNoteSaved,
-            onNoteDeleted: onNoteDeleted,
-          ),
+          _HomeDestination.notes =>
+            user.isAdmin || user.planLimits.notesEnabled
+                ? _NotesView(
+                    folders: noteFolders,
+                    notes: notes,
+                    workspaces: user.workspaces,
+                    activeWorkspaceId: user.activeWorkspace?.id,
+                    openNoteId: noteToOpenId,
+                    onFolderCreated: onNoteFolderCreated,
+                    onFolderDeleted: onNoteFolderDeleted,
+                    onNoteSaved: onNoteSaved,
+                    onNoteDeleted: onNoteDeleted,
+                  )
+                : _PlanLimitErrorBanner(
+                    message:
+                        'Notes are available on Premium, Pro, and Enterprise plans.',
+                    launchExternalUrl: launchExternalUrl,
+                  ),
           _HomeDestination.memory => _MemoryView(
             items: memoryItems,
             summaries: memorySummaries,
@@ -28780,10 +31053,16 @@ class _BeanFab extends StatefulWidget {
     required this.onPressed,
     required this.onLongPressStart,
     required this.onLongPressEnd,
+    this.widgetKey = const Key('nav-bean'),
+    this.semanticLabel = 'Bean chat',
+    this.longPressEnabled = true,
   });
 
+  final Key widgetKey;
   final bool selected;
   final bool listening;
+  final String semanticLabel;
+  final bool longPressEnabled;
   final VoidCallback onPressed;
   final VoidCallback onLongPressStart;
   final VoidCallback onLongPressEnd;
@@ -28794,8 +31073,13 @@ class _BeanFab extends StatefulWidget {
 
 class _BeanFabState extends State<_BeanFab>
     with SingleTickerProviderStateMixin {
+  static const _pressHoldDelay = Duration(milliseconds: 180);
+
   late final AnimationController _pulseController;
   bool _pressRecording = false;
+  Timer? _pressHoldTimer;
+
+  bool get _visuallyListening => widget.listening || _pressRecording;
 
   @override
   void initState() {
@@ -28816,7 +31100,7 @@ class _BeanFabState extends State<_BeanFab>
   }
 
   void _syncPulseAnimation() {
-    if (widget.listening) {
+    if (_visuallyListening) {
       _pulseController.repeat(reverse: true);
     } else {
       _pulseController.stop();
@@ -28826,31 +31110,61 @@ class _BeanFabState extends State<_BeanFab>
 
   @override
   void dispose() {
+    _pressHoldTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
 
+  void _handleTapDown() {
+    if (!widget.longPressEnabled) return;
+    _pressHoldTimer?.cancel();
+    _pressHoldTimer = Timer(_pressHoldDelay, _beginPressRecording);
+  }
+
+  void _handleTapUp() {
+    final wasRecording = _pressRecording;
+    _pressHoldTimer?.cancel();
+    _pressHoldTimer = null;
+    if (wasRecording) {
+      _endPressRecording();
+    } else {
+      widget.onPressed();
+    }
+  }
+
+  void _handleTapCancel() {
+    _pressHoldTimer?.cancel();
+    _pressHoldTimer = null;
+    _endPressRecording();
+  }
+
   void _beginPressRecording() {
+    if (!widget.longPressEnabled) return;
+    _pressHoldTimer?.cancel();
+    _pressHoldTimer = null;
     if (_pressRecording) return;
-    _pressRecording = true;
+    setState(() => _pressRecording = true);
+    _syncPulseAnimation();
     widget.onLongPressStart();
   }
 
   void _endPressRecording() {
     if (!_pressRecording) return;
-    _pressRecording = false;
+    setState(() => _pressRecording = false);
+    _syncPulseAnimation();
     widget.onLongPressEnd();
   }
 
   @override
   Widget build(BuildContext context) {
     final activeColor = HeyBeanTheme.accentStrong;
+    final visuallyListening = _visuallyListening;
     return GestureDetector(
-      key: const Key('nav-bean'),
-      onTap: widget.onPressed,
-      onLongPressStart: (_) => _beginPressRecording(),
-      onLongPressEnd: (_) => _endPressRecording(),
-      onLongPressCancel: _endPressRecording,
+      key: widget.widgetKey,
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _handleTapDown(),
+      onTapUp: (_) => _handleTapUp(),
+      onTapCancel: _handleTapCancel,
       child: SizedBox(
         width: 98,
         height: 98,
@@ -28858,7 +31172,7 @@ class _BeanFabState extends State<_BeanFab>
           alignment: Alignment.center,
           clipBehavior: Clip.none,
           children: [
-            if (widget.listening)
+            if (visuallyListening)
               AnimatedBuilder(
                 key: const Key('heybean-recording-pulse'),
                 animation: _pulseController,
@@ -28897,18 +31211,18 @@ class _BeanFabState extends State<_BeanFab>
                     shape: BoxShape.circle,
                     color: HeyBeanTheme.surface,
                     border: Border.all(
-                      color: widget.listening || widget.selected
+                      color: visuallyListening || widget.selected
                           ? activeColor
                           : HeyBeanTheme.border,
-                      width: widget.listening ? 4 : 2.5,
+                      width: visuallyListening ? 4 : 2.5,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: widget.listening
+                        color: visuallyListening
                             ? activeColor.withValues(alpha: .18)
                             : Colors.black.withValues(alpha: .14),
-                        blurRadius: widget.listening ? 32 : 22,
-                        spreadRadius: widget.listening ? 3 : 0,
+                        blurRadius: visuallyListening ? 32 : 22,
+                        spreadRadius: visuallyListening ? 3 : 0,
                         offset: const Offset(0, 10),
                       ),
                     ],
@@ -28922,7 +31236,7 @@ class _BeanFabState extends State<_BeanFab>
                       width: 38,
                       height: 38,
                       fit: BoxFit.contain,
-                      semanticLabel: 'Bean chat',
+                      semanticLabel: widget.semanticLabel,
                     ),
                   ),
                 ),

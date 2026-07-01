@@ -69,6 +69,18 @@ class HermesApiClient {
     return _rememberAuth(HermesAuthResult.fromJson(_expectMap(data['data'])));
   }
 
+  Future<HermesEmailAvailability> checkEmailAvailability({
+    required String email,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/auth/email-availability',
+      body: {'email': email},
+      authenticated: false,
+    );
+    return HermesEmailAvailability.fromJson(_expectMap(data['data']));
+  }
+
   Future<HermesAuthResult> login({
     required String email,
     required String password,
@@ -228,6 +240,7 @@ class HermesApiClient {
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
+    String? homeCity,
     HermesNotificationPreferences? notificationPreferences,
   }) async {
     final data = await _sendJson(
@@ -244,6 +257,7 @@ class HermesApiClient {
         if (onboardingPriorities != null)
           'onboarding_priorities': onboardingPriorities,
         if (onboardingContext != null) 'onboarding_context': onboardingContext,
+        if (homeCity != null) 'home_city': homeCity,
         if (notificationPreferences != null)
           'notification_preferences': notificationPreferences.toJson(),
       },
@@ -1293,10 +1307,22 @@ class HermesApiClient {
     return HermesAssistantRun.fromJson(_expectMap(data['data']));
   }
 
-  Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async {
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async {
     final data = await _sendJson(
       'GET',
-      '/assistant/sessions/$sessionId/events',
+      _pathWithQuery('/assistant/sessions/$sessionId/events', {
+        if (after != null) 'after': after.toString(),
+        if (waitSeconds > 0) 'wait': waitSeconds.toString(),
+        if (limit != 100) 'limit': limit.toString(),
+      }),
+      responseTimeout: waitSeconds > 0
+          ? Duration(seconds: waitSeconds + 10)
+          : _standardApiResponseTimeout,
     );
     return _expectList(
       data['data'],
@@ -1443,6 +1469,19 @@ class HermesApiException implements Exception {
 
   @override
   String toString() => 'HermesApiException(statusCode: $statusCode)';
+}
+
+class HermesEmailAvailability {
+  const HermesEmailAvailability({required this.email, required this.available});
+
+  final String email;
+  final bool available;
+
+  factory HermesEmailAvailability.fromJson(Map<String, Object?> json) =>
+      HermesEmailAvailability(
+        email: _expectString(json['email']),
+        available: json['available'] == true,
+      );
 }
 
 class HermesAuthResult {
@@ -1742,6 +1781,7 @@ class HermesUser {
     this.theme = 'green',
     this.themeMode = 'auto',
     this.commandCenterLabel = 'Command Center',
+    this.homeCity,
     this.onboardComplete = false,
     this.agentProfile,
     this.defaultWorkspaceId,
@@ -1766,6 +1806,7 @@ class HermesUser {
   final String theme;
   final String themeMode;
   final String commandCenterLabel;
+  final String? homeCity;
   final bool onboardComplete;
   final HermesAgentProfile? agentProfile;
   final int? defaultWorkspaceId;
@@ -1792,6 +1833,7 @@ class HermesUser {
     String? theme,
     String? themeMode,
     String? commandCenterLabel,
+    String? homeCity,
     bool? onboardComplete,
     HermesAgentProfile? agentProfile,
     int? defaultWorkspaceId,
@@ -1816,6 +1858,7 @@ class HermesUser {
     theme: theme ?? this.theme,
     themeMode: themeMode ?? this.themeMode,
     commandCenterLabel: commandCenterLabel ?? this.commandCenterLabel,
+    homeCity: homeCity ?? this.homeCity,
     onboardComplete: onboardComplete ?? this.onboardComplete,
     agentProfile: agentProfile ?? this.agentProfile,
     defaultWorkspaceId: defaultWorkspaceId ?? this.defaultWorkspaceId,
@@ -1855,6 +1898,7 @@ class HermesUser {
       json['command_center_label'] ?? json['commandCenterLabel'],
       'Command Center',
     ),
+    homeCity: (json['home_city'] ?? json['homeCity'])?.toString(),
     onboardComplete: json['onboard_complete'] == true,
     agentProfile: json['agent_profile'] is Map<String, Object?>
         ? HermesAgentProfile.fromJson(_expectMap(json['agent_profile']))
@@ -1912,6 +1956,7 @@ class HermesPlanLimits {
     this.recurringRemindersEnabled = false,
     this.recurringCalendarEnabled = false,
     this.emailRemindersEnabled = false,
+    this.notesEnabled = false,
     this.priorityBackgroundWork = false,
   });
 
@@ -1925,6 +1970,7 @@ class HermesPlanLimits {
   final bool recurringRemindersEnabled;
   final bool recurringCalendarEnabled;
   final bool emailRemindersEnabled;
+  final bool notesEnabled;
   final bool priorityBackgroundWork;
 
   factory HermesPlanLimits.fromJson(Map<String, Object?>? json) {
@@ -1956,6 +2002,7 @@ class HermesPlanLimits {
       emailRemindersEnabled: _readBool(
         json['email_reminders_enabled'] ?? json['emailRemindersEnabled'],
       ),
+      notesEnabled: _readBool(json['notes_enabled'] ?? json['notesEnabled']),
       priorityBackgroundWork: _readBool(
         json['priority_background_work'] ?? json['priorityBackgroundWork'],
       ),

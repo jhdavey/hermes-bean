@@ -127,6 +127,31 @@ void main() {
     expect(result.assistantMessage?.content, 'Updated.');
   });
 
+  test('checks email availability before guided registration', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      transport: (request) async {
+        expect(request.method, 'POST');
+        expect(request.path, '/auth/email-availability');
+        expect(request.headers.containsKey('Authorization'), isFalse);
+        expect(request.body, {'email': 'Taken@Example.com '});
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {'email': 'taken@example.com', 'available': false},
+          }),
+        );
+      },
+    );
+
+    final availability = await client.checkEmailAvailability(
+      email: 'Taken@Example.com ',
+    );
+
+    expect(availability.email, 'taken@example.com');
+    expect(availability.available, isFalse);
+  });
+
   test('creates notes when empty metadata returns as a JSON array', () async {
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),
@@ -221,6 +246,46 @@ void main() {
     expect(feed.changes.single.resourceType, 'task');
     expect(feed.changes.single.workspaceId, 3);
     expect(feed.changes.single.payload['title'], 'Buy milk');
+  });
+
+  test('polls assistant activity events incrementally', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'GET');
+        expect(
+          request.path,
+          '/assistant/sessions/42/events?after=10&wait=2&limit=25',
+        );
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': [
+              {
+                'id': 11,
+                'event_type': 'assistant.task.created',
+                'status': 'succeeded',
+              },
+            ],
+          }),
+        );
+      },
+    );
+
+    final events = await client.pollActivityEvents(
+      42,
+      after: 10,
+      waitSeconds: 2,
+      limit: 25,
+    );
+
+    expect(requests, hasLength(1));
+    expect(events.single.id, 11);
+    expect(events.single.eventType, 'assistant.task.created');
   });
 
   test(
@@ -689,6 +754,37 @@ void main() {
       expect(requests, hasLength(1));
     },
   );
+
+  test('updates home city through auth profile update', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'PATCH');
+        expect(request.path, '/auth/me');
+        expect(request.headers['Authorization'], 'Bearer token-123');
+        expect(request.body, {'home_city': 'Orlando, FL'});
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'id': 9,
+              'name': 'Bean User',
+              'email': 'bean@example.com',
+              'home_city': 'Orlando, FL',
+            },
+          }),
+        );
+      },
+    );
+
+    final user = await client.updateMe(homeCity: 'Orlando, FL');
+
+    expect(user.homeCity, 'Orlando, FL');
+    expect(requests, hasLength(1));
+  });
 
   test('registers and unregisters push notification tokens', () async {
     final requests = <HermesApiRequest>[];

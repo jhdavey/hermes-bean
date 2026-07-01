@@ -592,7 +592,7 @@ void main() {
     },
   );
 
-  testWidgets('create account signs in and shows the trial plan paywall', (
+  testWidgets('guided Bean signup creates account and starts plan checkout', (
     WidgetTester tester,
   ) async {
     final api = _FakeHermesApiClient();
@@ -612,18 +612,81 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('show-register-mode')));
+    await tester.tap(find.byKey(const Key('guided-signup-action')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('auth-name')), 'testing');
+    expect(find.text('Hello, please enter your name below.'), findsOneWidget);
+    expect(find.text('Please hold to talk, or tap to text'), findsNothing);
+    expect(find.text('Bean setup'), findsNothing);
+    expect(find.byKey(const Key('guided-onboarding-input')), findsOneWidget);
+    expect(find.text('Name'), findsOneWidget);
+    expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
+    final initialBeanLogo = tester.widget<Image>(
+      find.byKey(const Key('heybean-center-bean-logo')),
+    );
+    expect(
+      (initialBeanLogo.image as AssetImage).assetName,
+      'assets/images/bean/bean-logo.png',
+    );
+
     await tester.enterText(
-      find.byKey(const Key('auth-email')),
+      find.byKey(const Key('guided-onboarding-input')),
+      'testing',
+    );
+    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
+    expect(find.byKey(const Key('guided-onboarding-input')), findsOneWidget);
+    expect(
+      find.text(
+        'Nice to meet you, testing. Do you prefer light or dark mode? You can also choose Auto, and you can change this anytime in Appearance settings.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('guided-theme-mode-light')), findsOneWidget);
+    expect(find.byKey(const Key('guided-theme-mode-dark')), findsOneWidget);
+    expect(find.byKey(const Key('guided-theme-mode-auto')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('guided-theme-mode-dark')));
+    await tester.pump();
+    expect(
+      Theme.of(
+        tester.element(find.byKey(const Key('guided-onboarding-input'))),
+      ).brightness,
+      Brightness.dark,
+    );
+    final darkBeanLogo = tester.widget<Image>(
+      find.byKey(const Key('heybean-center-bean-logo')),
+    );
+    expect(
+      (darkBeanLogo.image as AssetImage).assetName,
+      'assets/images/bean/bean-logo-white-overlay.png',
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('What email address'), findsOneWidget);
+
+    api.takenEmails.add('taken@example.com');
+    await tester.enterText(
+      find.byKey(const Key('guided-onboarding-input')),
+      'taken@example.com',
+    );
+    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('already'), findsOneWidget);
+    expect(find.textContaining('choose a password'), findsNothing);
+    expect(api.registeredUsers, isEmpty);
+
+    await tester.enterText(
+      find.byKey(const Key('guided-onboarding-input')),
       'test@email.com',
     );
+    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.pumpAndSettle();
+
     await tester.enterText(
-      find.byKey(const Key('auth-password')),
+      find.byKey(const Key('guided-onboarding-input')),
       'password1234',
     );
-    await tester.tap(find.byKey(const Key('auth-submit')));
+    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
     await tester.pumpAndSettle();
 
     expect(api.registeredUsers, [
@@ -633,9 +696,28 @@ void main() {
         'password': 'password1234',
       },
     ]);
-    expect(find.byKey(const Key('signup-paywall-screen')), findsOneWidget);
-    expect(find.text('Choose your HeyBean subscription'), findsOneWidget);
-    expect(find.text('Account created for testing.'), findsOneWidget);
+    expect(api.updatedThemeMode, 'dark');
+    expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
+    expect(find.byKey(const Key('guided-onboarding-input')), findsOneWidget);
+    expect(
+      find.byKey(const Key('guided-personality-balanced')),
+      findsOneWidget,
+    );
+    expect(find.text('Balanced helper'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('guided-personality-balanced')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('guided-location-skip')));
+    await tester.pumpAndSettle();
+    expect(api.updatedAgentPersonality, 'balanced');
+    expect(api.updatedContext, contains('guided Bean signup onboarding'));
+
+    await tester.ensureVisible(find.byKey(const Key('guided-tour-skip')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('guided-tour-skip')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('signup-plan-base')), findsOneWidget);
     expect(
       find.text('14-day free trial, then billed monthly'),
       findsNWidgets(3),
@@ -647,16 +729,26 @@ void main() {
     expect(find.textContaining('Bean could not create'), findsNothing);
 
     expect(find.byKey(const Key('signup-plan-base')), findsOneWidget);
-    expect(find.byKey(const Key('signup-plan-premium')), findsOneWidget);
-    expect(find.byKey(const Key('signup-plan-pro')), findsOneWidget);
-    expect(find.byKey(const Key('signup-plan-enterprise')), findsOneWidget);
-    expect(find.text('Custom'), findsOneWidget);
-    expect(find.text('Contact us'), findsOneWidget);
+    expect(find.byKey(const Key('signup-plan-base-action')), findsOneWidget);
+    final viewportHeight =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    final baseCardRect = tester.getRect(
+      find.byKey(const Key('signup-plan-base')),
+    );
+    final enterpriseActionRect = tester.getRect(
+      find.byKey(const Key('signup-plan-enterprise-action')),
+    );
+    expect(baseCardRect.top, greaterThanOrEqualTo(0));
+    expect(baseCardRect.top, lessThan(viewportHeight));
+    expect(enterpriseActionRect.top, greaterThan(viewportHeight));
 
     await tester.ensureVisible(
       find.byKey(const Key('signup-plan-enterprise-action')),
     );
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('signup-plan-enterprise')), findsOneWidget);
+    expect(find.text('Custom'), findsOneWidget);
+    expect(find.text('Contact us'), findsOneWidget);
     await tester.tap(find.byKey(const Key('signup-plan-enterprise-action')));
     await tester.pumpAndSettle();
 
@@ -722,7 +814,8 @@ void main() {
       expect(loginHeaderRect.center.dx, closeTo(screenSize.width / 2, 1));
       expect(loginCardRect.center.dy, closeTo(bodyRect.center.dy, 1));
       expect(find.byIcon(Icons.lock_rounded), findsNothing);
-      expect(find.byKey(const Key('show-register-mode')), findsOneWidget);
+      expect(find.byKey(const Key('guided-signup-action')), findsOneWidget);
+      expect(find.byKey(const Key('show-register-mode')), findsNothing);
       expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
       expect(find.byKey(const Key('remember-me-checkbox')), findsOneWidget);
       expect(find.text('Remember me'), findsOneWidget);
@@ -736,19 +829,6 @@ void main() {
 
       expect(find.text('Forgot password?'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('show-register-mode')));
-      await tester.pumpAndSettle();
-      expect(find.text('Create your account'), findsOneWidget);
-      expect(
-        find.textContaining('Create your account with your email'),
-        findsNothing,
-      );
-      expect(find.byKey(const Key('auth-name')), findsOneWidget);
-      expect(find.text('Choose Bean’s personality'), findsNothing);
-      expect(find.text('What should Bean prioritize?'), findsNothing);
-
-      await tester.tap(find.byKey(const Key('show-login-mode')));
-      await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('auth-email')),
         'bean@example.com',
@@ -769,98 +849,16 @@ void main() {
       expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
       expect(
         find.byKey(const Key('bean-intro-spotlight-overlay')),
-        findsOneWidget,
-      );
-      expect(find.byKey(const Key('bean-intro-callout')), findsOneWidget);
-      expect(
-        find.text('Start by introducing yourself to Bean'),
-        findsOneWidget,
-      );
-      final introArrow = tester.getRect(
-        find.byKey(const Key('bean-intro-callout-arrow')),
-      );
-      final beanButton = tester.getRect(
-        find.byKey(const Key('heybean-center-bean-button')),
-      );
-      final arrowGap = beanButton.top - introArrow.bottom;
-      expect(arrowGap, greaterThanOrEqualTo(3));
-      expect(arrowGap, lessThanOrEqualTo(5));
-
-      await tester.tap(find.byKey(const Key('bean-intro-callout')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('nav-bean')), findsOneWidget);
-      expect(find.text("Hi, I'm Bean. What is your name?"), findsOneWidget);
-
-      await tester.enterText(
-        find.byKey(const Key('chat-input')),
-        "Hi, I'm Harley",
-      );
-      await tester.testTextInput.receiveAction(TextInputAction.send);
-      await tester.pumpAndSettle();
-
-      expect(api.sentMessages.first, contains("Hi, I'm Harley"));
-      expect(api.sendMessageCalls, 1);
-      expect(api.queueMessageCalls, 0);
-      expect(
-        find.text('Nice to meet you — I saved those Bean preferences.'),
-        findsOneWidget,
+        findsNothing,
       );
       expect(find.byKey(const Key('bean-intro-callout')), findsNothing);
-      expect(find.byKey(const Key('onboarding-tour-overlay')), findsOneWidget);
-      expect(
-        find.text('Hold for voice to text, or tap to type'),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('onboarding-tour-highlight-bean')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('nav-bean')), findsOneWidget);
+      expect(find.text("Hi, I'm Bean. What is your name?"), findsNothing);
 
-      await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Create new events, tasks, and reminders here'),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('onboarding-tour-highlight-create')),
-        findsOneWidget,
-      );
-
-      await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-      await tester.pumpAndSettle();
-      expect(
-        find.text(
-          "Your critical count includes today's critical events, and tasks that have been marked critical, or are overdue",
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('onboarding-tour-highlight-critical')),
-        findsOneWidget,
-      );
-
-      await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-      await tester.pumpAndSettle();
-      expect(
-        find.text(
-          'These will snap you back to the current day or month at any point',
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('onboarding-tour-highlight-date-month')),
-        findsOneWidget,
-      );
-
-      await tester.tap(find.byKey(const Key('onboarding-tour-finish')));
-      await tester.pumpAndSettle();
+      expect(api.sentMessages, isEmpty);
+      expect(api.sendMessageCalls, 0);
+      expect(api.queueMessageCalls, 0);
       expect(find.byKey(const Key('onboarding-tour-overlay')), findsNothing);
-      final onboardingTourPrefs = await SharedPreferences.getInstance();
-      expect(
-        onboardingTourPrefs.getBool('heybean.onboarding_tour_seen.1'),
-        isTrue,
-      );
 
       await tester.tap(find.byKey(const Key('calendar-today-button')));
       await tester.pumpAndSettle();
@@ -937,82 +935,33 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Bean onboarding falls back to queued work after client send drops',
-    (WidgetTester tester) async {
-      final api = _DirectSendDropsFakeHermesApiClient(
-        onboardingCompleted: false,
-      );
-      await tester.pumpWidget(
-        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('login skips the retired Bean onboarding interview', (
+    WidgetTester tester,
+  ) async {
+    final api = _FakeHermesApiClient(onboardingCompleted: false);
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
 
-      await tester.enterText(
-        find.byKey(const Key('auth-email')),
-        'bean@example.com',
-      );
-      await tester.enterText(
-        find.byKey(const Key('auth-password')),
-        'correct-horse-battery-staple',
-      );
-      await tester.tap(find.byKey(const Key('auth-submit')));
-      await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('auth-email')),
+      'bean@example.com',
+    );
+    await tester.enterText(
+      find.byKey(const Key('auth-password')),
+      'correct-horse-battery-staple',
+    );
+    await tester.tap(find.byKey(const Key('auth-submit')));
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('bean-intro-callout')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('chat-input')), "I'm Harley");
-      await tester.testTextInput.receiveAction(TextInputAction.send);
-      await tester.pumpAndSettle();
-
-      expect(api.directFailures, 2);
-      expect(api.queueMessageCalls, 1);
-      expect(
-        find.text('Nice to meet you — I saved those Bean preferences.'),
-        findsOneWidget,
-      );
-      expect(find.text('Failed'), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'Bean onboarding reports client send failures without storing user content',
-    (WidgetTester tester) async {
-      final api = _MessageSendAlwaysFailsFakeHermesApiClient(
-        onboardingCompleted: false,
-      );
-      await tester.pumpWidget(
-        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.enterText(
-        find.byKey(const Key('auth-email')),
-        'bean@example.com',
-      );
-      await tester.enterText(
-        find.byKey(const Key('auth-password')),
-        'correct-horse-battery-staple',
-      );
-      await tester.tap(find.byKey(const Key('auth-submit')));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('bean-intro-callout')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('chat-input')), "I'm Harley");
-      await tester.testTextInput.receiveAction(TextInputAction.send);
-      await tester.pumpAndSettle();
-
-      expect(api.sendMessageCalls, 2);
-      expect(api.queueMessageCalls, 1);
-      expect(find.text('Failed'), findsOneWidget);
-      expect(api.issueReports, hasLength(1));
-      expect(api.issueReports.single, contains('Flutter Bean chat failure'));
-      expect(api.issueReports.single, contains('bean_introduction: true'));
-      expect(api.issueReports.single, contains('content_length: 10'));
-      expect(api.issueReports.single, isNot(contains("I'm Harley")));
-    },
-  );
+    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+    expect(find.byKey(const Key('bean-intro-callout')), findsNothing);
+    expect(find.text("Hi, I'm Bean. What is your name?"), findsNothing);
+    expect(api.sentMessages, isEmpty);
+    expect(api.queueMessageCalls, 0);
+    await tester.pump(const Duration(milliseconds: 250));
+  });
 
   testWidgets(
     'creating a household keeps settings mounted without Flutter tree errors',
@@ -2199,7 +2148,7 @@ void main() {
   });
 
   testWidgets(
-    'finish closes onboarding even when save response returns stale profile',
+    'stale onboarding profile responses do not reopen the retired interview',
     (WidgetTester tester) async {
       final api = _FakeHermesApiClient(
         onboardingCompleted: false,
@@ -2222,14 +2171,15 @@ void main() {
       await tester.tap(find.byKey(const Key('auth-submit')));
       await tester.pumpAndSettle();
 
+      expect(find.byKey(const Key('command-center-home')), findsOneWidget);
       expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
-      expect(find.byKey(const Key('bean-intro-callout')), findsOneWidget);
-      expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+      expect(find.byKey(const Key('bean-intro-callout')), findsNothing);
 
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('agent-onboarding-overlay')), findsNothing);
-      expect(find.text("Hi, I'm Bean. What is your name?"), findsOneWidget);
+      expect(find.byKey(const Key('bean-intro-callout')), findsNothing);
+      expect(find.text("Hi, I'm Bean. What is your name?"), findsNothing);
     },
   );
 
@@ -2816,7 +2766,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
 
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
@@ -2826,6 +2776,196 @@ void main() {
     expect(find.text('Create reminder: Deep work'), findsOneWidget);
     expect(
       find.text('Done — I added the deep work block and reminder.'),
+      findsOneWidget,
+    );
+
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(milliseconds: 250));
+  });
+
+  testWidgets('multi-action Bean requests show every local work item upfront', (
+    WidgetTester tester,
+  ) async {
+    final api = _DashboardRefreshBeanWorkFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Please also add workout to my calendar for tomorrow morning at 6-7am, and set a reminder for 5:30am',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('Creating event: Workout'), findsOneWidget);
+    expect(find.text('Creating reminder: Workout'), findsOneWidget);
+    expect(find.text('0/2'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(milliseconds: 250));
+  });
+
+  testWidgets('schedule block and reminder request preserves work order', (
+    WidgetTester tester,
+  ) async {
+    final api = _DashboardRefreshBeanWorkFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Can you put a block on my schedule for next Friday from 9am-3pm for Miata engine swap and set a reminder for Thursday evening at 8pm',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('Creating event: Miata engine swap'), findsOneWidget);
+    expect(find.text('Creating reminder: Miata engine swap'), findsOneWidget);
+    expect(find.text('0/2'), findsOneWidget);
+
+    final eventTop = tester.getTopLeft(
+      find.text('Creating event: Miata engine swap'),
+    );
+    final reminderTop = tester.getTopLeft(
+      find.text('Creating reminder: Miata engine swap'),
+    );
+    expect(eventTop.dy, lessThan(reminderTop.dy));
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(milliseconds: 250));
+  });
+
+  testWidgets('plain create block request is labeled as a calendar event', (
+    WidgetTester tester,
+  ) async {
+    final api = _DashboardRefreshBeanWorkFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Ok, I deleted those both, so please again, create a block for next Friday from 9-4pm for Miata engine swap, and set a reminder for that morning at 8am',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('Creating event: Miata engine swap'), findsOneWidget);
+    expect(find.text('Creating reminder: Miata engine swap'), findsOneWidget);
+    expect(find.text('Creating item'), findsNothing);
+    expect(find.text('0/2'), findsOneWidget);
+
+    final eventTop = tester.getTopLeft(
+      find.text('Creating event: Miata engine swap'),
+    );
+    final reminderTop = tester.getTopLeft(
+      find.text('Creating reminder: Miata engine swap'),
+    );
+    expect(eventTop.dy, lessThan(reminderTop.dy));
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(milliseconds: 250));
+  });
+
+  testWidgets('backend work events replace one local item at a time', (
+    WidgetTester tester,
+  ) async {
+    final api = _PartialBeanWorkEventsFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Can you put a block on my schedule for next Friday from 9am-3pm for Miata engine swap and set a reminder for Thursday evening at 8pm',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.text('Creating event: Miata engine swap'), findsOneWidget);
+    expect(find.text('Creating reminder: Miata engine swap'), findsOneWidget);
+    expect(find.text('0/2'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(
+      find.text('Create calendar event: Miata engine swap'),
+      findsOneWidget,
+    );
+    expect(find.text('Creating reminder: Miata engine swap'), findsOneWidget);
+    expect(find.text('0/2'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(milliseconds: 250));
+  });
+
+  testWidgets('completed Bean work events refresh dashboard before run ends', (
+    WidgetTester tester,
+  ) async {
+    final api = _BeanMutationRefreshFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'add a task to take out trash tonight',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('Creating task: Take out trash'), findsOneWidget);
+    expect(find.text('Take out trash'), findsNothing);
+
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Create task: Take out trash'), findsOneWidget);
+    expect(api.taskListIncludedCreatedTask, isTrue);
+
+    await tester.tap(find.byKey(const Key('nav-tasks')));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Take out trash'), findsWidgets);
+
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(
+      find.text('Done — I added the take out trash task.'),
       findsOneWidget,
     );
 
@@ -7584,6 +7724,19 @@ class _NotesFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   Future<HermesUser> me() async {
     final user = await super.me();
     return user.copyWith(
+      subscriptionTier: 'premium',
+      planLimits: const HermesPlanLimits(
+        tier: 'premium',
+        workspaceLimit: 5,
+        calendarConnectionLimit: 5,
+        connectedAccountLimit: 3,
+        historyDays: 365,
+        recurringTasksEnabled: true,
+        recurringRemindersEnabled: true,
+        recurringCalendarEnabled: true,
+        emailRemindersEnabled: true,
+        notesEnabled: true,
+      ),
       defaultWorkspaceId: 1,
       personalWorkspace: personalWorkspace,
       activeWorkspace: personalWorkspace,
@@ -8115,6 +8268,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       );
   final passwordResetRequests = <String>[];
   final registeredUsers = <Map<String, String>>[];
+  final takenEmails = <String>{};
   final checkoutRequests = <Map<String, String>>[];
   int sendMessageCalls = 0;
   int branchMessageCalls = 0;
@@ -8223,6 +8377,17 @@ class _FakeHermesApiClient extends HermesApiClient {
     return HermesAuthResult(
       token: 'fake-token',
       user: _user(name: name, email: email, subscriptionStatus: 'incomplete'),
+    );
+  }
+
+  @override
+  Future<HermesEmailAvailability> checkEmailAvailability({
+    required String email,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    return HermesEmailAvailability(
+      email: normalizedEmail,
+      available: !takenEmails.contains(normalizedEmail),
     );
   }
 
@@ -8363,6 +8528,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
+    String? homeCity,
     HermesNotificationPreferences? notificationPreferences,
   }) async {
     updatedName = name ?? updatedName;
@@ -8589,8 +8755,12 @@ class _FakeHermesApiClient extends HermesApiClient {
   }
 
   @override
-  Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>
-      const [HermesActivityEvent(id: 1, eventType: 'assistant.ready')];
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async => const [HermesActivityEvent(id: 1, eventType: 'assistant.ready')];
 
   @override
   Future<GoogleCalendarSyncStatus> googleCalendarStatus() async =>
@@ -8827,54 +8997,6 @@ class _FakeHermesApiClient extends HermesApiClient {
   }
 }
 
-class _DirectSendDropsFakeHermesApiClient extends _FakeHermesApiClient {
-  _DirectSendDropsFakeHermesApiClient({super.onboardingCompleted});
-
-  int directFailures = 0;
-
-  @override
-  Future<HermesMessageResult> sendMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-  }) {
-    if (directFailures < 2) {
-      directFailures++;
-      throw StateError('simulated client send drop');
-    }
-    return super.sendMessage(
-      sessionId: sessionId,
-      content: content,
-      metadata: metadata,
-    );
-  }
-}
-
-class _MessageSendAlwaysFailsFakeHermesApiClient extends _FakeHermesApiClient {
-  _MessageSendAlwaysFailsFakeHermesApiClient({super.onboardingCompleted});
-
-  @override
-  Future<HermesMessageResult> sendMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-  }) {
-    sendMessageCalls++;
-    throw StateError('simulated client send failure');
-  }
-
-  @override
-  Future<HermesMessageResult> queueMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-    String source = 'flutter',
-  }) {
-    queueMessageCalls++;
-    throw StateError('simulated queued send failure');
-  }
-}
-
 class _SlowChatFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   final Completer<HermesMessageResult> _messageCompleter =
       Completer<HermesMessageResult>();
@@ -8980,8 +9102,12 @@ class _BeanWorkPlanFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   ];
 
   @override
-  Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>
-      _messageSent ? _workEvents : const [];
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async => _messageSent ? _workEvents : const [];
 
   @override
   Future<HermesMessageResult> queueMessage({
@@ -9110,10 +9236,278 @@ class _DashboardRefreshBeanWorkFakeHermesApiClient
   }
 
   @override
-  Future<List<HermesActivityEvent>> pollActivityEvents(int sessionId) async =>
-      _dashboardRefreshRequested
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async => _dashboardRefreshRequested
       ? _BeanWorkPlanFakeHermesApiClient._workEvents
       : const [];
+}
+
+class _BeanMutationRefreshFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  bool _messageSent = false;
+  bool _workEventsReturned = false;
+  bool taskListIncludedCreatedTask = false;
+
+  static const _workEvents = [
+    HermesActivityEvent(
+      id: 20,
+      eventType: 'assistant.work_item.planned',
+      status: 'planned',
+      toolName: 'assistant.work',
+      payload: {
+        'work_item_id': 'task-create-trash',
+        'work_order': 0,
+        'action_type': 'task.create',
+        'label': 'Create task: Take out trash',
+      },
+    ),
+    HermesActivityEvent(
+      id: 21,
+      eventType: 'assistant.task.created',
+      status: 'succeeded',
+      toolName: 'tasks.create',
+      payload: {
+        'task_id': 440,
+        'title': 'Take out trash',
+        'work_item_id': 'task-create-trash',
+        'work_order': 0,
+        'work_label': 'Create task: Take out trash',
+        'action_type': 'task.create',
+      },
+    ),
+  ];
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    _messageSent = true;
+    return HermesMessageResult(
+      status: 'queued',
+      session: const HermesSession(id: 42, status: 'queued', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 7300 + queueMessageCalls,
+        role: 'user',
+        content: content,
+        metadata: metadata ?? const {},
+      ),
+      run: const HermesAssistantRun(
+        id: 92,
+        status: 'running',
+        source: 'flutter',
+      ),
+      events: const [
+        HermesActivityEvent(
+          id: 19,
+          eventType: 'runtime.run_queued',
+          status: 'queued',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async {
+    if (!_messageSent) return const [];
+    _workEventsReturned = true;
+    return _workEvents;
+  }
+
+  @override
+  Future<List<HermesTask>> listTasks() async {
+    if (!_workEventsReturned) return const [];
+    taskListIncludedCreatedTask = true;
+    return [
+      HermesTask(
+        id: 440,
+        title: 'Take out trash',
+        status: 'open',
+        dueAt: DateTime.now().toIso8601String(),
+      ),
+    ];
+  }
+
+  @override
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
+    todaySummaryCalls++;
+    return HermesTodaySummary(
+      tasks: await listTasks(),
+      reminders: const [],
+      calendarEvents: const [],
+      activityEvents: await pollActivityEvents(42),
+      approvals: const [],
+      blockers: const [],
+    );
+  }
+
+  @override
+  Future<HermesAssistantRun> getAssistantRun(int runId) async =>
+      taskListIncludedCreatedTask
+      ? const HermesAssistantRun(
+          id: 92,
+          status: 'completed',
+          source: 'flutter',
+          assistantMessage: HermesMessage(
+            id: 8900,
+            role: 'assistant',
+            content: 'Done — I added the take out trash task.',
+          ),
+        )
+      : const HermesAssistantRun(id: 92, status: 'running', source: 'flutter');
+}
+
+class _PartialBeanWorkEventsFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  bool _messageSent = false;
+  int _activityPollsAfterMessage = 0;
+  int _runPolls = 0;
+
+  static const _calendarPlanEvent = HermesActivityEvent(
+    id: 30,
+    eventType: 'assistant.work_item.planned',
+    status: 'planned',
+    toolName: 'assistant.work',
+    payload: {
+      'work_item_id': 'calendar-miata',
+      'work_order': 0,
+      'action_type': 'calendar_event.create',
+      'label': 'Create calendar event: Miata engine swap',
+    },
+  );
+
+  static const _allEvents = [
+    _calendarPlanEvent,
+    HermesActivityEvent(
+      id: 31,
+      eventType: 'assistant.work_item.planned',
+      status: 'planned',
+      toolName: 'assistant.work',
+      payload: {
+        'work_item_id': 'reminder-miata',
+        'work_order': 1,
+        'action_type': 'reminder.create',
+        'label': 'Create reminder: Miata engine swap',
+      },
+    ),
+    HermesActivityEvent(
+      id: 32,
+      eventType: 'assistant.calendar_event.created',
+      status: 'succeeded',
+      toolName: 'calendar.create',
+      payload: {
+        'calendar_event_id': 61,
+        'title': 'Miata engine swap',
+        'work_item_id': 'calendar-miata',
+        'work_order': 0,
+        'work_label': 'Create calendar event: Miata engine swap',
+        'action_type': 'calendar_event.create',
+      },
+    ),
+    HermesActivityEvent(
+      id: 33,
+      eventType: 'assistant.reminder.created',
+      status: 'succeeded',
+      toolName: 'reminders.create',
+      payload: {
+        'reminder_id': 62,
+        'title': 'Miata engine swap',
+        'work_item_id': 'reminder-miata',
+        'work_order': 1,
+        'work_label': 'Create reminder: Miata engine swap',
+        'action_type': 'reminder.create',
+      },
+    ),
+  ];
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    _messageSent = true;
+    return HermesMessageResult(
+      status: 'queued',
+      session: const HermesSession(id: 42, status: 'queued', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 7400 + queueMessageCalls,
+        role: 'user',
+        content: content,
+        metadata: metadata ?? const {},
+      ),
+      run: const HermesAssistantRun(
+        id: 94,
+        status: 'running',
+        source: 'flutter',
+      ),
+      events: const [
+        HermesActivityEvent(
+          id: 29,
+          eventType: 'runtime.run_queued',
+          status: 'queued',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async {
+    if (!_messageSent) return const [];
+    _activityPollsAfterMessage++;
+    if (_activityPollsAfterMessage == 1) {
+      return const [_calendarPlanEvent];
+    }
+    if (_activityPollsAfterMessage < 4) {
+      return const [];
+    }
+    return _allEvents;
+  }
+
+  @override
+  Future<HermesAssistantRun> getAssistantRun(int runId) async {
+    _runPolls++;
+    return _runPolls >= 4
+        ? const HermesAssistantRun(
+            id: 94,
+            status: 'completed',
+            source: 'flutter',
+            assistantMessage: HermesMessage(
+              id: 8940,
+              role: 'assistant',
+              content:
+                  'Done — I added the Miata engine swap block and reminder.',
+            ),
+          )
+        : const HermesAssistantRun(
+            id: 94,
+            status: 'running',
+            source: 'flutter',
+          );
+  }
 }
 
 class _TomorrowReminderFakeHermesApiClient
@@ -10591,7 +10985,9 @@ class _JsonEnvelopeMessageHermesApiClient extends _SignedInFakeHermesApiClient {
         id: 9,
         role: 'assistant',
         content:
-            '{"message":"Added Workout to this week on Monday, Wednesday, and Friday from 9:00 AM to 10:00 AM. Should I make it repeat every week?"}',
+            '{"id":75}\n'
+            '{"tool":"calendar_events.create","ok":true}\n'
+            'Added Workout to this week on Monday, Wednesday, and Friday from 9:00 AM to 10:00 AM. Should I make it repeat every week?',
       ),
       events: [],
     );
