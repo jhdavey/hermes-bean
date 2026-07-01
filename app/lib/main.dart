@@ -18902,8 +18902,11 @@ class _EventLocationMapPreview extends StatelessWidget {
     final lat = place.latitude;
     final lng = place.longitude;
     if (lat == null || lng == null) return const SizedBox.shrink();
+    final mapTheme = Theme.of(context).brightness == Brightness.dark
+        ? 'dark'
+        : 'light';
     final mapUri = apiClient.resolveApiUri(
-      '/places/static-map?lat=${Uri.encodeComponent(lat.toString())}&lng=${Uri.encodeComponent(lng.toString())}',
+      '/places/static-map?lat=${Uri.encodeComponent(lat.toString())}&lng=${Uri.encodeComponent(lng.toString())}&theme=$mapTheme',
     );
     return Container(
       key: const Key('event-location-map-preview'),
