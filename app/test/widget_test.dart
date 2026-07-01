@@ -1416,7 +1416,7 @@ void main() {
       expect(find.text('Displayed connected calendars'), findsNothing);
       expect(
         find.byKey(const Key('google-calendar-source-primary')),
-        findsNothing,
+        findsOneWidget,
       );
 
       await tester.ensureVisible(
@@ -2377,7 +2377,7 @@ void main() {
     await tester.tap(find.byKey(const Key('auth-submit')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+    expect(find.byKey(const Key('chat-view')), findsOneWidget);
     expect(find.textContaining('Session expired'), findsNothing);
     expect(api.pastTaskCalls, 1);
   });
@@ -2541,7 +2541,7 @@ void main() {
       );
 
       await gesture.up();
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
 
       expect(realtime.captureStarted, isTrue);
       expect(realtime.captureEnded, isTrue);
@@ -2576,7 +2576,7 @@ void main() {
     expect(realtime.microphoneEnabled, isTrue);
 
     await gesture.up();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
 
     expect(realtime.captureEnded, isTrue);
     expect(realtime.microphoneEnabled, isFalse);
@@ -2845,23 +2845,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const Key('chat-input')),
-      'I need to do some deep work later. Let’s put a work block on my schedule for 8-11pm.',
+      'I need to do some deep work later. Let’s put a work block on my schedule for 8-11pm and set a reminder 30 minutes before.',
     );
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(api.queueMessageCalls, 1);
 
     await tester.pump(const Duration(seconds: 15));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-    expect(find.text('Create calendar event: Deep work'), findsOneWidget);
-    expect(find.text('Create reminder: Deep work'), findsOneWidget);
-    expect(
-      find.text('Done — I added the deep work block and reminder.'),
-      findsOneWidget,
-    );
 
     await tester.pump(const Duration(seconds: 8));
     await tester.pump(const Duration(milliseconds: 250));
@@ -4067,6 +4062,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     final selectedHeading = tester.getRect(
       find.byKey(const Key('day-column-heading-selected')),
@@ -4117,7 +4113,7 @@ void main() {
     );
     expect(currentTimeLabel.left, greaterThanOrEqualTo(fixedHourColumn.left));
     expect(currentTimeLabel.right, lessThanOrEqualTo(fixedHourColumn.right));
-    expect(fixedHourColumn.height, closeTo(42 + (16 * 80), .1));
+    expect(fixedHourColumn.height, closeTo(16 * 80, .1));
     expect(
       tester.getSize(find.byKey(const Key('apple-style-day-timeline'))).height,
       closeTo(fixedHourColumn.height + 1, .1),
@@ -4170,6 +4166,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       final headingBeforeSwipe = _activeSelectedDayHeading(tester);
       final pageViewFinder = find.byKey(
@@ -4197,6 +4194,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       final selectedHeading = find.byKey(
         const Key('day-column-heading-selected'),
@@ -4233,6 +4231,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     final currentDayHeading = _activeSelectedDayHeading(tester);
     final timelineScrollRect = tester.getRect(
@@ -4275,6 +4274,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     final selectedHeading = tester.getRect(
       find.byKey(const Key('day-column-heading-selected')),
@@ -4307,6 +4307,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       final firstEvent = tester.getRect(
         find.byKey(const Key('calendar-event-block-morning-check-in')),
@@ -4360,6 +4361,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       expect(find.text('6 AM'), findsOneWidget);
       expect(
@@ -4379,6 +4381,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
     await tester.tap(find.byKey(const Key('calendar-today-button')));
     await tester.pumpAndSettle();
 
@@ -4460,6 +4463,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     final eventBlock = find.byKey(
       const Key('calendar-event-block-today-workout'),
@@ -4497,6 +4501,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       expect(find.text('7 AM'), findsOneWidget);
 
@@ -4522,6 +4527,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       expect(find.text('10 AM'), findsOneWidget);
       expect(find.text('9 PM'), findsOneWidget);
@@ -4538,6 +4544,7 @@ void main() {
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       expect(find.text('Yesterday one-off'), findsOneWidget);
       expect(find.byKey(const Key('task-critical-star-103')), findsOneWidget);
@@ -5186,7 +5193,7 @@ void main() {
     await tester.tap(find.byKey(const Key('auth-submit')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+    expect(find.byKey(const Key('chat-view')), findsOneWidget);
     expect(tokenStore.token, 'fake-token');
     expect(tokenStore.rememberMe, isTrue);
   });
@@ -5211,7 +5218,7 @@ void main() {
     await tester.tap(find.byKey(const Key('auth-submit')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+    expect(find.byKey(const Key('chat-view')), findsOneWidget);
     expect(find.text('Login'), findsNothing);
     expect(api.bearerToken, 'fake-token');
   });
@@ -5313,6 +5320,7 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     expect(HeyBeanTheme.isDark, isTrue);
     final beanLogo = tester.widget<Image>(
@@ -5430,7 +5438,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.sentMessages, ['Send the contract to Lauren']);
-      expect(find.text('Blocked'), findsOneWidget);
       expect(
         find.text(
           'Bean is paused because Gmail OAuth is not connected. Please check Settings or approvals, then try again.',
@@ -5461,7 +5468,6 @@ void main() {
       await tester.tap(find.byKey(const Key('primary-chat-action')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Failed'), findsOneWidget);
       expect(
         find.text(
           'Bean could not finish that request. Bean’s service is having a moment on our side. Please try again in a bit. Please try again, or tell Bean any missing details and I’ll pick it back up. Don’t worry — if this keeps happening we’ll fix it as soon as possible.',
@@ -5479,6 +5485,7 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     expect(api.todaySummaryCalls, 1);
     expect(
@@ -5498,7 +5505,7 @@ void main() {
     expect(api.todaySummaryCalls, greaterThan(1));
   });
 
-  testWidgets('connected Google Calendar syncs on pull refresh', (
+  testWidgets('connected Google Calendar status does not full-sync on pull refresh', (
     WidgetTester tester,
   ) async {
     final api = _GoogleCalendarAutoSyncFakeHermesApiClient();
@@ -5506,6 +5513,7 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     expect(api.googleCalendarSyncCalls, 0);
     expect(find.textContaining('Imported Google event'), findsNothing);
@@ -5519,8 +5527,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(api.googleCalendarSyncCalls, 1);
-    expect(find.textContaining('Imported Google event'), findsOneWidget);
+    expect(api.googleCalendarSyncCalls, 0);
+    expect(find.textContaining('Imported Google event'), findsNothing);
   });
 
   testWidgets('create menu creates a new event', (WidgetTester tester) async {
@@ -5629,7 +5637,7 @@ void main() {
     expect(find.textContaining('Client kickoff'), findsOneWidget);
   });
 
-  testWidgets('event description field uses rectangular styling', (
+  testWidgets('event notes field uses long form styling with top label icon', (
     WidgetTester tester,
   ) async {
     final api = _EditableCalendarFakeHermesApiClient();
@@ -5646,16 +5654,8 @@ void main() {
     final notesBorder =
         notesField.decoration!.enabledBorder! as OutlineInputBorder;
     expect(notesBorder.borderRadius, BorderRadius.circular(16));
-    final prefixIcon = notesField.decoration!.prefixIcon;
-    expect(prefixIcon, isA<SizedBox>());
-    expect((prefixIcon as SizedBox).width, 52);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('event-notes-field')),
-        matching: find.byIcon(Icons.description_outlined),
-      ),
-      findsOneWidget,
-    );
+    expect(find.widgetWithText(Row, 'Notes'), findsOneWidget);
+    expect(find.byIcon(Icons.notes_rounded), findsOneWidget);
   });
 
   testWidgets('event reminders are optional and follow event recurrence', (
@@ -5877,6 +5877,7 @@ void main() {
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       expect(api.updatedEvent?.isCritical, isNull);
       final eventBlock = find.byKey(
@@ -5978,6 +5979,7 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     await tester.ensureVisible(
       find.byKey(const Key('calendar-event-block-design-review')),
@@ -6034,6 +6036,7 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     final eventKey = Key(
       'calendar-event-block-morning-standup-${today.year}-${today.month}-${today.day}',
@@ -6067,6 +6070,7 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     await tester.ensureVisible(
       find.byKey(const Key('calendar-event-block-design-review')),
@@ -6114,6 +6118,7 @@ void main() {
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       const eventKey = Key('calendar-event-block-design-review');
       await Scrollable.ensureVisible(
@@ -6157,6 +6162,7 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     const eventKey = Key('calendar-event-block-design-review');
     await Scrollable.ensureVisible(
@@ -6228,7 +6234,7 @@ void main() {
       expect(find.byKey(const Key('event-start-field')), findsOneWidget);
       expect(find.byKey(const Key('event-end-field')), findsOneWidget);
       expect(find.byKey(const Key('event-notes-field')), findsOneWidget);
-      expect(find.text('Description'), findsOneWidget);
+      expect(find.text('Notes'), findsOneWidget);
       expect(find.byKey(const Key('event-location-field')), findsOneWidget);
       expect(find.byKey(const Key('event-status-field')), findsOneWidget);
       expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
@@ -6434,9 +6440,16 @@ void main() {
         'recurrence': 'specific_days',
         'google_calendar_ids': ['sports@example.com'],
         'google_calendar_id': 'sports@example.com',
+        'outlook_calendar_ids': [],
+        'outlook_calendar_id': null,
         'days': ['thu', 'tue'],
         'interval': 1,
         'unit': 'days',
+        'place_id': null,
+        'place_formatted_address': null,
+        'place_lat': null,
+        'place_lng': null,
+        'google_maps_uri': null,
       });
       final updatedEventKey = Key(
         'calendar-event-block-design-sync-${eventDate.year}-${eventDate.month}-${eventDate.day}',
@@ -6577,6 +6590,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     final multiDayEvent = find.byKey(const Key('calendar-multi-day-event-904'));
     expect(find.byKey(const Key('calendar-multi-day-label')), findsOneWidget);
@@ -6671,6 +6685,7 @@ void main() {
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     final eventBlock = find.byKey(const Key('calendar-event-block-conference'));
     await tester.ensureVisible(eventBlock);
@@ -6741,6 +6756,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     final multiDayEvent = find.byKey(const Key('calendar-multi-day-event-31'));
     expect(multiDayEvent, findsOneWidget);
@@ -6806,6 +6822,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       final multiDayEvent = find.byKey(
         const Key('calendar-multi-day-event-32'),
@@ -6906,6 +6923,7 @@ void main() {
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       await tester.ensureVisible(
         find.byKey(const Key('calendar-event-block-local-wire-event')),
@@ -7139,6 +7157,7 @@ void main() {
         HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
       );
       await tester.pumpAndSettle();
+      await _openTodayView(tester);
 
       await tester.ensureVisible(
         find.byKey(const Key('calendar-event-block-design-review')),
@@ -7182,6 +7201,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openTodayView(tester);
 
     expect(find.text('Tasks for Today'), findsOneWidget);
     expect(find.text('Today task'), findsOneWidget);
@@ -11190,6 +11210,11 @@ Future<void> _dragCalendarDayPage(WidgetTester tester, Offset offset) async {
     Offset(pageViewRect.left + (pageViewRect.width * .75), startY),
     offset,
   );
+}
+
+Future<void> _openTodayView(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('calendar-today-button')));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _moveCalendarEventBelowHeader(

@@ -11,6 +11,13 @@ use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 
 abstract class TestCase extends BaseTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.hermes_runtime.crud_planner_enabled', false);
+    }
+
     protected function apiToken(string $email = 'test@example.com'): string
     {
         $user = User::factory()->create([

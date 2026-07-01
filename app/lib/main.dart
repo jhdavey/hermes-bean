@@ -13262,6 +13262,8 @@ class _HeroChatCard extends StatefulWidget {
 
 class _HeroChatCardState extends State<_HeroChatCard> {
   final _scrollController = ScrollController();
+  Timer? _scrollTimerShort;
+  Timer? _scrollTimerLong;
   int _lastScrollSignature = 0;
 
   @override
@@ -13287,6 +13289,8 @@ class _HeroChatCardState extends State<_HeroChatCard> {
 
   @override
   void dispose() {
+    _scrollTimerShort?.cancel();
+    _scrollTimerLong?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -13303,14 +13307,17 @@ class _HeroChatCardState extends State<_HeroChatCard> {
   }
 
   void _scheduleScrollToBottom({bool immediate = false}) {
+    _scrollTimerShort?.cancel();
+    _scrollTimerLong?.cancel();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToBottom(immediate: immediate);
-    });
-    Future<void>.delayed(const Duration(milliseconds: 60), () {
       if (!mounted) return;
       _scrollToBottom(immediate: immediate);
     });
-    Future<void>.delayed(const Duration(milliseconds: 180), () {
+    _scrollTimerShort = Timer(const Duration(milliseconds: 60), () {
+      if (!mounted) return;
+      _scrollToBottom(immediate: immediate);
+    });
+    _scrollTimerLong = Timer(const Duration(milliseconds: 180), () {
       if (!mounted) return;
       _scrollToBottom(immediate: immediate);
     });

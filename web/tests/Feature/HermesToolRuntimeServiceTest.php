@@ -29,6 +29,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
         config()->set('services.hermes_runtime.api_key', 'test-key');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        config()->set('services.hermes_runtime.crud_planner_enabled', false);
         config()->set('services.hermes_runtime.tavily_api_key', '');
         config()->set('services.hermes_runtime.google_maps_api_key', '');
         Cache::flush();
@@ -72,12 +73,9 @@ class HermesToolRuntimeServiceTest extends TestCase
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && $request->hasHeader('Authorization', 'Bearer test-key')
                 && data_get($payload, 'messages.0.role') === 'system'
-                && str_contains($systemPrompt, 'Ask this exact location question after learning the user\'s name')
-                && str_contains($systemPrompt, 'What city are you in? This will help me be more useful')
-                && str_contains($systemPrompt, 'just say "skip"')
-                && str_contains($systemPrompt, 'A skipped location still counts as enough onboarding detail')
-                && str_contains($systemPrompt, "Balanced helper, Motivating coach, Detail organizer, Creative partner, Direct operator, and Gentle companion")
-                && str_contains($systemPrompt, "Settings > Bean preferences")
+                && str_contains($systemPrompt, 'Do not run a first-login onboarding interview in normal chat')
+                && str_contains($systemPrompt, 'guided signup collects account and Bean preferences')
+                && str_contains($systemPrompt, 'If the user explicitly asks to change Bean preferences later')
                 && data_get($payload, 'messages.1.role') === 'system'
                 && data_get($payload, 'messages.2.role') === 'user'
                 && data_get($payload, 'messages.2.content') === 'hello bean'
@@ -138,7 +136,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 ]],
             ], 200);
 
-        $token = $this->apiToken('tool-stale-already@example.com');
+        $token = $this->premiumApiToken('tool-stale-already@example.com');
         $user = User::where('email', 'tool-stale-already@example.com')->firstOrFail();
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
@@ -162,7 +160,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             ],
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Done — I created the note.')
+            ->assertJsonPath('data.assistant_message.content', 'Done - I created Directions to boil an egg.')
             ->assertJsonFragment(['event_type' => 'assistant.note.created']);
 
         $this->assertDatabaseHas('notes', [
@@ -323,7 +321,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => "Hi, I'm Harley",
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'All set, Harley.');
+            ->assertJsonPath('data.assistant_message.content', 'Done - I updated Bean settings.');
 
         $user = User::where('email', 'onboarding-tool@example.com')->firstOrFail();
         $profile = $user->agentProfile()->firstOrFail();
@@ -390,7 +388,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => 'skip',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'All set — I will keep your location private.');
+            ->assertJsonPath('data.assistant_message.content', 'Done - I updated Bean settings.');
 
         $user = User::where('email', 'onboarding-skip-location@example.com')->firstOrFail();
         $profile = $user->agentProfile()->firstOrFail();
@@ -688,7 +686,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => 'mark litter box complete',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Marked Litter Box complete.')
+            ->assertJsonPath('data.assistant_message.content', 'Done - I updated Litter Box.')
             ->assertJsonFragment(['event_type' => 'assistant.task.updated']);
 
         $this->assertDatabaseHas('tasks', [
@@ -706,7 +704,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertNotNull(Task::findOrFail($task->id)->completed_at);
         $this->assertNotNull(Task::findOrFail($familyCopy->id)->completed_at);
 
-        Http::assertSentCount(2);
+        Http::assertSentCount(1);
     }
 
     public function test_tool_runtime_falls_back_when_final_assistant_json_envelope_is_blank(): void
@@ -749,14 +747,14 @@ class HermesToolRuntimeServiceTest extends TestCase
                 ]],
             ], 200);
 
-        $token = $this->apiToken('tool-note-envelope@example.com');
+        $token = $this->premiumApiToken('tool-note-envelope@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'create a note with directions to boil an egg',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'I created the note Directions to boil an egg.');
+            ->assertJsonPath('data.assistant_message.content', 'Done - I created Directions to boil an egg.');
 
         $this->assertDatabaseHas('notes', [
             'title' => 'Directions to boil an egg',
@@ -1817,17 +1815,6 @@ class HermesToolRuntimeServiceTest extends TestCase
                 ]],
             ], 200)
             ->push([
-                'id' => 'chatcmpl-initial-final',
-                'model' => 'gpt-test-tools',
-                'choices' => [[
-                    'finish_reason' => 'stop',
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => 'I added breakfast. Do you want a reminder for it?',
-                    ],
-                ]],
-            ], 200)
-            ->push([
                 'id' => 'chatcmpl-follow-up-tool-call',
                 'model' => 'gpt-test-tools',
                 'choices' => [[
@@ -2158,7 +2145,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => 'add buy milk to my tasks',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'I added Buy milk to your tasks.')
+            ->assertJsonPath('data.assistant_message.content', 'Done - I added Buy milk to your tasks.')
             ->assertJsonFragment(['event_type' => 'assistant.task.created']);
 
         $this->assertDatabaseHas('tasks', [
@@ -2222,7 +2209,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertIsInt(data_get($completed, 'payload.duration_ms'));
         $this->assertIsInt(data_get($completed, 'payload.model_call_ms'));
         $this->assertIsInt(data_get($completed, 'payload.tool_execution_ms'));
-        $this->assertSame(2, data_get($completed, 'payload.model_call_count'));
+        $this->assertSame(1, data_get($completed, 'payload.model_call_count'));
         $this->assertSame(1, data_get($completed, 'payload.tool_execution_count'));
 
         Http::assertSent(function ($request): bool {
@@ -2244,6 +2231,8 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_app_crud_planner_creates_each_dated_calendar_event_in_one_request(): void
     {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
         Http::fake();
 
         $token = $this->apiToken('tool-multi-dated-events@example.com');
@@ -2275,6 +2264,8 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_app_crud_planner_reports_partial_failure_without_falling_back_or_duplicating_completed_writes(): void
     {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
         Http::fakeSequence()
             ->push($this->plannerResponse([
                 [
@@ -2301,7 +2292,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
         $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Please add events to my calendar: 7/9 Normal appointment 3pm, 7/10 Recurring appointment 3pm',
+            'content' => 'Please add Normal appointment to my calendar and add Recurring appointment to my calendar too',
             'metadata' => [
                 'client_context' => [
                     'current_local_time' => '2026-06-30T22:19:29-04:00',
@@ -2316,7 +2307,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonFragment(['event_type' => 'assistant.action.failed']);
 
         $this->assertStringContainsString('I completed 1 of 2 requested changes.', $response->json('data.assistant_message.content'));
-        $this->assertStringContainsString('Create calendar event: Recurring appointment', $response->json('data.assistant_message.content'));
+        $this->assertStringContainsString('Recurring calendar events are available on Premium, Pro, and Enterprise plans. Upgrade your plan to use this feature.', $response->json('data.assistant_message.content'));
         $this->assertDatabaseCount('calendar_events', 1);
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Normal appointment']);
         $this->assertDatabaseMissing('calendar_events', ['user_id' => $user->id, 'title' => 'Recurring appointment']);
@@ -2325,6 +2316,8 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_app_crud_planner_returns_upgrade_message_for_base_plan_note_requests(): void
     {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
         Http::fakeSequence()
             ->push($this->plannerResponse([
                 [

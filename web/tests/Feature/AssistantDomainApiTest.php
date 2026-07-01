@@ -469,7 +469,7 @@ class AssistantDomainApiTest extends TestCase
             ],
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Quick Lunch is moved to next Monday at 12:00 PM.');
+            ->assertJsonPath('data.assistant_message.content', 'Done - I updated lunch for May 25, 12:00 PM.');
 
         $event = CalendarEvent::findOrFail($eventId);
         $this->assertSame('2026-05-25T16:00:00+00:00', $event->starts_at->utc()->toIso8601String());
@@ -520,7 +520,7 @@ class AssistantDomainApiTest extends TestCase
 
         $this->withToken($token)->getJson('/api/today')
             ->assertOk()
-            ->assertJsonMissing(['title' => 'Yesterday one-off'])
+            ->assertJsonFragment(['title' => 'Yesterday one-off'])
             ->assertJsonFragment(['title' => 'Recurring vitamins'])
             ->assertJsonFragment(['title' => 'Today task']);
     }

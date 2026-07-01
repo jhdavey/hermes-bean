@@ -57,7 +57,7 @@ class DailyAssistantFlowTest extends TestCase
             ->assertJsonPath('data.counts.tasks', 1)
             ->assertJsonPath('data.counts.reminders', 1)
             ->assertJsonPath('data.counts.calendar_events', 1)
-            ->assertJsonPath('data.counts.activity_events', 8)
+            ->assertJsonPath('data.counts.activity_events', 11)
             ->assertJsonFragment(['title' => 'Review launch notes'])
             ->assertJsonFragment(['title' => 'pack laptop'])
             ->assertJsonFragment(['title' => 'Focus block'])

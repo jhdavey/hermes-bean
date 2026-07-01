@@ -673,6 +673,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     private function canUseCrudPlanner(ConversationMessage $message): bool
     {
+        if (! (bool) config('services.hermes_runtime.crud_planner_enabled', true)) {
+            return false;
+        }
+
         if (! $this->messageAppearsToRequestAppWrite($message)) {
             return false;
         }

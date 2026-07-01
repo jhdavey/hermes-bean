@@ -248,7 +248,7 @@ class HermesRuntimeApiTest extends TestCase
             'content' => 'Schedule retreat today at 1pm through three days later at 8pm.',
             'metadata' => $this->clientTemporalMetadata(),
         ])->assertCreated()
-            ->assertJsonPath('data.assistant_message.content', 'Saved the retreat from 1:00 PM to 8:00 PM.');
+            ->assertJsonPath('data.assistant_message.content', 'Done - I added Retreat to your calendar from May 18, 1:00 PM to May 21, 8:00 PM.');
 
         $event = CalendarEvent::where('title', 'Retreat')->firstOrFail();
         $this->assertSame('2026-05-18T17:00:00+00:00', $event->starts_at->utc()->toIso8601String());
