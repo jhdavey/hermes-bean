@@ -1088,8 +1088,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                                     'function' => [
                                         'name' => 'external_lookup',
                                         'arguments' => json_encode([
-                                            'query' => 'nearest Wawa',
-                                            'location' => '32820',
+                                            'query' => 'Find the nearest Wawa to 32820',
                                         ], JSON_THROW_ON_ERROR),
                                     ],
                                 ]],

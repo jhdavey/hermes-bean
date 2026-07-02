@@ -542,7 +542,7 @@ class LiveLookupService
                 && ! (bool) preg_match('/\b(news|latest|today|stock|stocks|market|earnings|weather|score|price|headline)\b/i', $query.' '.$context);
         }
 
-        return (bool) preg_match('/\b(nearest|closest|nearby|near me|near \d{5}|around \d{5}|local)\b/i', $query.' '.$context);
+        return (bool) preg_match('/\b(nearest|closest|nearby|near me|near \d{5}|around \d{5}|to \d{5}|in \d{5}|local)\b/i', $query.' '.$context);
     }
 
     private function placeSearchName(string $query): string
