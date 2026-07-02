@@ -803,6 +803,11 @@ PROMPT;
             ->squish()
             ->toString();
 
+        $moveAndDeleteActions = $this->deterministicMoveEventAndDeleteReminderActions($session, $content, $contextPayload);
+        if ($moveAndDeleteActions !== []) {
+            return $moveAndDeleteActions;
+        }
+
         if ($this->textRequestsDelete($normalized)) {
             $deleteActions = $this->deterministicDeleteActions($session, $content, $contextPayload);
             if ($deleteActions !== []) {
@@ -896,6 +901,70 @@ PROMPT;
             if ($this->plannerActionHasRequiredFields($action)) {
                 $actions[] = $action;
             }
+        }
+
+        return $actions;
+    }
+
+    private function deterministicMoveEventAndDeleteReminderActions(ConversationSession $session, string $content, array $contextPayload): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (
+            ! preg_match('/\b(move|reschedule|change)\b/u', $normalized)
+            || ! preg_match('/\b(delete|remove|cancel)\b/u', $normalized)
+            || ! preg_match('/\b(reminder|reminders)\b/u', $normalized)
+        ) {
+            return [];
+        }
+
+        $targetDate = $this->deterministicTargetDate($content, $contextPayload);
+        $timezone = $this->displayTimezoneFromClientContext((array) data_get($contextPayload, 'temporal_context.client_context', []))
+            ?? $this->sessionDisplayTimezone($session);
+        $event = $this->resolveCalendarEventForMoveRequest($session, $content, $targetDate);
+        if (! $event instanceof CalendarEvent || ! $event->starts_at) {
+            return [];
+        }
+
+        if (! preg_match('/\b(?:to|at|for)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/iu', $content, $timeMatch)) {
+            return [];
+        }
+
+        $baseDate = $targetDate instanceof Carbon
+            ? $targetDate->copy()->setTimezone($timezone)
+            : $event->starts_at->copy()->setTimezone($timezone);
+        $startsAt = $this->deterministicDateWithMeridiemTime($baseDate, (string) ($timeMatch[1] ?? ''), $timezone);
+        if (! $startsAt instanceof Carbon) {
+            return [];
+        }
+
+        $durationSeconds = 3600;
+        if ($event->ends_at instanceof Carbon) {
+            $durationSeconds = max(900, $event->starts_at->diffInSeconds($event->ends_at));
+        }
+
+        $actions = [[
+            'type' => 'calendar_event.update',
+            'risk' => 'low',
+            'client_action_key' => 'update_event_0',
+            'parameters' => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'starts_at' => $startsAt->toIso8601String(),
+                'ends_at' => $startsAt->copy()->addSeconds($durationSeconds)->toIso8601String(),
+            ],
+        ]];
+
+        $reminder = $this->resolveReminderForText($session, $content, $targetDate, $event);
+        if ($reminder instanceof Reminder) {
+            $actions[] = [
+                'type' => 'reminder.delete',
+                'risk' => 'low',
+                'client_action_key' => 'delete_reminder_0',
+                'parameters' => [
+                    'id' => $reminder->id,
+                    'title' => $reminder->title,
+                ],
+            ];
         }
 
         return $actions;
@@ -1829,6 +1898,15 @@ PROMPT;
             $query->where('starts_at', '>=', now()->subDays(7));
         }
 
+        $sessionResolved = $this->bestScoredModelForText(
+            (clone $query)->where('conversation_session_id', $session->id)->latest('starts_at')->limit(20)->get(),
+            $content,
+            ['title']
+        );
+        if ($sessionResolved instanceof CalendarEvent) {
+            return $sessionResolved;
+        }
+
         return $this->bestScoredModelForText($query->latest('starts_at')->limit(20)->get(), $content, ['title']);
     }
 
@@ -1894,6 +1972,15 @@ PROMPT;
             ]);
         } else {
             $query->where('remind_at', '>=', now()->subDays(7));
+        }
+
+        $sessionResolved = $this->bestScoredModelForText(
+            (clone $query)->where('conversation_session_id', $session->id)->orderBy('remind_at')->limit(30)->get(),
+            $content,
+            ['title', 'notes']
+        );
+        if ($sessionResolved instanceof Reminder) {
+            return $sessionResolved;
         }
 
         return $this->bestScoredModelForText($query->orderBy('remind_at')->limit(30)->get(), $content, ['title', 'notes']);

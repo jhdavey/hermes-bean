@@ -392,6 +392,64 @@ class HermesRuntimeApiTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
+    public function test_runtime_followup_moves_target_event_and_deletes_its_reminder_without_touching_anchor_event(): void
+    {
+        Queue::fake();
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
+        ]);
+
+        $token = $this->apiToken('calendar-followup-move-delete@example.com');
+        $user = User::where('email', 'calendar-followup-move-delete@example.com')->firstOrFail();
+        $workspaceId = $user->default_workspace_id;
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $workout = CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Workout',
+            'starts_at' => Carbon::parse('2026-05-18T17:00:00-04:00')->utc(),
+            'ends_at' => Carbon::parse('2026-05-18T18:00:00-04:00')->utc(),
+        ]);
+        $grocery = CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Grocery shopping',
+            'starts_at' => Carbon::parse('2026-05-18T18:00:00-04:00')->utc(),
+            'ends_at' => Carbon::parse('2026-05-18T18:45:00-04:00')->utc(),
+        ]);
+        Reminder::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'conversation_session_id' => $sessionId,
+            'calendar_event_id' => $grocery->id,
+            'title' => 'Grocery shopping reminder',
+            'remind_at' => Carbon::parse('2026-05-18T17:45:00-04:00')->utc(),
+        ]);
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Move grocery shopping to start after the workout at 6:15pm and delete the grocery shopping reminder.',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $assistantContent = (string) $response->json('data.assistant_message.content');
+        $this->assertStringContainsString('Grocery shopping', $assistantContent);
+        $this->assertStringNotContainsString('updated Workout', $assistantContent);
+
+        $workout->refresh();
+        $grocery->refresh();
+        $this->assertSame('2026-05-18T21:00:00+00:00', $workout->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-18T22:15:00+00:00', $grocery->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-18T23:00:00+00:00', $grocery->ends_at->utc()->toIso8601String());
+        $this->assertSame(0, Reminder::where('conversation_session_id', $sessionId)->where('title', 'like', '%Grocery%')->count());
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+    }
+
     public function test_runtime_explains_note_plan_limits_without_generic_failure_copy(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
