@@ -220,7 +220,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
                 if ($toolCalls !== [] && $this->messageIsCapabilityQuestion($userMessage)) {
                     if ($turn >= 1) {
-                        $assistantContent = $this->capabilityQuestionFallbackContent();
+                        $assistantContent = $this->capabilityQuestionFallbackContent($userMessage);
                         $finalResponseDurationMs ??= 0;
                         break;
                     }
@@ -235,6 +235,11 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
                 if ($toolCalls === []) {
                     $candidateContent = $this->normalizedAssistantContent(data_get($message, 'content', ''));
+                    if ($this->messageIsCapabilityQuestion($userMessage) && str_word_count($candidateContent) > 28) {
+                        $assistantContent = $this->capabilityQuestionFallbackContent($userMessage);
+                        break;
+                    }
+
                     if ($actions !== [] && $this->toolOutputsAllSuccessfulWrites($toolOutputs)) {
                         $assistantContent = $this->nativeActionFallbackContent($actions);
                         $finalResponseDurationMs ??= 0;
@@ -4116,8 +4121,30 @@ PROMPT;
         );
     }
 
-    private function capabilityQuestionFallbackContent(): string
+    private function capabilityQuestionFallbackContent(ConversationMessage $message): string
     {
+        $text = str((string) $message->content)->lower()->toString();
+
+        if (preg_match('/\b(calendar|event|events|schedule|appointment|appointments)\b/u', $text)) {
+            return 'Yes - I can create calendar events when you give me the details.';
+        }
+
+        if (preg_match('/\b(note|notes)\b/u', $text)) {
+            return 'Yes - I can create and manage notes when you give me the details.';
+        }
+
+        if (preg_match('/\b(reminder|reminders|remind)\b/u', $text)) {
+            return 'Yes - I can create reminders when you give me the details.';
+        }
+
+        if (preg_match('/\b(task|tasks|todo|to do)\b/u', $text)) {
+            return 'Yes - I can create and manage tasks when you give me the details.';
+        }
+
+        if (preg_match('/\b(look up|find|search|weather|store hours|current)\b/u', $text)) {
+            return 'Yes - I can look that up when you tell me what you need.';
+        }
+
         return 'Yes - I can help with that when you give me the details.';
     }
 
