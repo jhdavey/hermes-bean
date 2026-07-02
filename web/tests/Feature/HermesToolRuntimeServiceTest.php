@@ -1773,7 +1773,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'I’m still checking live sources for current weather in Orlando Florida right now. Send me one more detail if you want me to narrow it down further.');
+            ->assertJsonPath('data.assistant_message.content', 'I’m checking live sources for current weather in Orlando Florida right now. Send me one more detail if you want me to narrow it down further.');
 
         $this->assertSame(2, $lookupCalls);
     }
@@ -1842,7 +1842,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'I’m still checking live sources for current weather in Orlando Florida right now. Send me one more detail if you want me to narrow it down further.');
+            ->assertJsonPath('data.assistant_message.content', 'I’m checking live sources for current weather in Orlando Florida right now. Send me one more detail if you want me to narrow it down further.');
     }
 
     public function test_daily_cost_limits_block_tool_runtime_request(): void

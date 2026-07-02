@@ -4357,7 +4357,21 @@ PROMPT;
             'could not complete the requested change',
             'i could not complete',
             'i tried to check that live information, but the lookup did not return a usable result',
+            'i tried to check that live information',
+            'i tried to check live information',
+            'i could not get live information',
+            'i couldn\'t get live information',
+            'i couldn’t get live information',
+            'could not get live information',
+            'couldn\'t get live information',
+            'couldn’t get live information',
+            'lookup did not return',
+            'lookup didn\'t return',
+            'lookup didn’t return',
             'could not get that live lookup back quickly enough',
+            'couldn\'t get that live lookup back quickly enough',
+            'couldn’t get that live lookup back quickly enough',
+            'live lookup back quickly enough',
             'did not return a usable result',
             'no usable result',
         ];
@@ -4403,7 +4417,7 @@ PROMPT;
                 return (string) $successfulLookup['text'];
             }
 
-            return 'I’m still checking live sources for that. Send me one more detail if you want me to narrow it down further.';
+            return 'I’m checking live sources now. Send me one more detail if you want me to narrow it down further.';
         }
 
         if (($last['ok'] ?? false) && array_key_exists('count', $last)) {
@@ -4415,7 +4429,7 @@ PROMPT;
                 : "I found {$count} matching ".str($tool)->after('search ')->toString().'.';
         }
 
-        return 'I’m still checking that. I’ll ask for one more detail if I need it.';
+        return 'I’m checking that now. I’ll ask for one more detail if I need it.';
     }
 
     private function canUseNativeReadFallback(array $toolOutputs): bool

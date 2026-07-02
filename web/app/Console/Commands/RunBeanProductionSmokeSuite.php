@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\AssistantRun;
+use App\Models\AiUsageLog;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
 use App\Models\MemoryItem;
@@ -173,6 +174,12 @@ class RunBeanProductionSmokeSuite extends Command
             'i could not complete',
             'no usable result',
             'not get that live lookup back quickly enough',
+            'reached today\'s ai usage limit',
+            'reached today’s ai usage limit',
+            'reached today\'s external lookup usage limit',
+            'reached today’s external lookup usage limit',
+            'ai usage limit reached',
+            'usage limit',
         ]);
     }
 
@@ -195,6 +202,7 @@ class RunBeanProductionSmokeSuite extends Command
         Reminder::where('user_id', $user->id)->delete();
         Note::where('user_id', $user->id)->delete();
         MemoryItem::where('user_id', $user->id)->delete();
+        AiUsageLog::where('user_id', $user->id)->delete();
     }
 
     /**

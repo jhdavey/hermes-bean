@@ -884,8 +884,8 @@ class LiveLookupService
         $topic = str($query)->squish()->limit(80, '')->toString();
 
         return $topic === ''
-            ? 'I’m still checking live sources for that. Send me one more detail if you want me to narrow it down further.'
-            : "I’m still checking live sources for {$topic}. Send me one more detail if you want me to narrow it down further.";
+            ? 'I’m checking live sources now. Send me one more detail if you want me to narrow it down further.'
+            : "I’m checking live sources for {$topic}. Send me one more detail if you want me to narrow it down further.";
     }
 
     private function externalLookupPrompt(ConversationSession $session, string $query, string $context, string $location): string
