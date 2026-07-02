@@ -8,6 +8,7 @@ use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class AssistantRunService
 {
@@ -92,13 +93,95 @@ class AssistantRunService
             return $run;
         }
 
-        DB::transaction(function () use ($run, $staleAfterSeconds): void {
+        $this->markStaleFailed($run, $staleAfterSeconds);
+
+        return $run->refresh();
+    }
+
+    public function recoverStaleRun(AssistantRun $run, HermesRuntimeService $runtime): AssistantRun
+    {
+        $run->refresh();
+        if (! in_array($run->status, ['queued', 'running'], true)) {
+            return $run;
+        }
+
+        $startedAt = $run->started_at ?: $run->created_at;
+        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 75);
+        if ($startedAt === null || $startedAt->gt(now()->subSeconds($staleAfterSeconds))) {
+            return $run;
+        }
+
+        if (! $run->session || ! $run->userMessage) {
+            $this->markStaleFailed($run, $staleAfterSeconds);
+
+            return $run->refresh();
+        }
+
+        $metadata = is_array($run->metadata) ? $run->metadata : [];
+        $attempts = (int) ($metadata['stale_recovery_attempts'] ?? 0);
+        if ($attempts >= 1 || $this->runHasCompletedMutatingWork($run)) {
+            $this->markStaleFailed($run, $staleAfterSeconds);
+
+            return $run->refresh();
+        }
+
+        $run->update([
+            'status' => 'running',
+            'started_at' => now(),
+            'metadata' => array_merge($metadata, [
+                'stale_recovery_attempts' => $attempts + 1,
+                'stale_recovered_at' => now()->toIso8601String(),
+            ]),
+        ]);
+
+        $this->recordEvent($run, 'runtime.run_stale_recovery_started', [
+            'run_id' => $run->id,
+            'message_id' => $run->user_message_id,
+            'attempt' => $attempts + 1,
+        ], 'hermes.runs', 'started');
+
+        try {
+            $result = $runtime->sendExistingMessage($run->session->refresh(), $run->userMessage);
+            $assistantMessage = $result['assistant_message'] ?? null;
+
+            $run->update([
+                'status' => $result['status'] === 'cancelled' ? 'cancelled' : 'completed',
+                'assistant_message_id' => $assistantMessage instanceof ConversationMessage ? $assistantMessage->id : null,
+                'result' => [
+                    'status' => $result['status'] ?? null,
+                    'assistant_message_id' => $assistantMessage instanceof ConversationMessage ? $assistantMessage->id : null,
+                    'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
+                    'recovered_from_stale' => true,
+                ],
+                'completed_at' => now(),
+            ]);
+
+            $this->recordEvent($run, 'runtime.run_stale_recovery_completed', [
+                'run_id' => $run->id,
+                'status' => $run->status,
+                'assistant_message_id' => $run->assistant_message_id,
+            ], 'hermes.runs', $run->status === 'completed' ? 'succeeded' : 'cancelled');
+        } catch (\Throwable $exception) {
+            Log::error('Assistant stale run recovery failed.', [
+                'run_id' => $run->id,
+                'session_id' => $run->conversation_session_id,
+                'exception' => $exception->getMessage(),
+            ]);
+            $this->markStaleFailed($run, $staleAfterSeconds, $exception->getMessage());
+        }
+
+        return $run->refresh();
+    }
+
+    private function markStaleFailed(AssistantRun $run, int $staleAfterSeconds, ?string $detail = null): void
+    {
+        DB::transaction(function () use ($run, $staleAfterSeconds, $detail): void {
             $run->refresh();
             if (! in_array($run->status, ['queued', 'running'], true)) {
                 return;
             }
 
-            $reason = "Assistant run did not complete within {$staleAfterSeconds} seconds.";
+            $reason = $detail ?: "Assistant run did not complete within {$staleAfterSeconds} seconds.";
             $run->update([
                 'status' => 'failed',
                 'error' => $reason,
@@ -113,8 +196,37 @@ class AssistantRunService
                 'reason' => $reason,
             ], 'hermes.runs', 'failed');
         });
+    }
 
-        return $run->refresh();
+    private function runHasCompletedMutatingWork(AssistantRun $run): bool
+    {
+        $messageId = (int) $run->user_message_id;
+        if ($messageId <= 0) {
+            return false;
+        }
+
+        return ActivityEvent::query()
+            ->where('conversation_session_id', $run->conversation_session_id)
+            ->where('status', 'succeeded')
+            ->where(function ($query) use ($messageId): void {
+                $query->where('payload->work_item_id', 'like', 'crud-plan-'.$messageId.'-%')
+                    ->orWhere('payload->source_message_id', $messageId);
+            })
+            ->whereIn('event_type', [
+                'assistant.task.created',
+                'assistant.task.updated',
+                'assistant.task.deleted',
+                'assistant.reminder.created',
+                'assistant.reminder.updated',
+                'assistant.reminder.deleted',
+                'assistant.calendar_event.created',
+                'assistant.calendar_event.updated',
+                'assistant.calendar_event.deleted',
+                'assistant.note.created',
+                'assistant.note.updated',
+                'assistant.note.deleted',
+            ])
+            ->exists();
     }
 
     private function recordEvent(AssistantRun $run, string $eventType, array $payload = [], ?string $toolName = null, string $status = 'recorded'): ActivityEvent

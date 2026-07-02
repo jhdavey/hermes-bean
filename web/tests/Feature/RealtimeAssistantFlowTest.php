@@ -547,4 +547,59 @@ class RealtimeAssistantFlowTest extends TestCase
         $this->assertSame('queued', ConversationSession::findOrFail($sessionId)->status);
         Queue::assertPushed(ProcessAssistantRun::class);
     }
+
+    public function test_polling_stale_async_run_recovers_deterministic_calendar_work(): void
+    {
+        Queue::fake();
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+        config()->set('services.hermes_runtime.assistant_run_stale_seconds', 1);
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-unexpected',
+                'choices' => [[
+                    'index' => 0,
+                    'message' => ['role' => 'assistant', 'content' => 'Unexpected model call.'],
+                    'finish_reason' => 'stop',
+                ]],
+                'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1, 'total_tokens' => 2],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('async-run-recovery@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $runId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_context' => [
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                    'current_local_time' => '2026-07-02T08:14:49',
+                    'current_utc_time' => '2026-07-02T12:14:49Z',
+                ],
+            ],
+        ])->assertAccepted()->json('data.run.id');
+
+        AssistantRun::findOrFail($runId)->forceFill([
+            'status' => 'running',
+            'started_at' => now()->subSeconds(5),
+        ])->save();
+        ConversationSession::findOrFail($sessionId)->forceFill(['status' => 'running'])->save();
+
+        $this->withToken($token)->getJson("/api/assistant/runs/{$runId}")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chen Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+
+        $events = CalendarEvent::where('conversation_session_id', $sessionId)->orderBy('starts_at')->get();
+        $this->assertCount(3, $events);
+        $this->assertSame('Dr Chen Cardio', $events[0]->title);
+        $this->assertSame('100 N Dean rd', $events[0]->location);
+        $this->assertSame('Ventura', $events[1]->title);
+        $this->assertSame('Azalea Lane', $events[2]->title);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+    }
 }

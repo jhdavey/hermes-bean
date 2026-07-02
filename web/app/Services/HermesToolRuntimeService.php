@@ -1739,17 +1739,15 @@ PROMPT;
 
     private function executeActionEnvelopeAtomically(ConversationSession $session, array $action, ?array $workItem): Collection
     {
-        return DB::transaction(function () use ($session, $action, $workItem): Collection {
-            $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
+        $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
 
-            if ($workItem !== null) {
-                $events = $events
-                    ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
-                    ->values();
-            }
+        if ($workItem !== null) {
+            $events = $events
+                ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
+                ->values();
+        }
 
-            return $events;
-        });
+        return $events;
     }
 
     private function createdCalendarEventIdFromEvents(Collection $events): ?int

@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\AdminSettingsService;
 use App\Services\AssistantRunService;
+use App\Services\HermesRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -18,6 +19,7 @@ class AssistantRunController extends Controller
         private readonly AssistantRunService $runs,
         private readonly AiUsageService $usage,
         private readonly AdminSettingsService $settings,
+        private readonly HermesRuntimeService $runtime,
     ) {}
 
     public function store(Request $request, string $session): JsonResponse
@@ -72,7 +74,7 @@ class AssistantRunController extends Controller
 
         return response()->json([
             'data' => $this->runs
-                ->reconcileStaleRun($ownedRun)
+                ->recoverStaleRun($ownedRun, $this->runtime)
                 ->load(['session', 'userMessage', 'assistantMessage']),
         ]);
     }

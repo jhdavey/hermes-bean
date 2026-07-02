@@ -633,7 +633,7 @@ class StructuredHermesActionService
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
             'metadata' => $metadata,
         ]);
-        $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh());
+        $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh(), $parameters);
 
         return $this->recordEvent($session, 'assistant.calendar_event.created', [
             'calendar_event_id' => $calendarEvent->id,
@@ -761,13 +761,17 @@ class StructuredHermesActionService
             );
         }
         $calendarEvent->update($updates);
-        $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh());
+        $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh(), $parameters);
 
         return $this->recordEvent($session, 'assistant.calendar_event.updated', ['calendar_event_id' => $calendarEvent->id, 'title' => $calendarEvent->title], 'calendar.update', 'succeeded');
     }
 
-    private function exportCalendarEventBestEffort(ConversationSession $session, CalendarEvent $calendarEvent): void
+    private function exportCalendarEventBestEffort(ConversationSession $session, CalendarEvent $calendarEvent, array $parameters): void
     {
+        if (! $this->shouldExportCalendarEvent($parameters, $calendarEvent)) {
+            return;
+        }
+
         if (app()->runningUnitTests() || app()->environment('testing')) {
             $this->exportCalendarEventNow($session, $calendarEvent);
 
@@ -786,6 +790,22 @@ class StructuredHermesActionService
 
             $this->exportCalendarEventNow($session, $calendarEvent);
         });
+    }
+
+    private function shouldExportCalendarEvent(array $parameters, CalendarEvent $calendarEvent): bool
+    {
+        if (($parameters['sync_external_calendars_now'] ?? false)
+            || ($parameters['sync_google_now'] ?? false)
+            || ($parameters['sync_outlook_now'] ?? false)) {
+            return true;
+        }
+
+        $metadata = $calendarEvent->metadata ?? [];
+
+        return filled($metadata['google_calendar_id'] ?? null)
+            || filled($metadata['outlook_calendar_id'] ?? null)
+            || (is_array($metadata['google_calendar_ids'] ?? null) && $metadata['google_calendar_ids'] !== [])
+            || (is_array($metadata['outlook_calendar_ids'] ?? null) && $metadata['outlook_calendar_ids'] !== []);
     }
 
     private function exportCalendarEventNow(ConversationSession $session, CalendarEvent $calendarEvent): void
