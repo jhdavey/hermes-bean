@@ -2021,6 +2021,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final Set<int> _beanDashboardRefreshEventIds = <int>{};
   final Set<String> _beanWorkStagedCompletionIds = <String>{};
   final Set<Timer> _beanWorkStageTimers = <Timer>{};
+  final Map<Timer, Completer<void>> _beanClientRetryTimers =
+      <Timer, Completer<void>>{};
   Timer? _beanWorkStatusClearTimer;
   Timer? _beanResponsePreviewTimer;
   DateTime? _beanWorkStatusHoldUntil;
@@ -3695,6 +3697,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cancelBeanWorkStageTimers();
+    _cancelBeanClientRetryTimers();
     _beanWorkStatusClearTimer?.cancel();
     _beanResponsePreviewTimer?.cancel();
     _reminderDueTimer?.cancel();
@@ -4924,6 +4927,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         : null;
     var chatPhase = 'preparing message';
     String? clientRequestId;
+    _cancelBeanClientRetryTimers();
     setState(() {
       _busy = true;
       _editingChatMessageId = null;
@@ -5041,6 +5045,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             _ensureBeanRequestWorkItem(trimmed);
           });
           unawaited(_pollQueuedRun(run.id, runToken));
+        } else {
+          unawaited(
+            _retryQueuedBeanRequestUntilAccepted(
+              runToken: runToken,
+              sessionId: session.id,
+              content: trimmed,
+              metadata: messageMetadata,
+              localUserMessageId: localUserMessageId,
+            ),
+          );
         }
         return;
       }
@@ -5350,20 +5364,96 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         lastError != null &&
         _shouldRetryQueuedBeanRequest(lastError)) {
       return HermesMessageResult(
-        status: 'completed',
+        status: 'queued',
         session: fallbackSession,
         events: const [],
-        assistantMessage: HermesMessage(
-          id: -DateTime.now().microsecondsSinceEpoch,
-          role: 'assistant',
-          content:
-              'I’m reconnecting to Bean now and checking whether that request reached the server.',
-          metadata: const {'runtime': 'local_transport_recovery'},
-        ),
       );
     }
 
     throw lastError ?? StateError('Bean queue request failed.');
+  }
+
+  Future<void> _retryQueuedBeanRequestUntilAccepted({
+    required int runToken,
+    required int sessionId,
+    required String content,
+    required Map<String, Object?> metadata,
+    required int localUserMessageId,
+  }) async {
+    final clientRequestId = metadata['client_request_id'] is String
+        ? (metadata['client_request_id']! as String).trim()
+        : '';
+    if (clientRequestId.isEmpty) return;
+
+    for (var attempt = 0; attempt < 18; attempt++) {
+      await _sleepWithBeanClientRetryTimer(
+        Duration(milliseconds: attempt < 4 ? 900 : 1800),
+      );
+      if (!mounted || runToken != _chatRunToken) return;
+
+      try {
+        final recovered = await widget.apiClient.lookupQueuedMessage(
+          sessionId: sessionId,
+          clientRequestId: clientRequestId,
+        );
+        if (!mounted || runToken != _chatRunToken) return;
+        _applyRecoveredChatResult(
+          recovered,
+          runToken: runToken,
+          localUserMessageId: localUserMessageId,
+          originalContent: content,
+        );
+        return;
+      } catch (_) {
+        // If lookup has not seen the request yet, retry the original
+        // idempotent queue call below.
+      }
+
+      try {
+        final queued = await widget.apiClient.queueMessage(
+          sessionId: sessionId,
+          content: content,
+          metadata: metadata,
+        );
+        if (!mounted || runToken != _chatRunToken) return;
+        _applyRecoveredChatResult(
+          queued,
+          runToken: runToken,
+          localUserMessageId: localUserMessageId,
+          originalContent: content,
+        );
+        return;
+      } catch (_) {
+        if (!mounted || runToken != _chatRunToken) return;
+        setState(() {
+          _chatRunState = 'Working in background';
+          _ensureBeanRequestWorkItem(content);
+          _error = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _sleepWithBeanClientRetryTimer(Duration duration) {
+    final completer = Completer<void>();
+    late final Timer timer;
+    timer = Timer(duration, () {
+      _beanClientRetryTimers.remove(timer);
+      if (!completer.isCompleted) completer.complete();
+    });
+    _beanClientRetryTimers[timer] = completer;
+    return completer.future;
+  }
+
+  void _cancelBeanClientRetryTimers() {
+    final pending = Map<Timer, Completer<void>>.from(_beanClientRetryTimers);
+    _beanClientRetryTimers.clear();
+    for (final entry in pending.entries) {
+      final timer = entry.key;
+      final completer = entry.value;
+      timer.cancel();
+      if (!completer.isCompleted) completer.complete();
+    }
   }
 
   bool _shouldRetryQueuedBeanRequest(Object error) {
