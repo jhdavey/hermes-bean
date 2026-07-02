@@ -154,14 +154,21 @@ class QuickVoiceReplyController extends Controller
             ->toString();
         $text = $this->personableVoiceText($text);
 
+        $continueAgent = $stage === 'bridge' || $this->shouldContinueAgent($content);
         if ($text === '') {
-            return response()->json([
-                'message' => 'Quick voice reply was empty.',
-                'code' => 'openai_quick_voice_empty',
-            ], 502);
+            Log::info('Quick voice reply was empty; falling back to agent bridge.', [
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'stage' => $stage,
+                'request_preview' => str($content)->limit(200)->toString(),
+            ]);
+
+            $continueAgent = true;
+            $text = $stage === 'bridge'
+                ? "I'm still working through that."
+                : "I'll check that now.";
         }
 
-        $continueAgent = $stage === 'bridge' || $this->shouldContinueAgent($content);
         $responseContract = $stage === 'bridge'
             ? 'bridge'
             : ($continueAgent ? 'acknowledged_background' : 'complete');

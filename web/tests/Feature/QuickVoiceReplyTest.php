@@ -125,6 +125,33 @@ class QuickVoiceReplyTest extends TestCase
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
+    public function test_quick_voice_reply_falls_back_to_agent_when_model_returns_empty_text(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-empty-weather',
+                'model' => 'gpt-quick-test',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => '',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('quick-voice-empty-weather@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
+            'content' => 'weather tomorrow Orlando',
+        ])->assertOk()
+            ->assertJsonPath('data.text', "I'll check that now.")
+            ->assertJsonPath('data.model', 'gpt-quick-test')
+            ->assertJsonPath('data.continue_agent', true)
+            ->assertJsonPath('data.response_contract', 'acknowledged_background');
+    }
+
     public function test_quick_voice_reply_continues_to_agent_for_generic_live_external_requests(): void
     {
         Http::fake([
