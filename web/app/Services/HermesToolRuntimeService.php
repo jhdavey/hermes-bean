@@ -3993,7 +3993,10 @@ PROMPT;
         if (preg_match('/\b(reminder|reminders|remind me|remind)\b/', $text)) {
             $count++;
         }
-        if (preg_match('/\b(calendar|schedule|event|events|appointment|meeting|block)\b/', $text)) {
+        $hasExplicitCalendarTarget = (bool) preg_match('/\b(calendar|schedule|event|events|appointment|appointments|block)\b/', $text);
+        $hasMeetingTarget = (bool) preg_match('/\b(meeting|meetings)\b/', $text)
+            && ! (bool) preg_match('/\bmeeting\s+(agenda|prep|notes?)\b/', $text);
+        if ($hasExplicitCalendarTarget || $hasMeetingTarget) {
             $count++;
         }
         if (
@@ -4384,6 +4387,13 @@ PROMPT;
             $title = trim((string) ($reminder['title'] ?? 'Untitled reminder'));
             $items[] = trim(($time !== '' ? "{$time} - " : '')."Reminder: {$title}");
         }
+
+        $items = collect($items)
+            ->map(fn (string $item): string => str($item)->squish()->toString())
+            ->filter()
+            ->unique(fn (string $item): string => mb_strtolower($item))
+            ->values()
+            ->all();
 
         if ($items === []) {
             return "Nothing else is scheduled for {$date}.";

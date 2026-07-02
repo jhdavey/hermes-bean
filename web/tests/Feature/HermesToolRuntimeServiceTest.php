@@ -2254,6 +2254,38 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(0);
     }
 
+    public function test_app_crud_planner_does_not_treat_meeting_agenda_task_as_calendar_meeting(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-meeting-agenda-task@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a task to prep the meeting agenda tomorrow morning, remind me 45 minutes before, and save a note called Meeting Prep Notes.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T08:55:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $events = collect($response->json('data.events'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.work_item.planned'));
+        $this->assertCount(1, $events->where('event_type', 'assistant.task.created'));
+        $this->assertCount(1, $events->where('event_type', 'assistant.reminder.created'));
+        $this->assertCount(1, $events->where('event_type', 'assistant.note.created'));
+        $this->assertDatabaseHas('tasks', ['conversation_session_id' => $sessionId, 'title' => 'prep the meeting agenda']);
+        $this->assertDatabaseHas('notes', ['title' => 'Meeting Prep Notes']);
+        Http::assertSentCount(0);
+    }
+
     public function test_app_crud_planner_handles_note_with_reminder_without_model_call(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
@@ -2387,6 +2419,29 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Ventura']);
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Azalea Lane']);
         Http::assertSentCount(0);
+    }
+
+    public function test_day_context_fallback_dedupes_identical_items(): void
+    {
+        $service = app(\App\Services\HermesToolRuntimeService::class);
+        $method = (new \ReflectionClass($service))->getMethod('dayContextFallbackContent');
+        $method->setAccessible(true);
+
+        $content = (string) $method->invoke($service, [
+            'date' => '2026-07-02',
+            'calendar_events' => [
+                ['display_start_time' => '3:50 PM', 'title' => 'Grocery shopping'],
+                ['display_start_time' => '3:50 PM', 'title' => 'Grocery shopping'],
+            ],
+            'tasks' => [],
+            'reminders' => [
+                ['display_remind_time' => '5:15 PM', 'title' => 'Reminder: Workout'],
+                ['display_remind_time' => '5:15 PM', 'title' => 'Reminder: Workout'],
+            ],
+        ]);
+
+        $this->assertSame(1, substr_count($content, 'Event: Grocery shopping'));
+        $this->assertSame(1, substr_count($content, 'Reminder: Reminder: Workout'));
     }
 
     public function test_app_crud_planner_reports_partial_failure_without_falling_back_or_duplicating_completed_writes(): void
