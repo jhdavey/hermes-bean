@@ -737,6 +737,66 @@ class RealtimeAssistantFlowTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
+    public function test_polling_failed_expired_async_run_recovers_when_no_work_was_done(): void
+    {
+        Queue::fake();
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-unexpected',
+                'choices' => [[
+                    'index' => 0,
+                    'message' => ['role' => 'assistant', 'content' => 'Unexpected model call.'],
+                    'finish_reason' => 'stop',
+                ]],
+                'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1, 'total_tokens' => 2],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('failed-async-run-recovery@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $runId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Please add the following events to my calendar: 7/9 Dr Chan Cardio at 100 N Dean Rd. 3pm, 7/15 Ventura 6pm, 7/19 Azalea Lane 2pm',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_context' => [
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                    'current_local_time' => '2026-07-02T08:14:49',
+                    'current_utc_time' => '2026-07-02T12:14:49Z',
+                ],
+            ],
+        ])->assertAccepted()->json('data.run.id');
+
+        AssistantRun::findOrFail($runId)->forceFill([
+            'status' => 'failed',
+            'error' => 'Run expired before it could be safely recovered.',
+            'started_at' => now()->subMinutes(10),
+            'completed_at' => now()->subMinute(),
+        ])->save();
+        ConversationSession::findOrFail($sessionId)->forceFill(['status' => 'active'])->save();
+
+        $this->withToken($token)->getJson("/api/assistant/runs/{$runId}")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chan Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+
+        $run = AssistantRun::findOrFail($runId);
+        $this->assertTrue($run->metadata['stale_recovered_from_failed_status']);
+        $this->assertNull($run->error);
+
+        $events = CalendarEvent::where('conversation_session_id', $sessionId)->orderBy('starts_at')->get();
+        $this->assertCount(3, $events);
+        $this->assertSame('Dr Chan Cardio', $events[0]->title);
+        $this->assertSame('100 N Dean Rd', $events[0]->location);
+        $this->assertSame('Ventura', $events[1]->title);
+        $this->assertSame('Azalea Lane', $events[2]->title);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+    }
+
     public function test_activity_poll_closes_expired_stale_run_without_replaying_work(): void
     {
         Queue::fake();

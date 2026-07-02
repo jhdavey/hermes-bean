@@ -139,24 +139,27 @@ class AssistantRunService
     public function recoverStaleRun(AssistantRun $run, HermesRuntimeService $runtime): AssistantRun
     {
         $run->refresh();
-        if (! in_array($run->status, ['queued', 'running'], true)) {
+        $recoveringFailedStaleRun = $this->isRecoverableFailedStaleRun($run);
+        if (! in_array($run->status, ['queued', 'running'], true) && ! $recoveringFailedStaleRun) {
             return $run;
         }
 
         $startedAt = $run->started_at ?: $run->created_at;
         $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 75);
-        if ($startedAt === null || $startedAt->gt(now()->subSeconds($staleAfterSeconds))) {
+        if (! $recoveringFailedStaleRun && ($startedAt === null || $startedAt->gt(now()->subSeconds($staleAfterSeconds)))) {
             return $run;
         }
 
-        if ($this->runRecoveryWindowExpired($run)) {
+        if (! $recoveringFailedStaleRun && $this->runRecoveryWindowExpired($run)) {
             $this->markStaleFailed($run, $staleAfterSeconds, 'Run expired before it could be safely recovered.');
 
             return $run->refresh();
         }
 
         if (! $run->session || ! $run->userMessage) {
-            $this->markStaleFailed($run, $staleAfterSeconds);
+            if (! $recoveringFailedStaleRun) {
+                $this->markStaleFailed($run, $staleAfterSeconds);
+            }
 
             return $run->refresh();
         }
@@ -164,7 +167,9 @@ class AssistantRunService
         $metadata = is_array($run->metadata) ? $run->metadata : [];
         $attempts = (int) ($metadata['stale_recovery_attempts'] ?? 0);
         if ($attempts >= 1 || $this->runHasCompletedMutatingWork($run)) {
-            $this->markStaleFailed($run, $staleAfterSeconds);
+            if (! $recoveringFailedStaleRun) {
+                $this->markStaleFailed($run, $staleAfterSeconds);
+            }
 
             return $run->refresh();
         }
@@ -172,9 +177,13 @@ class AssistantRunService
         $run->update([
             'status' => 'running',
             'started_at' => now(),
+            'completed_at' => null,
+            'error' => null,
+            'result' => null,
             'metadata' => array_merge($metadata, [
                 'stale_recovery_attempts' => $attempts + 1,
                 'stale_recovered_at' => now()->toIso8601String(),
+                'stale_recovered_from_failed_status' => $recoveringFailedStaleRun,
             ]),
         ]);
 
@@ -215,6 +224,21 @@ class AssistantRunService
         }
 
         return $run->refresh();
+    }
+
+    private function isRecoverableFailedStaleRun(AssistantRun $run): bool
+    {
+        if ($run->status !== 'failed' || $run->assistant_message_id !== null) {
+            return false;
+        }
+
+        $error = strtolower((string) $run->error);
+        if (! str_contains($error, 'run expired before it could be safely recovered')
+            && ! str_contains($error, 'assistant run did not complete within')) {
+            return false;
+        }
+
+        return ! $this->runHasCompletedMutatingWork($run);
     }
 
     public function closeExpiredStaleRunsForSession(ConversationSession $session): void
