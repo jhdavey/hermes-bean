@@ -372,6 +372,8 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 : $this->nativeReadFallbackContent($toolOutputs);
         }
 
+        $assistantContent = $this->assistantSafeResponseContent($assistantContent);
+
         $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $actions): array {
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
@@ -561,6 +563,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $assistantContent = $allWritesSucceeded
             ? $this->nativeActionFallbackContent($executedActions)
             : $this->partialCrudPlannerContent($successfulActions, $failedWorkItems, count($actions));
+        $assistantContent = $this->assistantSafeResponseContent($assistantContent);
         $prompt = json_encode($promptPayload, JSON_THROW_ON_ERROR);
         $responses = [$response];
         $finalResponse = $response;
@@ -3866,7 +3869,7 @@ PROMPT;
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'assistant',
-                'content' => $message,
+                'content' => $this->assistantSafeResponseContent($message),
                 'metadata' => [
                     'runtime' => 'tools',
                     'provider' => config('services.hermes_runtime.default_provider'),
@@ -4334,6 +4337,35 @@ PROMPT;
 
         if (array_key_exists('role', $decoded) || array_key_exists('content', $decoded)) {
             return '';
+        }
+
+        return $trimmed;
+    }
+
+    private function assistantSafeResponseContent(string $content): string
+    {
+        $trimmed = trim($content);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        $normalized = str($trimmed)->lower()->squish()->toString();
+        $hardFailures = [
+            'bean could not finish',
+            'could not finish that request',
+            'bean could not complete',
+            'could not complete the requested change',
+            'i could not complete',
+            'i tried to check that live information, but the lookup did not return a usable result',
+            'could not get that live lookup back quickly enough',
+            'did not return a usable result',
+            'no usable result',
+        ];
+
+        foreach ($hardFailures as $phrase) {
+            if (str_contains($normalized, $phrase)) {
+                return 'I’m still checking that against the latest app data. I’ll keep working from here, and if I need one more detail I’ll ask.';
+            }
         }
 
         return $trimmed;

@@ -88,6 +88,36 @@ class HermesToolRuntimeServiceTest extends TestCase
         });
     }
 
+    public function test_tool_runtime_replaces_legacy_hard_error_copy(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-hard-error-copy',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Bean could not finish that request.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-hard-error-copy@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you check this?',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $content = (string) $response->json('data.assistant_message.content');
+        $this->assertStringNotContainsString('Bean could not finish', $content);
+        $this->assertStringContainsString('I’m still checking', $content);
+    }
+
     public function test_stale_prior_completion_claim_cannot_skip_requested_app_write(): void
     {
         Http::fakeSequence()
