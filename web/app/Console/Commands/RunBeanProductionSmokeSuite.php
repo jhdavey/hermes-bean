@@ -3,9 +3,12 @@
 namespace App\Console\Commands;
 
 use App\Models\AssistantRun;
+use App\Models\ActivityEvent;
 use App\Models\AiUsageLog;
 use App\Models\CalendarEvent;
+use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\MemoryEvent;
 use App\Models\MemoryItem;
 use App\Models\Note;
 use App\Models\Reminder;
@@ -190,19 +193,61 @@ class RunBeanProductionSmokeSuite extends Command
             ->where('metadata->suite_id', $suiteId)
             ->pluck('id');
 
+        if ($sessionIds->isEmpty()) {
+            return;
+        }
+
+        $activityEvents = ActivityEvent::whereIn('conversation_session_id', $sessionIds)->get();
+        $noteIds = $activityEvents
+            ->map(fn (ActivityEvent $event): mixed => data_get($event->payload ?? [], 'note_id'))
+            ->filter()
+            ->unique()
+            ->values();
+        $memoryItemIds = $activityEvents
+            ->map(fn (ActivityEvent $event): mixed => data_get($event->payload ?? [], 'memory_item_id'))
+            ->filter()
+            ->unique()
+            ->values();
+
+        AiUsageLog::whereIn('conversation_session_id', $sessionIds)->delete();
+        MemoryEvent::whereIn('conversation_session_id', $sessionIds)->delete();
+        if ($memoryItemIds->isNotEmpty()) {
+            MemoryItem::withTrashed()->whereIn('id', $memoryItemIds)->forceDelete();
+        }
+        MemoryItem::withTrashed()
+            ->where('user_id', $user->id)
+            ->where('source_type', 'assistant_tool')
+            ->whereIn('source_id', $sessionIds)
+            ->forceDelete();
+        if ($noteIds->isNotEmpty()) {
+            Note::withTrashed()->whereIn('id', $noteIds)->forceDelete();
+        }
         CalendarEvent::whereIn('conversation_session_id', $sessionIds)->delete();
         Task::whereIn('conversation_session_id', $sessionIds)->delete();
         Reminder::whereIn('conversation_session_id', $sessionIds)->delete();
+        ActivityEvent::whereIn('conversation_session_id', $sessionIds)->delete();
+        AssistantRun::whereIn('conversation_session_id', $sessionIds)->delete();
+        ConversationMessage::whereIn('conversation_session_id', $sessionIds)->delete();
+        ConversationSession::whereIn('id', $sessionIds)->delete();
     }
 
     private function resetSmokeUserData(User $user): void
     {
+        $sessionIds = ConversationSession::where('user_id', $user->id)->pluck('id');
+
+        AiUsageLog::where('user_id', $user->id)->delete();
+        MemoryEvent::where('user_id', $user->id)->delete();
+        ActivityEvent::where('user_id', $user->id)->delete();
+        AssistantRun::where('user_id', $user->id)->delete();
+        ConversationMessage::where('user_id', $user->id)->delete();
         CalendarEvent::where('user_id', $user->id)->delete();
         Task::where('user_id', $user->id)->delete();
         Reminder::where('user_id', $user->id)->delete();
-        Note::where('user_id', $user->id)->delete();
-        MemoryItem::where('user_id', $user->id)->delete();
-        AiUsageLog::where('user_id', $user->id)->delete();
+        Note::withTrashed()->where('user_id', $user->id)->forceDelete();
+        MemoryItem::withTrashed()->where('user_id', $user->id)->forceDelete();
+        if ($sessionIds->isNotEmpty()) {
+            ConversationSession::whereIn('id', $sessionIds)->delete();
+        }
     }
 
     /**
