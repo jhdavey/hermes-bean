@@ -4094,10 +4094,10 @@ PROMPT;
         }
 
         if ($failedLabels->isEmpty()) {
-            return $completed.' Some remaining changes need another try or a little more detail.';
+            return $completed.' I need a little more detail before I can handle the rest.';
         }
 
-        return $completed.' The remaining item'.($failedLabels->count() === 1 ? ' needs' : 's need').' attention: '.$this->joinSummaryPhrases($failedLabels->all()).'. Please try those again or give me the missing details.';
+        return $completed.' I need a little more detail for '.$this->joinSummaryPhrases($failedLabels->all()).' before I can handle the rest.';
     }
 
     /**
