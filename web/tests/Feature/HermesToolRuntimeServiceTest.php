@@ -2187,6 +2187,38 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(0);
     }
 
+    public function test_app_crud_planner_does_not_treat_oil_change_as_update_request(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->apiToken('tool-oil-change-events@example.com');
+        $user = User::where('email', 'tool-oil-change-events@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'REQ-013: Add three calendar events: 7/11 Oil change at 500 Service Rd at 8am, 7/17 Dentist consult at 3pm, and 7/22 School pickup at 2pm.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T09:55:42-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $events = collect($response->json('data.events'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.work_item.planned'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.calendar_event.created'));
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Oil change', 'location' => '500 Service Rd']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Dentist consult']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'School pickup']);
+        Http::assertSentCount(0);
+    }
+
     public function test_app_crud_planner_handles_afternoon_plan_without_model_call(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
@@ -2310,6 +2342,33 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         $this->assertDatabaseHas('notes', ['title' => 'Quick Dinner Ideas', 'is_pinned' => true]);
         $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'Pick one from Quick Dinner Ideas']);
+        Http::assertSentCount(0);
+    }
+
+    public function test_app_crud_planner_does_not_treat_note_reminder_update_word_as_update_request(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-note-update-word@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'REQ-038: Create a note called Gift Ideas List with a few practical ideas, pin it, and add a reminder tomorrow at 6pm to update it.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T09:55:42-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertDatabaseHas('notes', ['title' => 'Gift Ideas List', 'is_pinned' => true]);
+        $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'Update Gift Ideas List']);
         Http::assertSentCount(0);
     }
 

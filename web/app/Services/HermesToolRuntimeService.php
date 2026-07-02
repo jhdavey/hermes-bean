@@ -702,11 +702,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
             return false;
         }
 
-        if (preg_match('/\b(what|when|where|who|which|find|search|show|list|look up|look for|did i|have i)\b/u', $text)) {
+        $hasPlannerWriteVerb = (bool) preg_match('/\b(add|create|make|schedule|book|set|put|block|remind|update|edit|change|move|reschedule|rename|delete|remove|cancel|clear|complete|finish|mark)\b/u', $text);
+        if (! $hasPlannerWriteVerb && preg_match('/\b(what|when|where|who|which|find|search|show|list|look up|look for|did i|have i)\b/u', $text)) {
             return false;
         }
 
-        return (bool) preg_match('/\b(add|create|make|schedule|book|set|put|block|remind|update|edit|change|move|reschedule|rename|delete|remove|cancel|clear|complete|finish|mark)\b/u', $text);
+        return $hasPlannerWriteVerb;
     }
 
     private function crudPlannerPromptPayload(ConversationSession $session, ConversationMessage $message, array $contextPayload, array $conversationMessages, int $expectedWriteActionCount): array
@@ -776,11 +777,17 @@ PROMPT;
             ->toString();
 
         if ($this->textRequestsDelete($normalized)) {
-            return $this->deterministicDeleteActions($session, $content, $contextPayload);
+            $deleteActions = $this->deterministicDeleteActions($session, $content, $contextPayload);
+            if ($deleteActions !== []) {
+                return $deleteActions;
+            }
         }
 
         if ($this->textRequestsUpdate($normalized)) {
-            return $this->deterministicUpdateActions($session, $content, $contextPayload);
+            $updateActions = $this->deterministicUpdateActions($session, $content, $contextPayload);
+            if ($updateActions !== []) {
+                return $updateActions;
+            }
         }
 
         $timezone = $this->displayTimezoneFromClientContext((array) data_get($contextPayload, 'temporal_context.client_context', []))
@@ -1037,6 +1044,13 @@ PROMPT;
             $plainText = $noteTitle;
         }
 
+        $reminderTitle = 'Pick one from '.$noteTitle;
+        if (preg_match('/\bupdate\s+it\b/u', $normalized)) {
+            $reminderTitle = 'Update '.$noteTitle;
+        } elseif (preg_match('/\breview\s+it\b/u', $normalized)) {
+            $reminderTitle = 'Review '.$noteTitle;
+        }
+
         return [
             [
                 'type' => 'note.create',
@@ -1053,7 +1067,7 @@ PROMPT;
                 'risk' => 'low',
                 'client_action_key' => 'reminder_0',
                 'parameters' => [
-                    'title' => 'Pick one from '.$noteTitle,
+                    'title' => $reminderTitle,
                     'remind_at' => $remindAt->toIso8601String(),
                 ],
             ],
