@@ -923,7 +923,7 @@ class BeanRealtimeConversation {
       }
       _sendFunctionOutput(callId, {
         'ok': false,
-        'message': 'Bean could not start that background work.',
+        'message': 'Bean hit a snag starting that background work.',
       });
       onStatus?.call('work failed');
       unawaited(

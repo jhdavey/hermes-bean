@@ -1571,7 +1571,9 @@ void main() {
     expect(find.text('Sign in to Hermes Bean'), findsNothing);
     expect(find.byKey(const Key('settings-view')), findsOneWidget);
     expect(
-      find.textContaining('Bean could not refresh your workspace'),
+      find.textContaining(
+        'Bean hit a snag while trying to refresh your workspace',
+      ),
       findsOneWidget,
     );
   });

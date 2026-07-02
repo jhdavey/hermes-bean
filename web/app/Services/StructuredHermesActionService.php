@@ -707,7 +707,7 @@ class StructuredHermesActionService
         }
 
         throw new InvalidArgumentException($matches->isEmpty()
-            ? 'Bean could not find a matching task to update.'
+            ? 'I can’t find a matching task to update.'
             : 'Bean found multiple matching tasks. Please include the exact task.'
         );
     }
@@ -1379,7 +1379,7 @@ class StructuredHermesActionService
 
         $candidates = $query->latest('updated_at')->limit(20)->get();
         if ($candidates->isEmpty()) {
-            throw new InvalidArgumentException('Bean could not find a matching calendar event to update.');
+            throw new InvalidArgumentException('I can’t find a matching calendar event to update.');
         }
 
         $sourceDate = $this->calendarEventSourceDate($session, $parameters);
@@ -1486,7 +1486,7 @@ class StructuredHermesActionService
         }
 
         throw new InvalidArgumentException($matches->isEmpty()
-            ? 'Bean could not find a matching note.'
+            ? 'I can’t find a matching note.'
             : 'Bean found multiple matching notes. Please include the exact note title.'
         );
     }
@@ -1519,7 +1519,7 @@ class StructuredHermesActionService
         }
 
         throw new InvalidArgumentException($matches->isEmpty()
-            ? 'Bean could not find a matching memory.'
+            ? 'I can’t find a matching memory.'
             : 'Bean found multiple matching memories. Please include the exact memory.'
         );
     }

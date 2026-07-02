@@ -513,8 +513,8 @@ bool realtimeVoiceCancelForTesting(String transcript) =>
 
 String beanFriendlyErrorMessage(Object error, {String? action}) {
   final prefix = action == null || action.trim().isEmpty
-      ? 'Bean hit a little snag.'
-      : 'Bean could not ${action.trim()}.';
+      ? 'Bean hit a snag.'
+      : 'Bean hit a snag while trying to ${action.trim()}.';
   final subscriptionLimitMessage = _subscriptionLimitMessageFromError(error);
   if (subscriptionLimitMessage != null) {
     return '$prefix $subscriptionLimitMessage';
@@ -550,7 +550,7 @@ String _beanErrorGuidance(Object error) {
       403 =>
         'Bean does not have permission to do that yet. Please check the account or workspace access and try again.',
       404 =>
-        'Bean could not find that item anymore. It may have been moved or deleted, so try refreshing the app.',
+        'I can’t find that item anymore. It may have been moved or deleted, so try refreshing the app.',
       408 =>
         'The connection took too long. Please check your internet connection and try again.',
       409 =>
@@ -573,10 +573,10 @@ String _beanErrorGuidance(Object error) {
     return 'The connection took too long. Please check your internet connection and try again.';
   }
   if (error is FormatException || error is TypeError) {
-    return 'Bean received something it could not read correctly. Please refresh and try again.';
+    return 'Bean received something it couldn’t read correctly. Please refresh and try again.';
   }
   if (error is PlatformException || error is MissingPluginException) {
-    return 'Bean could not open that on this device. Please update the app or try again.';
+    return 'I can’t open that on this device. Please update the app or try again.';
   }
   return 'Something unexpected happened. Please try again in a moment.';
 }
@@ -4150,8 +4150,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _error = invalidToken
             ? 'Session expired or the saved sign-in is no longer valid. Please sign in again.'
             : launchedFromRememberedToken
-            ? 'Bean could not refresh your saved sign-in. Your Remember me token is still saved, so please try again when the connection is back.'
-            : 'Bean could not reach your account. Please sign in again and Bean will get right back to work.';
+            ? 'Bean hit a snag refreshing your saved sign-in. Your Remember me token is still saved, so please try again when the connection is back.'
+            : 'Bean can’t reach your account right now. Please sign in again and Bean will get right back to work.';
         _user = null;
         _session = null;
         _tasks = const [];

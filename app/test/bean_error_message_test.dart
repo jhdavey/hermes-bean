@@ -17,7 +17,11 @@ void main() {
         action: 'save that task',
       );
 
-      expect(message, contains('Bean could not save that task.'));
+      expect(
+        message,
+        contains('Bean hit a snag while trying to save that task.'),
+      );
+      expect(message, isNot(contains('Bean could not')));
       expect(message, contains('our side'));
       expect(message, contains('we’ll fix it as soon as possible'));
       expect(message, isNot(contains('SQLSTATE')));
@@ -35,7 +39,11 @@ void main() {
       action: 'create your account',
     );
 
-    expect(message, contains('Bean could not create your account.'));
+    expect(
+      message,
+      contains('Bean hit a snag while trying to create your account.'),
+    );
+    expect(message, isNot(contains('Bean could not')));
     expect(message, contains('The email field is required.'));
     expect(message, contains('Please adjust it and try again.'));
     expect(message, isNot(contains('422')));
@@ -50,8 +58,9 @@ void main() {
           action: 'refresh your latest data',
         ),
         allOf(
-          contains('Bean could not refresh your latest data.'),
+          contains('Bean hit a snag while trying to refresh your latest data.'),
           contains('check your connection'),
+          isNot(contains('Bean could not')),
           isNot(contains('10.0.2.2')),
         ),
       );
