@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\WorkspaceMembership;
 use App\Notifications\ReminderDueNotification;
 use App\Services\WorkspaceService;
+use Illuminate\Contracts\Notifications\Dispatcher as NotificationDispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -67,6 +68,55 @@ class ReminderNotificationDeliveryTest extends TestCase
             '2026-05-18T13:45:00+00:00',
             $reminder->refresh()->metadata['email_notification_sent_at']
         );
+    }
+
+    public function test_due_reminder_email_failure_does_not_fail_command_or_retry_immediately(): void
+    {
+        Carbon::setTestNow('2026-05-18 13:45:00');
+        $sendAttempts = 0;
+        $this->app->bind(NotificationDispatcher::class, function () use (&$sendAttempts) {
+            return new class($sendAttempts) implements NotificationDispatcher
+            {
+                public function __construct(private int &$sendAttempts) {}
+
+                public function send($notifiables, $notification): void
+                {
+                    $this->sendAttempts++;
+
+                    throw new \RuntimeException('You have reached your daily email sending quota.');
+                }
+
+                public function sendNow($notifiables, $notification, ?array $channels = null): void
+                {
+                    $this->send($notifiables, $notification);
+                }
+            };
+        });
+
+        $user = User::factory()->create([
+            'email' => 'quota-reminder@example.com',
+            'subscription_tier' => 'premium',
+            'notification_preferences' => [
+                'reminder_push' => false,
+                'reminder_email' => true,
+            ],
+        ]);
+        $reminder = Reminder::create([
+            'user_id' => $user->id,
+            'title' => 'Quota-safe reminder',
+            'remind_at' => now()->subMinute(),
+            'status' => 'pending',
+        ]);
+
+        $this->assertSame(0, Artisan::call('reminders:send-due-notifications'));
+        $this->assertSame(0, Artisan::call('reminders:send-due-notifications'));
+
+        $metadata = $reminder->refresh()->metadata;
+        $delivery = $metadata['notification_delivery'];
+        $this->assertSame(1, $sendAttempts);
+        $this->assertSame('2026-05-18T13:45:00+00:00', $metadata['email_notification_failed_at']);
+        $this->assertSame('2026-05-19T00:00:00+00:00', $delivery['email_retry_after_by_user'][(string) $user->id]);
+        $this->assertArrayNotHasKey((string) $user->id, $delivery['email_sent_at_by_user']);
     }
 
     public function test_due_reminder_email_header_includes_black_bean_logo(): void
