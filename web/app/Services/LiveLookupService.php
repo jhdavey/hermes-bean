@@ -570,7 +570,7 @@ class LiveLookupService
         $clean = preg_replace('/[^a-z0-9&.\'\s-]/i', ' ', $clean) ?? $clean;
         $clean = trim((string) preg_replace('/\s+/', ' ', $clean));
 
-        return mb_substr($clean, 0, 80);
+        return mb_substr($this->stripGenericPlaceNameWords($clean), 0, 80);
     }
 
     private function cleanPlaceNameCandidate(string $candidate): string
@@ -578,7 +578,41 @@ class LiveLookupService
         $candidate = preg_replace('/\b(the|a|an)\b/i', ' ', $candidate) ?? $candidate;
         $candidate = preg_replace('/[^a-z0-9&.\'\s-]/i', ' ', $candidate) ?? $candidate;
 
-        return trim((string) preg_replace('/\s+/', ' ', $candidate));
+        return $this->stripGenericPlaceNameWords(trim((string) preg_replace('/\s+/', ' ', $candidate)));
+    }
+
+    private function stripGenericPlaceNameWords(string $candidate): string
+    {
+        $candidate = trim((string) preg_replace('/\s+/', ' ', $candidate));
+        if ($candidate === '') {
+            return '';
+        }
+
+        $tokens = preg_split('/\s+/', $candidate) ?: [];
+        if (count($tokens) <= 1) {
+            return $candidate;
+        }
+
+        $generic = [
+            'address',
+            'addresses',
+            'business',
+            'businesses',
+            'location',
+            'locations',
+            'place',
+            'places',
+            'shop',
+            'shops',
+            'store',
+            'stores',
+        ];
+        $filtered = array_values(array_filter(
+            $tokens,
+            fn (string $token): bool => ! in_array(mb_strtolower($token), $generic, true),
+        ));
+
+        return $filtered !== [] ? implode(' ', $filtered) : $candidate;
     }
 
     private function placeLocationQuery(string $query, string $location): string

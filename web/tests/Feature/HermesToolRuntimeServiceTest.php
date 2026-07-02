@@ -1294,6 +1294,83 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
     }
 
+    public function test_google_places_strips_generic_store_words_from_brand_place_queries(): void
+    {
+        config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
+
+        $placesTextQuery = null;
+        Http::fake(function ($request) use (&$placesTextQuery) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                return Http::response([
+                    'id' => 'chatcmpl-places-tool',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'tool_calls',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => null,
+                            'tool_calls' => [[
+                                'id' => 'call_places',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'external_lookup',
+                                    'arguments' => json_encode([
+                                        'query' => 'Wawa near ZIP code 32820 closest store address',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ]],
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'results' => [[
+                        'formatted_address' => 'Orlando, FL 32820, USA',
+                        'geometry' => [
+                            'location' => ['lat' => 28.568, 'lng' => -81.105],
+                        ],
+                        'address_components' => [[
+                            'long_name' => '32820',
+                            'short_name' => '32820',
+                            'types' => ['postal_code'],
+                        ]],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://places.googleapis.com/v1/places:searchText') {
+                $placesTextQuery = data_get($request->data(), 'textQuery');
+
+                return Http::response([
+                    'places' => [[
+                        'id' => 'colonial-wawa',
+                        'displayName' => ['text' => 'Wawa'],
+                        'formattedAddress' => '16959 E Colonial Dr, Orlando, FL 32820, USA',
+                        'location' => ['latitude' => 28.5687, 'longitude' => -81.1072],
+                        'googleMapsUri' => 'https://maps.google.com/?cid=1',
+                    ]],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-places-google-generic-store@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Find a nearby Wawa around 32820 and tell me the closest address.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertSame('wawa 32820', $placesTextQuery);
+        $this->assertStringContainsString('16959 E Colonial Dr', (string) $response->json('data.assistant_message.content'));
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
+    }
+
     public function test_google_places_ranks_exact_business_name_before_adjacent_service_match(): void
     {
         config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
