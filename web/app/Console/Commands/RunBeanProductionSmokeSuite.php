@@ -393,10 +393,20 @@ class RunBeanProductionSmokeSuite extends Command
 
     private function specificPlaceLookupFailure(string $promptText, string $answerText): ?string
     {
+        if (str_contains($promptText, '32820') && $this->promptLooksLikePlacesLookup($promptText) && (str_contains($answerText, 'ohio') || str_contains($answerText, '123 main'))) {
+            return 'wrong_place_32820';
+        }
+
         if (str_contains($promptText, '32820') && str_contains($promptText, 'wawa')) {
             return str_contains($answerText, '16959') || str_contains($answerText, 'e colonial')
                 ? null
                 : 'wrong_wawa_32820';
+        }
+
+        if (str_contains($promptText, '32820') && str_contains($promptText, 'starbucks')) {
+            return str_contains($answerText, '321') || str_contains($answerText, 'avalon')
+                ? null
+                : 'wrong_starbucks_32820';
         }
 
         if (str_contains($promptText, '32820') && str_contains($promptText, 'home depot')) {

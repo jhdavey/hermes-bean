@@ -1473,6 +1473,70 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
     }
 
+    public function test_google_places_retries_brand_only_query_inside_location_bias(): void
+    {
+        config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
+
+        $placesTextQueries = [];
+        Http::fake(function ($request) use (&$placesTextQueries) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                return Http::response(['error' => 'Unexpected model routing call'], 500);
+            }
+
+            if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'results' => [[
+                        'formatted_address' => 'Orlando, FL 32820, USA',
+                        'geometry' => [
+                            'location' => ['lat' => 28.568, 'lng' => -81.105],
+                        ],
+                        'address_components' => [[
+                            'long_name' => '32820',
+                            'short_name' => '32820',
+                            'types' => ['postal_code'],
+                        ]],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://places.googleapis.com/v1/places:searchText') {
+                $textQuery = (string) data_get($request->data(), 'textQuery');
+                $placesTextQueries[] = $textQuery;
+
+                if ($textQuery === 'starbucks 32820') {
+                    return Http::response(['places' => []], 200);
+                }
+
+                return Http::response([
+                    'places' => [[
+                        'id' => 'avalon-starbucks',
+                        'displayName' => ['text' => 'Starbucks Coffee Company'],
+                        'formattedAddress' => '321 Avalon Park S Blvd, Orlando, FL 32828, USA',
+                        'location' => ['latitude' => 28.5129, 'longitude' => -81.1558],
+                        'googleMapsUri' => 'https://maps.google.com/?cid=3',
+                    ]],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-places-google-retry-brand@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Find the nearest Starbucks to 32820 and tell me the address quickly.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertSame(['starbucks 32820', 'starbucks'], $placesTextQueries);
+        $this->assertStringContainsString('321 Avalon Park S Blvd', (string) $response->json('data.assistant_message.content'));
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
+    }
+
     public function test_google_places_cleans_verbose_brand_zip_queries_before_searching(): void
     {
         config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');

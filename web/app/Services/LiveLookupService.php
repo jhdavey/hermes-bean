@@ -190,60 +190,87 @@ class LiveLookupService
                 return $this->providerFailure($user, $session, 'google_places', 'google-geocoding', $query, 'places_location_not_found', 'The location needs a more specific city, zip code, or address.', $startedAt, null, ['stage' => 'geocode']);
             }
 
+            $requestedPostalCode = $this->postalCodeFromLocation($locationQuery);
+            $places = [];
+            $searchAttempts = 0;
+            $lastStatus = null;
+            $lastTextQuery = null;
             $radius = max(1000, (int) config('services.hermes_runtime.google_places_radius_meters', 50000));
-            $response = Http::acceptJson()
-                ->asJson()
-                ->withHeaders([
-                    'X-Goog-Api-Key' => $this->googleMapsApiKey(),
-                    'X-Goog-FieldMask' => 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.businessStatus,places.types',
-                ])
-                ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
-                ->post('https://places.googleapis.com/v1/places:searchText', [
-                    'textQuery' => trim("{$placeName} {$locationQuery}"),
-                    'pageSize' => 10,
-                    'locationBias' => [
-                        'circle' => [
-                            'center' => [
-                                'latitude' => $origin['lat'],
-                                'longitude' => $origin['lon'],
-                            ],
-                            'radius' => $radius,
-                        ],
-                    ],
-                ]);
+            $searchQueries = array_values(array_unique(array_filter([
+                trim("{$placeName} {$locationQuery}"),
+                $placeName,
+            ])));
 
-            $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
-            if (! $response->successful()) {
-                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, 'places_lookup_failed', 'The places provider needs another lookup attempt or a narrower location.', $startedAt, $response->status(), ['stage' => 'text_search']);
+            foreach ($searchQueries as $textQuery) {
+                $searchAttempts++;
+                $lastTextQuery = $textQuery;
+                $response = Http::acceptJson()
+                    ->asJson()
+                    ->withHeaders([
+                        'X-Goog-Api-Key' => $this->googleMapsApiKey(),
+                        'X-Goog-FieldMask' => 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.businessStatus,places.types',
+                    ])
+                    ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
+                    ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+                    ->post('https://places.googleapis.com/v1/places:searchText', [
+                        'textQuery' => $textQuery,
+                        'pageSize' => 10,
+                        'locationBias' => [
+                            'circle' => [
+                                'center' => [
+                                    'latitude' => $origin['lat'],
+                                    'longitude' => $origin['lon'],
+                                ],
+                                'radius' => $radius,
+                            ],
+                        ],
+                    ]);
+
+                if (! $response->successful()) {
+                    $lastStatus = $response->status();
+
+                    continue;
+                }
+
+                $candidatePlaces = collect((array) data_get($response->json(), 'places'))
+                    ->map(function ($place) use ($origin, $requestedPostalCode, $placeName): array {
+                        $normalized = $this->normalizeGooglePlace(is_array($place) ? $place : [], $origin, $requestedPostalCode);
+                        $normalized['name_match_score'] = $this->placeNameMatchScore($normalized, $placeName);
+                        $normalized['ranking_distance_meters'] = $this->placeRankingDistanceMeters($normalized);
+
+                        return $normalized;
+                    })
+                    ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
+                    ->filter(fn (array $place): bool => (int) ($place['name_match_score'] ?? 0) > 0)
+                    ->sortBy([
+                        ['postal_code_match', 'desc'],
+                        ['ranking_distance_meters', 'asc'],
+                        ['name_match_score', 'desc'],
+                    ])
+                    ->take(5)
+                    ->values()
+                    ->all();
+
+                if ($candidatePlaces !== []) {
+                    $places = $candidatePlaces;
+
+                    break;
+                }
             }
 
-            $requestedPostalCode = $this->postalCodeFromLocation($locationQuery);
-            $places = collect((array) data_get($response->json(), 'places'))
-                ->map(function ($place) use ($origin, $requestedPostalCode, $placeName): array {
-                    $normalized = $this->normalizeGooglePlace(is_array($place) ? $place : [], $origin, $requestedPostalCode);
-                    $normalized['name_match_score'] = $this->placeNameMatchScore($normalized, $placeName);
-                    $normalized['ranking_distance_meters'] = $this->placeRankingDistanceMeters($normalized);
-
-                    return $normalized;
-                })
-                ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
-                ->filter(fn (array $place): bool => (int) ($place['name_match_score'] ?? 0) > 0)
-                ->sortBy([
-                    ['postal_code_match', 'desc'],
-                    ['ranking_distance_meters', 'asc'],
-                    ['name_match_score', 'desc'],
-                ])
-                ->take(5)
-                ->values()
-                ->all();
+            $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
 
             if ($places === []) {
-                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, 'places_not_found', 'I need a more specific place name or a wider location to narrow that down.', $startedAt, null, ['stage' => 'text_search', 'location_query' => $locationQuery]);
+                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, $lastStatus === null ? 'places_not_found' : 'places_lookup_failed', 'I need a more specific place name or a wider location to narrow that down.', $startedAt, $lastStatus, [
+                    'stage' => 'text_search',
+                    'location_query' => $locationQuery,
+                    'search_attempts' => $searchAttempts,
+                    'last_text_query' => $lastTextQuery,
+                ]);
             }
 
             $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', 'google-places', [
-                'tool_call_count' => 2,
+                'tool_call_count' => 1 + $searchAttempts,
             ], [
                 'conversation_session_id' => $session->id,
                 'provider' => 'google',
@@ -251,6 +278,8 @@ class LiveLookupService
                 'query' => $query,
                 'place_name' => $placeName,
                 'location_query' => $locationQuery,
+                'search_attempts' => $searchAttempts,
+                'last_text_query' => $lastTextQuery,
                 'result_count' => count($places),
                 'postal_code_match' => data_get($places, '0.postal_code_match'),
                 'latency_ms' => $latencyMs,
