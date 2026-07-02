@@ -2811,6 +2811,33 @@ void main() {
     expect(find.text('It should be warm and cloudy tomorrow.'), findsOneWidget);
   });
 
+  testWidgets(
+    'stale Bean work events do not appear without an active request',
+    (WidgetTester tester) async {
+      final api = _StaleBeanWorkEventsFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Can you create calendar events?',
+      );
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Yes, I can help with calendar events.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+      expect(find.text('Create task: Old stale task'), findsNothing);
+    },
+  );
+
   testWidgets('Bean work dock uses backend work plan labels in order', (
     WidgetTester tester,
   ) async {
@@ -9488,6 +9515,82 @@ class _BeanWorkPlanFakeHermesApiClient extends _SignedInFakeHermesApiClient {
         content: 'Done — I added the deep work block and reminder.',
       ),
       events: _workEvents,
+    );
+  }
+}
+
+class _StaleBeanWorkEventsFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  static const _staleEvents = [
+    HermesActivityEvent(
+      id: 12,
+      eventType: 'assistant.work_item.planned',
+      status: 'planned',
+      toolName: 'assistant.work',
+      payload: {
+        'work_item_id': 'old-task',
+        'work_order': 0,
+        'action_type': 'task.create',
+        'label': 'Create task: Old stale task',
+      },
+    ),
+    HermesActivityEvent(
+      id: 13,
+      eventType: 'assistant.task.created',
+      status: 'succeeded',
+      toolName: 'tasks.create',
+      payload: {
+        'task_id': 999,
+        'title': 'Old stale task',
+        'work_item_id': 'old-task',
+        'work_order': 0,
+        'work_label': 'Create task: Old stale task',
+        'action_type': 'task.create',
+      },
+    ),
+  ];
+
+  @override
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async => _staleEvents;
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sendMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      assistantMessage: HermesMessage(
+        id: 8200,
+        role: 'assistant',
+        content: 'Yes, I can help with calendar events.',
+      ),
+      events: _staleEvents,
+    );
+  }
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) {
+    queueMessageCalls++;
+    return sendMessage(
+      sessionId: sessionId,
+      content: content,
+      metadata: metadata,
     );
   }
 }

@@ -1957,6 +1957,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   List<_BeanWorkItem> _beanWorkItems = const [];
   int _beanWorkEventFloorId = 0;
   bool _beanWorkFinalized = false;
+  bool _beanWorkAcceptsOrphanPlanEvents = false;
   final Set<int> _beanWorkAppliedEventIds = <int>{};
   final Set<int> _beanDashboardRefreshEventIds = <int>{};
   final Set<String> _beanWorkStagedCompletionIds = <String>{};
@@ -2632,6 +2633,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanWorkStatusMinUntil = null;
         _beanWorkItems = const [];
         _beanWorkFinalized = false;
+        _beanWorkAcceptsOrphanPlanEvents = false;
         _activeBeanWorkMessageId = null;
         _beanWorkStagedCompletionIds.clear();
       });
@@ -2658,6 +2660,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkAppliedEventIds.clear();
     _beanDashboardRefreshEventIds.clear();
     _beanWorkFinalized = false;
+    _beanWorkAcceptsOrphanPlanEvents = false;
     _activeBeanWorkMessageId = null;
     _beanWorkStagedCompletionIds.clear();
     _cancelBeanWorkStageTimers();
@@ -2816,10 +2819,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }) {
     if (_beanRequestIsCapabilityQuestion(content)) return;
     final labels = _beanWorkLabelsForTurn(content);
-    if (labels.isEmpty) return;
     if (freshRequest) {
       _prepareBeanWorkForFreshRequest();
     }
+    _beanWorkAcceptsOrphanPlanEvents = true;
+    if (labels.isEmpty) return;
     for (var index = 0; index < labels.length; index++) {
       _upsertBeanWorkItem('request-$index', labels[index], status: status);
     }
@@ -3342,6 +3346,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   void _applyBeanWorkEvents(List<HermesActivityEvent> events) {
     if (_beanWorkFinalized) return;
+    if (!_hasActiveBeanWorkContext) return;
     final ordered = [...events]
       ..sort((left, right) => left.id.compareTo(right.id));
     for (final event in ordered) {
@@ -3349,9 +3354,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _beanWorkAppliedEventIds.contains(event.id)) {
         continue;
       }
-      if (!_beanWorkEventBelongsToActiveRequest(event)) continue;
       final item = _beanWorkItemFromEvent(event);
       if (item == null) continue;
+      if (!_beanWorkEventBelongsToActiveRequest(event, item)) continue;
       _beanWorkAppliedEventIds.add(event.id);
       _beanWorkEventFloorId = math.max(_beanWorkEventFloorId, event.id);
       final shouldStageCompletion =
@@ -3377,6 +3382,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
+  bool get _hasActiveBeanWorkContext =>
+      _activeBeanWorkMessageId != null ||
+      _activeAssistantRunId != null ||
+      _beanWorkItems.isNotEmpty;
+
   void _stageBeanWorkCompletion(_BeanWorkItem item) {
     if (_beanWorkStagedCompletionIds.contains(item.id)) return;
     _beanWorkStagedCompletionIds.add(item.id);
@@ -3397,7 +3407,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkStageTimers.add(timer);
   }
 
-  bool _beanWorkEventBelongsToActiveRequest(HermesActivityEvent event) {
+  bool _beanWorkEventBelongsToActiveRequest(
+    HermesActivityEvent event,
+    _BeanWorkItem item,
+  ) {
     final activeMessageId = _activeBeanWorkMessageId;
     if (activeMessageId == null) return true;
 
@@ -3417,7 +3430,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       return true;
     }
 
-    return !type.startsWith('assistant.');
+    if (!type.startsWith('assistant.')) return true;
+
+    if (type == 'assistant.work_item.planned' &&
+        _beanWorkAcceptsOrphanPlanEvents) {
+      return true;
+    }
+
+    return _beanWorkItems.any((existing) => existing.id == item.id) ||
+        _beanWorkHasPendingPlaceholderForLabel(item.label);
   }
 
   _BeanWorkItem? _beanWorkItemFromEvent(HermesActivityEvent event) {
@@ -4692,6 +4713,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanVoiceDraft = null;
         _chatRunState = 'Ready';
         _beanWorkItems = const [];
+        _beanWorkAcceptsOrphanPlanEvents = false;
         _error = beanFriendlyErrorMessage(
           error,
           action: 'start realtime voice',
@@ -4746,6 +4768,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _chatInputController.clear();
         _chatRunState = 'Ready';
         _beanWorkItems = const [];
+        _beanWorkAcceptsOrphanPlanEvents = false;
       });
       return;
     }
@@ -4769,6 +4792,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _editingChatMessageId = null;
         _chatRunState = 'Stopped';
         _beanWorkItems = const [];
+        _beanWorkAcceptsOrphanPlanEvents = false;
         _messages.add(
           HermesMessage(
             id: _messages.length + 1,
@@ -4803,6 +4827,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _chatInputController.clear();
       _chatRunState = dictated.isEmpty ? 'Ready' : 'Bean is working...';
       _beanWorkItems = const [];
+      _beanWorkAcceptsOrphanPlanEvents = false;
     });
     if (dictated.isNotEmpty) {
       unawaited(_sendChat(dictated));
@@ -5049,6 +5074,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _chatRunState = 'Checking…';
         _beanWorkItems = const [];
+        _beanWorkAcceptsOrphanPlanEvents = false;
         _messages.add(
           HermesMessage(
             id: _messages.length + 1,
@@ -5322,6 +5348,7 @@ ${_truncateDiagnostic(stack, 2200)}
       _busy = false;
       _chatRunState = 'Timed out';
       _beanWorkItems = const [];
+      _beanWorkAcceptsOrphanPlanEvents = false;
     });
   }
 
