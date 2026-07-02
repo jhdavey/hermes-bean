@@ -745,7 +745,7 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_async_run_endpoint_recovers_failed_expired_run_for_client_request_id(): void
+    public function test_async_run_endpoint_requeues_failed_expired_run_for_client_request_id_without_blocking(): void
     {
         Queue::fake();
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
@@ -789,18 +789,19 @@ class RealtimeAssistantFlowTest extends TestCase
         ])->save();
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
-            ->assertOk()
-            ->assertJsonPath('data.status', 'completed')
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
             ->assertJsonPath('data.run.id', $runId)
-            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chan Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+            ->assertJsonPath('data.run.metadata.background_response_retry_attempts', 1)
+            ->assertJsonPath('data.assistant_message', null);
 
-        $this->assertCount(3, CalendarEvent::where('conversation_session_id', $sessionId)->get());
+        $this->assertCount(0, CalendarEvent::where('conversation_session_id', $sessionId)->get());
         $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
-        Queue::assertPushed(ProcessAssistantRun::class, 1);
+        Queue::assertPushed(ProcessAssistantRun::class, 2);
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
-    public function test_async_run_lookup_recovers_failed_expired_run_for_client_request_id(): void
+    public function test_async_run_lookup_requeues_failed_expired_run_for_client_request_id_without_blocking(): void
     {
         Queue::fake();
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
@@ -841,14 +842,15 @@ class RealtimeAssistantFlowTest extends TestCase
         ])->save();
 
         $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/runs/lookup?client_request_id=flutter-recover-failed-run-lookup-1")
-            ->assertOk()
-            ->assertJsonPath('data.status', 'completed')
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
             ->assertJsonPath('data.run.id', $runId)
-            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chan Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+            ->assertJsonPath('data.run.metadata.background_response_retry_attempts', 1)
+            ->assertJsonPath('data.assistant_message', null);
 
-        $this->assertCount(3, CalendarEvent::where('conversation_session_id', $sessionId)->get());
+        $this->assertCount(0, CalendarEvent::where('conversation_session_id', $sessionId)->get());
         $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
-        Queue::assertPushed(ProcessAssistantRun::class, 1);
+        Queue::assertPushed(ProcessAssistantRun::class, 2);
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
@@ -1072,7 +1074,7 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class, 1);
     }
 
-    public function test_polling_stale_async_run_recovers_deterministic_calendar_work(): void
+    public function test_polling_stale_async_run_requeues_deterministic_calendar_work_without_blocking(): void
     {
         Queue::fake();
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
@@ -1114,20 +1116,18 @@ class RealtimeAssistantFlowTest extends TestCase
         ConversationSession::findOrFail($sessionId)->forceFill(['status' => 'running'])->save();
 
         $this->withToken($token)->getJson("/api/assistant/runs/{$runId}")
-            ->assertOk()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chen Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.metadata.background_stale_retry_attempts', 1)
+            ->assertJsonPath('data.assistant_message', null);
 
         $events = CalendarEvent::where('conversation_session_id', $sessionId)->orderBy('starts_at')->get();
-        $this->assertCount(3, $events);
-        $this->assertSame('Dr Chen Cardio', $events[0]->title);
-        $this->assertSame('100 N Dean rd', $events[0]->location);
-        $this->assertSame('Ventura', $events[1]->title);
-        $this->assertSame('Azalea Lane', $events[2]->title);
+        $this->assertCount(0, $events);
+        Queue::assertPushed(ProcessAssistantRun::class, 2);
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
-    public function test_polling_failed_expired_async_run_recovers_when_no_work_was_done(): void
+    public function test_polling_failed_expired_async_run_requeues_when_no_work_was_done_without_blocking(): void
     {
         Queue::fake();
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
@@ -1170,20 +1170,18 @@ class RealtimeAssistantFlowTest extends TestCase
         ConversationSession::findOrFail($sessionId)->forceFill(['status' => 'active'])->save();
 
         $this->withToken($token)->getJson("/api/assistant/runs/{$runId}")
-            ->assertOk()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chan Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.metadata.background_response_retry_attempts', 1)
+            ->assertJsonPath('data.assistant_message', null);
 
         $run = AssistantRun::findOrFail($runId);
-        $this->assertTrue($run->metadata['stale_recovered_from_failed_status']);
+        $this->assertSame(1, $run->metadata['background_response_retry_attempts']);
         $this->assertNull($run->error);
 
         $events = CalendarEvent::where('conversation_session_id', $sessionId)->orderBy('starts_at')->get();
-        $this->assertCount(3, $events);
-        $this->assertSame('Dr Chan Cardio', $events[0]->title);
-        $this->assertSame('100 N Dean Rd', $events[0]->location);
-        $this->assertSame('Ventura', $events[1]->title);
-        $this->assertSame('Azalea Lane', $events[2]->title);
+        $this->assertCount(0, $events);
+        Queue::assertPushed(ProcessAssistantRun::class, 2);
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
@@ -1230,26 +1228,25 @@ class RealtimeAssistantFlowTest extends TestCase
         ConversationSession::findOrFail($sessionId)->forceFill(['status' => 'active'])->save();
 
         $this->withToken($token)->getJson("/api/assistant/runs/{$runId}")
-            ->assertOk()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chen Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.metadata.background_response_retry_attempts', 1)
+            ->assertJsonPath('data.assistant_message', null);
 
         $run = AssistantRun::findOrFail($runId);
-        $this->assertTrue($run->metadata['stale_recovered_from_failed_status']);
+        $this->assertSame(1, $run->metadata['background_response_retry_attempts']);
         $this->assertNull($run->error);
 
         $events = CalendarEvent::where('conversation_session_id', $sessionId)->orderBy('starts_at')->get();
-        $this->assertCount(3, $events);
-        $this->assertSame('Dr Chen Cardio', $events[0]->title);
-        $this->assertSame('100 N Dean Rd', $events[0]->location);
-        $this->assertSame('Ventura', $events[1]->title);
-        $this->assertSame('Azalea Lane', $events[2]->title);
+        $this->assertCount(0, $events);
+        Queue::assertPushed(ProcessAssistantRun::class, 2);
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
     public function test_polling_generic_failed_async_run_returns_bridge_message_instead_of_failed_payload(): void
     {
         Queue::fake();
+        config()->set('services.hermes_runtime.assistant_run_background_retry_attempts', 0);
         $this->bindFailingDirectRuntime();
 
         $token = $this->apiToken('failed-run-bridge@example.com');
@@ -1288,6 +1285,7 @@ class RealtimeAssistantFlowTest extends TestCase
     public function test_client_request_lookup_generic_failed_async_run_returns_bridge_message_instead_of_failed_payload(): void
     {
         Queue::fake();
+        config()->set('services.hermes_runtime.assistant_run_background_retry_attempts', 0);
         $this->bindFailingDirectRuntime();
 
         $token = $this->apiToken('failed-run-lookup-bridge@example.com');

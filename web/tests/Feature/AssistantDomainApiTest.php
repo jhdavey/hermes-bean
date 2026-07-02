@@ -430,6 +430,7 @@ class AssistantDomainApiTest extends TestCase
                 'match_title' => 'lunch',
                 'from_date' => '2026-05-20',
                 'starts_at' => '2026-05-25T12:00:00-04:00',
+                'sync_google_now' => true,
             ]),
         ], 'Quick Lunch is moved to next Monday at 12:00 PM.');
 

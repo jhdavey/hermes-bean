@@ -40,9 +40,7 @@ class AssistantRunController extends Controller
                 ->first();
 
             if ($existingRun instanceof AssistantRun) {
-                $existingRun = $this->runs->recoverStaleRun($existingRun, $this->runtime)
-                    ->refresh();
-                $existingRun = $this->runs->resolveFailedRunForResponse($existingRun, $this->runtime)
+                $existingRun = $this->runs->prepareRunForBackgroundResponse($existingRun)
                     ->load(['session', 'userMessage', 'assistantMessage']);
 
                 return response()->json(
@@ -153,9 +151,7 @@ class AssistantRunController extends Controller
             ->first();
 
         if ($existingRun instanceof AssistantRun) {
-            $existingRun = $this->runs->recoverStaleRun($existingRun, $this->runtime)
-                ->refresh();
-            $existingRun = $this->runs->resolveFailedRunForResponse($existingRun, $this->runtime)
+            $existingRun = $this->runs->prepareRunForBackgroundResponse($existingRun)
                 ->load(['session', 'userMessage', 'assistantMessage']);
 
             return response()->json(
@@ -213,12 +209,10 @@ class AssistantRunController extends Controller
             ->with(['session', 'userMessage', 'assistantMessage'])
             ->findOrFail($run);
 
-        return response()->json([
-            'data' => $this->runs->resolveFailedRunForResponse(
-                $this->runs->recoverStaleRun($ownedRun, $this->runtime)->refresh(),
-                $this->runtime
-            )->load(['session', 'userMessage', 'assistantMessage']),
-        ]);
+        $preparedRun = $this->runs->prepareRunForBackgroundResponse($ownedRun)
+            ->load(['session', 'userMessage', 'assistantMessage']);
+
+        return response()->json(['data' => $preparedRun], $this->runResponseStatus($preparedRun));
     }
 
     public function cancel(Request $request, string $run): JsonResponse

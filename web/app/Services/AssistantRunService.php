@@ -299,6 +299,97 @@ class AssistantRunService
         return $this->completeFailedRunWithBridgeMessage($run);
     }
 
+    public function prepareRunForBackgroundResponse(AssistantRun $run): AssistantRun
+    {
+        $run->refresh();
+        if (in_array($run->status, ['queued', 'running'], true)) {
+            $startedAt = $run->started_at ?: $run->created_at;
+            $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 210);
+            if ($startedAt !== null && $startedAt->lte(now()->subSeconds($staleAfterSeconds))) {
+                if ($this->runRecoveryWindowExpired($run)) {
+                    $this->markStaleFailed($run, $staleAfterSeconds, 'Run expired before it could be safely recovered.');
+
+                    return $this->prepareRunForBackgroundResponse($run->refresh());
+                }
+
+                $metadata = is_array($run->metadata) ? $run->metadata : [];
+                $attempts = (int) ($metadata['background_stale_retry_attempts'] ?? 0);
+                $maxAttempts = (int) config('services.hermes_runtime.assistant_run_background_retry_attempts', 1);
+                if ($maxAttempts > 0 && $attempts < $maxAttempts && ! $this->runHasCompletedMutatingWork($run)) {
+                    $run->update([
+                        'status' => 'queued',
+                        'started_at' => null,
+                        'completed_at' => null,
+                        'error' => null,
+                        'result' => null,
+                        'metadata' => array_merge($metadata, [
+                            'background_stale_retry_attempts' => $attempts + 1,
+                            'background_stale_retried_at' => now()->toIso8601String(),
+                        ]),
+                    ]);
+                    $run->session?->update([
+                        'status' => 'queued',
+                        'last_activity_at' => now(),
+                    ]);
+
+                    $this->recordEvent($run->refresh(), 'runtime.run_stale_retry_queued', [
+                        'run_id' => $run->id,
+                        'message_id' => $run->user_message_id,
+                        'attempt' => $attempts + 1,
+                    ], 'hermes.runs', 'queued');
+
+                    ProcessAssistantRun::dispatch($run->id);
+
+                    return $run->refresh();
+                }
+
+                $this->markStaleFailed($run, $staleAfterSeconds);
+
+                return $this->prepareRunForBackgroundResponse($run->refresh());
+            }
+
+            return $run;
+        }
+
+        if ($run->status !== 'failed' || $run->assistant_message_id !== null) {
+            return $run;
+        }
+
+        $metadata = is_array($run->metadata) ? $run->metadata : [];
+        $attempts = (int) ($metadata['background_response_retry_attempts'] ?? 0);
+        $maxAttempts = (int) config('services.hermes_runtime.assistant_run_background_retry_attempts', 1);
+        if ($maxAttempts > 0 && $attempts < $maxAttempts && ! $this->runHasCompletedMutatingWork($run)) {
+            $run->update([
+                'status' => 'queued',
+                'started_at' => null,
+                'completed_at' => null,
+                'error' => null,
+                'result' => null,
+                'metadata' => array_merge($metadata, [
+                    'background_response_retry_attempts' => $attempts + 1,
+                    'background_response_retried_at' => now()->toIso8601String(),
+                    'background_response_original_error' => $run->error,
+                ]),
+            ]);
+            $run->session?->update([
+                'status' => 'queued',
+                'last_activity_at' => now(),
+            ]);
+
+            $this->recordEvent($run->refresh(), 'runtime.run_retry_queued', [
+                'run_id' => $run->id,
+                'message_id' => $run->user_message_id,
+                'attempt' => $attempts + 1,
+            ], 'hermes.runs', 'queued');
+
+            ProcessAssistantRun::dispatch($run->id);
+
+            return $run->refresh();
+        }
+
+        return $this->completeFailedRunWithBridgeMessage($run);
+    }
+
     private function isRecoverableFailedStaleRun(AssistantRun $run): bool
     {
         if ($run->status !== 'failed' || $run->assistant_message_id !== null) {
