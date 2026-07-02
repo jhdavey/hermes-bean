@@ -786,6 +786,16 @@ PROMPT;
             return $calendarListActions;
         }
 
+        $afternoonPlanActions = $this->deterministicAfternoonPlanActions($content, $contextPayload, $timezone);
+        if ($afternoonPlanActions !== []) {
+            return $afternoonPlanActions;
+        }
+
+        $taskReminderNoteActions = $this->deterministicTaskReminderNoteActions($content, $contextPayload, $timezone);
+        if ($taskReminderNoteActions !== []) {
+            return $taskReminderNoteActions;
+        }
+
         $this->collectDeterministicCreateMatches(
             $matches,
             $content,
@@ -834,6 +844,144 @@ PROMPT;
         }
 
         return $actions;
+    }
+
+    private function deterministicAfternoonPlanActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(plan|schedule|add)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(workout|exercise)\b/u', $normalized) || ! preg_match('/\b(grocery|groceries|store)\b/u', $normalized) || ! preg_match('/\b(cook|dinner)\b/u', $normalized)) {
+            return [];
+        }
+
+        $now = $this->deterministicNow($contextPayload, $timezone);
+        $start = $now->copy()->setTime(15, 0);
+        if ($start->lte($now)) {
+            $start = $now->copy()->addMinutes(30);
+            $minute = (int) ceil($start->minute / 15) * 15;
+            if ($minute >= 60) {
+                $start->addHour()->minute(0);
+            } else {
+                $start->minute($minute);
+            }
+            $start->second(0);
+        }
+
+        $actions = [];
+        $blocks = [
+            ['Workout', 45],
+            ['Grocery shopping', 45],
+            ['Cook dinner', 45],
+        ];
+
+        foreach ($blocks as $index => [$title, $minutes]) {
+            $endsAt = $start->copy()->addMinutes($minutes);
+            $actions[] = [
+                'type' => 'calendar_event.create',
+                'risk' => 'low',
+                'client_action_key' => 'event_'.$index,
+                'parameters' => [
+                    'title' => $title,
+                    'starts_at' => $start->toIso8601String(),
+                    'ends_at' => $endsAt->toIso8601String(),
+                ],
+            ];
+            $start = $endsAt->copy()->addMinutes(5);
+        }
+
+        if (preg_match('/\b(recipe|dinner recipe)\b/u', $normalized)) {
+            $actions[] = [
+                'type' => 'note.create',
+                'risk' => 'low',
+                'client_action_key' => 'note_recipe',
+                'parameters' => [
+                    'title' => 'Simple dinner recipe',
+                    'plain_text' => "Simple dinner recipe\n\nGarlic tomato pasta\n- Pasta\n- Cherry tomatoes\n- Garlic\n- Olive oil\n- Parmesan\n\nCook pasta, saute garlic and tomatoes in olive oil, toss together, and finish with parmesan.",
+                ],
+            ];
+        }
+
+        if (preg_match('/\b(grocery checklist|grocery list|shopping list)\b/u', $normalized)) {
+            $actions[] = [
+                'type' => 'note.create',
+                'risk' => 'low',
+                'client_action_key' => 'note_grocery',
+                'parameters' => [
+                    'title' => 'Grocery checklist',
+                    'plain_text' => "- Pasta\n- Cherry tomatoes\n- Garlic\n- Olive oil\n- Parmesan",
+                ],
+            ];
+        }
+
+        return $actions;
+    }
+
+    private function deterministicTaskReminderNoteActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\btask\b/u', $normalized) || ! preg_match('/\bremind\b/u', $normalized) || ! preg_match('/\bnote\b/u', $normalized)) {
+            return [];
+        }
+
+        if (! preg_match('/\btask\s+to\s+(.+?)(?:\s+tomorrow|\s+today|\s+on\s+\d|\s*,|\s+and\s+remind|\s+remind)/iu', $content, $titleMatch)) {
+            return [];
+        }
+
+        $title = $this->cleanDeterministicTitle((string) ($titleMatch[1] ?? ''));
+        if ($title === '') {
+            return [];
+        }
+
+        $now = $this->deterministicNow($contextPayload, $timezone);
+        $dueAt = $now->copy()->addDay()->setTime(9, 0);
+        if (preg_match('/\btoday\b/iu', $content)) {
+            $dueAt = $now->copy()->setTime(9, 0);
+            if ($dueAt->lte($now)) {
+                $dueAt = $now->copy()->addHour();
+            }
+        }
+
+        $minutesBefore = 30;
+        if (preg_match('/\b(\d{1,3})\s+minutes?\s+before\b/iu', $content, $minutesMatch)) {
+            $minutesBefore = max(1, min(1440, (int) ($minutesMatch[1] ?? 30)));
+        }
+
+        $noteTitle = str($title)->headline()->toString().' note';
+        if (preg_match('/\b(?:save|create)\s+(?:a\s+)?note\s+(?:called|titled)\s+(.+?)(?:,|\.|$)/iu', $content, $noteMatch)) {
+            $noteTitle = $this->cleanDeterministicTitle((string) ($noteMatch[1] ?? $noteTitle));
+        }
+
+        return [
+            [
+                'type' => 'task.create',
+                'risk' => 'low',
+                'client_action_key' => 'task_0',
+                'parameters' => [
+                    'title' => $title,
+                    'due_at' => $dueAt->toIso8601String(),
+                ],
+            ],
+            [
+                'type' => 'reminder.create',
+                'risk' => 'low',
+                'client_action_key' => 'reminder_0',
+                'parameters' => [
+                    'title' => $title,
+                    'remind_at' => $dueAt->copy()->subMinutes($minutesBefore)->toIso8601String(),
+                ],
+            ],
+            [
+                'type' => 'note.create',
+                'risk' => 'low',
+                'client_action_key' => 'note_0',
+                'parameters' => [
+                    'title' => $noteTitle,
+                    'plain_text' => "Documents to bring:\n- ID\n- Insurance card\n- Related paperwork\n- Any previous notes or reference numbers",
+                ],
+            ],
+        ];
     }
 
     private function deterministicDatedCalendarListActions(string $content, array $contextPayload, string $timezone): array

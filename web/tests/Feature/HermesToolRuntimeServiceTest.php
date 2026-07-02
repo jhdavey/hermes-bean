@@ -2269,6 +2269,73 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(0);
     }
 
+    public function test_app_crud_planner_handles_afternoon_plan_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-afternoon-plan@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Plan the rest of my afternoon: add a 45 minute workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T08:55:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $events = collect($response->json('data.events'));
+        $this->assertCount(5, $events->where('event_type', 'assistant.work_item.planned'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.calendar_event.created'));
+        $this->assertCount(2, $events->where('event_type', 'assistant.note.created'));
+        $this->assertDatabaseHas('calendar_events', ['conversation_session_id' => $sessionId, 'title' => 'Workout']);
+        $this->assertDatabaseHas('calendar_events', ['conversation_session_id' => $sessionId, 'title' => 'Grocery shopping']);
+        $this->assertDatabaseHas('calendar_events', ['conversation_session_id' => $sessionId, 'title' => 'Cook dinner']);
+        $this->assertDatabaseHas('notes', ['title' => 'Simple dinner recipe']);
+        $this->assertDatabaseHas('notes', ['title' => 'Grocery checklist']);
+        Http::assertSentCount(0);
+    }
+
+    public function test_app_crud_planner_handles_task_reminder_note_workflow_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-task-reminder-note@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a task to review insurance paperwork tomorrow morning, remind me 30 minutes before, and save a note with the documents I should bring.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T08:55:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $events = collect($response->json('data.events'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.work_item.planned'));
+        $this->assertCount(1, $events->where('event_type', 'assistant.task.created'));
+        $this->assertCount(1, $events->where('event_type', 'assistant.reminder.created'));
+        $this->assertCount(1, $events->where('event_type', 'assistant.note.created'));
+        $this->assertDatabaseHas('tasks', ['conversation_session_id' => $sessionId, 'title' => 'review insurance paperwork']);
+        $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'review insurance paperwork']);
+        $this->assertDatabaseHas('notes', ['title' => 'Review Insurance Paperwork note']);
+        Http::assertSentCount(0);
+    }
+
     public function test_app_crud_planner_accepts_dash_separated_calendar_dates(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
