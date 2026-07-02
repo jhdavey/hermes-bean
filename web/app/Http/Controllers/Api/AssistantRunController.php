@@ -10,6 +10,8 @@ use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class AssistantRunController extends Controller
 {
@@ -77,12 +79,21 @@ class AssistantRunController extends Controller
                     ]], 200);
                 }
 
-                $queued = $this->runs->queueExistingMessage(
-                    $ownedSession,
-                    $existingUserMessage,
-                    $data['metadata'] ?? [],
-                    $source
-                );
+                try {
+                    $queued = $this->runs->queueExistingMessage(
+                        $ownedSession,
+                        $existingUserMessage,
+                        $data['metadata'] ?? [],
+                        $source
+                    );
+                } catch (Throwable $exception) {
+                    return $this->directRuntimeFallbackResponse(
+                        $ownedSession->refresh(),
+                        $existingUserMessage,
+                        $exception,
+                        'existing_message_queue_failed'
+                    );
+                }
 
                 return response()->json(['data' => [
                     'status' => 'queued',
@@ -94,12 +105,27 @@ class AssistantRunController extends Controller
             }
         }
 
-        $queued = $this->runs->queueRun(
-            $ownedSession,
-            $data['content'],
-            $data['metadata'] ?? [],
-            $source
-        );
+        try {
+            $queued = $this->runs->queueRun(
+                $ownedSession,
+                $data['content'],
+                $data['metadata'] ?? [],
+                $source
+            );
+        } catch (Throwable $exception) {
+            $userMessage = $this->findOrCreateQueuedFallbackUserMessage(
+                $ownedSession->refresh(),
+                $data['content'],
+                $data['metadata'] ?? []
+            );
+
+            return $this->directRuntimeFallbackResponse(
+                $ownedSession->refresh(),
+                $userMessage,
+                $exception,
+                'queue_run_failed'
+            );
+        }
 
         return response()->json(['data' => [
             'status' => 'queued',
@@ -219,6 +245,88 @@ class AssistantRunController extends Controller
     private function runResponseStatus(AssistantRun $run): int
     {
         return in_array($run->status, ['completed', 'failed', 'cancelled'], true) ? 200 : 202;
+    }
+
+    private function findOrCreateQueuedFallbackUserMessage(ConversationSession $session, string $content, array $metadata): ConversationMessage
+    {
+        $clientRequestId = trim((string) data_get($metadata, 'client_request_id', ''));
+        if ($clientRequestId !== '') {
+            $existing = ConversationMessage::query()
+                ->where('user_id', $session->user_id)
+                ->where('conversation_session_id', $session->id)
+                ->where('role', 'user')
+                ->where('metadata->client_request_id', $clientRequestId)
+                ->latest('id')
+                ->first();
+
+            if ($existing instanceof ConversationMessage) {
+                return $existing;
+            }
+        }
+
+        return ConversationMessage::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => $content,
+            'metadata' => $metadata ?: null,
+        ]);
+    }
+
+    private function directRuntimeFallbackResponse(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        Throwable $queueException,
+        string $fallbackSource
+    ): JsonResponse {
+        Log::warning('Bean async run queue failed; trying direct runtime fallback.', [
+            'session_id' => $session->id,
+            'message_id' => $userMessage->id,
+            'fallback_source' => $fallbackSource,
+            'exception' => $queueException->getMessage(),
+        ]);
+
+        try {
+            $result = $this->runtime->sendExistingMessage($session->refresh(), $userMessage);
+
+            return response()->json(['data' => $result], 201);
+        } catch (Throwable $runtimeException) {
+            Log::error('Bean direct runtime fallback failed after async queue failure.', [
+                'session_id' => $session->id,
+                'message_id' => $userMessage->id,
+                'fallback_source' => $fallbackSource,
+                'queue_exception' => $queueException->getMessage(),
+                'runtime_exception' => $runtimeException->getMessage(),
+            ]);
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.',
+                'metadata' => [
+                    'runtime' => 'async_queue_bridge',
+                    'fallback_source' => $fallbackSource,
+                    'queue_error' => str($queueException->getMessage())->limit(1000, '')->toString(),
+                    'runtime_error' => str($runtimeException->getMessage())->limit(1000, '')->toString(),
+                ],
+            ]);
+
+            $session->update([
+                'status' => 'active',
+                'last_activity_at' => now(),
+            ]);
+
+            return response()->json(['data' => [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'run' => null,
+                'user_message' => $userMessage->refresh(),
+                'assistant_message' => $assistantMessage,
+                'events' => [],
+                'blocker' => null,
+            ]], 200);
+        }
     }
 
     private function missingRunBridgeMessage(ConversationSession $session, string $clientRequestId): ConversationMessage
