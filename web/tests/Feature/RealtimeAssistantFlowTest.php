@@ -12,6 +12,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
+use App\Services\HermesRuntimeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -754,6 +755,77 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_direct_message_failure_queues_existing_user_message_instead_of_returning_error(): void
+    {
+        Queue::fake();
+        $this->bindFailingDirectRuntime();
+
+        $token = $this->apiToken('direct-fallback@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'direct-fallback-1',
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.user_message.content', 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm')
+            ->assertJsonPath('data.run.status', 'queued')
+            ->assertJsonPath('data.run.metadata.client_request_id', 'direct-fallback-1');
+
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
+        $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
+    }
+
+    public function test_branch_message_failure_queues_edited_message_instead_of_returning_error(): void
+    {
+        Queue::fake();
+        $this->bindFailingDirectRuntime();
+
+        $token = $this->apiToken('branch-fallback@example.com');
+        $user = User::where('email', 'branch-fallback@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $originalUserMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Original request',
+        ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Original response',
+        ]);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages/{$originalUserMessage->id}/branch", [
+            'content' => 'Edited request',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'branch-fallback-1',
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.user_message.content', 'Edited request')
+            ->assertJsonPath('data.run.status', 'queued')
+            ->assertJsonPath('data.run.metadata.client_request_id', 'branch-fallback-1')
+            ->assertJsonPath('data.run.metadata.edited_from_message_id', $originalUserMessage->id);
+
+        $this->assertDatabaseMissing('conversation_messages', ['id' => $originalUserMessage->id]);
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
+        $this->assertSame(0, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
+    }
+
     public function test_async_run_endpoint_queues_existing_direct_message_for_client_request_id(): void
     {
         Queue::fake();
@@ -935,5 +1007,43 @@ class RealtimeAssistantFlowTest extends TestCase
         $this->assertSame('Run expired before it could be safely recovered.', $run->error);
         $this->assertSame('active', ConversationSession::findOrFail($sessionId)->status);
         $this->assertDatabaseCount('calendar_events', 0);
+    }
+
+    private function bindFailingDirectRuntime(): void
+    {
+        $this->app->bind(HermesRuntimeService::class, function (): HermesRuntimeService {
+            return new class implements HermesRuntimeService
+            {
+                public function startSession(array $attributes = []): ConversationSession
+                {
+                    return ConversationSession::create($attributes);
+                }
+
+                public function resumeSession(ConversationSession $session): ConversationSession
+                {
+                    return $session;
+                }
+
+                public function cancelSession(ConversationSession $session): ConversationSession
+                {
+                    return $session;
+                }
+
+                public function progressEvents(ConversationSession $session): \Illuminate\Support\Collection
+                {
+                    return collect();
+                }
+
+                public function sendMessage(ConversationSession $session, string $content, array $metadata = []): array
+                {
+                    throw new \RuntimeException('Simulated direct runtime outage.');
+                }
+
+                public function sendExistingMessage(ConversationSession $session, ConversationMessage $userMessage): array
+                {
+                    throw new \RuntimeException('Simulated direct runtime outage.');
+                }
+            };
+        });
     }
 }
