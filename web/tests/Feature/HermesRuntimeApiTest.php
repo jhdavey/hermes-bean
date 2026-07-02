@@ -172,6 +172,51 @@ class HermesRuntimeApiTest extends TestCase
             ->assertJsonPath('data.sessions.1.id', $oldSession->id);
     }
 
+    public function test_stale_assistant_failure_copy_is_sanitized_when_serialized(): void
+    {
+        $token = $this->apiToken('stale-history@example.com');
+        $user = User::where('email', 'stale-history@example.com')->firstOrFail();
+        $workspaceId = $user->default_workspace_id;
+
+        $session = ConversationSession::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Old failure copy',
+            'status' => 'active',
+            'runtime_mode' => 'tools',
+            'last_activity_at' => now(),
+        ]);
+
+        $message = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'assistant',
+            'content' => 'Bean could not finish that request.',
+        ]);
+
+        $this->assertSame(
+            'Bean could not finish that request.',
+            $message->getRawOriginal('content'),
+        );
+        $this->assertSame(
+            'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
+            $message->content,
+        );
+        $this->assertDatabaseHas('conversation_messages', [
+            'id' => $message->id,
+            'content' => 'Bean could not finish that request.',
+        ]);
+
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$session->id}")
+            ->assertOk()
+            ->assertJsonPath('data.messages.0.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
+
+        $this->withToken($token)->getJson("/api/assistant/sessions?workspace_id={$workspaceId}&date=2026-05-13&timezone=America/New_York")
+            ->assertOk()
+            ->assertJsonPath('data.sessions.0.latest_message.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
+    }
+
     public function test_runtime_persists_tool_created_events_tasks_and_reminders_to_domain_tables(): void
     {
         Http::fakeSequence()
