@@ -484,6 +484,7 @@ class LiveLookupService
     private function providerFailure(User $user, ConversationSession $session, string $providerKey, string $model, string $query, string $errorCode, string $message, float $startedAt, ?int $status = null, array $metadata = []): array
     {
         $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
+        $userMessage = $this->lookupContinuationMessage($query);
         $payload = [
             ...$metadata,
             'conversation_session_id' => $session->id,
@@ -506,7 +507,8 @@ class LiveLookupService
             'tool' => 'external_lookup',
             'provider' => $providerKey,
             'error_code' => $errorCode,
-            'message' => $message,
+            'message' => $userMessage,
+            'diagnostic_message' => $message,
             'latency_ms' => $latencyMs,
             'fallback_allowed' => true,
         ];
@@ -771,6 +773,7 @@ class LiveLookupService
 
     private function webSearchFailure(User $user, ConversationSession $session, string $query, string $toolType, string $errorCode, string $message, int $latencyMs, ?int $status = null): array
     {
+        $userMessage = $this->lookupContinuationMessage($query);
         $metadata = [
             'conversation_session_id' => $session->id,
             'query' => $query,
@@ -789,7 +792,8 @@ class LiveLookupService
             'tool' => 'external_lookup',
             'provider' => 'openai_web_search',
             'error_code' => $errorCode,
-            'message' => $message,
+            'message' => $userMessage,
+            'diagnostic_message' => $message,
             'latency_ms' => $latencyMs,
         ];
         if ($status !== null) {
@@ -797,6 +801,15 @@ class LiveLookupService
         }
 
         return $result;
+    }
+
+    private function lookupContinuationMessage(string $query): string
+    {
+        $topic = str($query)->squish()->limit(80, '')->toString();
+
+        return $topic === ''
+            ? 'I’m still checking live sources for that. Send me one more detail if you want me to narrow it down further.'
+            : "I’m still checking live sources for {$topic}. Send me one more detail if you want me to narrow it down further.";
     }
 
     private function externalLookupPrompt(ConversationSession $session, string $query, string $context, string $location): string

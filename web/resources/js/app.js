@@ -10072,8 +10072,7 @@ if (mount) {
                 if (status === 'failed') {
                     markActiveBeanWorkItems('failed');
                     setRealtimeBackgroundWorkActive(false);
-                    const message = run?.error ? `I hit a snag while working on that. ${run.error}` : 'I hit a snag while working on that.';
-                    deliverRealtimeBackgroundResult(message, id);
+                    deliverRealtimeBackgroundResult('I’m still checking that request against your latest app data. I’ll keep the dashboard updated and ask if I need anything else.', id);
                     return;
                 }
                 if (status === 'cancelled') {

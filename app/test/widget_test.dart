@@ -5509,7 +5509,7 @@ void main() {
   );
 
   testWidgets(
-    'chat failure message tells the user Bean hit a recoverable snag',
+    'chat failure message keeps Bean in a recoverable checking state',
     (WidgetTester tester) async {
       await tester.pumpWidget(
         HermesBeanApp(
@@ -5530,8 +5530,12 @@ void main() {
       await tester.pumpAndSettle(const Duration(seconds: 2));
 
       expect(
-        find.textContaining('I hit a snag while working on that.'),
+        find.textContaining('I’m still checking that request.'),
         findsOneWidget,
+      );
+      expect(
+        find.textContaining('I hit a snag while working on that'),
+        findsNothing,
       );
     },
   );

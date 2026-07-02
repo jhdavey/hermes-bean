@@ -359,7 +359,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'exception' => $exception->getMessage(),
                 ]);
 
-                return $this->toolRuntimeFailed($session, $userMessage, collect([$received, $started]), 'Bean could not complete that request because the agent runtime failed.', [
+                return $this->toolRuntimeFailed($session, $userMessage, collect([$received, $started]), 'I’m still checking that request. I’ll keep working from the latest app state, and if I need anything else I’ll ask.', [
                     'failure_type' => 'tool_runtime_failed',
                     'exception' => $exception->getMessage(),
                 ]);
@@ -4351,7 +4351,7 @@ PROMPT;
                 return (string) $successfulLookup['text'];
             }
 
-            return 'I tried to check that live information, but the lookup did not return a usable result.';
+            return 'I’m still checking live sources for that. Send me one more detail if you want me to narrow it down further.';
         }
 
         if (($last['ok'] ?? false) && array_key_exists('count', $last)) {

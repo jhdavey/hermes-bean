@@ -74,13 +74,12 @@ void main() {
     },
   );
 
-  test('chat failures sound like Bean and hide status codes', () {
+  test('chat failures stay recoverable and hide status codes', () {
     final message = beanFriendlyChatFailureMessage(
       const HermesApiException(429, '{"message":"Too Many Attempts."}'),
     );
 
-    expect(message, contains('I hit a snag while working on that.'));
-    expect(message, contains('Please try again'));
+    expect(message, contains('I’m still checking that request.'));
     expect(message, isNot(contains('429')));
     expect(message, isNot(contains('HermesApiException')));
   });

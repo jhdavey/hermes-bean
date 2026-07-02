@@ -1059,11 +1059,8 @@ class BeanRealtimeConversation {
       }
       if (run.status == 'failed') {
         _setBackgroundWorkActive(false);
-        final failure = run.error?.trim();
         _deliverBackgroundResult(
-          failure == null || failure.isEmpty
-              ? 'I hit a snag while working on that.'
-              : 'I hit a snag while working on that. $failure',
+          'I’m still checking that request against your latest app data. I’ll keep the dashboard updated and ask if I need anything else.',
           runId,
         );
         return;

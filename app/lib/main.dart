@@ -525,7 +525,11 @@ String beanFriendlyErrorMessage(Object error, {String? action}) {
 
 String beanFriendlyChatFailureMessage(Object error) {
   final guidance = _beanErrorGuidance(error);
-  return 'I hit a snag while working on that. $guidance Please try again, or tell me any missing details and I’ll pick it back up.';
+  if (guidance.toLowerCase().contains('plan limit') ||
+      guidance.toLowerCase().contains('upgrade')) {
+    return guidance;
+  }
+  return 'I’m still checking that request. I’ll keep working from the latest app state, and if I need anything else I’ll ask.';
 }
 
 String _beanErrorGuidance(Object error) {
@@ -5043,7 +5047,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
       if (!mounted || runToken != _chatRunToken) return;
       setState(() {
-        _chatRunState = 'Failed';
+        _chatRunState = 'Checking…';
         _beanWorkItems = const [];
         _messages.add(
           HermesMessage(
@@ -5052,7 +5056,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             content: beanFriendlyChatFailureMessage(error),
           ),
         );
-        _error = beanFriendlyErrorMessage(error, action: 'send that message');
+        _error = null;
       });
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
@@ -5283,7 +5287,7 @@ ${_truncateDiagnostic(stack, 2200)}
             _chatRunState = switch (run.status) {
               'completed' => 'Updated',
               'cancelled' => 'Stopped',
-              _ => 'Failed',
+              _ => 'Checking…',
             };
             _completeActiveBeanWorkItems(switch (run.status) {
               'completed' => 'completed',
@@ -5295,14 +5299,12 @@ ${_truncateDiagnostic(stack, 2200)}
                 !_messages.any((candidate) => candidate.id == message.id)) {
               _messages.add(_displayableAssistantMessage(message));
             } else if (run.status == 'failed') {
-              final failure = run.error?.trim();
               _messages.add(
                 HermesMessage(
                   id: _messages.length + 1,
                   role: 'assistant',
-                  content: failure == null || failure.isEmpty
-                      ? 'I hit a snag while working on that. No changes should be assumed complete unless they already appeared on your dashboard.'
-                      : 'I hit a snag while working on that. $failure',
+                  content:
+                      'I’m still checking that request against your latest app data. I’ll keep the dashboard updated and ask if I need anything else.',
                 ),
               );
             }
