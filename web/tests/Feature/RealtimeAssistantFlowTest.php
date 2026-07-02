@@ -529,6 +529,35 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class, fn (ProcessAssistantRun $job): bool => $job->assistantRunId === $run->id);
     }
 
+    public function test_realtime_tool_call_queues_usage_limited_background_work_for_runtime_message(): void
+    {
+        Queue::fake();
+        config()->set('services.ai_usage.limits.base_cost_limit', 0.000001);
+
+        $token = $this->apiToken('realtime-tool-limit@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/assistant/realtime/tool-calls', [
+            'session_id' => $sessionId,
+            'tool_name' => 'queue_bean_work',
+            'call_id' => 'call_limit',
+            'arguments' => [
+                'content' => 'Add this to my calendar.',
+                'client_context' => ['timezone_offset' => '-04:00'],
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.ok', true)
+            ->assertJsonPath('data.message', 'Bean is working on that in the background.');
+
+        $run = AssistantRun::firstOrFail();
+        $this->assertSame('realtime', $run->source);
+        $this->assertSame('queued', $run->status);
+        $this->assertSame('Add this to my calendar.', $run->input);
+        Queue::assertPushed(ProcessAssistantRun::class, fn (ProcessAssistantRun $job): bool => $job->assistantRunId === $run->id);
+    }
+
     public function test_async_run_endpoint_preserves_existing_chat_session_contract(): void
     {
         Queue::fake();
@@ -547,6 +576,27 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertJsonPath('data.user_message.content', 'Plan my afternoon');
 
         $this->assertSame('queued', ConversationSession::findOrFail($sessionId)->status);
+        Queue::assertPushed(ProcessAssistantRun::class);
+    }
+
+    public function test_async_run_endpoint_queues_usage_limited_requests_for_runtime_message(): void
+    {
+        Queue::fake();
+        config()->set('services.ai_usage.limits.base_cost_limit', 0.000001);
+
+        $token = $this->apiToken('async-run-limit@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Please add three events to my calendar.',
+            'metadata' => ['source' => 'flutter'],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.session.status', 'queued')
+            ->assertJsonPath('data.user_message.content', 'Please add three events to my calendar.');
+
         Queue::assertPushed(ProcessAssistantRun::class);
     }
 

@@ -2028,7 +2028,7 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'hello bean',
-        ])->assertStatus(429)
+        ])->assertCreated()
             ->assertJsonPath('data.status', 'blocked')
             ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI usage limit.');
 

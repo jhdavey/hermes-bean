@@ -320,27 +320,6 @@ class RealtimeSessionController extends Controller
                     'message' => 'No work content was provided.',
                 ]], 422);
             }
-            $preflight = $this->usageService->preflightDirect(
-                $request->user(),
-                $session->workspace_id,
-                $this->adminSettings->mainModel(),
-                $this->usageService->estimateTokens($content),
-                (int) config('services.ai_usage.reserve_output_tokens', 1200),
-                null,
-                'voice_background',
-                ['session' => $session],
-            );
-            if (! $preflight['allowed']) {
-                return response()->json([
-                    'message' => $preflight['reason'],
-                    'code' => 'bean_usage_limit',
-                    'data' => [
-                        'ok' => false,
-                        'message' => $preflight['reason'],
-                    ],
-                ], 429);
-            }
-
             $queued = $this->runs->queueRun($session, $content, [
                 'source' => 'realtime',
                 'call_id' => $data['call_id'] ?? null,

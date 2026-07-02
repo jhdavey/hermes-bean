@@ -35,7 +35,7 @@ class ConversationMessageController extends Controller
         try {
             $result = $this->runtime->sendExistingMessage($ownedSession, $userMessage);
 
-            return response()->json(['data' => $result], $result['status'] === 'blocked' ? 429 : 201);
+            return response()->json(['data' => $result], 201);
         } catch (Throwable $exception) {
             Log::warning('Direct Bean message failed; queueing background run.', [
                 'session_id' => $ownedSession->id,
@@ -78,7 +78,7 @@ class ConversationMessageController extends Controller
         try {
             $result = $this->runtime->sendExistingMessage($ownedSession, $userMessage);
 
-            return response()->json(['data' => $result], $result['status'] === 'blocked' ? 429 : 201);
+            return response()->json(['data' => $result], 201);
         } catch (Throwable $exception) {
             Log::warning('Direct Bean branch failed; queueing background run.', [
                 'session_id' => $ownedSession->id,
