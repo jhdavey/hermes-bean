@@ -115,7 +115,7 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         $content = (string) $response->json('data.assistant_message.content');
         $this->assertStringNotContainsString('Bean could not finish', $content);
-        $this->assertStringContainsString('I’m still checking', $content);
+        $this->assertStringContainsString('I’m on it', $content);
     }
 
     public function test_stale_prior_completion_claim_cannot_skip_requested_app_write(): void

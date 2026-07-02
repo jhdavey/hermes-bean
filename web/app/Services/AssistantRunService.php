@@ -326,7 +326,7 @@ class AssistantRunService
             $hadCompletedWork = $this->runHasCompletedMutatingWork($run);
             $content = $hadCompletedWork
                 ? 'I finished the app updates and refreshed the latest details. Tell me what you want to do next.'
-                : 'I’m still checking that request against the latest app data. Tell me any extra detail and I’ll keep going.';
+                : 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.';
 
             $assistantMessage = ConversationMessage::create([
                 'user_id' => $run->user_id,

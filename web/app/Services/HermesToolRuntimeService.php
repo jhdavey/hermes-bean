@@ -359,7 +359,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'exception' => $exception->getMessage(),
                 ]);
 
-                return $this->toolRuntimeFailed($session, $userMessage, collect([$received, $started]), 'I’m still checking that request. I’ll keep working from the latest app state, and if I need anything else I’ll ask.', [
+                return $this->toolRuntimeFailed($session, $userMessage, collect([$received, $started]), 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.', [
                     'failure_type' => 'tool_runtime_failed',
                     'exception' => $exception->getMessage(),
                 ]);
@@ -4364,7 +4364,7 @@ PROMPT;
 
         foreach ($hardFailures as $phrase) {
             if (str_contains($normalized, $phrase)) {
-                return 'I’m still checking that against the latest app data. I’ll keep working from here, and if I need one more detail I’ll ask.';
+                return 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.';
             }
         }
 

@@ -1034,7 +1034,7 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.error', null)
-            ->assertJsonPath('data.assistant_message.content', 'I’m still checking that request against the latest app data. Tell me any extra detail and I’ll keep going.');
+            ->assertJsonPath('data.assistant_message.content', 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.');
 
         $run = AssistantRun::findOrFail($runId);
         $this->assertSame('completed', $run->status);
@@ -1077,13 +1077,13 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.run.status', 'completed')
             ->assertJsonPath('data.run.error', null)
-            ->assertJsonPath('data.assistant_message.content', 'I’m still checking that request against the latest app data. Tell me any extra detail and I’ll keep going.');
+            ->assertJsonPath('data.assistant_message.content', 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
             ->assertOk()
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'I’m still checking that request against the latest app data. Tell me any extra detail and I’ll keep going.');
+            ->assertJsonPath('data.assistant_message.content', 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.');
 
         $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
         $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());

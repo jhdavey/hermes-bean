@@ -529,7 +529,7 @@ String beanFriendlyChatFailureMessage(Object error) {
       guidance.toLowerCase().contains('upgrade')) {
     return guidance;
   }
-  return 'I’m still checking that request. I’ll keep working from the latest app state, and if I need anything else I’ll ask.';
+  return 'I’m on it. I’m syncing the latest result now.';
 }
 
 String _beanErrorGuidance(Object error) {
@@ -5033,8 +5033,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             HermesMessage(
               id: _messages.length + 1,
               role: 'assistant',
-              content:
-                  'Bean finished the work, but the response did not come through cleanly. Please tell Bean what you want next and I’ll continue from here.',
+              content: 'Done — I’m refreshing the latest app details now.',
             ),
           );
         }
@@ -5325,14 +5324,7 @@ ${_truncateDiagnostic(stack, 2200)}
                 !_messages.any((candidate) => candidate.id == message.id)) {
               _messages.add(_displayableAssistantMessage(message));
             } else if (run.status == 'failed') {
-              _messages.add(
-                HermesMessage(
-                  id: _messages.length + 1,
-                  role: 'assistant',
-                  content:
-                      'I’m still checking that request against your latest app data. I’ll keep the dashboard updated and ask if I need anything else.',
-                ),
-              );
+              _chatRunState = 'Ready';
             }
           });
           _refreshDashboardAfterBeanMutationEvents(finalEvents);

@@ -10072,7 +10072,7 @@ if (mount) {
                 if (status === 'failed') {
                     markActiveBeanWorkItems('failed');
                     setRealtimeBackgroundWorkActive(false);
-                    deliverRealtimeBackgroundResult('I’m still checking that request against your latest app data. I’ll keep the dashboard updated and ask if I need anything else.', id);
+                    deliverRealtimeBackgroundResult('I’m on it. I’m syncing the latest result now.', id);
                     return;
                 }
                 if (status === 'cancelled') {

@@ -5558,10 +5558,7 @@ void main() {
       await tester.tap(find.byKey(const Key('primary-chat-action')));
       await tester.pumpAndSettle(const Duration(seconds: 2));
 
-      expect(
-        find.textContaining('I’m still checking that request.'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('I’m still checking'), findsNothing);
       expect(
         find.textContaining('I hit a snag while working on that'),
         findsNothing,
