@@ -17,7 +17,7 @@ class ProcessAssistantRun implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 60;
+    public int $timeout = 180;
 
     public bool $failOnTimeout = true;
 

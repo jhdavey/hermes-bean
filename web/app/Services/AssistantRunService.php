@@ -126,7 +126,7 @@ class AssistantRunService
         }
 
         $startedAt = $run->started_at ?: $run->created_at;
-        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 75);
+        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 210);
         if ($startedAt === null || $startedAt->gt(now()->subSeconds($staleAfterSeconds))) {
             return $run;
         }
@@ -145,7 +145,7 @@ class AssistantRunService
         }
 
         $startedAt = $run->started_at ?: $run->created_at;
-        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 75);
+        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 210);
         if (! $recoveringFailedStaleRun && ($startedAt === null || $startedAt->gt(now()->subSeconds($staleAfterSeconds)))) {
             return $run;
         }
@@ -307,7 +307,10 @@ class AssistantRunService
 
         $error = strtolower((string) $run->error);
         if (! str_contains($error, 'run expired before it could be safely recovered')
-            && ! str_contains($error, 'assistant run did not complete within')) {
+            && ! str_contains($error, 'assistant run did not complete within')
+            && ! str_contains($error, 'has timed out')
+            && ! str_contains($error, 'timed out')
+            && ! str_contains($error, 'timeout')) {
             return false;
         }
 
@@ -374,7 +377,7 @@ class AssistantRunService
 
     public function closeExpiredStaleRunsForSession(ConversationSession $session): void
     {
-        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 75);
+        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 210);
 
         /** @var EloquentCollection<int, AssistantRun> $runs */
         $runs = AssistantRun::query()

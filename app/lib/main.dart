@@ -5254,7 +5254,7 @@ ${_truncateDiagnostic(stack, 2200)}
   }
 
   Future<void> _pollQueuedRun(int runId, int runToken) async {
-    for (var attempt = 0; attempt < 30; attempt++) {
+    for (var attempt = 0; attempt < 90; attempt++) {
       await Future<void>.delayed(
         attempt == 0
             ? const Duration(milliseconds: 150)
@@ -5336,11 +5336,8 @@ ${_truncateDiagnostic(stack, 2200)}
     }
     if (!mounted || runToken != _chatRunToken) return;
     setState(() {
-      if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
       _busy = false;
-      _chatRunState = 'Timed out';
-      _beanWorkItems = const [];
-      _beanWorkAcceptsOrphanPlanEvents = false;
+      _chatRunState = 'Working in background';
     });
   }
 
