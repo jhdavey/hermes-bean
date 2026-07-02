@@ -161,6 +161,23 @@ class HermesToolRuntimeService implements HermesRuntimeService
         ], 'hermes.tools', 'started');
         $session->update(['status' => 'running', 'last_activity_at' => now()]);
 
+        if ($this->messageIsRequestHistoryRecall($userMessage)) {
+            $historyResult = $this->tryRunRequestHistoryFastPath(
+                $session,
+                $userMessage,
+                $received,
+                $started,
+                $modelRoute,
+                $prompt,
+                $runtimeStartedAt,
+                $contextBuildMs,
+                $toolMode
+            );
+            if ($historyResult !== null) {
+                return $historyResult;
+            }
+        }
+
         $messages = [
             ['role' => 'system', 'content' => $this->toolSystemInstructions()],
             ['role' => 'system', 'content' => "Runtime context:\n".json_encode($contextPayload, JSON_THROW_ON_ERROR)],
@@ -447,6 +464,107 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
                 'events' => collect([$received, $started, $completed])->concat($domainEvents)->push($messageCompleted),
+                'usage' => $usageLog,
+                'blocker' => null,
+            ];
+        });
+
+        $assistantMessage = $result['assistant_message'] ?? null;
+        if ($assistantMessage instanceof ConversationMessage) {
+            $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
+        }
+
+        return $result;
+    }
+
+    private function tryRunRequestHistoryFastPath(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        ActivityEvent $received,
+        ActivityEvent $started,
+        array $modelRoute,
+        string $prompt,
+        float $runtimeStartedAt,
+        int $contextBuildMs,
+        string $toolMode
+    ): ?array {
+        $query = $this->requestHistoryRecallQuery($userMessage);
+        if ($query === '') {
+            return null;
+        }
+
+        $toolStartedAt = microtime(true);
+        $toolOutput = $this->requestHistoryForTool($session, [
+            'query' => $query,
+            'workspace_id' => $session->workspace_id,
+            'limit' => 8,
+        ], $userMessage);
+        $toolExecutionMs = $this->elapsedMs($toolStartedAt);
+        $assistantContent = $this->assistantSafeResponseContent($this->requestHistoryFallbackContent($toolOutput));
+        $responses = [[
+            'id' => 'local-request-history',
+            'model' => 'local-request-history',
+            'choices' => [[
+                'finish_reason' => 'stop',
+                'message' => ['role' => 'assistant', 'content' => $assistantContent],
+            ]],
+        ]];
+
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $assistantContent, $runtimeStartedAt, $contextBuildMs, $toolExecutionMs, $toolMode): array {
+            $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
+                'message_id' => $userMessage->id,
+                'response_count' => 1,
+                'finish_reason' => 'stop',
+                'tool_mode' => $toolMode,
+                'read_fast_path' => 'request_history',
+                'duration_ms' => $this->elapsedMs($runtimeStartedAt),
+                'context_build_ms' => $contextBuildMs,
+                'model_call_count' => 0,
+                'model_call_ms' => 0,
+                'model_call_durations_ms' => [],
+                'tool_execution_count' => 1,
+                'tool_execution_ms' => $toolExecutionMs,
+                'tool_execution_durations_ms' => [$toolExecutionMs],
+                'final_response_ms' => 0,
+                'action_count' => 0,
+            ], 'hermes.tools', 'succeeded');
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $assistantContent,
+                'metadata' => [
+                    'runtime' => 'tools',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $modelRoute['model'],
+                    'model_route' => $modelRoute,
+                    'read_fast_path' => 'request_history',
+                ],
+            ]);
+
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+            ]);
+
+            $usageLog = $this->usageService->recordCompletion(
+                $session,
+                $userMessage,
+                $assistantMessage,
+                $modelRoute,
+                $prompt,
+                json_encode($responses, JSON_THROW_ON_ERROR),
+                collect()
+            );
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => collect([$received, $started, $completed, $messageCompleted]),
                 'usage' => $usageLog,
                 'blocker' => null,
             ];
@@ -4461,6 +4579,47 @@ PROMPT;
         return (bool) preg_match(
             '/^(can|could|would|will|do|does|are|is)\s+(you|bean)\b.{0,120}\b(create|add|make|schedule|book|set|update|change|move|reschedule|delete|remove|cancel|complete|mark|remember|forget|look up|find|search|sync|manage|handle|help)\b.{0,80}\??$/u',
             $text
+        );
+    }
+
+    private function messageIsRequestHistoryRecall(ConversationMessage $message): bool
+    {
+        $text = str(str_replace('’', "'", (string) $message->content))
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s\'?.-]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($text === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/\bwhat\s+(?:did|was)\s+(?:i|my)\b.{0,80}\b(?:ask|asked|request|requested)\b/u', $text)
+            || (bool) preg_match('/\bwhat\s+request\s+did\s+i\s+make\b/u', $text)
+            || (bool) preg_match('/\bwhich\s+request\s+did\s+i\s+make\b/u', $text)
+            || (bool) preg_match('/\bwhat\s+was\s+my\s+earlier\s+request\b/u', $text);
+    }
+
+    private function requestHistoryRecallQuery(ConversationMessage $message): string
+    {
+        $content = str((string) $message->content)->squish()->toString();
+        if ($content === '') {
+            return '';
+        }
+
+        if (preg_match('/\bREQ-\d{3}\b/iu', $content, $match)) {
+            return strtoupper((string) ($match[0] ?? ''));
+        }
+
+        if (preg_match('/\babout\s+(.+?)(?:\s+earlier\b|\s+in\s+this\b|\s+if\s+any\b|\?|\.|$)/iu', $content, $match)) {
+            $query = $this->cleanDeterministicTitle((string) ($match[1] ?? ''));
+            if ($query !== '') {
+                return $query;
+            }
+        }
+
+        return $this->cleanDeterministicTitle(
+            preg_replace('/\b(?:what|which|request|did|i|make|ask|asked|requested|earlier|smoke|run|include|the|req|number|if|any|there|was|none|say|so|clearly)\b/iu', ' ', $content) ?: $content
         );
     }
 

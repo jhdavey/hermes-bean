@@ -599,26 +599,16 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_request_history_tool_searches_message_content_without_missing_columns(): void
     {
-        Http::fakeSequence()
-            ->push([
-                'id' => 'chatcmpl-history-tool',
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-unexpected-history-fast-path',
                 'model' => 'gpt-test-tools',
                 'choices' => [[
-                    'finish_reason' => 'tool_calls',
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => null,
-                        'tool_calls' => [[
-                            'id' => 'call_history',
-                            'type' => 'function',
-                            'function' => [
-                                'name' => 'get_request_history',
-                                'arguments' => json_encode(['query' => 'REQ-100'], JSON_THROW_ON_ERROR),
-                            ],
-                        ]],
-                    ],
+                    'finish_reason' => 'stop',
+                    'message' => ['role' => 'assistant', 'content' => 'Unexpected model call.'],
                 ]],
-            ], 200);
+            ], 200),
+        ]);
 
         $token = $this->apiToken('tool-request-history-query@example.com');
         $user = User::where('email', 'tool-request-history-query@example.com')->firstOrFail();
@@ -641,7 +631,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertStringContainsString('You asked:', $content);
         $this->assertStringContainsString('REQ-100: What remains today?', $content);
 
-        Http::assertSentCount(1);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
     public function test_native_read_tools_return_client_visible_dates_for_calendar_tasks_and_reminders(): void

@@ -487,6 +487,48 @@ class HermesRuntimeApiTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
+    public function test_runtime_request_history_recall_about_domain_item_uses_history_not_current_records(): void
+    {
+        Queue::fake();
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
+        ]);
+
+        $token = $this->apiToken('request-history-fast-path@example.com');
+        $user = User::where('email', 'request-history-fast-path@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'REQ-011: Add three calendar events: 7/9 Dr Chen Cardio at 100 N Dean Rd at 3pm, 7/15 Ventura at 6pm, and 7/19 Azalea Lane at 2pm.',
+            'created_at' => now()->subMinutes(10),
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Dr Chen Cardio',
+            'starts_at' => Carbon::parse('2026-07-09T15:00:00-04:00')->utc(),
+            'ends_at' => Carbon::parse('2026-07-09T16:00:00-04:00')->utc(),
+        ]);
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'What request did I make about Dr Chen Cardio earlier in this smoke run?',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $content = (string) $response->json('data.assistant_message.content');
+        $this->assertStringContainsString('You asked:', $content);
+        $this->assertStringContainsString('REQ-011', $content);
+        $this->assertStringContainsString('Dr Chen Cardio', $content);
+        $this->assertStringNotContainsString('You scheduled a calendar event', $content);
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+    }
+
     public function test_runtime_explains_note_plan_limits_without_generic_failure_copy(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
