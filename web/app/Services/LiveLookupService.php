@@ -223,15 +223,16 @@ class LiveLookupService
                 ->map(function ($place) use ($origin, $requestedPostalCode, $placeName): array {
                     $normalized = $this->normalizeGooglePlace(is_array($place) ? $place : [], $origin, $requestedPostalCode);
                     $normalized['name_match_score'] = $this->placeNameMatchScore($normalized, $placeName);
+                    $normalized['ranking_distance_meters'] = $this->placeRankingDistanceMeters($normalized);
 
                     return $normalized;
                 })
                 ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
                 ->filter(fn (array $place): bool => (int) ($place['name_match_score'] ?? 0) > 0)
                 ->sortBy([
-                    ['name_match_score', 'desc'],
                     ['postal_code_match', 'desc'],
-                    ['distance_meters', 'asc'],
+                    ['ranking_distance_meters', 'asc'],
+                    ['name_match_score', 'desc'],
                 ])
                 ->take(5)
                 ->values()
@@ -562,9 +563,16 @@ class LiveLookupService
             }
         }
 
+        if (preg_match('/\b([a-z0-9&.\'\s-]{1,80}?)\s+(?:to|near|around|in)\s+(?:zip\s+code\s+)?\d{5}(?:-\d{4})?\b/i', $query, $matches)) {
+            $candidate = $this->cleanPlaceNameCandidate((string) ($matches[1] ?? ''));
+            if ($candidate !== '') {
+                return mb_substr($candidate, 0, 80);
+            }
+        }
+
         $clean = mb_strtolower($query);
         $clean = preg_replace('/\b(what|where|which|who|can you|could you|please|find|look up|search for|tell me|return|is|are|the|a|an|and|full|street|zip|code)\b/i', ' ', $clean) ?? $clean;
-        $clean = preg_replace('/\b(nearest|closest|nearby|near me|near|around|to me|from me|local|location|locations|address|addresses|hours|open|closed|right now|today)\b/i', ' ', $clean) ?? $clean;
+        $clean = preg_replace('/\b(nearest|closest|nearby|near me|near|around|to me|from me|local|location|locations|address|addresses|city|state|hours|open|closed|right now|today)\b/i', ' ', $clean) ?? $clean;
         $clean = preg_replace('/\b(in|at|by|to)\s+[a-z\s,.-]*\d{5}(?:-\d{4})?\b/i', ' ', $clean) ?? $clean;
         $clean = preg_replace('/\b\d{5}(?:-\d{4})?\b/', ' ', $clean) ?? $clean;
         $clean = preg_replace('/[^a-z0-9&.\'\s-]/i', ' ', $clean) ?? $clean;
@@ -575,10 +583,10 @@ class LiveLookupService
 
     private function cleanPlaceNameCandidate(string $candidate): string
     {
-        $candidate = preg_replace('/\b(the|a|an)\b/i', ' ', $candidate) ?? $candidate;
+        $candidate = preg_replace('/\b(what|where|which|who|can you|could you|please|find|look up|search for|tell me|return|is|are|the|a|an|and|nearest|closest|nearby|near me|near|around|to me|from me|local|full|street|zip|code|city|state|address|addresses|location|locations|store|stores)\b/i', ' ', $candidate) ?? $candidate;
         $candidate = preg_replace('/[^a-z0-9&.\'\s-]/i', ' ', $candidate) ?? $candidate;
 
-        return $this->stripGenericPlaceNameWords(trim((string) preg_replace('/\s+/', ' ', $candidate)));
+        return mb_strtolower($this->stripGenericPlaceNameWords(trim((string) preg_replace('/\s+/', ' ', $candidate))));
     }
 
     private function stripGenericPlaceNameWords(string $candidate): string
@@ -740,6 +748,21 @@ class LiveLookupService
         }
 
         return 0;
+    }
+
+    private function placeRankingDistanceMeters(array $place): int
+    {
+        $distance = $place['distance_meters'] ?? null;
+        $score = (int) ($place['name_match_score'] ?? 0);
+        $penalty = match (true) {
+            $score >= 100 => 0,
+            $score >= 70 => 500,
+            $score >= 50 => 1000,
+            $score >= 30 => 3000,
+            default => 10000,
+        };
+
+        return (is_numeric($distance) ? (int) $distance : 99_999_999) + $penalty;
     }
 
     private function normalizedPlaceName(string $value): string

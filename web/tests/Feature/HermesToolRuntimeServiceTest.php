@@ -1410,6 +1410,166 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
     }
 
+    public function test_google_places_cleans_verbose_brand_zip_queries_before_searching(): void
+    {
+        config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
+
+        $placesTextQuery = null;
+        Http::fake(function ($request) use (&$placesTextQuery) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                return Http::response([
+                    'id' => 'chatcmpl-places-tool',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'tool_calls',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => null,
+                            'tool_calls' => [[
+                                'id' => 'call_places',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'external_lookup',
+                                    'arguments' => json_encode([
+                                        'query' => 'Wawa near ZIP code 32820 (Orlando, FL). Find the closest Wawa and return full street address, city, state, and ZIP.',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ]],
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'results' => [[
+                        'formatted_address' => 'Orlando, FL 32820, USA',
+                        'geometry' => [
+                            'location' => ['lat' => 28.568, 'lng' => -81.105],
+                        ],
+                        'address_components' => [[
+                            'long_name' => '32820',
+                            'short_name' => '32820',
+                            'types' => ['postal_code'],
+                        ]],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://places.googleapis.com/v1/places:searchText') {
+                $placesTextQuery = data_get($request->data(), 'textQuery');
+
+                return Http::response([
+                    'places' => [[
+                        'id' => 'colonial-wawa',
+                        'displayName' => ['text' => 'Wawa'],
+                        'formattedAddress' => '16959 E Colonial Dr, Orlando, FL 32820, USA',
+                        'location' => ['latitude' => 28.5687, 'longitude' => -81.1072],
+                        'googleMapsUri' => 'https://maps.google.com/?cid=1',
+                    ]],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-places-google-verbose-zip@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Find the closest Wawa to ZIP code 32820 and give me the full street address.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertSame('wawa 32820', $placesTextQuery);
+        $this->assertStringContainsString('16959 E Colonial Dr', (string) $response->json('data.assistant_message.content'));
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
+    }
+
+    public function test_google_places_prefers_closer_same_brand_over_far_exact_name(): void
+    {
+        config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
+
+        Http::fake(function ($request) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                return Http::response([
+                    'id' => 'chatcmpl-places-tool',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'tool_calls',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => null,
+                            'tool_calls' => [[
+                                'id' => 'call_places',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'external_lookup',
+                                    'arguments' => json_encode([
+                                        'query' => 'nearest Starbucks to ZIP code 32820 address',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ]],
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'results' => [[
+                        'formatted_address' => 'Orlando, FL 32820, USA',
+                        'geometry' => [
+                            'location' => ['lat' => 28.568, 'lng' => -81.105],
+                        ],
+                        'address_components' => [[
+                            'long_name' => '32820',
+                            'short_name' => '32820',
+                            'types' => ['postal_code'],
+                        ]],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://places.googleapis.com/v1/places:searchText') {
+                return Http::response([
+                    'places' => [
+                        [
+                            'id' => 'far-exact-starbucks',
+                            'displayName' => ['text' => 'Starbucks'],
+                            'formattedAddress' => '626 N Fern Creek Ave, Orlando, FL 32803, USA',
+                            'location' => ['latitude' => 28.5515, 'longitude' => -81.3600],
+                            'googleMapsUri' => 'https://maps.google.com/?cid=2',
+                        ],
+                        [
+                            'id' => 'near-starbucks-coffee-company',
+                            'displayName' => ['text' => 'Starbucks Coffee Company'],
+                            'formattedAddress' => '321 Avalon Park S Blvd, Orlando, FL 32828, USA',
+                            'location' => ['latitude' => 28.5131, 'longitude' => -81.1530],
+                            'googleMapsUri' => 'https://maps.google.com/?cid=1',
+                        ],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-places-google-distance-ranking@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Find the nearest Starbucks to 32820 and tell me the address quickly.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $content = (string) $response->json('data.assistant_message.content');
+        $this->assertStringContainsString('321 Avalon Park S Blvd', $content);
+        $this->assertStringNotContainsString('626 N Fern Creek Ave', str($content)->before('Other close matches')->toString());
+    }
+
     public function test_google_places_ranks_exact_business_name_before_adjacent_service_match(): void
     {
         config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
