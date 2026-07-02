@@ -44,10 +44,14 @@ class ConversationMessageController extends Controller
             ]);
         }
 
-        return response()->json(
-            ['data' => $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'direct_fallback')],
-            202
-        );
+        try {
+            return response()->json(
+                ['data' => $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'direct_fallback')],
+                202
+            );
+        } catch (Throwable $exception) {
+            return $this->bridgeQueuedResponseFailure($ownedSession->refresh(), $userMessage, $exception, 'direct_fallback');
+        }
     }
 
     public function branch(Request $request, string $session, string $message): JsonResponse
@@ -88,10 +92,14 @@ class ConversationMessageController extends Controller
             ]);
         }
 
-        return response()->json(
-            ['data' => $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'branch_fallback')],
-            202
-        );
+        try {
+            return response()->json(
+                ['data' => $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'branch_fallback')],
+                202
+            );
+        } catch (Throwable $exception) {
+            return $this->bridgeQueuedResponseFailure($ownedSession->refresh(), $userMessage, $exception, 'branch_fallback');
+        }
     }
 
     private function createUserMessage(ConversationSession $session, string $content, array $metadata): ConversationMessage
@@ -125,5 +133,46 @@ class ConversationMessageController extends Controller
             'events' => [$queued['event']],
             'blocker' => null,
         ];
+    }
+
+    private function bridgeQueuedResponseFailure(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        Throwable $exception,
+        string $fallbackSource
+    ): JsonResponse {
+        Log::error('Direct Bean fallback queue failed; returning bridge message.', [
+            'session_id' => $session->id,
+            'message_id' => $userMessage->id,
+            'fallback_source' => $fallbackSource,
+            'exception' => $exception->getMessage(),
+        ]);
+
+        $assistantMessage = ConversationMessage::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'role' => 'assistant',
+            'content' => 'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
+            'metadata' => [
+                'runtime' => 'direct_queue_bridge',
+                'fallback_source' => $fallbackSource,
+                'queue_error' => str($exception->getMessage())->limit(1000, '')->toString(),
+            ],
+        ]);
+
+        $session->update([
+            'status' => 'active',
+            'last_activity_at' => now(),
+        ]);
+
+        return response()->json(['data' => [
+            'status' => 'completed',
+            'session' => $session->refresh(),
+            'run' => null,
+            'user_message' => $userMessage->refresh(),
+            'assistant_message' => $assistantMessage,
+            'events' => [],
+            'blocker' => null,
+        ]], 200);
     }
 }

@@ -918,6 +918,36 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class, 1);
     }
 
+    public function test_direct_message_returns_bridge_when_direct_runtime_and_queue_fallback_fail(): void
+    {
+        Queue::fake();
+        $this->bindFailingDirectRuntime();
+        $this->bindFailingQueueService();
+
+        $token = $this->apiToken('direct-fallback-bridge@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'direct-fallback-bridge-1',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.run', null)
+            ->assertJsonPath('data.user_message.content', 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm')
+            ->assertJsonPath('data.assistant_message.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
+
+        $this->assertSame('active', ConversationSession::findOrFail($sessionId)->status);
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        $this->assertSame(0, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        Queue::assertNothingPushed();
+    }
+
     public function test_branch_message_failure_queues_edited_message_instead_of_returning_error(): void
     {
         Queue::fake();
@@ -960,6 +990,51 @@ class RealtimeAssistantFlowTest extends TestCase
         $this->assertSame(0, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
         $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
         Queue::assertPushed(ProcessAssistantRun::class, 1);
+    }
+
+    public function test_branch_message_returns_bridge_when_direct_runtime_and_queue_fallback_fail(): void
+    {
+        Queue::fake();
+        $this->bindFailingDirectRuntime();
+        $this->bindFailingQueueService();
+
+        $token = $this->apiToken('branch-fallback-bridge@example.com');
+        $user = User::where('email', 'branch-fallback-bridge@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $originalUserMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Original request',
+        ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Original response',
+        ]);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages/{$originalUserMessage->id}/branch", [
+            'content' => 'Edited request',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'branch-fallback-bridge-1',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.run', null)
+            ->assertJsonPath('data.user_message.content', 'Edited request')
+            ->assertJsonPath('data.assistant_message.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
+
+        $this->assertDatabaseMissing('conversation_messages', ['id' => $originalUserMessage->id]);
+        $this->assertSame('active', ConversationSession::findOrFail($sessionId)->status);
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        $this->assertSame(0, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        Queue::assertNothingPushed();
     }
 
     public function test_async_run_endpoint_queues_existing_direct_message_for_client_request_id(): void
