@@ -188,29 +188,35 @@ class HermesRuntimeApiTest extends TestCase
             'last_activity_at' => now(),
         ]);
 
-        $message = ConversationMessage::create([
+        $messages = collect([
+            'Bean could not finish that request.',
+            'Bean hit a snag while trying to handle that request.',
+            'HermesApiException(statusCode: 502)',
+        ])->map(fn (string $content): ConversationMessage => ConversationMessage::create([
             'user_id' => $user->id,
             'conversation_session_id' => $session->id,
             'role' => 'assistant',
-            'content' => 'Bean could not finish that request.',
-        ]);
+            'content' => $content,
+        ]));
 
-        $this->assertSame(
-            'Bean could not finish that request.',
-            $message->getRawOriginal('content'),
-        );
-        $this->assertSame(
-            'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
-            $message->content,
-        );
-        $this->assertDatabaseHas('conversation_messages', [
-            'id' => $message->id,
-            'content' => 'Bean could not finish that request.',
-        ]);
+        foreach ($messages as $message) {
+            $this->assertSame(
+                'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
+                $message->content,
+            );
+            $this->assertDatabaseHas('conversation_messages', [
+                'id' => $message->id,
+                'content' => $message->getRawOriginal('content'),
+            ]);
+        }
 
         $this->withToken($token)->getJson("/api/assistant/sessions/{$session->id}")
             ->assertOk()
             ->assertJsonPath('data.messages.0.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$session->id}")
+            ->assertOk()
+            ->assertJsonPath('data.messages.1.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.')
+            ->assertJsonPath('data.messages.2.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
 
         $this->withToken($token)->getJson("/api/assistant/sessions?workspace_id={$workspaceId}&date=2026-05-13&timezone=America/New_York")
             ->assertOk()
