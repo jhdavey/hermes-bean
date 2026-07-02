@@ -1294,6 +1294,89 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
     }
 
+    public function test_google_places_ranks_exact_business_name_before_adjacent_service_match(): void
+    {
+        config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
+
+        Http::fake(function ($request) {
+            if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
+                return Http::response([
+                    'id' => 'chatcmpl-places-tool',
+                    'model' => 'gpt-test-tools',
+                    'choices' => [[
+                        'finish_reason' => 'tool_calls',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => null,
+                            'tool_calls' => [[
+                                'id' => 'call_places',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'external_lookup',
+                                    'arguments' => json_encode([
+                                        'query' => 'closest Target to 32820 full street address',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ]],
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'results' => [[
+                        'formatted_address' => 'Orlando, FL 32820, USA',
+                        'geometry' => [
+                            'location' => ['lat' => 28.568, 'lng' => -81.105],
+                        ],
+                        'address_components' => [[
+                            'long_name' => '32820',
+                            'short_name' => '32820',
+                            'types' => ['postal_code'],
+                        ]],
+                    ]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://places.googleapis.com/v1/places:searchText') {
+                return Http::response([
+                    'places' => [
+                        [
+                            'id' => 'target-optical',
+                            'displayName' => ['text' => 'Target Optical'],
+                            'formattedAddress' => '325 N Alafaya Trail, Orlando, FL 32828, USA',
+                            'location' => ['latitude' => 28.5525, 'longitude' => -81.2060],
+                            'googleMapsUri' => 'https://maps.google.com/?cid=2',
+                        ],
+                        [
+                            'id' => 'target-store',
+                            'displayName' => ['text' => 'Target'],
+                            'formattedAddress' => '325 N Alafaya Trail, Orlando, FL 32828, USA',
+                            'location' => ['latitude' => 28.5525, 'longitude' => -81.2060],
+                            'googleMapsUri' => 'https://maps.google.com/?cid=1',
+                        ],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-places-google-exact-business@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Find the closest Target to 32820 and give me the full street address.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $content = (string) $response->json('data.assistant_message.content');
+        $this->assertStringContainsString('is Target at 325 N Alafaya Trail', $content);
+        $this->assertStringNotContainsString('is Target Optical', $content);
+    }
+
     public function test_external_lookup_routes_general_live_search_to_tavily(): void
     {
         config()->set('services.hermes_runtime.tavily_api_key', 'tavily-test-key');
@@ -1544,6 +1627,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 $messages = $request->data()['messages'] ?? [];
                 $toolOutput = collect($messages)->firstWhere('role', 'tool');
                 $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
+                \PHPUnit\Framework\Assert::assertSame('The live lookup timed out before it could return current information.', data_get($lookupResult, 'diagnostic_message'));
 
                 return Http::response([
                     'id' => 'chatcmpl-weather-final',
@@ -1573,7 +1657,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'The live lookup timed out before it could return current information.');
+            ->assertJsonPath('data.assistant_message.content', 'I’m still checking live sources for current weather in Orlando Florida right now. Send me one more detail if you want me to narrow it down further.');
 
         $this->assertSame(2, $lookupCalls);
     }
@@ -2581,6 +2665,41 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         $this->assertSame(1, substr_count($content, 'Event: Grocery shopping'));
         $this->assertSame(1, substr_count($content, 'Reminder: Reminder: Workout'));
+    }
+
+    public function test_native_read_fallback_prefers_day_context_over_request_history_when_both_were_read(): void
+    {
+        $service = app(\App\Services\HermesToolRuntimeService::class);
+        $method = (new \ReflectionClass($service))->getMethod('nativeReadFallbackContent');
+        $method->setAccessible(true);
+
+        $content = (string) $method->invoke($service, [
+            [
+                'ok' => true,
+                'tool' => 'get_day_context',
+                'date' => '2026-07-02',
+                'calendar_events' => [
+                    ['display_start_time' => '5:30 PM', 'title' => 'Workout'],
+                ],
+                'tasks' => [],
+                'reminders' => [],
+            ],
+            [
+                'ok' => true,
+                'tool' => 'get_request_history',
+                'items' => [
+                    [
+                        'created_at' => '2026-07-02T09:47:48-04:00',
+                        'content' => 'REQ-100: What remains today, and suggest one practical improvement to the plan.',
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertStringContainsString('Here is what is coming up for 2026-07-02', $content);
+        $this->assertStringContainsString('Event: Workout', $content);
+        $this->assertStringNotContainsString('request history', $content);
+        $this->assertStringNotContainsString('REQ-100', $content);
     }
 
     public function test_app_crud_planner_reports_partial_failure_without_falling_back_or_duplicating_completed_writes(): void

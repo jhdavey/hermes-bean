@@ -220,10 +220,16 @@ class LiveLookupService
 
             $requestedPostalCode = $this->postalCodeFromLocation($locationQuery);
             $places = collect((array) data_get($response->json(), 'places'))
-                ->map(fn ($place): array => $this->normalizeGooglePlace(is_array($place) ? $place : [], $origin, $requestedPostalCode))
+                ->map(function ($place) use ($origin, $requestedPostalCode, $placeName): array {
+                    $normalized = $this->normalizeGooglePlace(is_array($place) ? $place : [], $origin, $requestedPostalCode);
+                    $normalized['name_match_score'] = $this->placeNameMatchScore($normalized, $placeName);
+
+                    return $normalized;
+                })
                 ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
-                ->filter(fn (array $place): bool => $this->placeMatchesSearchName($place, $placeName))
+                ->filter(fn (array $place): bool => (int) ($place['name_match_score'] ?? 0) > 0)
                 ->sortBy([
+                    ['name_match_score', 'desc'],
                     ['postal_code_match', 'desc'],
                     ['distance_meters', 'asc'],
                 ])
@@ -664,13 +670,49 @@ class LiveLookupService
 
     private function placeMatchesSearchName(array $place, string $placeName): bool
     {
+        return $this->placeNameMatchScore($place, $placeName) > 0;
+    }
+
+    private function placeNameMatchScore(array $place, string $placeName): int
+    {
         $needle = mb_strtolower($placeName);
         if ($needle === '') {
-            return true;
+            return 1;
         }
 
-        return str_contains(mb_strtolower((string) ($place['name'] ?? '')), $needle)
-            || str_contains(mb_strtolower((string) ($place['address'] ?? '')), $needle);
+        $name = mb_strtolower((string) ($place['name'] ?? ''));
+        $address = mb_strtolower((string) ($place['address'] ?? ''));
+        $normalizedNeedle = $this->normalizedPlaceName($needle);
+        $normalizedName = $this->normalizedPlaceName($name);
+
+        if ($normalizedName === $normalizedNeedle) {
+            return 100;
+        }
+
+        if (str_starts_with($normalizedName, $normalizedNeedle.' ')) {
+            return 70;
+        }
+
+        if ((bool) preg_match('/(^|\s)'.preg_quote($normalizedNeedle, '/').'($|\s)/u', $normalizedName)) {
+            return 50;
+        }
+
+        if (str_contains($normalizedName, $normalizedNeedle)) {
+            return 30;
+        }
+
+        if (str_contains($address, $needle)) {
+            return 10;
+        }
+
+        return 0;
+    }
+
+    private function normalizedPlaceName(string $value): string
+    {
+        $normalized = preg_replace('/[^a-z0-9]+/u', ' ', mb_strtolower($value)) ?? $value;
+
+        return trim((string) preg_replace('/\s+/', ' ', $normalized));
     }
 
     private function postalCodeFromLocation(string $locationQuery): ?string

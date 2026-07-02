@@ -4332,8 +4332,14 @@ PROMPT;
             return 'Done.';
         }
 
-        if (($last['tool'] ?? null) === 'get_day_context' && ($last['ok'] ?? false)) {
-            return $this->dayContextFallbackContent($last);
+        $successfulDayContext = collect($toolOutputs)
+            ->reverse()
+            ->first(fn (mixed $output): bool => is_array($output)
+                && ($output['tool'] ?? null) === 'get_day_context'
+                && ($output['ok'] ?? false));
+
+        if (is_array($successfulDayContext)) {
+            return $this->dayContextFallbackContent($successfulDayContext);
         }
 
         if (($last['tool'] ?? null) === 'get_request_history' && ($last['ok'] ?? false)) {
