@@ -4923,6 +4923,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ? editingMessageId
         : null;
     var chatPhase = 'preparing message';
+    String? clientRequestId;
     setState(() {
       _busy = true;
       _editingChatMessageId = null;
@@ -4967,7 +4968,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           : useDirectConversationReply
           ? 'sending Bean conversation reply'
           : 'queueing Bean chat message';
-      final clientRequestId =
+      clientRequestId =
           'flutter-chat-${DateTime.now().microsecondsSinceEpoch}-$localUserMessageId';
       final messageMetadata = _flutterChatMetadata(
         additional: {
@@ -5127,6 +5128,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         unawaited(_startOnboardingTourAfterBeanIntroduction());
       }
     } catch (error, stackTrace) {
+      final recovered = await _recoverChatFailureFromServer(
+        runToken: runToken,
+        session: session,
+        clientRequestId: clientRequestId,
+        localUserMessageId: localUserMessageId,
+        originalContent: trimmed,
+      );
+      if (recovered) {
+        return;
+      }
       debugPrint('Bean chat failed during $chatPhase: $error\n$stackTrace');
       unawaited(
         _reportChatFailure(
@@ -5155,6 +5166,137 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
     }
+  }
+
+  Future<bool> _recoverChatFailureFromServer({
+    required int runToken,
+    required HermesSession? session,
+    required String? clientRequestId,
+    required int localUserMessageId,
+    required String originalContent,
+  }) async {
+    final activeSession = session ?? _session;
+    final requestId = clientRequestId?.trim() ?? '';
+    if (activeSession == null || requestId.isEmpty) {
+      return false;
+    }
+
+    try {
+      final result = await widget.apiClient.lookupQueuedMessage(
+        sessionId: activeSession.id,
+        clientRequestId: requestId,
+      );
+      if (!mounted || runToken != _chatRunToken) return true;
+      _applyRecoveredChatResult(
+        result,
+        runToken: runToken,
+        localUserMessageId: localUserMessageId,
+        originalContent: originalContent,
+      );
+      return true;
+    } catch (_) {
+      // Fall through to session refresh. Some failures happen after the server
+      // saved messages but before the run lookup is available.
+    }
+
+    try {
+      final details = await widget.apiClient.resumeSessionDetails(
+        activeSession.id,
+      );
+      if (!mounted || runToken != _chatRunToken) return true;
+      final messages = details.messages;
+      final userIndex = messages.indexWhere(
+        (message) =>
+            message.role == 'user' &&
+            message.metadata['client_request_id'] == requestId,
+      );
+      if (userIndex == -1) {
+        return false;
+      }
+      final hasAssistantAfter = messages
+          .skip(userIndex + 1)
+          .any((message) => message.role == 'assistant');
+      setState(() {
+        _session = details.session;
+        _replaceMessagesFromSession(details, user: _user);
+        _activeBeanWorkMessageId = messages[userIndex].id;
+        _chatRunState = hasAssistantAfter ? 'Updated' : 'Working in background';
+        if (hasAssistantAfter) {
+          _activeAssistantRunId = null;
+          _completeActiveBeanWorkItems();
+        } else {
+          _ensureBeanRequestWorkItem(originalContent);
+        }
+        _error = null;
+      });
+      if (hasAssistantAfter) {
+        unawaited(_refreshSignedInViews(showLoading: false));
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _applyRecoveredChatResult(
+    HermesMessageResult result, {
+    required int runToken,
+    required int localUserMessageId,
+    required String originalContent,
+  }) {
+    if (!mounted || runToken != _chatRunToken) return;
+    if (result.status == 'queued') {
+      setState(() {
+        if (result.userMessage != null) {
+          _replaceChatMessage(localUserMessageId, result.userMessage!);
+          _activeBeanWorkMessageId = result.userMessage!.id;
+        }
+        _session = result.session;
+        _chatRunState = 'working...';
+        _events = _mergeEvents(result.events, _events);
+        _applyBeanWorkEvents(result.events);
+        _applyBeanDashboardMutationEvents(result.events);
+        _ensureBeanRequestWorkItem(originalContent);
+        final run = result.run;
+        if (run != null) {
+          _activeAssistantRunId = run.id;
+        }
+        _error = null;
+      });
+      final run = result.run;
+      if (run != null) {
+        unawaited(_pollQueuedRun(run.id, runToken));
+      }
+      return;
+    }
+
+    setState(() {
+      if (result.userMessage != null) {
+        _replaceChatMessage(localUserMessageId, result.userMessage!);
+        _activeBeanWorkMessageId = result.userMessage!.id;
+      }
+      _session = result.session;
+      _events = _mergeEvents(result.events, _events);
+      _applyBeanWorkEvents(result.events);
+      _applyBeanDashboardMutationEvents(result.events);
+      if (result.assistantMessage != null &&
+          !_messages.any(
+            (candidate) => candidate.id == result.assistantMessage!.id,
+          )) {
+        _messages.add(_displayableAssistantMessage(result.assistantMessage!));
+      }
+      _chatRunState = switch (result.status) {
+        'blocked' => 'Blocked',
+        'cancelled' => 'Stopped',
+        _ => 'Updated',
+      };
+      if (result.status == 'completed') {
+        _completeActiveBeanWorkItems();
+      }
+      _activeAssistantRunId = null;
+      _error = null;
+    });
+    unawaited(_refreshSignedInViews(showLoading: false));
   }
 
   Future<HermesMessageResult> _queueBeanMessageWithRetry({
@@ -12671,17 +12813,23 @@ class _CommandCenterContent extends StatelessWidget {
             inlineError,
             const SizedBox(height: 12),
           ],
-          if (selectedDestination == _HomeDestination.bean)
+          if (selectedDestination == _HomeDestination.bean ||
+              selectedDestination == _HomeDestination.notes)
             Expanded(child: selectedPanel)
           else
             selectedPanel,
         ];
+        final panelNeedsFullHeight =
+            selectedDestination == _HomeDestination.bean ||
+            selectedDestination == _HomeDestination.notes;
         final selectedPanelWithStatus =
-            panelChildren.length == 1 && panelChildren.single == selectedPanel
+            panelChildren.length == 1 &&
+                panelChildren.single == selectedPanel &&
+                !panelNeedsFullHeight
             ? selectedPanel
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: selectedDestination == _HomeDestination.bean
+                mainAxisSize: panelNeedsFullHeight
                     ? MainAxisSize.max
                     : MainAxisSize.min,
                 children: panelChildren,
@@ -25276,7 +25424,7 @@ class _NotesViewState extends State<_NotesView> {
                         controller: _bodyController,
                         focusNode: _bodyFocusNode,
                         readOnly: locked,
-                        minLines: 18,
+                        minLines: 10,
                         maxLines: null,
                         keyboardType: TextInputType.multiline,
                         textAlignVertical: TextAlignVertical.top,

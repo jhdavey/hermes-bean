@@ -5663,6 +5663,69 @@ void main() {
     );
   });
 
+  testWidgets(
+    'chat recovers direct Bean work through lookup after parse failure',
+    (WidgetTester tester) async {
+      final api = _LookupRecoveryAfterParseFailureHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Can you create calendar events?',
+      );
+      await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle(const Duration(seconds: 2));
+
+      expect(api.sendMessageCalls, 1);
+      expect(api.lookupQueuedMessageCalls, 1);
+      expect(api.issueReports, isEmpty);
+      expect(find.text('Done - I recovered that request.'), findsOneWidget);
+      expect(find.textContaining('Bean could not finish'), findsNothing);
+      expect(
+        find.textContaining('I hit a snag while working on that'),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'chat refreshes session after failed lookup before showing fallback',
+    (WidgetTester tester) async {
+      final api = _SessionRefreshRecoveryAfterParseFailureHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Can you create reminders?',
+      );
+      await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle(const Duration(seconds: 2));
+
+      expect(api.sendMessageCalls, 1);
+      expect(api.lookupQueuedMessageCalls, 1);
+      expect(api.resumeSessionDetailsCalls, 1);
+      expect(api.issueReports, isEmpty);
+      expect(find.text('Done - I found the saved response.'), findsOneWidget);
+      expect(find.textContaining('Bean could not finish'), findsNothing);
+      expect(
+        find.textContaining('I hit a snag while working on that'),
+        findsNothing,
+      );
+    },
+  );
+
   testWidgets('chat queues direct replies after transient send failures', (
     WidgetTester tester,
   ) async {
@@ -11759,6 +11822,8 @@ class _FailingBeanRealtimeConversation extends _FakeBeanRealtimeConversation {
 }
 
 class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {
+  int lookupQueuedMessageCalls = 0;
+
   @override
   Future<HermesMessageResult> sendMessage({
     required int sessionId,
@@ -11766,6 +11831,15 @@ class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {
     Map<String, Object?>? metadata,
   }) async {
     throw const HermesApiException(504, '{"message":"Hermes timed out."}');
+  }
+
+  @override
+  Future<HermesMessageResult> lookupQueuedMessage({
+    required int sessionId,
+    required String clientRequestId,
+  }) async {
+    lookupQueuedMessageCalls++;
+    throw const HermesApiException(404, '{"message":"Not found"}');
   }
 }
 
@@ -11844,6 +11918,97 @@ class _LostQueueResponseHermesApiClient extends _SignedInFakeHermesApiClient {
         content: 'Done - I found that queued request.',
       ),
       events: [],
+    );
+  }
+}
+
+class _LookupRecoveryAfterParseFailureHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  int lookupQueuedMessageCalls = 0;
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sendMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    throw const FormatException('Expected top-level JSON object');
+  }
+
+  @override
+  Future<HermesMessageResult> lookupQueuedMessage({
+    required int sessionId,
+    required String clientRequestId,
+  }) async {
+    lookupQueuedMessageCalls++;
+    return HermesMessageResult(
+      status: 'completed',
+      session: const HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 9250,
+        role: 'user',
+        content: 'Can you create calendar events?',
+        metadata: {'client_request_id': clientRequestId},
+      ),
+      assistantMessage: const HermesMessage(
+        id: 9251,
+        role: 'assistant',
+        content: 'Done - I recovered that request.',
+      ),
+      events: const [],
+    );
+  }
+}
+
+class _SessionRefreshRecoveryAfterParseFailureHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  int lookupQueuedMessageCalls = 0;
+  int resumeSessionDetailsCalls = 0;
+  String? _clientRequestId;
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sendMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    _clientRequestId = metadata?['client_request_id']?.toString();
+    throw const FormatException('Expected top-level JSON object');
+  }
+
+  @override
+  Future<HermesMessageResult> lookupQueuedMessage({
+    required int sessionId,
+    required String clientRequestId,
+  }) async {
+    lookupQueuedMessageCalls++;
+    throw const FormatException('Expected top-level JSON object');
+  }
+
+  @override
+  Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async {
+    resumeSessionDetailsCalls++;
+    return HermesSessionDetails(
+      session: HermesSession(id: sessionId, status: 'active', title: 'Today'),
+      messages: [
+        HermesMessage(
+          id: 9300,
+          role: 'user',
+          content: 'Can you create reminders?',
+          metadata: {'client_request_id': _clientRequestId},
+        ),
+        const HermesMessage(
+          id: 9301,
+          role: 'assistant',
+          content: 'Done - I found the saved response.',
+        ),
+      ],
     );
   }
 }
