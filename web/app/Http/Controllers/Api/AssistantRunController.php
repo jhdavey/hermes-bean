@@ -190,7 +190,17 @@ class AssistantRunController extends Controller
             }
         }
 
-        return response()->json(['message' => 'No Bean run found for that request.'], 404);
+        $assistantMessage = $this->missingRunBridgeMessage($ownedSession, $clientRequestId);
+
+        return response()->json(['data' => [
+            'status' => 'completed',
+            'session' => $ownedSession->refresh(),
+            'run' => null,
+            'user_message' => $existingUserMessage,
+            'assistant_message' => $assistantMessage,
+            'events' => [],
+            'blocker' => null,
+        ]], 200);
     }
 
     public function show(Request $request, string $run): JsonResponse
@@ -232,5 +242,39 @@ class AssistantRunController extends Controller
     private function runResponseStatus(AssistantRun $run): int
     {
         return in_array($run->status, ['completed', 'failed', 'cancelled'], true) ? 200 : 202;
+    }
+
+    private function missingRunBridgeMessage(ConversationSession $session, string $clientRequestId): ConversationMessage
+    {
+        $existing = ConversationMessage::query()
+            ->where('user_id', $session->user_id)
+            ->where('conversation_session_id', $session->id)
+            ->where('role', 'assistant')
+            ->where('metadata->runtime', 'missing_run_bridge')
+            ->where('metadata->client_request_id', $clientRequestId)
+            ->latest('id')
+            ->first();
+
+        if ($existing instanceof ConversationMessage) {
+            return $existing;
+        }
+
+        $message = ConversationMessage::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'role' => 'assistant',
+            'content' => 'I didn’t receive that request cleanly. Please send it once more and I’ll take it from there.',
+            'metadata' => [
+                'runtime' => 'missing_run_bridge',
+                'client_request_id' => $clientRequestId,
+            ],
+        ]);
+
+        $session->update([
+            'status' => 'active',
+            'last_activity_at' => now(),
+        ]);
+
+        return $message;
     }
 }

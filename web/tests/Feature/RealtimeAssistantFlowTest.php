@@ -609,6 +609,35 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertJsonPath('data.user_message.content', 'Plan my afternoon');
     }
 
+    public function test_async_run_lookup_missing_client_request_returns_bridge_message_instead_of_error(): void
+    {
+        Queue::fake();
+
+        $token = $this->apiToken('async-run-lookup-missing@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $first = $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/runs/lookup?client_request_id=flutter-missing-run-1")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.run', null)
+            ->assertJsonPath('data.user_message', null)
+            ->assertJsonPath('data.assistant_message.content', 'I didn’t receive that request cleanly. Please send it once more and I’ll take it from there.')
+            ->json('data.assistant_message.id');
+
+        $second = $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/runs/lookup?client_request_id=flutter-missing-run-1")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.id', $first)
+            ->json('data.assistant_message.id');
+
+        $this->assertSame($first, $second);
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        $this->assertSame(0, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        Queue::assertNothingPushed();
+    }
+
     public function test_async_run_endpoint_recovers_failed_expired_run_for_client_request_id(): void
     {
         Queue::fake();
