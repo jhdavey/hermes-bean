@@ -826,6 +826,11 @@ PROMPT;
             return $calendarListActions;
         }
 
+        $afterWorkoutActions = $this->deterministicAfterWorkoutFollowUpActions($session, $content, $contextPayload, $timezone);
+        if ($afterWorkoutActions !== []) {
+            return $afterWorkoutActions;
+        }
+
         $afternoonPlanActions = $this->deterministicAfternoonPlanActions($content, $contextPayload, $timezone);
         if ($afternoonPlanActions !== []) {
             return $afternoonPlanActions;
@@ -894,6 +899,125 @@ PROMPT;
         }
 
         return $actions;
+    }
+
+    private function deterministicAfterWorkoutFollowUpActions(ConversationSession $session, string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (
+            ! str_contains($normalized, 'after the workout')
+            || ! preg_match('/\b(add|create|schedule|put|yes please)\b/u', $normalized)
+            || ! preg_match('/\b(grocery|groceries|store)\b/u', $normalized)
+            || ! preg_match('/\b(cook|cooking|dinner)\b/u', $normalized)
+        ) {
+            return [];
+        }
+
+        $workout = $this->existingWorkoutEventForFollowUp($session, $contextPayload, $timezone);
+        if (! $workout instanceof CalendarEvent || ! $workout->ends_at) {
+            return [];
+        }
+
+        $groceryMinutes = $this->durationMinutesNearKeyword($content, 'grocery', 45);
+        $cookMinutes = $this->durationMinutesNearKeyword($content, 'cook', 30);
+        $reminderMinutes = 15;
+        if (preg_match('/\b(\d{1,3})\s*-?\s*minutes?\s+reminders?\b/iu', $content, $reminderMatch)) {
+            $reminderMinutes = max(1, min(1440, (int) ($reminderMatch[1] ?? 15)));
+        } elseif (preg_match('/\b(\d{1,3})\s+minutes?\s+before\b/iu', $content, $reminderMatch)) {
+            $reminderMinutes = max(1, min(1440, (int) ($reminderMatch[1] ?? 15)));
+        }
+
+        $groceryStart = $workout->ends_at->copy()->setTimezone($timezone);
+        $groceryEnd = $groceryStart->copy()->addMinutes($groceryMinutes);
+        $cookStart = $groceryEnd->copy();
+        $cookEnd = $cookStart->copy()->addMinutes($cookMinutes);
+        $createReminders = preg_match('/\breminders?\b|\bremind\b/iu', $content);
+
+        $actions = [
+            [
+                'type' => 'calendar_event.create',
+                'risk' => 'low',
+                'client_action_key' => 'event_grocery',
+                'parameters' => [
+                    'title' => 'Grocery shopping',
+                    'starts_at' => $groceryStart->toIso8601String(),
+                    'ends_at' => $groceryEnd->toIso8601String(),
+                ],
+            ],
+            [
+                'type' => 'calendar_event.create',
+                'risk' => 'low',
+                'client_action_key' => 'event_cook',
+                'parameters' => [
+                    'title' => 'Cook dinner',
+                    'starts_at' => $cookStart->toIso8601String(),
+                    'ends_at' => $cookEnd->toIso8601String(),
+                ],
+            ],
+        ];
+
+        if ($createReminders) {
+            $actions[] = [
+                'type' => 'reminder.create',
+                'risk' => 'low',
+                'client_action_key' => 'reminder_grocery',
+                'related_action_key' => 'event_grocery',
+                'parameters' => [
+                    'title' => 'Reminder: Grocery shopping',
+                    'remind_at' => $groceryStart->copy()->subMinutes($reminderMinutes)->toIso8601String(),
+                ],
+            ];
+            $actions[] = [
+                'type' => 'reminder.create',
+                'risk' => 'low',
+                'client_action_key' => 'reminder_cook',
+                'related_action_key' => 'event_cook',
+                'parameters' => [
+                    'title' => 'Reminder: Cook dinner',
+                    'remind_at' => $cookStart->copy()->subMinutes($reminderMinutes)->toIso8601String(),
+                ],
+            ];
+        }
+
+        return $actions;
+    }
+
+    private function existingWorkoutEventForFollowUp(ConversationSession $session, array $contextPayload, string $timezone): ?CalendarEvent
+    {
+        $now = $this->deterministicNow($contextPayload, $timezone);
+        $startUtc = $now->copy()->setTimezone($timezone)->startOfDay()->utc();
+        $endUtc = $now->copy()->setTimezone($timezone)->endOfDay()->utc();
+
+        $query = CalendarEvent::query()
+            ->where('user_id', $session->user_id)
+            ->whereBetween('starts_at', [$startUtc, $endUtc])
+            ->where(function ($query): void {
+                $query->where('title', 'like', '%Workout%')
+                    ->orWhere('title', 'like', '%Exercise%');
+            });
+
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+
+        return (clone $query)
+            ->where('conversation_session_id', $session->id)
+            ->orderByDesc('ends_at')
+            ->first()
+            ?: $query->orderByDesc('ends_at')->first();
+    }
+
+    private function durationMinutesNearKeyword(string $content, string $keyword, int $default): int
+    {
+        if (preg_match('/\b'.preg_quote($keyword, '/').'\w*\b.{0,80}?\bfor\s+(\d{1,3})\s+minutes?\b/iu', $content, $match)) {
+            return max(1, min(1440, (int) ($match[1] ?? $default)));
+        }
+
+        if (preg_match('/\b(\d{1,3})\s+minutes?\b.{0,80}?\b'.preg_quote($keyword, '/').'\w*\b/iu', $content, $match)) {
+            return max(1, min(1440, (int) ($match[1] ?? $default)));
+        }
+
+        return $default;
     }
 
     private function deterministicAfternoonPlanActions(string $content, array $contextPayload, string $timezone): array
