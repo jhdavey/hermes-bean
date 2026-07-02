@@ -1088,7 +1088,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                                     'function' => [
                                         'name' => 'external_lookup',
                                         'arguments' => json_encode([
-                                            'query' => 'Find the nearest Wawa to 32820',
+                                            'query' => 'Nearest Wawa to ZIP code 32820 (Orlando, FL). Return the closest Wawa location and its full street address.',
                                         ], JSON_THROW_ON_ERROR),
                                     ],
                                 ]],

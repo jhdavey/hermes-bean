@@ -547,6 +547,13 @@ class LiveLookupService
 
     private function placeSearchName(string $query): string
     {
+        if (preg_match('/\b(?:find\s+)?(?:the\s+)?(?:nearest|closest|nearby)\s+([a-z0-9&.\'\s-]+?)\s+(?:to|near|around|in)\b/i', $query, $matches)) {
+            $candidate = $this->cleanPlaceNameCandidate((string) ($matches[1] ?? ''));
+            if ($candidate !== '') {
+                return mb_substr($candidate, 0, 80);
+            }
+        }
+
         $clean = mb_strtolower($query);
         $clean = preg_replace('/\b(what|where|which|who|can you|could you|please|find|look up|search for|tell me|is|are|the|a|an)\b/i', ' ', $clean) ?? $clean;
         $clean = preg_replace('/\b(nearest|closest|nearby|near me|near|around|to me|from me|local|location|locations|address|addresses|hours|open|closed|right now|today)\b/i', ' ', $clean) ?? $clean;
@@ -556,6 +563,14 @@ class LiveLookupService
         $clean = trim((string) preg_replace('/\s+/', ' ', $clean));
 
         return mb_substr($clean, 0, 80);
+    }
+
+    private function cleanPlaceNameCandidate(string $candidate): string
+    {
+        $candidate = preg_replace('/\b(the|a|an)\b/i', ' ', $candidate) ?? $candidate;
+        $candidate = preg_replace('/[^a-z0-9&.\'\s-]/i', ' ', $candidate) ?? $candidate;
+
+        return trim((string) preg_replace('/\s+/', ' ', $candidate));
     }
 
     private function placeLocationQuery(string $query, string $location): string
