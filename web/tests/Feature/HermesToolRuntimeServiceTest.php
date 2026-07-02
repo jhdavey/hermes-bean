@@ -797,21 +797,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                     ], 200);
                 }
 
-                $messages = $request->data()['messages'] ?? [];
-                $toolOutput = collect($messages)->firstWhere('role', 'tool');
-                $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
-
-                return Http::response([
-                    'id' => 'chatcmpl-external-final',
-                    'model' => 'gpt-test-tools',
-                    'choices' => [[
-                        'finish_reason' => 'stop',
-                        'message' => [
-                            'role' => 'assistant',
-                            'content' => data_get($lookupResult, 'text'),
-                        ],
-                    ]],
-                ], 200);
+                return Http::response(['error' => 'Unexpected second chat completion request'], 500);
             }
 
             if ($request->url() === 'https://api.openai.test/v1/responses') {
@@ -858,21 +844,8 @@ class HermesToolRuntimeServiceTest extends TestCase
                 && str_contains((string) data_get($payload, 'input'), 'Orlando, FL');
         });
 
-        Http::assertSent(function ($request): bool {
-            $payload = $request->data();
-            $toolMessage = collect($payload['messages'] ?? [])->firstWhere('role', 'tool');
-            if (! $toolMessage) {
-                return false;
-            }
-            $toolOutput = json_decode((string) data_get($toolMessage, 'content'), true, flags: JSON_THROW_ON_ERROR);
-
-            return $request->url() === 'https://api.openai.test/v1/chat/completions'
-                && data_get($toolOutput, 'tool') === 'external_lookup'
-                && data_get($toolOutput, 'text') === 'The local Ace Hardware closes at 8 PM today.'
-                && data_get($toolOutput, 'citations.0.url') === 'https://www.acehardware.com/store-details/example';
-        });
-
-        Http::assertSentCount(3);
+        $this->assertSame(1, $chatCalls);
+        Http::assertSentCount(2);
     }
 
     public function test_external_lookup_routes_current_weather_to_open_meteo(): void
@@ -1096,8 +1069,7 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         $chatCalls = 0;
         $geocodeCalls = 0;
-        $capturedLookupResult = [];
-        Http::fake(function ($request) use (&$chatCalls, &$geocodeCalls, &$capturedLookupResult) {
+        Http::fake(function ($request) use (&$chatCalls, &$geocodeCalls) {
             if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
                 $chatCalls++;
 
@@ -1126,21 +1098,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                     ], 200);
                 }
 
-                $messages = $request->data()['messages'] ?? [];
-                $toolOutput = collect($messages)->firstWhere('role', 'tool');
-                $capturedLookupResult = json_decode((string) data_get($toolOutput, 'content'), true) ?: [];
-
-                return Http::response([
-                    'id' => 'chatcmpl-places-final',
-                    'model' => 'gpt-test-tools',
-                    'choices' => [[
-                        'finish_reason' => 'stop',
-                        'message' => [
-                            'role' => 'assistant',
-                            'content' => data_get($capturedLookupResult, 'text'),
-                        ],
-                    ]],
-                ], 200);
+                return Http::response(['error' => 'Unexpected second chat completion request'], 500);
             }
 
             if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
@@ -1182,14 +1140,12 @@ class HermesToolRuntimeServiceTest extends TestCase
         $token = $this->apiToken('tool-places-google@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'where is the nearest wawa to 32820',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed');
 
-        $this->assertSame('google_places', data_get($capturedLookupResult, 'provider'));
-        $this->assertStringContainsString('16959 E Colonial Dr', (string) data_get($capturedLookupResult, 'text'));
-        $this->assertTrue((bool) data_get($capturedLookupResult, 'places.0.postal_code_match'));
+        $this->assertStringContainsString('16959 E Colonial Dr', (string) $response->json('data.assistant_message.content'));
         $this->assertSame(1, $geocodeCalls);
         Http::assertSent(function ($request): bool {
             return $request->url() === 'https://places.googleapis.com/v1/places:searchText'
@@ -1205,8 +1161,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
 
         $chatCalls = 0;
-        $capturedLookupResult = [];
-        Http::fake(function ($request) use (&$chatCalls, &$capturedLookupResult) {
+        Http::fake(function ($request) use (&$chatCalls) {
             if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
                 $chatCalls++;
 
@@ -1235,21 +1190,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                     ], 200);
                 }
 
-                $messages = $request->data()['messages'] ?? [];
-                $toolOutput = collect($messages)->firstWhere('role', 'tool');
-                $capturedLookupResult = json_decode((string) data_get($toolOutput, 'content'), true) ?: [];
-
-                return Http::response([
-                    'id' => 'chatcmpl-places-final',
-                    'model' => 'gpt-test-tools',
-                    'choices' => [[
-                        'finish_reason' => 'stop',
-                        'message' => [
-                            'role' => 'assistant',
-                            'content' => data_get($capturedLookupResult, 'text'),
-                        ],
-                    ]],
-                ], 200);
+                return Http::response(['error' => 'Unexpected second chat completion request'], 500);
             }
 
             if (str_starts_with($request->url(), 'https://maps.googleapis.com/maps/api/geocode/json')) {
@@ -1296,14 +1237,13 @@ class HermesToolRuntimeServiceTest extends TestCase
         $token = $this->apiToken('tool-places-google-ranking@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'where is the nearest wawa to 32820',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed');
 
-        $this->assertSame('google_places', data_get($capturedLookupResult, 'provider'));
-        $this->assertSame('16959 E Colonial Dr, Orlando, FL 32820, USA', data_get($capturedLookupResult, 'places.0.address'));
-        $this->assertSame('6500 Lee Vista Blvd, Orlando, FL 32822, USA', data_get($capturedLookupResult, 'places.1.address'));
+        $this->assertStringContainsString('16959 E Colonial Dr', (string) $response->json('data.assistant_message.content'));
+        $this->assertSame(1, $chatCalls);
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
     }
@@ -1313,8 +1253,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         config()->set('services.hermes_runtime.tavily_api_key', 'tavily-test-key');
 
         $chatCalls = 0;
-        $capturedLookupResult = [];
-        Http::fake(function ($request) use (&$chatCalls, &$capturedLookupResult) {
+        Http::fake(function ($request) use (&$chatCalls) {
             if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
                 $chatCalls++;
 
@@ -1342,21 +1281,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                     ], 200);
                 }
 
-                $messages = $request->data()['messages'] ?? [];
-                $toolOutput = collect($messages)->firstWhere('role', 'tool');
-                $capturedLookupResult = json_decode((string) data_get($toolOutput, 'content'), true) ?: [];
-
-                return Http::response([
-                    'id' => 'chatcmpl-tavily-final',
-                    'model' => 'gpt-test-tools',
-                    'choices' => [[
-                        'finish_reason' => 'stop',
-                        'message' => [
-                            'role' => 'assistant',
-                            'content' => data_get($capturedLookupResult, 'text'),
-                        ],
-                    ]],
-                ], 200);
+                return Http::response(['error' => 'Unexpected second chat completion request'], 500);
             }
 
             if ($request->url() === 'https://api.tavily.com/search') {
@@ -1386,9 +1311,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.assistant_message.content', 'Apple reported updated earnings results.');
 
-        $this->assertSame('tavily_search', data_get($capturedLookupResult, 'provider'));
-        $this->assertSame('Apple reported updated earnings results.', data_get($capturedLookupResult, 'text'));
-        $this->assertSame('https://example.com/apple-earnings', data_get($capturedLookupResult, 'citations.0.url'));
+        $this->assertSame(1, $chatCalls);
         Http::assertSent(function ($request): bool {
             return $request->url() === 'https://api.tavily.com/search'
                 && $request->hasHeader('Authorization', 'Bearer tavily-test-key');
@@ -1396,13 +1319,12 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
     }
 
-    public function test_external_lookup_result_falls_back_if_final_model_call_fails(): void
+    public function test_external_lookup_result_uses_provider_text_without_final_model_call(): void
     {
         config()->set('services.hermes_runtime.weather_lookup_enabled', false);
 
         $chatCalls = 0;
-        $capturedToolContent = null;
-        Http::fake(function ($request) use (&$chatCalls, &$capturedToolContent) {
+        Http::fake(function ($request) use (&$chatCalls) {
             if ($request->url() === 'https://api.openai.test/v1/chat/completions') {
                 $chatCalls++;
 
@@ -1431,10 +1353,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                     ], 200);
                 }
 
-                $messages = $request->data()['messages'] ?? [];
-                $capturedToolContent = (string) data_get(collect($messages)->firstWhere('role', 'tool'), 'content', '');
-
-                return Http::response(['error' => ['message' => 'temporary final model failure']], 500);
+                return Http::response(['error' => 'Unexpected second chat completion request'], 500);
             }
 
             if ($request->url() === 'https://api.openai.test/v1/responses') {
@@ -1455,10 +1374,10 @@ class HermesToolRuntimeServiceTest extends TestCase
             'content' => 'Can you tell me what the weather is in Orlando Florida right now?',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed');
-        $this->assertStringContainsString('It is 82 degrees and partly cloudy in Orlando right now.', (string) $capturedToolContent);
         $response->assertJsonPath('data.assistant_message.content', 'It is 82 degrees and partly cloudy in Orlando right now.')
             ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
-        Http::assertSentCount(3);
+        $this->assertSame(1, $chatCalls);
+        Http::assertSentCount(2);
     }
 
     public function test_external_lookup_retries_transport_timeouts(): void

@@ -297,6 +297,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     ];
                 }
 
+                if ($actions === [] && $this->canUseNativeReadFallback($toolOutputs)) {
+                    $assistantContent = $this->nativeReadFallbackContent($toolOutputs);
+                    $finalResponseDurationMs = 0;
+                    break;
+                }
+
                 if (
                     $actions !== []
                     && count($actions) >= $expectedWriteActionCount
@@ -4038,6 +4044,10 @@ PROMPT;
             return 'Done.';
         }
 
+        if (($last['tool'] ?? null) === 'get_day_context' && ($last['ok'] ?? false)) {
+            return $this->dayContextFallbackContent($last);
+        }
+
         if (($last['tool'] ?? null) === 'external_lookup') {
             $successfulLookup = collect($toolOutputs)
                 ->reverse()
@@ -4062,6 +4072,66 @@ PROMPT;
         }
 
         return 'I checked, but I could not get a usable result.';
+    }
+
+    private function canUseNativeReadFallback(array $toolOutputs): bool
+    {
+        if ($toolOutputs === []) {
+            return false;
+        }
+
+        $last = collect($toolOutputs)->reverse()->first(fn (mixed $output): bool => is_array($output));
+        if (! is_array($last) || ($last['ok'] ?? false) !== true) {
+            return false;
+        }
+
+        if (($last['tool'] ?? null) === 'external_lookup') {
+            return filled($last['text'] ?? null);
+        }
+
+        return ($last['tool'] ?? null) === 'get_day_context';
+    }
+
+    private function dayContextFallbackContent(array $output): string
+    {
+        $date = (string) ($output['date'] ?? 'today');
+        $items = [];
+
+        foreach ((array) ($output['calendar_events'] ?? []) as $event) {
+            if (! is_array($event)) {
+                continue;
+            }
+            $time = trim((string) ($event['display_start_time'] ?? ''));
+            $title = trim((string) ($event['title'] ?? 'Untitled event'));
+            $items[] = trim(($time !== '' ? "{$time} - " : '')."Event: {$title}");
+        }
+
+        foreach ((array) ($output['tasks'] ?? []) as $task) {
+            if (! is_array($task)) {
+                continue;
+            }
+            $time = trim((string) ($task['display_due_time'] ?? ''));
+            $title = trim((string) ($task['title'] ?? 'Untitled task'));
+            $items[] = trim(($time !== '' ? "{$time} - " : '')."Task: {$title}");
+        }
+
+        foreach ((array) ($output['reminders'] ?? []) as $reminder) {
+            if (! is_array($reminder)) {
+                continue;
+            }
+            $time = trim((string) ($reminder['display_remind_time'] ?? ''));
+            $title = trim((string) ($reminder['title'] ?? 'Untitled reminder'));
+            $items[] = trim(($time !== '' ? "{$time} - " : '')."Reminder: {$title}");
+        }
+
+        if ($items === []) {
+            return "Nothing else is scheduled for {$date}.";
+        }
+
+        $limited = array_slice($items, 0, 8);
+        $suffix = count($items) > count($limited) ? "\n- Plus ".(count($items) - count($limited)).' more.' : '';
+
+        return "Here is what is coming up for {$date}:\n- ".implode("\n- ", $limited).$suffix;
     }
 
     private function recordEvent(ConversationSession $session, string $type, array $payload = [], ?string $toolName = null, string $status = 'recorded'): ActivityEvent
