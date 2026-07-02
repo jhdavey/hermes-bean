@@ -101,7 +101,8 @@ class RunBeanProductionSmokeSuite extends Command
             $durationMs = $run->created_at && $run->updated_at
                 ? (int) $run->created_at->diffInMilliseconds($run->updated_at, true)
                 : null;
-            $failed = $run->status !== 'completed' || $this->containsFailureCopy($assistant);
+            $qualityFailures = $this->assistantQualityFailures($prompt, $assistant);
+            $failed = $run->status !== 'completed' || $this->containsFailureCopy($assistant) || $qualityFailures !== [];
 
             $results[] = [
                 'case' => $case,
@@ -110,6 +111,7 @@ class RunBeanProductionSmokeSuite extends Command
                 'status' => $run->status,
                 'duration_ms' => $durationMs,
                 'failed' => $failed,
+                'quality_failures' => $qualityFailures,
                 'prompt' => $prompt,
                 'assistant' => str($assistant)->squish()->limit(220)->toString(),
                 'error' => $run->error,
@@ -122,7 +124,7 @@ class RunBeanProductionSmokeSuite extends Command
                 $failed ? '<fg=red>FAIL</>' : '<fg=green>PASS</>',
                 $run->id,
                 $durationMs ?? '?',
-                str($assistant ?: $run->error ?: 'No response')->squish()->limit(110)->toString(),
+                str(($qualityFailures === [] ? '' : '['.implode(', ', $qualityFailures).'] ').($assistant ?: $run->error ?: 'No response'))->squish()->limit(150)->toString(),
             ));
         }
 
@@ -184,6 +186,84 @@ class RunBeanProductionSmokeSuite extends Command
             'ai usage limit reached',
             'usage limit',
         ]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function assistantQualityFailures(string $prompt, string $assistant): array
+    {
+        $promptText = str($prompt)->lower()->squish()->toString();
+        $answerText = str($assistant)->lower()->squish()->toString();
+        $failures = [];
+
+        if ($answerText === '') {
+            return ['empty_response'];
+        }
+
+        if (str_word_count($answerText) < 4) {
+            $failures[] = 'too_short';
+        }
+
+        if (preg_match('/^(done|ok|okay|sure|yes)[.!]?$/u', $answerText)) {
+            $failures[] = 'generic_acknowledgement';
+        }
+
+        if ($this->promptLooksLikeWriteRequest($promptText) && ! $this->answerLooksLikeWriteCompletion($answerText)) {
+            $failures[] = 'missing_write_confirmation';
+        }
+
+        if (str_contains($promptText, 'weather for tomorrow') && ! preg_match('/\b(high|low|weather|rain|storm|clear|overcast|drizzl|showery|precipitation|°f|degrees)\b/u', $answerText)) {
+            $failures[] = 'missing_weather_details';
+        }
+
+        if ($this->promptLooksLikePlacesLookup($promptText) && ! preg_match('/\b(address| mi| miles|[0-9]{3,}\s+[a-z])/u', $answerText)) {
+            $failures[] = 'missing_place_details';
+        }
+
+        if (str_contains($promptText, 'remember that') && ! preg_match('/\b(saved|remembered|bean knowledge|knowledge)\b/u', $answerText)) {
+            $failures[] = 'missing_memory_confirmation';
+        }
+
+        if ($this->promptLooksLikeDayContextRequest($promptText) && ! preg_match('/\b(today|coming up|scheduled|calendar|event|task|reminder|next|plan)\b/u', $answerText)) {
+            $failures[] = 'missing_day_context';
+        }
+
+        return array_values(array_unique($failures));
+    }
+
+    private function promptLooksLikeWriteRequest(string $promptText): bool
+    {
+        return (bool) preg_match('/\b(add|create|make|schedule|book|set|move|update|remind me|save a note|pin it|remember that)\b/u', $promptText)
+            && ! str_contains($promptText, 'find the weather')
+            && ! str_contains($promptText, 'find the nearest')
+            && ! str_contains($promptText, 'find the closest');
+    }
+
+    private function answerLooksLikeWriteCompletion(string $answerText): bool
+    {
+        return (bool) preg_match('/\b(done|added|created|set|saved|updated|moved|scheduled|reminder|calendar|task|note|bean knowledge)\b/u', $answerText);
+    }
+
+    private function promptLooksLikePlacesLookup(string $promptText): bool
+    {
+        return str_contains($promptText, 'nearest ')
+            || str_contains($promptText, 'closest ')
+            || str_contains($promptText, 'nearby ');
+    }
+
+    private function promptLooksLikeDayContextRequest(string $promptText): bool
+    {
+        return str_contains($promptText, 'coming up today')
+            || str_contains($promptText, 'on my calendar and reminders today')
+            || str_contains($promptText, 'left today')
+            || str_contains($promptText, 'later today')
+            || str_contains($promptText, 'review today')
+            || str_contains($promptText, 'scheduled today')
+            || str_contains($promptText, 'after lunch')
+            || str_contains($promptText, 'remember today')
+            || str_contains($promptText, 'look at today')
+            || str_contains($promptText, 'remains today');
     }
 
     private function cleanup(User $user, string $suiteId): void

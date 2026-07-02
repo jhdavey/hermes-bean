@@ -40,6 +40,62 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
         ));
     }
 
+    public function test_smoke_quality_checks_flag_weak_responses(): void
+    {
+        $command = new RunBeanProductionSmokeSuite;
+        $method = new ReflectionMethod($command, 'assistantQualityFailures');
+        $method->setAccessible(true);
+
+        $this->assertContains('missing_write_confirmation', $method->invoke(
+            $command,
+            'REQ-001: Create a task to review insurance paperwork tomorrow morning.',
+            'I can help with that.',
+        ));
+        $this->assertContains('missing_weather_details', $method->invoke(
+            $command,
+            'REQ-061: Find the weather for tomorrow in Orlando, then suggest whether my evening run should be indoors or outdoors.',
+            'Tomorrow should be fine.',
+        ));
+        $this->assertContains('missing_place_details', $method->invoke(
+            $command,
+            'REQ-071: Find the nearest Wawa to 32820 and tell me the address quickly.',
+            'I found one nearby.',
+        ));
+        $this->assertContains('missing_memory_confirmation', $method->invoke(
+            $command,
+            'REQ-081: Remember that I prefer short practical answers unless I ask for detail, then tell me what you saved.',
+            'That makes sense.',
+        ));
+        $this->assertContains('missing_day_context', $method->invoke(
+            $command,
+            'REQ-091: What do I have coming up today, and if there is empty time after 5pm, suggest a simple plan.',
+            'Sounds good.',
+        ));
+    }
+
+    public function test_smoke_quality_checks_accept_useful_responses(): void
+    {
+        $command = new RunBeanProductionSmokeSuite;
+        $method = new ReflectionMethod($command, 'assistantQualityFailures');
+        $method->setAccessible(true);
+
+        $this->assertSame([], $method->invoke(
+            $command,
+            'REQ-011: Add three calendar events: 7/9 Dr Chen Cardio at 100 N Dean Rd at 3pm, 7/15 Ventura at 6pm, and 7/19 Azalea Lane at 2pm.',
+            'Done - I added Dr Chen Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.',
+        ));
+        $this->assertSame([], $method->invoke(
+            $command,
+            'REQ-061: Find the weather for tomorrow in Orlando, then suggest whether my evening run should be indoors or outdoors.',
+            'Tomorrow in Orlando should be stormy. High 94°F, low 76°F, with precipitation possible.',
+        ));
+        $this->assertSame([], $method->invoke(
+            $command,
+            'REQ-071: Find the nearest Wawa to 32820 and tell me the address quickly.',
+            'The nearest Wawa I found near 32820 is Wawa at 16959 E Colonial Dr, Orlando, FL 32820, USA about 1.4 miles away.',
+        ));
+    }
+
     public function test_smoke_account_reset_clears_ai_usage_logs(): void
     {
         $user = User::factory()->create();
