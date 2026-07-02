@@ -2344,7 +2344,7 @@ PROMPT;
         $name = (string) data_get($toolCall, 'function.name', '');
         $arguments = $this->decodeToolArguments((string) data_get($toolCall, 'function.arguments', '{}'));
         if ($this->isNativeReadTool($name)) {
-            $toolOutput = $this->executeNativeReadTool($session, $name, $arguments);
+            $toolOutput = $this->executeNativeReadTool($session, $name, $arguments, $userMessage);
             $event = $this->recordEvent($session, 'assistant.read_tool.executed', [
                 'tool_name' => $name,
                 'ok' => (bool) ($toolOutput['ok'] ?? false),
@@ -2731,7 +2731,7 @@ PROMPT;
             ->toString();
     }
 
-    private function executeNativeReadTool(ConversationSession $session, string $name, array $arguments): array
+    private function executeNativeReadTool(ConversationSession $session, string $name, array $arguments, ?ConversationMessage $userMessage = null): array
     {
         try {
             return match ($name) {
@@ -2740,7 +2740,7 @@ PROMPT;
                 'search_calendar_events' => $this->searchCalendarEventsForTool($session, $arguments),
                 'search_notes' => $this->searchNotesForTool($session, $arguments),
                 'search_memory' => $this->searchMemoryForTool($session, $arguments),
-                'get_request_history' => $this->requestHistoryForTool($session, $arguments),
+                'get_request_history' => $this->requestHistoryForTool($session, $arguments, $userMessage),
                 'get_activity_timeline' => $this->activityTimelineForTool($session, $arguments),
                 'get_day_context' => $this->dayContextForTool($session, $arguments),
                 'external_lookup' => $this->externalLookupForTool($session, $arguments),
@@ -2945,18 +2945,25 @@ PROMPT;
         return $this->readToolResult('search_memory', $items, $workspace->id);
     }
 
-    private function requestHistoryForTool(ConversationSession $session, array $arguments): array
+    private function requestHistoryForTool(ConversationSession $session, array $arguments, ?ConversationMessage $userMessage = null): array
     {
         if (filled($arguments['workspace_id'] ?? null)) {
             $user = User::findOrFail($session->user_id);
             $this->workspaceService->authorizeMember($user, Workspace::findOrFail((int) $arguments['workspace_id']));
         }
 
+        if ($userMessage instanceof ConversationMessage) {
+            $arguments['exclude_message_id'] = $userMessage->id;
+        }
+
+        $items = $this->memoryService->requestHistory($session, $arguments);
+
         return [
             'ok' => true,
             'tool' => 'get_request_history',
             'workspace_id' => $arguments['workspace_id'] ?? $session->workspace_id,
-            'items' => $this->memoryService->requestHistory($session, $arguments),
+            'items' => $items,
+            'count' => count($items),
         ];
     }
 
@@ -2967,11 +2974,14 @@ PROMPT;
             $this->workspaceService->authorizeMember($user, Workspace::findOrFail((int) $arguments['workspace_id']));
         }
 
+        $items = $this->memoryService->activityTimeline($session, $arguments);
+
         return [
             'ok' => true,
             'tool' => 'get_activity_timeline',
             'workspace_id' => $arguments['workspace_id'] ?? $session->workspace_id,
-            'items' => $this->memoryService->activityTimeline($session, $arguments),
+            'items' => $items,
+            'count' => count($items),
         ];
     }
 
@@ -4326,6 +4336,10 @@ PROMPT;
             return $this->dayContextFallbackContent($last);
         }
 
+        if (($last['tool'] ?? null) === 'get_request_history' && ($last['ok'] ?? false)) {
+            return $this->requestHistoryFallbackContent($last);
+        }
+
         if (($last['tool'] ?? null) === 'external_lookup') {
             $successfulLookup = collect($toolOutputs)
                 ->reverse()
@@ -4367,7 +4381,36 @@ PROMPT;
             return filled($last['text'] ?? null);
         }
 
-        return ($last['tool'] ?? null) === 'get_day_context';
+        return in_array(($last['tool'] ?? null), ['get_day_context', 'get_request_history'], true);
+    }
+
+    private function requestHistoryFallbackContent(array $output): string
+    {
+        $items = collect((array) ($output['items'] ?? []))
+            ->filter(fn (mixed $item): bool => is_array($item) && filled($item['content'] ?? null))
+            ->values();
+
+        if ($items->isEmpty()) {
+            return 'I checked your request history, but I did not find anything matching that.';
+        }
+
+        $lines = $items
+            ->take(5)
+            ->map(function (array $item): string {
+                $createdAt = trim((string) ($item['created_at'] ?? ''));
+                $content = str((string) ($item['content'] ?? ''))->squish()->limit(180, '')->toString();
+
+                return trim(($createdAt !== '' ? $createdAt.' - ' : '').$content);
+            })
+            ->filter()
+            ->values()
+            ->all();
+
+        if (count($lines) === 1) {
+            return 'You asked: '.$lines[0];
+        }
+
+        return "Here is what I found in your request history:\n- ".implode("\n- ", $lines);
     }
 
     private function dayContextFallbackContent(array $output): string

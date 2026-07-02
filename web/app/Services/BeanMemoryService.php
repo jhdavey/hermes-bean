@@ -208,7 +208,10 @@ class BeanMemoryService
             ->when($from && $to, fn (Builder $query) => $query->whereBetween('created_at', [$from, $to]));
 
         if (filled($filters['query'] ?? null)) {
-            $this->whereLooseContent($query, (string) $filters['query'], ['content', 'title', 'summary']);
+            $this->whereLooseContent($query, (string) $filters['query'], ['content']);
+        }
+        if (filled($filters['exclude_message_id'] ?? null)) {
+            $query->whereKeyNot((int) $filters['exclude_message_id']);
         }
         if (filled($filters['workspace_id'] ?? null)) {
             $query->whereHas('session', fn (Builder $sessionQuery) => $sessionQuery->where('workspace_id', (int) $filters['workspace_id']));

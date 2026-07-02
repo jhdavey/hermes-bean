@@ -498,6 +498,53 @@ class HermesToolRuntimeServiceTest extends TestCase
         });
     }
 
+    public function test_request_history_tool_searches_message_content_without_missing_columns(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-history-tool',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_history',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'get_request_history',
+                                'arguments' => json_encode(['query' => 'REQ-100'], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-request-history-query@example.com');
+        $user = User::where('email', 'tool-request-history-query@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'REQ-100: What remains today?',
+            'created_at' => now()->subMinutes(5),
+        ]);
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'What did I ask for REQ-100?',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $content = (string) $response->json('data.assistant_message.content');
+        $this->assertStringContainsString('You asked:', $content);
+        $this->assertStringContainsString('REQ-100: What remains today?', $content);
+
+        Http::assertSentCount(1);
+    }
+
     public function test_native_read_tools_return_client_visible_dates_for_calendar_tasks_and_reminders(): void
     {
         $chatCalls = 0;
@@ -2182,6 +2229,39 @@ class HermesToolRuntimeServiceTest extends TestCase
                 $this->assertSame($userMessageId, (int) data_get($event, 'payload.message_id'));
             });
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Dr Chen Cardio', 'location' => '100 N Dean Rd']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Ventura']);
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Azalea Lane']);
+        Http::assertSentCount(0);
+    }
+
+    public function test_app_crud_planner_handles_natural_dated_calendar_list_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->apiToken('tool-natural-dated-events@example.com');
+        $user = User::where('email', 'tool-natural-dated-events@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T10:10:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+
+        $events = collect($response->json('data.events'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.work_item.planned'));
+        $this->assertCount(3, $events->where('event_type', 'assistant.calendar_event.created'));
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Dr Chen Cardio', 'location' => '100 N Dean rd']);
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Ventura']);
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Azalea Lane']);
         Http::assertSentCount(0);
