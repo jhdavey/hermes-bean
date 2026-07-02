@@ -517,7 +517,7 @@ String beanFriendlyErrorMessage(Object error, {String? action}) {
       : 'Bean hit a snag while trying to ${action.trim()}.';
   final subscriptionLimitMessage = _subscriptionLimitMessageFromError(error);
   if (subscriptionLimitMessage != null) {
-    return '$prefix $subscriptionLimitMessage';
+    return subscriptionLimitMessage;
   }
   final guidance = _beanErrorGuidance(error);
   return '$prefix $guidance Don’t worry — your data is safe, and if this keeps happening we’ll fix it as soon as possible.';
@@ -645,11 +645,11 @@ String? _subscriptionLimitMessageFromApiBody(String body) {
       if (code == 'subscription_limit_reached' && message is String) {
         return _safeValidationSentence(message);
       }
-      if (code == 'bean_usage_limit' && message is String) {
+      if (_isBeanUsageLimitCode(code) && message is String) {
         return _safeValidationSentence(message);
       }
       final topCode = decoded['code']?.toString();
-      if (topCode == 'bean_usage_limit' && message is String) {
+      if (_isBeanUsageLimitCode(topCode) && message is String) {
         return _safeValidationSentence(message);
       }
     }
@@ -658,6 +658,12 @@ String? _subscriptionLimitMessageFromApiBody(String body) {
   }
   return null;
 }
+
+bool _isBeanUsageLimitCode(String? code) => const {
+  'bean_usage_limit',
+  'bean_voice_usage_limit',
+  'bean_voice_paused',
+}.contains(code);
 
 bool _isPlanLimitMessage(String? message) {
   final normalized = (message ?? '').toLowerCase();

@@ -93,6 +93,20 @@ void main() {
     expect(message, isNot(contains('HermesApiException')));
   });
 
+  test('usage limit messages are shown directly without generic snag copy', () {
+    const body =
+        '{"message":"This account has reached today\'s AI usage limit.","code":"bean_voice_paused"}';
+    final message = beanFriendlyErrorMessage(
+      const HermesApiException(429, body),
+      action: 'start realtime voice',
+    );
+
+    expect(message, 'This account has reached today\'s AI usage limit.');
+    expect(message, isNot(contains('Bean hit a snag')));
+    expect(message, isNot(contains('429')));
+    expect(message, isNot(contains('HermesApiException')));
+  });
+
   test('stale assistant error copy is sanitized before display', () {
     final messages = [
       'Bean could not finish that request.',
