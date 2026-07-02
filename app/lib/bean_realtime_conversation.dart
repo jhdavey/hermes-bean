@@ -1062,8 +1062,8 @@ class BeanRealtimeConversation {
         final failure = run.error?.trim();
         _deliverBackgroundResult(
           failure == null || failure.isEmpty
-              ? 'I could not finish that request.'
-              : 'I could not finish that request. $failure',
+              ? 'I hit a snag while working on that.'
+              : 'I hit a snag while working on that. $failure',
           runId,
         );
         return;

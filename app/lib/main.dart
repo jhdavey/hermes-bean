@@ -525,7 +525,7 @@ String beanFriendlyErrorMessage(Object error, {String? action}) {
 
 String beanFriendlyChatFailureMessage(Object error) {
   final guidance = _beanErrorGuidance(error);
-  return 'Bean could not finish that request. $guidance Please try again, or tell Bean any missing details and I’ll pick it back up. Don’t worry — if this keeps happening we’ll fix it as soon as possible.';
+  return 'I hit a snag while working on that. $guidance Please try again, or tell me any missing details and I’ll pick it back up.';
 }
 
 String _beanErrorGuidance(Object error) {
@@ -5187,8 +5187,8 @@ ${_truncateDiagnostic(stack, 2200)}
                   id: _messages.length + 1,
                   role: 'assistant',
                   content: failure == null || failure.isEmpty
-                      ? 'I could not finish that request. No changes should be assumed complete unless they already appeared on your dashboard.'
-                      : 'I could not finish that request. $failure',
+                      ? 'I hit a snag while working on that. No changes should be assumed complete unless they already appeared on your dashboard.'
+                      : 'I hit a snag while working on that. $failure',
                 ),
               );
             }

@@ -3632,7 +3632,7 @@ PROMPT;
 
         $completed = $completedCount > 0
             ? 'I completed '.$completedCount.' of '.$totalActionCount.' requested change'.($totalActionCount === 1 ? '' : 's').'.'
-            : 'I could not complete the requested change'.($totalActionCount === 1 ? '' : 's').'.';
+            : 'I need one more thing before I can make the requested change'.($totalActionCount === 1 ? '' : 's').'.';
 
         if ($completedCount > 0) {
             $completed .= ' '.$this->nativeActionFallbackContent($successfulActions);
@@ -3646,10 +3646,10 @@ PROMPT;
         }
 
         if ($failedLabels->isEmpty()) {
-            return $completed.' Some remaining changes could not be completed. Please try those again.';
+            return $completed.' Some remaining changes need another try or a little more detail.';
         }
 
-        return $completed.' I could not complete: '.$this->joinSummaryPhrases($failedLabels->all()).'. Please try those again.';
+        return $completed.' The remaining item'.($failedLabels->count() === 1 ? ' needs' : 's need').' attention: '.$this->joinSummaryPhrases($failedLabels->all()).'. Please try those again or give me the missing details.';
     }
 
     /**

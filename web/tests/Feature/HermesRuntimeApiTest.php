@@ -289,6 +289,37 @@ class HermesRuntimeApiTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
+    public function test_runtime_explains_note_plan_limits_without_generic_failure_copy(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse(json_encode([
+                'actions' => [[
+                    'type' => 'note.create',
+                    'risk' => 'low',
+                    'parameters' => [
+                        'title' => 'Note: hello',
+                        'plain_text' => 'hello',
+                    ],
+                ]],
+            ], JSON_THROW_ON_ERROR)), 200),
+        ]);
+
+        $token = $this->apiToken('base-note-limit@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you create a note that says hello',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Notes are available on Premium, Pro, and Enterprise plans. Upgrade your plan to create and manage notes.');
+
+        $this->assertDatabaseMissing('notes', [
+            'conversation_session_id' => $sessionId,
+            'title' => 'Note: hello',
+        ]);
+    }
+
     private function assistantResponse(string $content): array
     {
         return [

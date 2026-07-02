@@ -5509,7 +5509,7 @@ void main() {
   );
 
   testWidgets(
-    'chat failure message tells the user why Hermes could not complete the request',
+    'chat failure message tells the user Bean hit a recoverable snag',
     (WidgetTester tester) async {
       await tester.pumpWidget(
         HermesBeanApp(
@@ -5531,7 +5531,7 @@ void main() {
 
       expect(
         find.text(
-          'Bean could not finish that request. Bean’s service is having a moment on our side. Please try again in a bit. Please try again, or tell Bean any missing details and I’ll pick it back up. Don’t worry — if this keeps happening we’ll fix it as soon as possible.',
+          'I hit a snag while working on that. Bean’s service is having a moment on our side. Please try again in a bit. Please try again, or tell me any missing details and I’ll pick it back up.',
         ),
         findsOneWidget,
       );

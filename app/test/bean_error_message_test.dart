@@ -79,9 +79,8 @@ void main() {
       const HermesApiException(429, '{"message":"Too Many Attempts."}'),
     );
 
-    expect(message, contains('Bean could not finish that request.'));
+    expect(message, contains('I hit a snag while working on that.'));
     expect(message, contains('Please try again'));
-    expect(message, contains('we’ll fix it as soon as possible'));
     expect(message, isNot(contains('429')));
     expect(message, isNot(contains('HermesApiException')));
   });

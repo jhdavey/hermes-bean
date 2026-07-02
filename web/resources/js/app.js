@@ -10054,7 +10054,7 @@ if (mount) {
                 if (status === 'failed') {
                     markActiveBeanWorkItems('failed');
                     setRealtimeBackgroundWorkActive(false);
-                    const message = run?.error ? `I could not finish that: ${run.error}` : 'I could not finish that request.';
+                    const message = run?.error ? `I hit a snag while working on that. ${run.error}` : 'I hit a snag while working on that.';
                     deliverRealtimeBackgroundResult(message, id);
                     return;
                 }
