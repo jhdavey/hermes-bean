@@ -196,6 +196,7 @@ if (mount) {
         chatHistoryOpen: false,
         chatRunState: 'Ready',
         editingChatMessageId: '',
+        activeBeanWorkMessageId: null,
         beanWorkItems: [],
         voiceListening: false,
         voiceRecognition: null,
@@ -2839,6 +2840,7 @@ if (mount) {
             beanWorkStatusHoldUntil = 0;
             beanWorkStatusMinUntil = 0;
             state.beanWorkItems = [];
+            state.activeBeanWorkMessageId = null;
             refreshBeanStatusTag();
         }, delay);
     }
@@ -2856,6 +2858,7 @@ if (mount) {
         beanWorkStatusMinUntil = 0;
         beanWorkEventFloorId = maxActivityEventId(state.activity);
         beanWorkAppliedEventIds.clear();
+        state.activeBeanWorkMessageId = null;
         state.beanWorkItems = [];
         refreshBeanStatusTag();
     }
@@ -3137,6 +3140,7 @@ if (mount) {
             const eventId = Number(event?.id || 0);
             if (Number.isFinite(eventId) && eventId <= beanWorkEventFloorId) return;
             if (Number.isFinite(eventId) && beanWorkAppliedEventIds.has(eventId)) return;
+            if (!beanWorkEventBelongsToActiveRequest(event)) return;
             const item = beanWorkItemFromEvent(event);
             if (!item) return;
             if (Number.isFinite(eventId)) {
@@ -3149,6 +3153,17 @@ if (mount) {
                 order: item.order,
             });
         });
+    }
+
+    function beanWorkEventBelongsToActiveRequest(event) {
+        const activeMessageId = Number(state.activeBeanWorkMessageId || 0);
+        if (!activeMessageId) return true;
+        const payload = event?.payload || {};
+        const eventMessageId = Number(payload.user_message_id || payload.userMessageId || payload.message_id || payload.messageId || payload.request_message_id || payload.requestMessageId || 0);
+        if (eventMessageId) return eventMessageId === activeMessageId;
+        const type = String(event?.event_type || event?.eventType || '');
+        if (['runtime.run_queued', 'runtime.run_started', 'runtime.run_completed', 'runtime.run_stale_failed', 'runtime.run_failed'].includes(type)) return true;
+        return !type.startsWith('assistant.');
     }
 
     function beanWorkItemFromEvent(event) {
@@ -7936,8 +7951,11 @@ if (mount) {
             }
             state.session = result.session || state.session;
             state.activity = normalizeList(result.events).length ? result.events : state.activity;
+            if (result.user_message) {
+                state.activeBeanWorkMessageId = Number(result.user_message.id || 0) || state.activeBeanWorkMessageId;
+                replaceLocalUserMessage(result.user_message);
+            }
             applyBeanWorkEvents(result.events);
-            if (result.user_message) replaceLocalUserMessage(result.user_message);
             if (result.assistant_message) {
                 state.messages.push(result.assistant_message);
                 assistantContent = result.assistant_message.content || '';

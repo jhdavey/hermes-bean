@@ -2254,8 +2254,15 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
 
         $events = collect($response->json('data.events'));
+        $userMessageId = (int) $response->json('data.user_message.id');
         $this->assertCount(3, $events->where('event_type', 'assistant.work_item.planned'));
         $this->assertCount(3, $events->where('event_type', 'assistant.calendar_event.created'));
+        $events
+            ->whereIn('event_type', ['assistant.work_item.planned', 'assistant.calendar_event.created'])
+            ->each(function (array $event) use ($userMessageId): void {
+                $this->assertSame($userMessageId, (int) data_get($event, 'payload.user_message_id'));
+                $this->assertSame($userMessageId, (int) data_get($event, 'payload.message_id'));
+            });
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Dr Chen Cardio', 'location' => '100 N Dean Rd']);
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Ventura']);
         $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'Azalea Lane']);

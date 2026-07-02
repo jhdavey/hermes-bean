@@ -1949,6 +1949,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String _chatRunState = 'Ready';
   int _chatRunToken = 0;
   int? _activeAssistantRunId;
+  int? _activeBeanWorkMessageId;
   List<_BeanWorkItem> _beanWorkItems = const [];
   int _beanWorkEventFloorId = 0;
   bool _beanWorkFinalized = false;
@@ -2627,6 +2628,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanWorkStatusMinUntil = null;
         _beanWorkItems = const [];
         _beanWorkFinalized = false;
+        _activeBeanWorkMessageId = null;
         _beanWorkStagedCompletionIds.clear();
       });
       _cancelBeanWorkStageTimers();
@@ -2652,6 +2654,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkAppliedEventIds.clear();
     _beanDashboardRefreshEventIds.clear();
     _beanWorkFinalized = false;
+    _activeBeanWorkMessageId = null;
     _beanWorkStagedCompletionIds.clear();
     _cancelBeanWorkStageTimers();
   }
@@ -3342,6 +3345,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _beanWorkAppliedEventIds.contains(event.id)) {
         continue;
       }
+      if (!_beanWorkEventBelongsToActiveRequest(event)) continue;
       final item = _beanWorkItemFromEvent(event);
       if (item == null) continue;
       _beanWorkAppliedEventIds.add(event.id);
@@ -3387,6 +3391,29 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
     });
     _beanWorkStageTimers.add(timer);
+  }
+
+  bool _beanWorkEventBelongsToActiveRequest(HermesActivityEvent event) {
+    final activeMessageId = _activeBeanWorkMessageId;
+    if (activeMessageId == null) return true;
+
+    final payload = event.payload;
+    final eventMessageId =
+        _intFromPayload(payload, 'user_message_id') ??
+        _intFromPayload(payload, 'message_id') ??
+        _intFromPayload(payload, 'request_message_id');
+    if (eventMessageId != null) return eventMessageId == activeMessageId;
+
+    final type = event.eventType;
+    if (type == 'runtime.run_queued' ||
+        type == 'runtime.run_started' ||
+        type == 'runtime.run_completed' ||
+        type == 'runtime.run_stale_failed' ||
+        type == 'runtime.run_failed') {
+      return true;
+    }
+
+    return !type.startsWith('assistant.');
   }
 
   _BeanWorkItem? _beanWorkItemFromEvent(HermesActivityEvent event) {
@@ -4872,6 +4899,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         setState(() {
           if (result.userMessage != null) {
             _replaceChatMessage(localUserMessageId, result.userMessage!);
+            _activeBeanWorkMessageId = result.userMessage!.id;
           }
           _session = result.session;
           _chatRunState = 'working...';
@@ -4919,6 +4947,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         if (result.userMessage != null) {
           _replaceChatMessage(localUserMessageId, result.userMessage!);
+          _activeBeanWorkMessageId = result.userMessage!.id;
         }
         _user = refreshedUser;
         _session = result.session;
@@ -5124,6 +5153,13 @@ ${_truncateDiagnostic(stack, 2200)}
       );
       if (!mounted || runToken != _chatRunToken) return;
       try {
+        final run = await widget.apiClient.getAssistantRun(runId);
+        if (!mounted || runToken != _chatRunToken) return;
+        if (run.userMessageId != null) {
+          setState(() {
+            _activeBeanWorkMessageId = run.userMessageId;
+          });
+        }
         final sessionId = _session?.id;
         if (sessionId != null) {
           final events = await widget.apiClient
@@ -5143,8 +5179,6 @@ ${_truncateDiagnostic(stack, 2200)}
             _refreshDashboardAfterBeanMutationEvents(events);
           }
         }
-        final run = await widget.apiClient.getAssistantRun(runId);
-        if (!mounted || runToken != _chatRunToken) return;
         if (run.status == 'completed' ||
             run.status == 'failed' ||
             run.status == 'cancelled') {

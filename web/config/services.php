@@ -77,6 +77,8 @@ return [
         'weather_lookup_timeout' => (float) env('HERMES_WEATHER_LOOKUP_TIMEOUT', 6),
         'weather_lookup_connect_timeout' => (float) env('HERMES_WEATHER_LOOKUP_CONNECT_TIMEOUT', 3),
         'weather_warm_cache_seconds' => (int) env('HERMES_WEATHER_WARM_CACHE_SECONDS', 300),
+        'assistant_run_stale_seconds' => (int) env('HERMES_ASSISTANT_RUN_STALE_SECONDS', 75),
+        'assistant_run_recovery_window_seconds' => (int) env('HERMES_ASSISTANT_RUN_RECOVERY_WINDOW_SECONDS', 900),
     ],
 
     'hermes_realtime' => [

@@ -7,6 +7,7 @@ use App\Models\ActivityEvent;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -111,6 +112,12 @@ class AssistantRunService
             return $run;
         }
 
+        if ($this->runRecoveryWindowExpired($run)) {
+            $this->markStaleFailed($run, $staleAfterSeconds, 'Run expired before it could be safely recovered.');
+
+            return $run->refresh();
+        }
+
         if (! $run->session || ! $run->userMessage) {
             $this->markStaleFailed($run, $staleAfterSeconds);
 
@@ -171,6 +178,46 @@ class AssistantRunService
         }
 
         return $run->refresh();
+    }
+
+    public function closeExpiredStaleRunsForSession(ConversationSession $session): void
+    {
+        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 75);
+
+        /** @var EloquentCollection<int, AssistantRun> $runs */
+        $runs = AssistantRun::query()
+            ->where('conversation_session_id', $session->id)
+            ->whereIn('status', ['queued', 'running'])
+            ->where(function ($query) use ($staleAfterSeconds): void {
+                $threshold = now()->subSeconds($staleAfterSeconds);
+                $query
+                    ->where('started_at', '<=', $threshold)
+                    ->orWhere(function ($query) use ($threshold): void {
+                        $query->whereNull('started_at')->where('created_at', '<=', $threshold);
+                    });
+            })
+            ->get();
+
+        foreach ($runs as $run) {
+            if ($this->runRecoveryWindowExpired($run)) {
+                $this->markStaleFailed($run, $staleAfterSeconds, 'Run expired before it could be safely recovered.');
+            }
+        }
+    }
+
+    private function runRecoveryWindowExpired(AssistantRun $run): bool
+    {
+        $startedAt = $run->started_at ?: $run->created_at;
+        if ($startedAt === null) {
+            return false;
+        }
+
+        $windowSeconds = (int) config('services.hermes_runtime.assistant_run_recovery_window_seconds', 900);
+        if ($windowSeconds <= 0) {
+            return false;
+        }
+
+        return $startedAt->lte(now()->subSeconds($windowSeconds));
     }
 
     private function markStaleFailed(AssistantRun $run, int $staleAfterSeconds, ?string $detail = null): void

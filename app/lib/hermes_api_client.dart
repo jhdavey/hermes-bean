@@ -3215,6 +3215,7 @@ class HermesAssistantRun {
     required this.id,
     required this.status,
     required this.source,
+    this.userMessageId,
     this.assistantMessageId,
     this.assistantMessage,
     this.error,
@@ -3223,6 +3224,7 @@ class HermesAssistantRun {
   final int id;
   final String status;
   final String source;
+  final int? userMessageId;
   final int? assistantMessageId;
   final HermesMessage? assistantMessage;
   final String? error;
@@ -3232,6 +3234,7 @@ class HermesAssistantRun {
         id: _expectInt(json['id']),
         status: _expectString(json['status']),
         source: _expectString(json['source']),
+        userMessageId: _readIntOrNull(json['user_message_id']),
         assistantMessageId: _readIntOrNull(json['assistant_message_id']),
         assistantMessage: json['assistant_message'] == null
             ? null

@@ -602,4 +602,37 @@ class RealtimeAssistantFlowTest extends TestCase
         $this->assertSame('Azalea Lane', $events[2]->title);
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
+
+    public function test_activity_poll_closes_expired_stale_run_without_replaying_work(): void
+    {
+        Queue::fake();
+        config()->set('services.hermes_runtime.assistant_run_stale_seconds', 1);
+        config()->set('services.hermes_runtime.assistant_run_recovery_window_seconds', 60);
+
+        $token = $this->apiToken('expired-async-run@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $runId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Please add Dr Chen Cardio on 7/9 at 3pm',
+            'metadata' => ['source' => 'flutter'],
+        ])->assertAccepted()->json('data.run.id');
+
+        AssistantRun::findOrFail($runId)->forceFill([
+            'status' => 'running',
+            'started_at' => now()->subMinutes(2),
+        ])->save();
+        ConversationSession::findOrFail($sessionId)->forceFill(['status' => 'running'])->save();
+
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/events")
+            ->assertOk()
+            ->assertJsonFragment(['event_type' => 'runtime.run_stale_failed']);
+
+        $run = AssistantRun::findOrFail($runId);
+        $this->assertSame('failed', $run->status);
+        $this->assertSame('Run expired before it could be safely recovered.', $run->error);
+        $this->assertSame('active', ConversationSession::findOrFail($sessionId)->status);
+        $this->assertDatabaseCount('calendar_events', 0);
+    }
 }

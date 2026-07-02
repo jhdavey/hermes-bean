@@ -262,7 +262,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'tool_calls' => $toolCalls,
                 ];
 
-                $plannedWorkByToolCall = $this->recordPlannedNativeWorkItems($session, $toolCalls);
+                $plannedWorkByToolCall = $this->recordPlannedNativeWorkItems($session, $userMessage, $toolCalls);
                 $domainEvents = $domainEvents->concat(
                     collect($plannedWorkByToolCall)
                         ->pluck('event')
@@ -1646,6 +1646,8 @@ PROMPT;
                 'work_order' => $order,
                 'action_type' => (string) ($action['type'] ?? ''),
                 'label' => $label,
+                'message_id' => $message->id,
+                'user_message_id' => $message->id,
             ];
             $workItem['event'] = $this->recordEvent(
                 $session,
@@ -1771,7 +1773,7 @@ PROMPT;
         return is_scalar($action['client_action_key'] ?? null) ? (string) $action['client_action_key'] : '';
     }
 
-    private function recordPlannedNativeWorkItems(ConversationSession $session, array $toolCalls): array
+    private function recordPlannedNativeWorkItems(ConversationSession $session, ConversationMessage $userMessage, array $toolCalls): array
     {
         $planned = [];
         $order = 0;
@@ -1807,6 +1809,8 @@ PROMPT;
                 'work_order' => $order++,
                 'action_type' => $actionType,
                 'label' => $label,
+                'message_id' => $userMessage->id,
+                'user_message_id' => $userMessage->id,
             ];
             $workItem['event'] = $this->recordEvent(
                 $session,
@@ -1908,6 +1912,8 @@ PROMPT;
             'work_order' => $workItem['work_order'] ?? null,
             'work_label' => $workItem['label'] ?? null,
             'action_type' => $workItem['action_type'] ?? null,
+            'message_id' => $workItem['message_id'] ?? null,
+            'user_message_id' => $workItem['user_message_id'] ?? null,
         ]);
     }
 

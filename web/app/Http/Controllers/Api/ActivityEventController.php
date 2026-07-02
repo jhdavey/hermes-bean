@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ConversationSession;
+use App\Services\AssistantRunService;
 use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
 use Illuminate\Http\JsonResponse;
@@ -14,6 +15,7 @@ class ActivityEventController extends Controller
     public function __construct(
         private readonly PlanHistoryService $history,
         private readonly PlanLimitService $planLimits,
+        private readonly AssistantRunService $runs,
     ) {}
 
     public function index(Request $request, string $session): JsonResponse
@@ -33,6 +35,8 @@ class ActivityEventController extends Controller
         $deadline = microtime(true) + $waitSeconds;
 
         do {
+            $this->runs->closeExpiredStaleRunsForSession($ownedSession);
+
             $events = $this->history->filterActivityEvents(
                 $ownedSession->activityEvents()
                     ->when($after > 0, fn ($query) => $query->where('id', '>', $after))
