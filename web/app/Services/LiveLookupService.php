@@ -555,7 +555,7 @@ class LiveLookupService
         }
 
         $clean = mb_strtolower($query);
-        $clean = preg_replace('/\b(what|where|which|who|can you|could you|please|find|look up|search for|tell me|is|are|the|a|an)\b/i', ' ', $clean) ?? $clean;
+        $clean = preg_replace('/\b(what|where|which|who|can you|could you|please|find|look up|search for|tell me|return|is|are|the|a|an|and|full|street|zip|code)\b/i', ' ', $clean) ?? $clean;
         $clean = preg_replace('/\b(nearest|closest|nearby|near me|near|around|to me|from me|local|location|locations|address|addresses|hours|open|closed|right now|today)\b/i', ' ', $clean) ?? $clean;
         $clean = preg_replace('/\b(in|at|by|to)\s+[a-z\s,.-]*\d{5}(?:-\d{4})?\b/i', ' ', $clean) ?? $clean;
         $clean = preg_replace('/\b\d{5}(?:-\d{4})?\b/', ' ', $clean) ?? $clean;
