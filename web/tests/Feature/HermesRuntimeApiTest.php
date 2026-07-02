@@ -505,6 +505,13 @@ class HermesRuntimeApiTest extends TestCase
             'content' => 'REQ-011: Add three calendar events: 7/9 Dr Chen Cardio at 100 N Dean Rd at 3pm, 7/15 Ventura at 6pm, and 7/19 Azalea Lane at 2pm.',
             'created_at' => now()->subMinutes(10),
         ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'REQ-073: Find a nearby Wawa around 32820 and tell me the closest address.',
+            'created_at' => now()->subMinutes(5),
+        ]);
         CalendarEvent::create([
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
@@ -524,7 +531,42 @@ class HermesRuntimeApiTest extends TestCase
         $this->assertStringContainsString('You asked:', $content);
         $this->assertStringContainsString('REQ-011', $content);
         $this->assertStringContainsString('Dr Chen Cardio', $content);
+        $this->assertStringNotContainsString('REQ-073', $content);
+        $this->assertStringNotContainsString('Wawa', $content);
         $this->assertStringNotContainsString('You scheduled a calendar event', $content);
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+    }
+
+    public function test_runtime_request_history_recall_does_not_return_generic_note_matches(): void
+    {
+        Queue::fake();
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
+        ]);
+
+        $token = $this->apiToken('request-history-strict-none@example.com');
+        $user = User::where('email', 'request-history-strict-none@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'REQ-053: Create a project follow-up workflow for the budget cleanup: calendar focus block Friday at 9am, task to prepare notes, and reminder Thursday afternoon.',
+            'created_at' => now()->subMinutes(10),
+        ]);
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'What was my earlier request about Egg Protein Note, if any? If there was none, say so clearly.',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $content = (string) $response->json('data.assistant_message.content');
+        $this->assertStringContainsString('did not find', $content);
+        $this->assertStringNotContainsString('REQ-053', $content);
+        $this->assertStringNotContainsString('budget cleanup', $content);
 
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }

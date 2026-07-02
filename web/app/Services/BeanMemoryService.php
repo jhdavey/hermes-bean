@@ -208,7 +208,11 @@ class BeanMemoryService
             ->when($from && $to, fn (Builder $query) => $query->whereBetween('created_at', [$from, $to]));
 
         if (filled($filters['query'] ?? null)) {
-            $this->whereLooseContent($query, (string) $filters['query'], ['content']);
+            if ((bool) ($filters['strict_query'] ?? false)) {
+                $this->whereStrictContent($query, (string) $filters['query'], ['content']);
+            } else {
+                $this->whereLooseContent($query, (string) $filters['query'], ['content']);
+            }
         }
         if (filled($filters['exclude_message_id'] ?? null)) {
             $query->whereKeyNot((int) $filters['exclude_message_id']);
@@ -424,6 +428,49 @@ class BeanMemoryService
                     $query->orWhere($column, 'like', '%'.$escaped.'%');
                 }
             }
+        });
+    }
+
+    private function whereStrictContent(Builder $query, string $text, array $columns): void
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text) ?: '');
+        if ($text === '') {
+            return;
+        }
+
+        $terms = collect(preg_split('/\s+/u', mb_strtolower($text)) ?: [])
+            ->map(fn (string $term): string => trim($term, " \t\n\r\0\x0B'\".,!?-"))
+            ->filter(fn (string $term): bool => mb_strlen($term) >= 3)
+            ->reject(fn (string $term): bool => in_array($term, [
+                'about', 'after', 'any', 'asked', 'earlier', 'for', 'make', 'made',
+                'note', 'notes', 'request', 'requested', 'smoke', 'the', 'this',
+            ], true))
+            ->unique()
+            ->take(8)
+            ->values();
+
+        $escapedText = addcslashes($text, '%_\\');
+        $query->where(function (Builder $query) use ($terms, $escapedText, $columns): void {
+            foreach (array_values($columns) as $index => $column) {
+                $method = $index === 0 ? 'where' : 'orWhere';
+                $query->{$method}($column, 'like', '%'.$escapedText.'%');
+            }
+
+            if ($terms->isEmpty()) {
+                return;
+            }
+
+            $query->orWhere(function (Builder $query) use ($terms, $columns): void {
+                foreach ($terms as $term) {
+                    $escaped = addcslashes($term, '%_\\');
+                    $query->where(function (Builder $query) use ($columns, $escaped): void {
+                        foreach (array_values($columns) as $index => $column) {
+                            $method = $index === 0 ? 'where' : 'orWhere';
+                            $query->{$method}($column, 'like', '%'.$escaped.'%');
+                        }
+                    });
+                }
+            });
         });
     }
 

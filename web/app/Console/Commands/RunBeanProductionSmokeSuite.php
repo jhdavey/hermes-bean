@@ -359,6 +359,11 @@ class RunBeanProductionSmokeSuite extends Command
             $failures[] = 'missing_request_history';
         }
 
+        $specificHistoryFailure = $this->specificRequestHistoryFailure($promptText, $answerText);
+        if ($specificHistoryFailure !== null) {
+            $failures[] = $specificHistoryFailure;
+        }
+
         return array_values(array_unique($failures));
     }
 
@@ -424,6 +429,37 @@ class RunBeanProductionSmokeSuite extends Command
             || str_contains($promptText, 'which request did i make')
             || str_contains($promptText, 'what was my earlier request')
             || str_contains($promptText, 'what did i request');
+    }
+
+    private function specificRequestHistoryFailure(string $promptText, string $answerText): ?string
+    {
+        if (! $this->promptLooksLikeRequestHistoryRecall($promptText)) {
+            return null;
+        }
+
+        if (str_contains($promptText, 'req-011')) {
+            return str_contains($answerText, 'req-011') ? null : 'wrong_request_history_req_011';
+        }
+
+        if (str_contains($promptText, 'dr chen cardio')) {
+            return str_contains($answerText, 'dr chen cardio') && str_contains($answerText, 'req-011')
+                ? null
+                : 'wrong_request_history_dr_chen';
+        }
+
+        if (str_contains($promptText, 'roofing estimate')) {
+            return str_contains($answerText, 'roofing estimate') && str_contains($answerText, 'req-018')
+                ? null
+                : 'wrong_request_history_roofing';
+        }
+
+        if (str_contains($promptText, 'egg protein note')) {
+            return preg_match('/\b(did not find|didn.t find|no earlier|none|could not find|cannot find)\b/u', $answerText)
+                ? null
+                : 'wrong_request_history_egg_protein';
+        }
+
+        return null;
     }
 
     private function answerAsksUsefulClarifyingQuestion(string $answerText): bool

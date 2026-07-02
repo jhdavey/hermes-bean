@@ -83,6 +83,16 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
             'REQ-091: What do I have coming up today, and if there is empty time after 5pm, suggest a simple plan.',
             'Sounds good.',
         ));
+        $this->assertContains('wrong_request_history_dr_chen', $method->invoke(
+            $command,
+            'REQ-097: What request did I make about Dr Chen Cardio earlier in this smoke run?',
+            'Here is what I found in your request history: REQ-073: Find a nearby Wawa around 32820.',
+        ));
+        $this->assertContains('wrong_request_history_egg_protein', $method->invoke(
+            $command,
+            'REQ-099: What was my earlier request about Egg Protein Note, if any? If there was none, say so clearly.',
+            'Here is what I found in your request history: REQ-053: Create a project follow-up workflow for the budget cleanup.',
+        ));
     }
 
     public function test_smoke_quality_checks_accept_useful_responses(): void
@@ -110,6 +120,16 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
             $command,
             'REQ-076: Find the nearest Home Depot to 32820 and tell me the address quickly.',
             'The nearest Home Depot I found near 32820 is The Home Depot at 350 N Alafaya Trail, Orlando, FL 32828, USA.',
+        ));
+        $this->assertSame([], $method->invoke(
+            $command,
+            'REQ-097: What request did I make about Dr Chen Cardio earlier in this smoke run?',
+            'You asked: REQ-011: Add three calendar events: 7/9 Dr Chen Cardio at 100 N Dean Rd at 3pm.',
+        ));
+        $this->assertSame([], $method->invoke(
+            $command,
+            'REQ-099: What was my earlier request about Egg Protein Note, if any? If there was none, say so clearly.',
+            'I checked your request history, but I did not find anything matching that.',
         ));
     }
 

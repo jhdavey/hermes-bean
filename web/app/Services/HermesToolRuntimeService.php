@@ -517,6 +517,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'query' => $query,
             'workspace_id' => $session->workspace_id,
             'limit' => 8,
+            'strict_query' => true,
         ], $userMessage);
         $toolExecutionMs = $this->elapsedMs($toolStartedAt);
         $assistantContent = $this->assistantSafeResponseContent($this->requestHistoryFallbackContent($toolOutput));
