@@ -585,6 +585,32 @@ String beanSafeAssistantDisplayContent(String content) {
   return content;
 }
 
+@visibleForTesting
+bool beanAssistantMessageShouldStayOutOfChat(HermesMessage message) {
+  if (message.role != 'assistant') return false;
+
+  final runtime = message.metadata['runtime']?.toString();
+  if (runtime == 'missing_run_bridge' ||
+      runtime == 'direct_queue_bridge' ||
+      runtime == 'async_queue_bridge') {
+    return true;
+  }
+
+  final normalized = (message.content ?? '')
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  return normalized ==
+          'i’m checking the latest app state now. if i need one more detail, i’ll ask.' ||
+      normalized ==
+          "i'm checking the latest app state now. if i need one more detail, i'll ask." ||
+      normalized ==
+          'i didn’t receive that request cleanly. please send it once more and i’ll take it from there.' ||
+      normalized ==
+          "i didn't receive that request cleanly. please send it once more and i'll take it from there.";
+}
+
 String _beanErrorGuidance(Object error) {
   if (error is HermesApiException) {
     final subscriptionLimitMessage = _subscriptionLimitMessageFromApiBody(
@@ -4654,7 +4680,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }) {
     _messages.clear();
     if (details != null && details.messages.isNotEmpty) {
-      _messages.addAll(details.messages.map(_displayableAssistantMessage));
+      _messages.addAll(
+        details.messages
+            .map(_displayableChatMessage)
+            .whereType<HermesMessage>(),
+      );
       return;
     }
     _messages.add(
@@ -4793,7 +4823,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       (candidate) => candidate.id == localMessageId,
     );
     if (index == -1) return;
-    _messages[index] = _displayableAssistantMessage(message);
+    final displayMessage = _displayableChatMessage(message);
+    if (displayMessage == null) {
+      _messages.removeAt(index);
+      return;
+    }
+    _messages[index] = displayMessage;
   }
 
   void _beginEditingChatMessage(HermesMessage message) {
@@ -5085,6 +5120,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (!mounted || runToken != _chatRunToken) return;
       final completedBeanIntroduction =
           needsBeanIntroduction && !_userNeedsBeanIntroduction(refreshedUser);
+      final suppressedAssistantMessage =
+          result.assistantMessage != null &&
+          _assistantMessageShouldStayOutOfChat(result.assistantMessage!);
       setState(() {
         if (result.userMessage != null) {
           _replaceChatMessage(localUserMessageId, result.userMessage!);
@@ -5096,7 +5134,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         if (result.status == 'cancelled') {
           _chatRunState = 'Stopped';
         } else if (result.assistantMessage != null) {
-          _messages.add(_displayableAssistantMessage(result.assistantMessage!));
+          final displayMessage = _displayableChatMessage(
+            result.assistantMessage!,
+          );
+          if (displayMessage != null) {
+            _messages.add(displayMessage);
+          } else {
+            _chatRunState = 'Working in background';
+            _ensureBeanRequestWorkItem(trimmed);
+          }
           final assistantContent = result.assistantMessage!.content;
           if (_isPlanLimitMessage(assistantContent)) {
             _error = assistantContent;
@@ -5121,11 +5167,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             ),
           );
         }
-        _chatRunState = switch (result.status) {
-          'blocked' => 'Blocked',
-          'cancelled' => 'Stopped',
-          _ => 'Updated',
-        };
+        _chatRunState = suppressedAssistantMessage
+            ? 'Working in background'
+            : switch (result.status) {
+                'blocked' => 'Blocked',
+                'cancelled' => 'Stopped',
+                _ => 'Updated',
+              };
         _tasks = _tasksWithPendingWrites(refreshedTasks);
         _reminders = _remindersWithPendingWrites(refreshedSummary.reminders);
         _calendar = _calendarEventsForDashboardState(
@@ -5136,8 +5184,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _events = _mergeEvents(result.events, refreshedEvents);
         _applyBeanWorkEvents(_events);
         _applyBeanDashboardMutationEvents(result.events);
-        _completeActiveBeanWorkItems();
+        if (suppressedAssistantMessage) {
+          _ensureBeanRequestWorkItem(trimmed);
+        } else {
+          _completeActiveBeanWorkItems();
+        }
       });
+      if (suppressedAssistantMessage) {
+        unawaited(
+          _retryQueuedBeanRequestUntilAccepted(
+            runToken: runToken,
+            sessionId: session.id,
+            content: trimmed,
+            metadata: messageMetadata,
+            localUserMessageId: localUserMessageId,
+          ),
+        );
+      }
       if (completedBeanIntroduction) {
         unawaited(_startOnboardingTourAfterBeanIntroduction());
       }
@@ -5285,6 +5348,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
 
     setState(() {
+      final suppressedAssistantMessage =
+          result.assistantMessage != null &&
+          _assistantMessageShouldStayOutOfChat(result.assistantMessage!);
       if (result.userMessage != null) {
         _replaceChatMessage(localUserMessageId, result.userMessage!);
         _activeBeanWorkMessageId = result.userMessage!.id;
@@ -5297,15 +5363,27 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           !_messages.any(
             (candidate) => candidate.id == result.assistantMessage!.id,
           )) {
-        _messages.add(_displayableAssistantMessage(result.assistantMessage!));
+        final displayMessage = _displayableChatMessage(
+          result.assistantMessage!,
+        );
+        if (displayMessage != null) {
+          _messages.add(displayMessage);
+        } else {
+          _chatRunState = 'Working in background';
+          _ensureBeanRequestWorkItem(originalContent);
+        }
       }
-      _chatRunState = switch (result.status) {
-        'blocked' => 'Blocked',
-        'cancelled' => 'Stopped',
-        _ => 'Updated',
-      };
-      if (result.status == 'completed') {
+      _chatRunState = suppressedAssistantMessage
+          ? 'Working in background'
+          : switch (result.status) {
+              'blocked' => 'Blocked',
+              'cancelled' => 'Stopped',
+              _ => 'Updated',
+            };
+      if (result.status == 'completed' && !suppressedAssistantMessage) {
         _completeActiveBeanWorkItems();
+      } else if (suppressedAssistantMessage) {
+        _ensureBeanRequestWorkItem(originalContent);
       }
       _activeAssistantRunId = null;
       _error = null;
@@ -5642,7 +5720,10 @@ ${_truncateDiagnostic(stack, 2200)}
             final message = run.assistantMessage;
             if (message != null &&
                 !_messages.any((candidate) => candidate.id == message.id)) {
-              _messages.add(_displayableAssistantMessage(message));
+              final displayMessage = _displayableChatMessage(message);
+              if (displayMessage != null) {
+                _messages.add(displayMessage);
+              }
             } else if (run.status == 'failed') {
               _chatRunState = 'Ready';
             }
@@ -5759,7 +5840,11 @@ ${_truncateDiagnostic(stack, 2200)}
     ).hasMatch(type);
   }
 
-  HermesMessage _displayableAssistantMessage(HermesMessage message) {
+  HermesMessage? _displayableChatMessage(HermesMessage message) {
+    if (_assistantMessageShouldStayOutOfChat(message)) {
+      return null;
+    }
+
     final content = _naturalLanguageContent(message.content);
     final safeContent = content == null
         ? null
@@ -5772,6 +5857,10 @@ ${_truncateDiagnostic(stack, 2200)}
           (message.metadata['runtime'] == 'tools' ? 'Done.' : null),
       metadata: message.metadata,
     );
+  }
+
+  bool _assistantMessageShouldStayOutOfChat(HermesMessage message) {
+    return beanAssistantMessageShouldStayOutOfChat(message);
   }
 
   String? _naturalLanguageContent(String? content) {

@@ -139,6 +139,51 @@ void main() {
     );
   });
 
+  test('internal Bean bridge messages stay out of the visible chat transcript', () {
+    for (final runtime in [
+      'missing_run_bridge',
+      'direct_queue_bridge',
+      'async_queue_bridge',
+    ]) {
+      expect(
+        beanAssistantMessageShouldStayOutOfChat(
+          HermesMessage(
+            id: 1,
+            role: 'assistant',
+            content:
+                'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
+            metadata: {'runtime': runtime},
+          ),
+        ),
+        isTrue,
+      );
+    }
+
+    expect(
+      beanAssistantMessageShouldStayOutOfChat(
+        const HermesMessage(
+          id: 2,
+          role: 'assistant',
+          content:
+              'I didn’t receive that request cleanly. Please send it once more and I’ll take it from there.',
+        ),
+      ),
+      isTrue,
+    );
+
+    expect(
+      beanAssistantMessageShouldStayOutOfChat(
+        const HermesMessage(
+          id: 3,
+          role: 'assistant',
+          content: 'Done - I added that to your calendar.',
+          metadata: {'runtime': 'tools'},
+        ),
+      ),
+      isFalse,
+    );
+  });
+
   test('queued Bean work recovers transient transport failures', () {
     final retryableErrors = [
       const HermesApiException(408, '{"message":"Timeout"}'),
