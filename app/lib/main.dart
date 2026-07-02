@@ -532,6 +532,40 @@ String beanFriendlyChatFailureMessage(Object error) {
   return 'I’m checking the latest app state now. If I need one more detail, I’ll ask.';
 }
 
+String beanSafeAssistantDisplayContent(String content) {
+  final trimmed = content.trim();
+  if (trimmed.isEmpty) return content;
+  final normalized = trimmed.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  final staleFailurePhrases = [
+    'bean could not finish',
+    'could not finish that request',
+    'bean could not complete',
+    'could not complete the requested change',
+    'i could not complete',
+    'i tried to check that live information',
+    'lookup did not return',
+    'lookup didn’t return',
+    "lookup didn't return",
+    'did not return a usable result',
+    'no usable result',
+    'could not get that live lookup back quickly enough',
+    'couldn’t get that live lookup back quickly enough',
+    "couldn't get that live lookup back quickly enough",
+    'live lookup back quickly enough',
+    'i’m still checking',
+    "i'm still checking",
+    'still checking live sources',
+    'still checking live weather',
+    'response did not come through',
+    'something unexpected happened',
+  ];
+  if (staleFailurePhrases.any(normalized.contains)) {
+    return 'I’m checking the latest app state now. If I need one more detail, I’ll ask.';
+  }
+
+  return content;
+}
+
 String _beanErrorGuidance(Object error) {
   if (error is HermesApiException) {
     final subscriptionLimitMessage = _subscriptionLimitMessageFromApiBody(
@@ -5442,11 +5476,15 @@ ${_truncateDiagnostic(stack, 2200)}
 
   HermesMessage _displayableAssistantMessage(HermesMessage message) {
     final content = _naturalLanguageContent(message.content);
+    final safeContent = content == null
+        ? null
+        : beanSafeAssistantDisplayContent(content);
     return HermesMessage(
       id: message.id,
       role: message.role,
       content:
-          content ?? (message.metadata['runtime'] == 'tools' ? 'Done.' : null),
+          safeContent ??
+          (message.metadata['runtime'] == 'tools' ? 'Done.' : null),
       metadata: message.metadata,
     );
   }

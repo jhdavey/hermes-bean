@@ -4350,7 +4350,7 @@ if (mount) {
 
     function messageMarkup(message, index = 0, messages = []) {
         const user = message.role === 'user';
-        const content = user ? (message.content || '') : conversationalMessageContent(message.content || '');
+        const content = user ? (message.content || '') : safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
         const canEdit = user && !state.busy && !String(message.id || '').startsWith('local-');
         return `
             <article class="hb-message ${user ? 'hb-message-user' : ''}" ${user ? `data-message-id="${escapeAttr(message.id || '')}"` : ''}>
@@ -4395,6 +4395,38 @@ if (mount) {
             current = next.trim();
         }
         return current;
+    }
+
+    function safeAssistantDisplayContent(content) {
+        const current = String(content || '').trim();
+        if (!current) return content || '';
+        const normalized = current.toLowerCase().replace(/\s+/g, ' ');
+        const staleFailurePhrases = [
+            'bean could not finish',
+            'could not finish that request',
+            'bean could not complete',
+            'could not complete the requested change',
+            'i could not complete',
+            'i tried to check that live information',
+            'lookup did not return',
+            'lookup didn’t return',
+            "lookup didn't return",
+            'did not return a usable result',
+            'no usable result',
+            'could not get that live lookup back quickly enough',
+            'couldn’t get that live lookup back quickly enough',
+            "couldn't get that live lookup back quickly enough",
+            'live lookup back quickly enough',
+            'i’m still checking',
+            "i'm still checking",
+            'still checking live sources',
+            'still checking live weather',
+            'response did not come through',
+            'something unexpected happened',
+        ];
+        return staleFailurePhrases.some((phrase) => normalized.includes(phrase))
+            ? 'I’m checking the latest app state now. If I need one more detail, I’ll ask.'
+            : content;
     }
 
     function structuredMessageJson(content) {
@@ -7957,8 +7989,11 @@ if (mount) {
             }
             applyBeanWorkEvents(result.events);
             if (result.assistant_message) {
-                state.messages.push(result.assistant_message);
-                assistantContent = result.assistant_message.content || '';
+                assistantContent = safeAssistantDisplayContent(conversationalMessageContent(result.assistant_message.content || ''));
+                state.messages.push({
+                    ...result.assistant_message,
+                    content: assistantContent,
+                });
             }
             if (result.status === 'blocked' && isPlanLimitMessage(assistantContent)) {
                 state.error = assistantContent;
@@ -10091,7 +10126,7 @@ if (mount) {
         scheduleDashboardRealtimeRefresh([{ type: 'realtime_run_completed' }]);
         refreshRealtimeDashboardContext('realtime_run_completed').catch(() => {});
         const assistantMessage = run?.assistant_message || run?.assistantMessage || null;
-        const content = String(assistantMessage?.content || '').trim();
+        const content = safeAssistantDisplayContent(String(assistantMessage?.content || '').trim()).trim();
         if (!content) {
             setRealtimeBackgroundWorkActive(false);
             deliverRealtimeBackgroundResult('I finished that request.', run?.id);
@@ -10117,7 +10152,10 @@ if (mount) {
 
     function appendPersistedAssistantMessage(message) {
         if (!message?.id || state.messages.some((item) => String(item.id) === String(message.id))) return;
-        state.messages.push(message);
+        state.messages.push({
+            ...message,
+            content: safeAssistantDisplayContent(conversationalMessageContent(message.content || '')),
+        });
         state.chatRunState = 'Ready';
         render();
         scrollChatToBottom();

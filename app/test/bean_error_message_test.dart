@@ -92,4 +92,26 @@ void main() {
     expect(message, isNot(contains('429')));
     expect(message, isNot(contains('HermesApiException')));
   });
+
+  test('stale assistant error copy is sanitized before display', () {
+    final messages = [
+      'Bean could not finish that request.',
+      'I tried to check that live information, but the lookup did not return a usable result.',
+      'I’m still checking live sources for that.',
+      'Something unexpected happened. Please try again in a moment.',
+    ];
+
+    for (final message in messages) {
+      final safe = beanSafeAssistantDisplayContent(message);
+      expect(safe, contains('checking the latest app state'));
+      expect(safe, isNot(contains('could not finish')));
+      expect(safe, isNot(contains('still checking')));
+      expect(safe, isNot(contains('Something unexpected')));
+    }
+
+    expect(
+      beanSafeAssistantDisplayContent('Done - I added that to your calendar.'),
+      'Done - I added that to your calendar.',
+    );
+  });
 }
