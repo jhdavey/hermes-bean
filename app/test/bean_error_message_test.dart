@@ -114,4 +114,33 @@ void main() {
       'Done - I added that to your calendar.',
     );
   });
+
+  test('queued Bean work recovers transient transport failures', () {
+    final retryableErrors = [
+      const HermesApiException(408, '{"message":"Timeout"}'),
+      const HermesApiException(500, '{"message":"Server error"}'),
+      const HermesApiException(502, '{"message":"Bad gateway"}'),
+      const HermesApiException(503, '{"message":"Unavailable"}'),
+      const HermesApiException(504, '{"message":"Gateway timeout"}'),
+      const SocketException('offline'),
+      TimeoutException('slow network'),
+    ];
+
+    for (final error in retryableErrors) {
+      expect(beanShouldRecoverQueuedRequest(error), isTrue);
+    }
+
+    expect(
+      beanShouldRecoverQueuedRequest(
+        const HermesApiException(422, '{"message":"Invalid"}'),
+      ),
+      isFalse,
+    );
+    expect(
+      beanShouldRecoverQueuedRequest(
+        const HermesApiException(429, '{"message":"Limit"}'),
+      ),
+      isFalse,
+    );
+  });
 }

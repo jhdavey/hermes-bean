@@ -532,6 +532,17 @@ String beanFriendlyChatFailureMessage(Object error) {
   return 'I’m checking the latest app state now. If I need one more detail, I’ll ask.';
 }
 
+bool beanShouldRecoverQueuedRequest(Object error) {
+  if (error is HermesApiException) {
+    return error.statusCode == 408 ||
+        error.statusCode == 500 ||
+        error.statusCode == 502 ||
+        error.statusCode == 503 ||
+        error.statusCode == 504;
+  }
+  return error is SocketException || error is TimeoutException;
+}
+
 String beanSafeAssistantDisplayContent(String content) {
   final trimmed = content.trim();
   if (trimmed.isEmpty) return content;
@@ -5191,14 +5202,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   bool _shouldRetryQueuedBeanRequest(Object error) {
-    if (error is HermesApiException) {
-      return error.statusCode == 408 ||
-          error.statusCode == 500 ||
-          error.statusCode == 502 ||
-          error.statusCode == 503 ||
-          error.statusCode == 504;
-    }
-    return error is SocketException || error is TimeoutException;
+    return beanShouldRecoverQueuedRequest(error);
   }
 
   bool _shouldUseDirectConversationReply(String content) {
