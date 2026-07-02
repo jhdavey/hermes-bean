@@ -826,6 +826,11 @@ PROMPT;
             ?? $this->sessionDisplayTimezone($session);
         $matches = [];
 
+        $sameDaySequenceActions = $this->deterministicSameDayCalendarSequenceActions($content, $contextPayload, $timezone);
+        if ($sameDaySequenceActions !== []) {
+            return $sameDaySequenceActions;
+        }
+
         $calendarListActions = $this->deterministicDatedCalendarListActions($content, $contextPayload, $timezone);
         if ($calendarListActions !== []) {
             return $calendarListActions;
@@ -1049,6 +1054,133 @@ PROMPT;
         }
 
         return $actions;
+    }
+
+    private function deterministicSameDayCalendarSequenceActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(add|create|schedule|put)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(today|tomorrow|calendar|schedule|event|events|appointment|meeting|block)\b/u', $normalized)) {
+            return [];
+        }
+
+        if (! preg_match_all(
+            '/(?:^|,|\band\s+)\s*(?:add|create|schedule|put)?\s*(?:a\s+|an\s+)?(?<title>[\pL\pN][\pL\pN\s&\'-]{1,80}?)\s+(?<date>today|tomorrow)?\s*from\s+(?<start>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|to|until)\s*(?<end>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/iu',
+            $content,
+            $matches,
+            PREG_SET_ORDER | PREG_OFFSET_CAPTURE
+        )) {
+            return [];
+        }
+
+        if (count($matches) < 2) {
+            return [];
+        }
+
+        $now = $this->deterministicNow($contextPayload, $timezone)->setTimezone($timezone);
+        $actions = [];
+        $eventsByKey = [];
+        foreach ($matches as $index => $match) {
+            $title = $this->cleanDeterministicTitle((string) ($match['title'][0] ?? ''));
+            $title = preg_replace('/\b(?:and|then)\s*$/iu', '', $title) ?: $title;
+            $title = $this->cleanDeterministicTitle($title);
+            if ($title === '' || preg_match('/\b(reminder|remind)\b/iu', $title)) {
+                continue;
+            }
+            $title = str($title)->ucfirst()->toString();
+
+            $dateWord = mb_strtolower(trim((string) ($match['date'][0] ?? '')));
+            $date = $now->copy()->startOfDay();
+            if ($dateWord === 'tomorrow') {
+                $date->addDay();
+            }
+
+            $startText = trim((string) ($match['start'][0] ?? ''));
+            $endText = trim((string) ($match['end'][0] ?? ''));
+            $startMeridiem = $this->meridiemFromTimeText($startText);
+            $endMeridiem = $this->meridiemFromTimeText($endText);
+            if ($startMeridiem === null && $endMeridiem !== null) {
+                $startText .= $endMeridiem;
+            }
+            if ($endMeridiem === null && $startMeridiem !== null) {
+                $endText .= $startMeridiem;
+            }
+
+            $startsAt = $this->deterministicDateWithMeridiemTime($date, $startText, $timezone);
+            $endsAt = $this->deterministicDateWithMeridiemTime($date, $endText, $timezone);
+            if (! $startsAt instanceof Carbon || ! $endsAt instanceof Carbon) {
+                continue;
+            }
+            if ($endsAt->lte($startsAt)) {
+                $endsAt->addDay();
+            }
+
+            $key = 'event_'.$index;
+            $actions[] = [
+                'type' => 'calendar_event.create',
+                'risk' => 'low',
+                'client_action_key' => $key,
+                'parameters' => [
+                    'title' => $title,
+                    'starts_at' => $startsAt->toIso8601String(),
+                    'ends_at' => $endsAt->toIso8601String(),
+                ],
+            ];
+            $eventsByKey[$key] = [
+                'title' => $title,
+                'starts_at' => $startsAt,
+            ];
+        }
+
+        if (count($actions) < 2) {
+            return [];
+        }
+
+        if (preg_match_all('/\b(?:a\s+)?reminder\s+(\d{1,3})\s+minutes?\s+before\s+([\pL\pN\s&\'-]+?)(?=,|\.|$)/iu', $content, $reminderMatches, PREG_SET_ORDER)) {
+            foreach ($reminderMatches as $reminderIndex => $reminderMatch) {
+                $minutes = max(1, min(1440, (int) ($reminderMatch[1] ?? 15)));
+                $hint = mb_strtolower($this->cleanDeterministicTitle((string) ($reminderMatch[2] ?? '')));
+                $relatedKey = null;
+                foreach ($eventsByKey as $key => $event) {
+                    $eventTitle = mb_strtolower((string) ($event['title'] ?? ''));
+                    if ($hint !== '' && (str_contains($eventTitle, $hint) || str_contains($hint, $eventTitle))) {
+                        $relatedKey = $key;
+                        break;
+                    }
+                }
+                if ($relatedKey === null && $eventsByKey !== []) {
+                    $relatedKey = array_key_last($eventsByKey);
+                }
+                if (! is_string($relatedKey) || ! isset($eventsByKey[$relatedKey])) {
+                    continue;
+                }
+
+                $event = $eventsByKey[$relatedKey];
+                $actions[] = [
+                    'type' => 'reminder.create',
+                    'risk' => 'low',
+                    'client_action_key' => 'reminder_'.$reminderIndex,
+                    'related_action_key' => $relatedKey,
+                    'parameters' => [
+                        'title' => 'Reminder: '.$event['title'],
+                        'remind_at' => $event['starts_at']->copy()->subMinutes($minutes)->toIso8601String(),
+                    ],
+                ];
+            }
+        }
+
+        return $actions;
+    }
+
+    private function meridiemFromTimeText(string $timeText): ?string
+    {
+        if (preg_match('/\b(am|pm)\b/iu', $timeText, $match)) {
+            return mb_strtolower((string) ($match[1] ?? ''));
+        }
+
+        return null;
     }
 
     private function existingWorkoutEventForFollowUp(ConversationSession $session, array $contextPayload, string $timezone): ?CalendarEvent
