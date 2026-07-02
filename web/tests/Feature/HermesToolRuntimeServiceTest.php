@@ -187,7 +187,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'create a note with directions to boil an egg',
             'metadata' => [
-                'source' => 'flutter',
+                'source' => 'web',
             ],
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
@@ -2349,7 +2349,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'add workout to my calendar and move grocery shopping to be after that, and delete the reminder',
             'metadata' => [
-                'source' => 'flutter',
+                'source' => 'web',
                 'client_context' => [
                     'current_local_time' => '2026-06-24T15:35:00-04:00',
                     'timezone' => 'America/New_York',

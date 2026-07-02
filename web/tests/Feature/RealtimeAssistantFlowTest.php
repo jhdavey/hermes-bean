@@ -920,6 +920,34 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class, 1);
     }
 
+    public function test_flutter_direct_message_queues_without_calling_synchronous_runtime(): void
+    {
+        Queue::fake();
+
+        $token = $this->apiToken('flutter-queue-first@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $this->bindRuntimeThatFailsIfCalled();
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Can you create calendar events?',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'flutter-queue-first-1',
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.run.status', 'queued')
+            ->assertJsonPath('data.run.metadata.client_request_id', 'flutter-queue-first-1')
+            ->assertJsonPath('data.assistant_message', null);
+
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
+        $this->assertSame(0, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
+    }
+
     public function test_direct_message_returns_bridge_when_direct_runtime_and_queue_fallback_fail(): void
     {
         Queue::fake();
@@ -1459,6 +1487,44 @@ class RealtimeAssistantFlowTest extends TestCase
                         'events' => collect(),
                         'blocker' => null,
                     ];
+                }
+            };
+        });
+    }
+
+    private function bindRuntimeThatFailsIfCalled(): void
+    {
+        $this->app->bind(HermesRuntimeService::class, function (): HermesRuntimeService {
+            return new class implements HermesRuntimeService
+            {
+                public function startSession(array $attributes = []): ConversationSession
+                {
+                    throw new \RuntimeException('Synchronous runtime should not be called.');
+                }
+
+                public function resumeSession(ConversationSession $session): ConversationSession
+                {
+                    throw new \RuntimeException('Synchronous runtime should not be called.');
+                }
+
+                public function cancelSession(ConversationSession $session): ConversationSession
+                {
+                    throw new \RuntimeException('Synchronous runtime should not be called.');
+                }
+
+                public function progressEvents(ConversationSession $session): \Illuminate\Support\Collection
+                {
+                    throw new \RuntimeException('Synchronous runtime should not be called.');
+                }
+
+                public function sendMessage(ConversationSession $session, string $content, array $metadata = []): array
+                {
+                    throw new \RuntimeException('Synchronous runtime should not be called.');
+                }
+
+                public function sendExistingMessage(ConversationSession $session, ConversationMessage $userMessage): array
+                {
+                    throw new \RuntimeException('Synchronous runtime should not be called.');
                 }
             };
         });

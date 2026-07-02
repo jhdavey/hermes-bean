@@ -403,7 +403,7 @@ class AssistantDomainApiTest extends TestCase
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Move lunch tomorrow to next Monday at 12',
             'metadata' => [
-                'source' => 'flutter',
+                'source' => 'web',
                 'client_context' => [
                     'current_local_time' => '2026-05-19T15:09:00-04:00',
                     'timezone_offset' => '-04:00',
@@ -461,7 +461,7 @@ class AssistantDomainApiTest extends TestCase
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => "move tomorrow's lunch to next Monday at 12",
             'metadata' => [
-                'source' => 'flutter',
+                'source' => 'web',
                 'client_context' => [
                     'current_local_time' => '2026-05-19T15:25:00-04:00',
                     'timezone_offset' => '-04:00',
@@ -703,7 +703,7 @@ class AssistantDomainApiTest extends TestCase
             $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
                 'content' => $prompt,
                 'metadata' => [
-                    'source' => 'flutter',
+                    'source' => 'web',
                     'client_context' => [
                         'current_local_time' => '2026-05-19T15:25:00-04:00',
                         'timezone_offset' => '-04:00',

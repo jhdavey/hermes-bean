@@ -99,7 +99,7 @@ class HermesRuntimeApiTest extends TestCase
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages/{$originalMessageId}/branch", [
             'content' => 'Plan tomorrow',
-            'metadata' => ['source' => 'flutter'],
+            'metadata' => ['source' => 'web'],
         ])->assertCreated()
             ->assertJsonPath('data.user_message.content', 'Plan tomorrow')
             ->assertJsonPath('data.user_message.metadata.edited_from_message_id', $originalMessageId)
@@ -413,7 +413,7 @@ class HermesRuntimeApiTest extends TestCase
     private function clientTemporalMetadata(): array
     {
         return [
-            'source' => 'flutter',
+            'source' => 'web',
             'client_context' => [
                 'current_local_time' => '2026-05-18T13:14:00.000',
                 'current_utc_time' => '2026-05-18T17:14:00.000Z',
