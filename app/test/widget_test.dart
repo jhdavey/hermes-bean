@@ -1572,7 +1572,7 @@ void main() {
     expect(find.byKey(const Key('settings-view')), findsOneWidget);
     expect(
       find.textContaining(
-        'Bean hit a snag while trying to refresh your workspace',
+        'Bean is checking the latest app state while trying to refresh your workspace',
       ),
       findsOneWidget,
     );

@@ -19,11 +19,12 @@ void main() {
 
       expect(
         message,
-        contains('Bean hit a snag while trying to save that task.'),
+        contains(
+          'Bean is checking the latest app state while trying to save that task.',
+        ),
       );
       expect(message, isNot(contains('Bean could not')));
-      expect(message, contains('our side'));
-      expect(message, contains('we’ll fix it as soon as possible'));
+      expect(message, contains('reconnecting on our side'));
       expect(message, isNot(contains('SQLSTATE')));
       expect(message, isNot(contains('HermesApiException')));
       expect(message, isNot(contains('500')));
@@ -41,7 +42,9 @@ void main() {
 
     expect(
       message,
-      contains('Bean hit a snag while trying to create your account.'),
+      contains(
+        'Bean is checking the latest app state while trying to create your account.',
+      ),
     );
     expect(message, isNot(contains('Bean could not')));
     expect(message, contains('The email field is required.'));
@@ -58,8 +61,10 @@ void main() {
           action: 'refresh your latest data',
         ),
         allOf(
-          contains('Bean hit a snag while trying to refresh your latest data.'),
-          contains('check your connection'),
+          contains(
+            'Bean is checking the latest app state while trying to refresh your latest data.',
+          ),
+          contains('keep checking once the connection is back'),
           isNot(contains('Bean could not')),
           isNot(contains('10.0.2.2')),
         ),
@@ -67,7 +72,7 @@ void main() {
 
       expect(
         beanFriendlyErrorMessage(TimeoutException('after 30s'), action: 'sync'),
-        allOf(contains('took too long'), isNot(contains('30s'))),
+        allOf(contains('took longer than expected'), isNot(contains('30s'))),
       );
 
       expect(
@@ -110,6 +115,8 @@ void main() {
   test('stale assistant error copy is sanitized before display', () {
     final messages = [
       'Bean could not finish that request.',
+      'Bean hit a snag while trying to handle that request.',
+      'HermesApiException(statusCode: 502)',
       'I tried to check that live information, but the lookup did not return a usable result.',
       'I’m still checking live sources for that.',
       'Something unexpected happened. Please try again in a moment.',
@@ -119,6 +126,9 @@ void main() {
       final safe = beanSafeAssistantDisplayContent(message);
       expect(safe, contains('checking the latest app state'));
       expect(safe, isNot(contains('could not finish')));
+      expect(safe, isNot(contains('hit a snag')));
+      expect(safe, isNot(contains('HermesApiException')));
+      expect(safe, isNot(contains('502')));
       expect(safe, isNot(contains('still checking')));
       expect(safe, isNot(contains('Something unexpected')));
     }

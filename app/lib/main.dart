@@ -512,15 +512,15 @@ bool realtimeVoiceCancelForTesting(String transcript) =>
     _voiceCommandIsCancel(_normalizedVoiceCommand(transcript));
 
 String beanFriendlyErrorMessage(Object error, {String? action}) {
-  final prefix = action == null || action.trim().isEmpty
-      ? 'Bean hit a snag.'
-      : 'Bean hit a snag while trying to ${action.trim()}.';
   final subscriptionLimitMessage = _subscriptionLimitMessageFromError(error);
   if (subscriptionLimitMessage != null) {
     return subscriptionLimitMessage;
   }
+  final prefix = action == null || action.trim().isEmpty
+      ? 'Bean is checking the latest app state.'
+      : 'Bean is checking the latest app state while trying to ${action.trim()}.';
   final guidance = _beanErrorGuidance(error);
-  return '$prefix $guidance Don’t worry — your data is safe, and if this keeps happening we’ll fix it as soon as possible.';
+  return '$prefix $guidance';
 }
 
 String beanFriendlyChatFailureMessage(Object error) {
@@ -553,6 +553,14 @@ String beanSafeAssistantDisplayContent(String content) {
     'bean could not complete',
     'could not complete the requested change',
     'i could not complete',
+    'bean hit a snag',
+    'hermesapiexception',
+    'statuscode:',
+    'status code',
+    'bad gateway',
+    'server error',
+    'gateway timeout',
+    'too many attempts',
     'i tried to check that live information',
     'lookup did not return',
     'lookup didn’t return',
@@ -597,7 +605,7 @@ String _beanErrorGuidance(Object error) {
       404 =>
         'I can’t find that item anymore. It may have been moved or deleted, so try refreshing the app.',
       408 =>
-        'The connection took too long. Please check your internet connection and try again.',
+        'The connection took longer than expected, so Bean is checking whether the request reached the server.',
       409 =>
         'That change bumped into something that was already updated. Please refresh and try once more.',
       422 =>
@@ -605,18 +613,17 @@ String _beanErrorGuidance(Object error) {
       423 =>
         'That action is temporarily blocked while Bean waits on a required connection or approval. Please check Settings and try again.',
       429 =>
-        'Bean is getting too many requests at once. Please give it a moment and try again.',
+        'Bean is handling a lot of requests right now and will keep checking the latest state.',
       >= 500 && < 600 =>
-        'Bean’s service is having a moment on our side. Please try again in a bit.',
-      _ =>
-        'Bean is checking the latest app state. Please try again in a moment.',
+        'Bean’s service is reconnecting on our side and will keep checking the latest state.',
+      _ => 'Bean will keep checking the latest state.',
     };
   }
   if (error is SocketException) {
-    return 'Bean cannot reach the internet right now. Please check your connection and try again.';
+    return 'Bean cannot reach the internet right now, so it will keep checking once the connection is back.';
   }
   if (error is TimeoutException) {
-    return 'The connection took too long. Please check your internet connection and try again.';
+    return 'The connection took longer than expected, so Bean is checking whether the request reached the server.';
   }
   if (error is FormatException || error is TypeError) {
     return 'Bean received something it couldn’t read correctly. Please refresh and try again.';
@@ -624,7 +631,7 @@ String _beanErrorGuidance(Object error) {
   if (error is PlatformException || error is MissingPluginException) {
     return 'I can’t open that on this device. Please update the app or try again.';
   }
-  return 'Bean is checking the latest app state. Please try again in a moment.';
+  return 'Bean will keep checking the latest state.';
 }
 
 String? _subscriptionLimitMessageFromError(Object error) {
@@ -4223,7 +4230,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _error = invalidToken
             ? 'Session expired or the saved sign-in is no longer valid. Please sign in again.'
             : launchedFromRememberedToken
-            ? 'Bean hit a snag refreshing your saved sign-in. Your Remember me token is still saved, so please try again when the connection is back.'
+            ? 'Bean is checking your saved sign-in. Your Remember me token is still saved, and Bean will reconnect when the connection is back.'
             : 'Bean can’t reach your account right now. Please sign in again and Bean will get right back to work.';
         _user = null;
         _session = null;
