@@ -903,6 +903,15 @@ class HermesToolRuntimeServiceTest extends TestCase
                 $chatCalls++;
 
                 if ($chatCalls === 1) {
+                    $toolNames = collect($request->data()['tools'] ?? [])
+                        ->map(fn (array $tool): ?string => data_get($tool, 'function.name'))
+                        ->filter()
+                        ->values();
+                    \PHPUnit\Framework\Assert::assertTrue($toolNames->contains('external_lookup'));
+                    \PHPUnit\Framework\Assert::assertTrue($toolNames->contains('get_day_context'));
+                    \PHPUnit\Framework\Assert::assertFalse($toolNames->contains('create_calendar_event'));
+                    \PHPUnit\Framework\Assert::assertFalse($toolNames->contains('create_task'));
+
                     return Http::response([
                         'id' => 'chatcmpl-weather-tool',
                         'model' => 'gpt-test-tools',

@@ -3280,7 +3280,7 @@ PROMPT;
         ];
         foreach ($externalTerms as $term) {
             if (str_contains($text, $term)) {
-                return 'full';
+                return $this->messageAppearsToRequestAppWrite($message) ? 'full' : 'read_lookup';
             }
         }
 
@@ -3538,29 +3538,43 @@ PROMPT;
             ], ['event_type']),
         ];
 
-        if ($toolMode !== 'app_crud') {
+        if ($toolMode === 'full') {
             return $tools;
         }
 
-        $allowed = [
-            'search_tasks',
-            'search_reminders',
-            'search_calendar_events',
-            'search_notes',
-            'get_day_context',
-            'create_task',
-            'update_task',
-            'delete_task',
-            'create_reminder',
-            'update_reminder',
-            'delete_reminder',
-            'create_calendar_event',
-            'update_calendar_event',
-            'delete_calendar_event',
-            'create_note',
-            'update_note',
-            'delete_note',
-        ];
+        $allowed = match ($toolMode) {
+            'read_lookup' => [
+                'search_tasks',
+                'search_reminders',
+                'search_calendar_events',
+                'search_notes',
+                'search_memory',
+                'get_request_history',
+                'get_activity_timeline',
+                'get_day_context',
+                'external_lookup',
+            ],
+            'app_crud' => [
+                'search_tasks',
+                'search_reminders',
+                'search_calendar_events',
+                'search_notes',
+                'get_day_context',
+                'create_task',
+                'update_task',
+                'delete_task',
+                'create_reminder',
+                'update_reminder',
+                'delete_reminder',
+                'create_calendar_event',
+                'update_calendar_event',
+                'delete_calendar_event',
+                'create_note',
+                'update_note',
+                'delete_note',
+            ],
+            default => [],
+        };
 
         return collect($tools)
             ->filter(fn (array $tool): bool => in_array((string) data_get($tool, 'function.name'), $allowed, true))
