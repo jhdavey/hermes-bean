@@ -2310,6 +2310,53 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(0);
     }
 
+    public function test_app_crud_planner_moves_event_and_creates_relative_reminder_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-move-event-reminder@example.com');
+        $user = User::where('email', 'tool-move-event-reminder@example.com')->firstOrFail();
+        $workspaceId = (int) $user->default_workspace_id;
+        $event = CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Workout',
+            'starts_at' => Carbon::parse('2026-07-02T15:00:00-04:00')->utc(),
+            'ends_at' => Carbon::parse('2026-07-02T15:45:00-04:00')->utc(),
+        ]);
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Move my next workout event to 5:30pm if there is one today, then create a reminder 15 minutes before it.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T08:55:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $events = collect($response->json('data.events'));
+        $this->assertCount(2, $events->where('event_type', 'assistant.work_item.planned'));
+        $this->assertCount(1, $events->where('event_type', 'assistant.calendar_event.updated'));
+        $this->assertCount(1, $events->where('event_type', 'assistant.reminder.created'));
+        $event->refresh();
+        $this->assertSame('2026-07-02T21:30:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-07-02T22:15:00+00:00', $event->ends_at->utc()->toIso8601String());
+        $this->assertDatabaseHas('reminders', [
+            'conversation_session_id' => $sessionId,
+            'calendar_event_id' => $event->id,
+            'title' => 'Reminder: Workout',
+        ]);
+        Http::assertSentCount(0);
+    }
+
     public function test_app_crud_planner_accepts_dash_separated_calendar_dates(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);

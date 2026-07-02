@@ -1383,6 +1383,11 @@ PROMPT;
         $targetDate = $this->deterministicTargetDate($content, $contextPayload);
         $actions = [];
 
+        $moveEventActions = $this->deterministicMoveEventWithOptionalReminderActions($session, $content, $contextPayload, $targetDate);
+        if ($moveEventActions !== []) {
+            return $moveEventActions;
+        }
+
         if (preg_match('/\b(mark|complete|finish)\b/u', $normalized)) {
             if (preg_match('/\b(task|tasks|todo|to-do|to do)\b/u', $normalized)) {
                 $task = $this->resolveTaskForText($session, $content, $targetDate);
@@ -1452,6 +1457,71 @@ PROMPT;
                     }
                 }
             }
+        }
+
+        return $actions;
+    }
+
+    private function deterministicMoveEventWithOptionalReminderActions(ConversationSession $session, string $content, array $contextPayload, ?Carbon $targetDate): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(move|reschedule|change)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(calendar|event|events|appointment|meeting|block|workout|exercise)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(?:to|at|for)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/iu', $content, $timeMatch)) {
+            return [];
+        }
+
+        $event = $this->resolveCalendarEventForMoveRequest($session, $content, $targetDate);
+        if (! $event instanceof CalendarEvent || ! $event->starts_at) {
+            return [];
+        }
+
+        $timezone = $this->sessionDisplayTimezone($session);
+        $baseDate = $targetDate instanceof Carbon
+            ? $targetDate->copy()->setTimezone($timezone)
+            : $event->starts_at->copy()->setTimezone($timezone);
+        $startsAt = $this->deterministicDateWithMeridiemTime($baseDate, (string) ($timeMatch[1] ?? ''), $timezone);
+        if (! $startsAt instanceof Carbon) {
+            return [];
+        }
+
+        $durationSeconds = 3600;
+        if ($event->ends_at instanceof Carbon) {
+            $durationSeconds = max(900, $event->starts_at->diffInSeconds($event->ends_at));
+        }
+
+        $actions[] = [
+            'type' => 'calendar_event.update',
+            'risk' => 'low',
+            'client_action_key' => 'update_event_0',
+            'parameters' => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'starts_at' => $startsAt->toIso8601String(),
+                'ends_at' => $startsAt->copy()->addSeconds($durationSeconds)->toIso8601String(),
+            ],
+        ];
+
+        if (preg_match('/\b(reminder|reminders|remind)\b/u', $normalized)) {
+            $minutesBefore = 15;
+            if (preg_match('/\b(\d{1,3})\s*(?:minute|minutes|min|mins)\s+before\b/iu', $content, $beforeMatch)) {
+                $minutesBefore = max(1, min(1440, (int) ($beforeMatch[1] ?? 15)));
+            }
+
+            $actions[] = [
+                'type' => 'reminder.create',
+                'risk' => 'low',
+                'client_action_key' => 'reminder_0',
+                'parameters' => [
+                    'title' => 'Reminder: '.$event->title,
+                    'calendar_event_id' => $event->id,
+                    'remind_at' => $startsAt->copy()->subMinutes($minutesBefore)->toIso8601String(),
+                ],
+            ];
         }
 
         return $actions;
@@ -1597,6 +1667,42 @@ PROMPT;
         return $this->bestScoredModelForText($query->latest('starts_at')->limit(20)->get(), $content, ['title']);
     }
 
+    private function resolveCalendarEventForMoveRequest(ConversationSession $session, string $content, ?Carbon $targetDate): ?CalendarEvent
+    {
+        $resolved = $this->resolveCalendarEventForText($session, $content, $targetDate);
+        if ($resolved instanceof CalendarEvent) {
+            return $resolved;
+        }
+
+        $normalized = str($content)->lower()->squish()->toString();
+        $titleHint = null;
+        if (preg_match('/\b(workout|exercise)\b/u', $normalized, $match)) {
+            $titleHint = (string) $match[1];
+        }
+        if ($titleHint === null || $titleHint === '') {
+            return null;
+        }
+
+        $query = CalendarEvent::query()
+            ->where('user_id', $session->user_id);
+        if ($session->workspace_id) {
+            $query->where('workspace_id', $session->workspace_id);
+        }
+        if ($targetDate instanceof Carbon) {
+            $query->whereBetween('starts_at', [
+                $targetDate->copy()->startOfDay()->utc(),
+                $targetDate->copy()->endOfDay()->utc(),
+            ]);
+        } else {
+            $query->where('starts_at', '>=', now()->subDays(1));
+        }
+
+        return $query
+            ->where('title', 'like', '%'.$titleHint.'%')
+            ->orderBy('starts_at')
+            ->first();
+    }
+
     private function resolveReminderForText(ConversationSession $session, string $content, ?Carbon $targetDate, ?CalendarEvent $calendarEvent = null): ?Reminder
     {
         if ($calendarEvent instanceof CalendarEvent) {
@@ -1735,6 +1841,28 @@ PROMPT;
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    private function deterministicDateWithMeridiemTime(Carbon $date, string $timeText, string $timezone): ?Carbon
+    {
+        if (! preg_match('/^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*$/iu', $timeText, $match)) {
+            return null;
+        }
+
+        $hour = (int) ($match[1] ?? 0);
+        $minute = (int) ($match[2] ?? 0);
+        if ($hour < 1 || $hour > 12 || $minute < 0 || $minute > 59) {
+            return null;
+        }
+
+        $meridiem = mb_strtolower((string) ($match[3] ?? ''));
+        if ($meridiem === 'pm' && $hour !== 12) {
+            $hour += 12;
+        } elseif ($meridiem === 'am' && $hour === 12) {
+            $hour = 0;
+        }
+
+        return $date->copy()->setTimezone($timezone)->setTime($hour, $minute);
     }
 
     private function localPlannerResponse(array $plannerRoute, array $actions): array
