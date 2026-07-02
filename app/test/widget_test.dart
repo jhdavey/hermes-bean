@@ -5569,6 +5569,39 @@ void main() {
     );
   });
 
+  testWidgets('chat queues direct replies after transient send failures', (
+    WidgetTester tester,
+  ) async {
+    final api = _TransientDirectSendFailureHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Can you create calendar events?',
+    );
+    await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle(const Duration(seconds: 2));
+
+    expect(api.sendMessageCalls, 1);
+    expect(api.queueMessageCalls, 1);
+    expect(api.sentMessageMetadata.single?['client_request_id'], isNotNull);
+    expect(
+      api.sentMessageMetadata.single?['client_request_id'],
+      api.queuedMetadata.single?['client_request_id'],
+    );
+    expect(find.text('Done - I queued that request.'), findsOneWidget);
+    expect(
+      find.textContaining('I hit a snag while working on that'),
+      findsNothing,
+    );
+  });
+
   testWidgets('pull to refresh reloads signed-in views', (
     WidgetTester tester,
   ) async {
@@ -11594,6 +11627,49 @@ class _TransientQueueFailureHermesApiClient
       ),
       assistantMessage: HermesMessage(
         id: 9101,
+        role: 'assistant',
+        content: 'Done - I queued that request.',
+      ),
+      events: [],
+    );
+  }
+}
+
+class _TransientDirectSendFailureHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  final queuedMetadata = <Map<String, Object?>?>[];
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sendMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    throw const HermesApiException(502, '{"message":"Bad gateway"}');
+  }
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    queuedMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 9200,
+        role: 'user',
+        content: 'Can you create calendar events?',
+      ),
+      assistantMessage: HermesMessage(
+        id: 9201,
         role: 'assistant',
         content: 'Done - I queued that request.',
       ),

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AssistantRun;
+use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\User;
 use App\Services\AiUsageService;
@@ -51,6 +52,50 @@ class AssistantRunController extends Controller
                     'assistant_message' => $existingRun->assistantMessage,
                     'events' => [],
                 ]], $existingRun->status === 'completed' ? 200 : 202);
+            }
+
+            $existingUserMessage = ConversationMessage::query()
+                ->where('user_id', $ownedSession->user_id)
+                ->where('conversation_session_id', $ownedSession->id)
+                ->where('role', 'user')
+                ->where('metadata->client_request_id', $clientRequestId)
+                ->latest('id')
+                ->first();
+
+            if ($existingUserMessage instanceof ConversationMessage) {
+                $assistantMessage = ConversationMessage::query()
+                    ->where('user_id', $ownedSession->user_id)
+                    ->where('conversation_session_id', $ownedSession->id)
+                    ->where('role', 'assistant')
+                    ->where('id', '>', $existingUserMessage->id)
+                    ->orderBy('id')
+                    ->first();
+
+                if ($assistantMessage instanceof ConversationMessage) {
+                    return response()->json(['data' => [
+                        'status' => 'completed',
+                        'session' => $ownedSession->refresh(),
+                        'run' => null,
+                        'user_message' => $existingUserMessage,
+                        'assistant_message' => $assistantMessage,
+                        'events' => [],
+                    ]], 200);
+                }
+
+                $queued = $this->runs->queueExistingMessage(
+                    $ownedSession,
+                    $existingUserMessage,
+                    $data['metadata'] ?? [],
+                    $source
+                );
+
+                return response()->json(['data' => [
+                    'status' => 'queued',
+                    'session' => $ownedSession->refresh(),
+                    'run' => $queued['run']->refresh(),
+                    'user_message' => $queued['user_message'],
+                    'events' => [$queued['event']],
+                ]], 202);
             }
         }
 

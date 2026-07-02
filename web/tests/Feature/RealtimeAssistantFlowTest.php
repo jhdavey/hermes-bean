@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Jobs\ProcessAssistantRun;
 use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
+use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\Reminder;
 use App\Models\Task;
@@ -578,6 +579,80 @@ class RealtimeAssistantFlowTest extends TestCase
 
         $this->assertSame($first, $second);
         $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        $this->assertSame(1, ConversationSession::findOrFail($sessionId)->messages()->where('role', 'user')->count());
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
+    }
+
+    public function test_async_run_endpoint_returns_completed_direct_message_for_client_request_id(): void
+    {
+        Queue::fake();
+
+        $token = $this->apiToken('async-run-direct-completed@example.com');
+        $user = User::where('email', 'async-run-direct-completed@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $userMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Can you do that?',
+            'metadata' => ['client_request_id' => 'flutter-direct-test-1'],
+        ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Yes - I can help with that.',
+        ]);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Can you do that?',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'flutter-direct-test-1',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.user_message.id', $userMessage->id)
+            ->assertJsonPath('data.assistant_message.content', 'Yes - I can help with that.');
+
+        $this->assertSame(0, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_async_run_endpoint_queues_existing_direct_message_for_client_request_id(): void
+    {
+        Queue::fake();
+
+        $token = $this->apiToken('async-run-direct-existing@example.com');
+        $user = User::where('email', 'async-run-direct-existing@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $userMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Can you do that?',
+            'metadata' => ['client_request_id' => 'flutter-direct-test-2'],
+        ]);
+
+        $runId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Can you do that?',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'flutter-direct-test-2',
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.user_message.id', $userMessage->id)
+            ->json('data.run.id');
+
+        $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        $this->assertSame($userMessage->id, AssistantRun::findOrFail($runId)->user_message_id);
         $this->assertSame(1, ConversationSession::findOrFail($sessionId)->messages()->where('role', 'user')->count());
         Queue::assertPushed(ProcessAssistantRun::class, 1);
     }

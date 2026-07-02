@@ -57,6 +57,43 @@ class AssistantRunService
         return $queued;
     }
 
+    /**
+     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent}
+     */
+    public function queueExistingMessage(ConversationSession $session, ConversationMessage $userMessage, array $metadata = [], string $source = 'http'): array
+    {
+        $queued = DB::transaction(function () use ($session, $userMessage, $metadata, $source): array {
+            $run = AssistantRun::create([
+                'user_id' => $session->user_id,
+                'workspace_id' => $session->workspace_id,
+                'conversation_session_id' => $session->id,
+                'user_message_id' => $userMessage->id,
+                'source' => $source,
+                'status' => 'queued',
+                'input' => $userMessage->content,
+                'metadata' => $metadata ?: ($userMessage->metadata ?: null),
+            ]);
+
+            $session->update([
+                'status' => 'queued',
+                'last_activity_at' => now(),
+            ]);
+
+            $event = $this->recordEvent($run, 'runtime.run_queued', [
+                'run_id' => $run->id,
+                'message_id' => $userMessage->id,
+                'source' => $source,
+                'reused_user_message' => true,
+            ], 'hermes.runs', 'queued');
+
+            return ['run' => $run, 'user_message' => $userMessage, 'event' => $event];
+        });
+
+        ProcessAssistantRun::dispatch($queued['run']->id);
+
+        return $queued;
+    }
+
     public function cancelRun(AssistantRun $run): AssistantRun
     {
         DB::transaction(function () use ($run): void {

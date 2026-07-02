@@ -4878,26 +4878,50 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             'edited_message_id': editingServerMessageId,
         },
       );
-      final result = needsBeanIntroduction
-          ? await _sendBeanIntroductionMessage(session.id, trimmed)
-          : editingServerMessageId != null
-          ? await widget.apiClient.branchMessage(
-              sessionId: session.id,
-              messageId: editingServerMessageId,
-              content: trimmed,
-              metadata: messageMetadata,
-            )
-          : useDirectConversationReply
-          ? await widget.apiClient.sendMessage(
-              sessionId: session.id,
-              content: trimmed,
-              metadata: messageMetadata,
-            )
-          : await _queueBeanMessageWithRetry(
-              sessionId: session.id,
-              content: trimmed,
-              metadata: messageMetadata,
-            );
+      late final HermesMessageResult result;
+      if (needsBeanIntroduction) {
+        result = await _sendBeanIntroductionMessage(session.id, trimmed);
+      } else if (editingServerMessageId != null) {
+        try {
+          result = await widget.apiClient.branchMessage(
+            sessionId: session.id,
+            messageId: editingServerMessageId,
+            content: trimmed,
+            metadata: messageMetadata,
+          );
+        } catch (error) {
+          if (!_shouldRetryQueuedBeanRequest(error)) rethrow;
+          chatPhase = 'queueing edited Bean message after transient failure';
+          result = await _queueBeanMessageWithRetry(
+            sessionId: session.id,
+            content: trimmed,
+            metadata: messageMetadata,
+          );
+        }
+      } else if (useDirectConversationReply) {
+        try {
+          result = await widget.apiClient.sendMessage(
+            sessionId: session.id,
+            content: trimmed,
+            metadata: messageMetadata,
+          );
+        } catch (error) {
+          if (!_shouldRetryQueuedBeanRequest(error)) rethrow;
+          chatPhase =
+              'queueing Bean conversation reply after transient failure';
+          result = await _queueBeanMessageWithRetry(
+            sessionId: session.id,
+            content: trimmed,
+            metadata: messageMetadata,
+          );
+        }
+      } else {
+        result = await _queueBeanMessageWithRetry(
+          sessionId: session.id,
+          content: trimmed,
+          metadata: messageMetadata,
+        );
+      }
       if (!mounted || runToken != _chatRunToken) return;
       if (result.status == 'queued') {
         setState(() {
