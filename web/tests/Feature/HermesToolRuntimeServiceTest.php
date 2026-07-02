@@ -1094,7 +1094,8 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonPath('data.assistant_message.content', "It's 82°F and partly cloudy in Orlando, Florida, US right now. Feels like 85°F, humidity is 68%, wind is 9 mph from the east.");
 
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
-        Http::assertSentCount(3);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        Http::assertSentCount(2);
     }
 
     public function test_external_lookup_routes_structured_weather_forecast_to_open_meteo(): void
@@ -1204,7 +1205,8 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonPath('data.assistant_message.content', 'Tomorrow in Orlando, Florida, US should be overcast. High 91°F, low 76°F. Precipitation chance up to 40%, wind up to 12 mph.');
 
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
-        Http::assertSentCount(3);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        Http::assertSentCount(2);
         Carbon::setTestNow();
     }
 
@@ -1296,6 +1298,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 && $request->hasHeader('X-Goog-Api-Key', 'google-test-key')
                 && str_contains((string) $request->header('X-Goog-FieldMask')[0], 'places.formattedAddress');
         });
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
     }
@@ -1387,7 +1390,8 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonPath('data.status', 'completed');
 
         $this->assertStringContainsString('16959 E Colonial Dr', (string) $response->json('data.assistant_message.content'));
-        $this->assertSame(1, $chatCalls);
+        $this->assertSame(0, $chatCalls);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
     }

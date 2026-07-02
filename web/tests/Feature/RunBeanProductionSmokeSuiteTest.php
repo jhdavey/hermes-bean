@@ -63,6 +63,16 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
             'REQ-071: Find the nearest Wawa to 32820 and tell me the address quickly.',
             'I found one nearby.',
         ));
+        $this->assertContains('wrong_wawa_32820', $method->invoke(
+            $command,
+            'REQ-071: Find the nearest Wawa to 32820 and tell me the address quickly.',
+            'The nearest Wawa I found near 32820 is Wawa at 6500 Lee Vista Boulevard, Orlando, FL 32822, USA.',
+        ));
+        $this->assertContains('wrong_home_depot_32820', $method->invoke(
+            $command,
+            'REQ-076: Find the nearest Home Depot to 32820 and tell me the address quickly.',
+            'The nearest Home Depot I found near 32820 is Home Depot at 655 East Colonial Drive, Orlando, FL.',
+        ));
         $this->assertContains('missing_memory_confirmation', $method->invoke(
             $command,
             'REQ-081: Remember that I prefer short practical answers unless I ask for detail, then tell me what you saved.',
@@ -95,6 +105,11 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
             $command,
             'REQ-071: Find the nearest Wawa to 32820 and tell me the address quickly.',
             'The nearest Wawa I found near 32820 is Wawa at 16959 E Colonial Dr, Orlando, FL 32820, USA about 1.4 miles away.',
+        ));
+        $this->assertSame([], $method->invoke(
+            $command,
+            'REQ-076: Find the nearest Home Depot to 32820 and tell me the address quickly.',
+            'The nearest Home Depot I found near 32820 is The Home Depot at 350 N Alafaya Trail, Orlando, FL 32828, USA.',
         ));
     }
 

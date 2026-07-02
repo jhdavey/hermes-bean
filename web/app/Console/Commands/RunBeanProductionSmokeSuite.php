@@ -330,12 +330,21 @@ class RunBeanProductionSmokeSuite extends Command
             $failures[] = 'missing_write_confirmation';
         }
 
-        if (str_contains($promptText, 'weather for tomorrow') && ! preg_match('/\b(high|low|weather|rain|storm|clear|overcast|drizzl|showery|precipitation|°f|degrees)\b/u', $answerText)) {
+        if (
+            str_contains($promptText, 'weather for tomorrow')
+            && ! $this->answerAsksUsefulClarifyingQuestion($answerText)
+            && ! preg_match('/\b(high|low|weather|rain|storm|clear|overcast|drizzl|showery|precipitation|°f|degrees)\b/u', $answerText)
+        ) {
             $failures[] = 'missing_weather_details';
         }
 
         if ($this->promptLooksLikePlacesLookup($promptText) && ! preg_match('/\b(address| mi| miles|[0-9]{3,}\s+[a-z])/u', $answerText)) {
             $failures[] = 'missing_place_details';
+        }
+
+        $specificPlaceFailure = $this->specificPlaceLookupFailure($promptText, $answerText);
+        if ($specificPlaceFailure !== null) {
+            $failures[] = $specificPlaceFailure;
         }
 
         if (str_contains($promptText, 'remember that') && ! preg_match('/\b(saved|remembered|bean knowledge|knowledge)\b/u', $answerText)) {
@@ -355,6 +364,10 @@ class RunBeanProductionSmokeSuite extends Command
 
     private function promptLooksLikeWriteRequest(string $promptText): bool
     {
+        if ($this->promptLooksLikeRequestHistoryRecall($promptText)) {
+            return false;
+        }
+
         return (bool) preg_match('/\b(add|create|make|schedule|book|set|move|update|remind me|save a note|pin it|remember that)\b/u', $promptText)
             && ! str_contains($promptText, 'find the weather')
             && ! str_contains($promptText, 'find the nearest')
@@ -371,6 +384,23 @@ class RunBeanProductionSmokeSuite extends Command
         return str_contains($promptText, 'nearest ')
             || str_contains($promptText, 'closest ')
             || str_contains($promptText, 'nearby ');
+    }
+
+    private function specificPlaceLookupFailure(string $promptText, string $answerText): ?string
+    {
+        if (str_contains($promptText, '32820') && str_contains($promptText, 'wawa')) {
+            return str_contains($answerText, '16959') || str_contains($answerText, 'e colonial')
+                ? null
+                : 'wrong_wawa_32820';
+        }
+
+        if (str_contains($promptText, '32820') && str_contains($promptText, 'home depot')) {
+            return str_contains($answerText, '350') || str_contains($answerText, 'alafaya')
+                ? null
+                : 'wrong_home_depot_32820';
+        }
+
+        return null;
     }
 
     private function promptLooksLikeDayContextRequest(string $promptText): bool
@@ -394,6 +424,17 @@ class RunBeanProductionSmokeSuite extends Command
             || str_contains($promptText, 'which request did i make')
             || str_contains($promptText, 'what was my earlier request')
             || str_contains($promptText, 'what did i request');
+    }
+
+    private function answerAsksUsefulClarifyingQuestion(string $answerText): bool
+    {
+        return str_contains($answerText, 'which ')
+            && (
+                str_contains($answerText, 'do you mean')
+                || str_contains($answerText, 'which one')
+                || str_contains($answerText, 'which city')
+                || str_contains($answerText, 'which location')
+            );
     }
 
     /**

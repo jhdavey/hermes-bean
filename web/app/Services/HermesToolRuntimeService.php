@@ -178,6 +178,25 @@ class HermesToolRuntimeService implements HermesRuntimeService
             }
         }
 
+        $directLookupArguments = $this->directExternalLookupArguments($session, $userMessage);
+        if ($directLookupArguments !== null) {
+            $lookupResult = $this->tryRunExternalLookupFastPath(
+                $session,
+                $userMessage,
+                $received,
+                $started,
+                $modelRoute,
+                $prompt,
+                $runtimeStartedAt,
+                $contextBuildMs,
+                $toolMode,
+                $directLookupArguments
+            );
+            if ($lookupResult !== null) {
+                return $lookupResult;
+            }
+        }
+
         $messages = [
             ['role' => 'system', 'content' => $this->toolSystemInstructions()],
             ['role' => 'system', 'content' => "Runtime context:\n".json_encode($contextPayload, JSON_THROW_ON_ERROR)],
@@ -540,6 +559,111 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'model' => $modelRoute['model'],
                     'model_route' => $modelRoute,
                     'read_fast_path' => 'request_history',
+                ],
+            ]);
+
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+            ]);
+
+            $usageLog = $this->usageService->recordCompletion(
+                $session,
+                $userMessage,
+                $assistantMessage,
+                $modelRoute,
+                $prompt,
+                json_encode($responses, JSON_THROW_ON_ERROR),
+                collect()
+            );
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => collect([$received, $started, $completed, $messageCompleted]),
+                'usage' => $usageLog,
+                'blocker' => null,
+            ];
+        });
+
+        $assistantMessage = $result['assistant_message'] ?? null;
+        if ($assistantMessage instanceof ConversationMessage) {
+            $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     */
+    private function tryRunExternalLookupFastPath(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        ActivityEvent $received,
+        ActivityEvent $started,
+        array $modelRoute,
+        string $prompt,
+        float $runtimeStartedAt,
+        int $contextBuildMs,
+        string $toolMode,
+        array $arguments
+    ): ?array {
+        $toolStartedAt = microtime(true);
+        $toolOutput = $this->externalLookupForTool($session, $arguments);
+        $toolExecutionMs = $this->elapsedMs($toolStartedAt);
+
+        if (! filled($toolOutput['text'] ?? null)) {
+            return null;
+        }
+
+        $assistantContent = $this->assistantSafeResponseContent($this->nativeReadFallbackContent([$toolOutput]));
+        $provider = (string) ($toolOutput['provider'] ?? 'external_lookup');
+        $responses = [[
+            'id' => 'local-external-lookup',
+            'model' => 'local-external-lookup',
+            'choices' => [[
+                'finish_reason' => 'stop',
+                'message' => ['role' => 'assistant', 'content' => $assistantContent],
+            ]],
+        ]];
+
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $assistantContent, $runtimeStartedAt, $contextBuildMs, $toolExecutionMs, $toolMode, $provider, $toolOutput): array {
+            $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
+                'message_id' => $userMessage->id,
+                'response_count' => 1,
+                'finish_reason' => 'stop',
+                'tool_mode' => $toolMode,
+                'read_fast_path' => 'external_lookup',
+                'lookup_provider' => $provider,
+                'lookup_kind' => $toolOutput['kind'] ?? null,
+                'duration_ms' => $this->elapsedMs($runtimeStartedAt),
+                'context_build_ms' => $contextBuildMs,
+                'model_call_count' => 0,
+                'model_call_ms' => 0,
+                'model_call_durations_ms' => [],
+                'tool_execution_count' => 1,
+                'tool_execution_ms' => $toolExecutionMs,
+                'tool_execution_durations_ms' => [$toolExecutionMs],
+                'final_response_ms' => 0,
+                'action_count' => 0,
+            ], 'hermes.tools', 'succeeded');
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $assistantContent,
+                'metadata' => [
+                    'runtime' => 'tools',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $modelRoute['model'],
+                    'model_route' => $modelRoute,
+                    'read_fast_path' => 'external_lookup',
+                    'lookup_provider' => $provider,
                 ],
             ]);
 
@@ -4582,6 +4706,131 @@ PROMPT;
         );
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function directExternalLookupArguments(ConversationSession $session, ConversationMessage $message): ?array
+    {
+        if ($this->messageIsCapabilityQuestion($message) || $this->messageIsRequestHistoryRecall($message)) {
+            return null;
+        }
+
+        $content = str((string) $message->content)->squish()->toString();
+        if ($content === '') {
+            return null;
+        }
+
+        $text = str(str_replace('’', "'", $content))
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s\'?.-]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($this->directLookupTextLooksLikeAppWrite($text)) {
+            return null;
+        }
+
+        $weatherArguments = $this->directWeatherLookupArguments($session, $content, $text);
+        if ($weatherArguments !== null) {
+            return $weatherArguments;
+        }
+
+        return $this->directPlacesLookupArguments($content, $text);
+    }
+
+    private function directLookupTextLooksLikeAppWrite(string $text): bool
+    {
+        return (bool) preg_match('/\b(add|create|make|schedule|book|set|move|update|delete|remove|cancel|complete|mark|save|pin|lock)\b/u', $text)
+            && (bool) preg_match('/\b(task|tasks|reminder|reminders|note|notes|calendar|event|events|appointment|appointments|workspace|workspaces|folder|folders)\b/u', $text);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function directWeatherLookupArguments(ConversationSession $session, string $content, string $text): ?array
+    {
+        if (! (bool) config('services.hermes_runtime.weather_lookup_enabled', true)) {
+            return null;
+        }
+
+        if (! preg_match('/\b(weather|forecast|temperature|temp|rain|raining|storm|storming|snow|snowing|humidity|wind|windy|cloudy|sunny)\b/u', $text)) {
+            return null;
+        }
+
+        $location = $this->directWeatherLocation($content);
+        if ($location === '') {
+            return null;
+        }
+
+        $timezone = $this->sessionDisplayTimezone($session);
+        $date = null;
+        $intent = 'current_weather';
+        if (preg_match('/\b(tomorrow|forecast)\b/u', $text)) {
+            $intent = 'weather_forecast';
+            $date = str_contains($text, 'tomorrow')
+                ? now($this->validTimezone($timezone) ? $timezone : config('app.timezone'))->addDay()->toDateString()
+                : null;
+        }
+
+        return array_filter([
+            'query' => $content,
+            'domain' => 'weather',
+            'intent' => $intent,
+            'location' => $location,
+            'date' => $date,
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
+    }
+
+    private function directWeatherLocation(string $content): string
+    {
+        $patterns = [
+            '/\b(?:weather|forecast|temperature|temp|rain|raining|storm|storming|snow|snowing|humidity|wind|windy|cloudy|sunny)\b.*?\b(?:in|for|near|at)\s+(.+?)(?:\s+(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening))?\s*[?.!]*$/iu',
+            '/\b(?:in|for|near|at)\s+(.+?)(?:\s+(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening))?\s*[?.!]*$/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $content, $match)) {
+                $candidate = trim((string) ($match[1] ?? ''));
+                $candidate = preg_replace('/\b(right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening)\b/iu', '', $candidate) ?? $candidate;
+                $candidate = preg_replace('/^\s*(?:in|for|near|at)\s+/iu', '', $candidate) ?? $candidate;
+                $candidate = trim($candidate, " \t\n\r\0\x0B,.?!'\"");
+                if ($candidate !== '' && ! preg_match('/\b(weather|forecast|temperature|temp)\b/iu', $candidate)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function directPlacesLookupArguments(string $content, string $text): ?array
+    {
+        if (! (bool) config('services.hermes_runtime.google_places_enabled', true)) {
+            return null;
+        }
+
+        if (! preg_match('/\b(nearest|closest|nearby|near me|near|around|local)\b/u', $text)) {
+            return null;
+        }
+
+        if (! preg_match('/\b\d{5}(?:-\d{4})?\b/u', $text) && ! preg_match('/\b(?:near|around|in|to)\s+[a-z][a-z\s,.-]+$/iu', $content)) {
+            return null;
+        }
+
+        if (preg_match('/\b(weather|forecast|temperature|temp|news|latest|stock|stocks|score|sports|price|prices)\b/u', $text)) {
+            return null;
+        }
+
+        return [
+            'query' => $content,
+            'domain' => 'places',
+            'intent' => 'nearby_place',
+        ];
+    }
+
     private function messageIsRequestHistoryRecall(ConversationMessage $message): bool
     {
         $text = str(str_replace('’', "'", (string) $message->content))
@@ -4607,8 +4856,10 @@ PROMPT;
             return '';
         }
 
-        if (preg_match('/\bREQ-\d{3}\b/iu', $content, $match)) {
-            return strtoupper((string) ($match[0] ?? ''));
+        $content = preg_replace('/^\s*REQ-\d{3}\s*:\s*/iu', '', $content) ?: $content;
+
+        if (preg_match_all('/\bREQ-\d{3}\b/iu', $content, $matches) && ! empty($matches[0])) {
+            return strtoupper((string) end($matches[0]));
         }
 
         if (preg_match('/\babout\s+(.+?)(?:\s+earlier\b|\s+in\s+this\b|\s+if\s+any\b|\?|\.|$)/iu', $content, $match)) {
