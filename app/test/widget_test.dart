@@ -2563,6 +2563,37 @@ void main() {
     },
   );
 
+  testWidgets('failing Bean voice start shows text fallback instead of snag', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FailingBeanRealtimeConversation(api);
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('chat-view')), findsOneWidget);
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('nav-bean'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(realtime.started, isTrue);
+    expect(
+      find.textContaining('Voice is not available right now'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Bean hit a snag'), findsNothing);
+    expect(find.textContaining('Realtime unavailable'), findsNothing);
+  });
+
   testWidgets('holding the selected Bean button records until release', (
     WidgetTester tester,
   ) async {

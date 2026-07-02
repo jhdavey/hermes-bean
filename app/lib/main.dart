@@ -12647,10 +12647,21 @@ class _CommandCenterContent extends StatelessWidget {
                 onDismissed: onErrorDismissed,
               )
             : null;
+        final inlineError = error != null && !_isPlanLimitMessage(error)
+            ? _InlinePlanLimitError(
+                message: error!,
+                onDismissed: onErrorDismissed,
+              )
+            : null;
         final panelChildren = <Widget>[
           if (limitBanner != null &&
               selectedDestination != _HomeDestination.settings) ...[
             limitBanner,
+            const SizedBox(height: 12),
+          ],
+          if (inlineError != null &&
+              selectedDestination != _HomeDestination.settings) ...[
+            inlineError,
             const SizedBox(height: 12),
           ],
           if (selectedDestination == _HomeDestination.bean)
