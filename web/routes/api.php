@@ -74,6 +74,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/assistant/sessions/{session}/messages', [ConversationMessageController::class, 'store']);
         Route::post('/assistant/sessions/{session}/messages/{message}/branch', [ConversationMessageController::class, 'branch']);
         Route::post('/assistant/sessions/{session}/runs', [AssistantRunController::class, 'store']);
+        Route::get('/assistant/sessions/{session}/runs/lookup', [AssistantRunController::class, 'lookup']);
         Route::get('/assistant/sessions/{session}/events', [ActivityEventController::class, 'index']);
         Route::get('/assistant/runs/{run}', [AssistantRunController::class, 'show']);
         Route::post('/assistant/runs/{run}/cancel', [AssistantRunController::class, 'cancel']);

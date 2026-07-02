@@ -5065,6 +5065,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     required Map<String, Object?> metadata,
   }) async {
     Object? lastError;
+    final clientRequestId = metadata['client_request_id'] is String
+        ? (metadata['client_request_id']! as String).trim()
+        : '';
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         return await widget.apiClient.queueMessage(
@@ -5075,11 +5078,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       } catch (error) {
         lastError = error;
         if (!_shouldRetryQueuedBeanRequest(error) || attempt >= 2) {
-          rethrow;
+          break;
         }
         await Future<void>.delayed(
           Duration(milliseconds: 300 + (attempt * 450)),
         );
+      }
+    }
+
+    if (clientRequestId.isNotEmpty && lastError != null) {
+      try {
+        return await widget.apiClient.lookupQueuedMessage(
+          sessionId: sessionId,
+          clientRequestId: clientRequestId,
+        );
+      } catch (_) {
+        // Keep the original transport error so diagnostics point to the failed
+        // queue request instead of this best-effort recovery lookup.
       }
     }
 

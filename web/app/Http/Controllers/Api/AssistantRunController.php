@@ -132,6 +132,65 @@ class AssistantRunController extends Controller
         ]], 202);
     }
 
+    public function lookup(Request $request, string $session): JsonResponse
+    {
+        $ownedSession = ConversationSession::where('user_id', $request->user()->id)->findOrFail($session);
+        $data = $request->validate([
+            'client_request_id' => ['required', 'string', 'max:120'],
+        ]);
+
+        $clientRequestId = trim((string) $data['client_request_id']);
+        $existingRun = AssistantRun::query()
+            ->where('user_id', $ownedSession->user_id)
+            ->where('conversation_session_id', $ownedSession->id)
+            ->where('metadata->client_request_id', $clientRequestId)
+            ->with(['session', 'userMessage', 'assistantMessage'])
+            ->latest('id')
+            ->first();
+
+        if ($existingRun instanceof AssistantRun) {
+            return response()->json(['data' => [
+                'status' => $existingRun->status,
+                'session' => $existingRun->session?->refresh() ?? $ownedSession->refresh(),
+                'run' => $existingRun->refresh()->load(['session', 'userMessage', 'assistantMessage']),
+                'user_message' => $existingRun->userMessage,
+                'assistant_message' => $existingRun->assistantMessage,
+                'events' => [],
+            ]], $existingRun->status === 'completed' ? 200 : 202);
+        }
+
+        $existingUserMessage = ConversationMessage::query()
+            ->where('user_id', $ownedSession->user_id)
+            ->where('conversation_session_id', $ownedSession->id)
+            ->where('role', 'user')
+            ->where('metadata->client_request_id', $clientRequestId)
+            ->latest('id')
+            ->first();
+
+        if ($existingUserMessage instanceof ConversationMessage) {
+            $assistantMessage = ConversationMessage::query()
+                ->where('user_id', $ownedSession->user_id)
+                ->where('conversation_session_id', $ownedSession->id)
+                ->where('role', 'assistant')
+                ->where('id', '>', $existingUserMessage->id)
+                ->orderBy('id')
+                ->first();
+
+            if ($assistantMessage instanceof ConversationMessage) {
+                return response()->json(['data' => [
+                    'status' => 'completed',
+                    'session' => $ownedSession->refresh(),
+                    'run' => null,
+                    'user_message' => $existingUserMessage,
+                    'assistant_message' => $assistantMessage,
+                    'events' => [],
+                ]]);
+            }
+        }
+
+        return response()->json(['message' => 'No Bean run found for that request.'], 404);
+    }
+
     public function show(Request $request, string $run): JsonResponse
     {
         $ownedRun = AssistantRun::query()

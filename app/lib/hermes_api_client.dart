@@ -1205,6 +1205,19 @@ class HermesApiClient {
     return HermesMessageResult.fromJson(_expectMap(data['data']));
   }
 
+  Future<HermesMessageResult> lookupQueuedMessage({
+    required int sessionId,
+    required String clientRequestId,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/assistant/sessions/$sessionId/runs/lookup', {
+        'client_request_id': clientRequestId,
+      }),
+    );
+    return HermesMessageResult.fromJson(_expectMap(data['data']));
+  }
+
   Future<HermesRealtimeSession> startRealtimeSession({
     String? title,
     String? runtimeMode,

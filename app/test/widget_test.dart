@@ -5569,6 +5569,39 @@ void main() {
     );
   });
 
+  testWidgets('chat recovers queued Bean work after repeated lost responses', (
+    WidgetTester tester,
+  ) async {
+    final api = _LostQueueResponseHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Book a plumber for tomorrow',
+    );
+    await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle(const Duration(seconds: 3));
+
+    expect(api.queueMessageCalls, 3);
+    expect(api.lookupQueuedMessageCalls, 1);
+    expect(api.queuedMetadata, hasLength(3));
+    expect(
+      api.lookupClientRequestId,
+      api.queuedMetadata.first?['client_request_id'],
+    );
+    expect(find.text('Done - I found that queued request.'), findsOneWidget);
+    expect(
+      find.textContaining('I hit a snag while working on that'),
+      findsNothing,
+    );
+  });
+
   testWidgets('chat queues direct replies after transient send failures', (
     WidgetTester tester,
   ) async {
@@ -11629,6 +11662,49 @@ class _TransientQueueFailureHermesApiClient
         id: 9101,
         role: 'assistant',
         content: 'Done - I queued that request.',
+      ),
+      events: [],
+    );
+  }
+}
+
+class _LostQueueResponseHermesApiClient extends _SignedInFakeHermesApiClient {
+  final queuedMetadata = <Map<String, Object?>?>[];
+  int lookupQueuedMessageCalls = 0;
+  String? lookupClientRequestId;
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    queuedMetadata.add(metadata);
+    throw const HermesApiException(502, '{"message":"Bad gateway"}');
+  }
+
+  @override
+  Future<HermesMessageResult> lookupQueuedMessage({
+    required int sessionId,
+    required String clientRequestId,
+  }) async {
+    lookupQueuedMessageCalls++;
+    lookupClientRequestId = clientRequestId;
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 9150,
+        role: 'user',
+        content: 'Book a plumber for tomorrow',
+      ),
+      assistantMessage: HermesMessage(
+        id: 9151,
+        role: 'assistant',
+        content: 'Done - I found that queued request.',
       ),
       events: [],
     );

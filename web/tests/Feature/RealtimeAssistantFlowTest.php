@@ -583,6 +583,31 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class, 1);
     }
 
+    public function test_async_run_lookup_returns_existing_client_request_run(): void
+    {
+        Queue::fake();
+
+        $token = $this->apiToken('async-run-lookup@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $runId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Plan my afternoon',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'flutter-chat-lookup-1',
+            ],
+        ])->assertAccepted()
+            ->json('data.run.id');
+
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/runs/lookup?client_request_id=flutter-chat-lookup-1")
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.run.id', $runId)
+            ->assertJsonPath('data.user_message.content', 'Plan my afternoon');
+    }
+
     public function test_async_run_endpoint_returns_completed_direct_message_for_client_request_id(): void
     {
         Queue::fake();
