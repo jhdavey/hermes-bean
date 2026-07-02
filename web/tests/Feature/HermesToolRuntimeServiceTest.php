@@ -2255,6 +2255,61 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(0);
     }
 
+    public function test_app_crud_planner_handles_note_with_reminder_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-note-reminder@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a note called Quick Dinner Ideas with three fast meals, pin it, and add a reminder tomorrow at 4pm to pick one.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T08:55:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertDatabaseHas('notes', ['title' => 'Quick Dinner Ideas', 'is_pinned' => true]);
+        $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'Pick one from Quick Dinner Ideas']);
+        Http::assertSentCount(0);
+    }
+
+    public function test_app_crud_planner_handles_project_followup_workflow_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-project-followup@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a project follow-up workflow: calendar focus block Friday at 9am, task to prepare notes, and reminder Thursday afternoon.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-02T08:55:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertDatabaseHas('calendar_events', ['conversation_session_id' => $sessionId, 'title' => 'Project follow-up focus block']);
+        $this->assertDatabaseHas('tasks', ['conversation_session_id' => $sessionId, 'title' => 'Prepare notes for project follow-up']);
+        $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'Prepare notes for project follow-up']);
+        Http::assertSentCount(0);
+    }
+
     public function test_app_crud_planner_accepts_dash_separated_calendar_dates(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);

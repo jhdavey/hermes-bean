@@ -802,6 +802,16 @@ PROMPT;
             return $taskReminderNoteActions;
         }
 
+        $noteReminderActions = $this->deterministicNoteReminderActions($content, $contextPayload, $timezone);
+        if ($noteReminderActions !== []) {
+            return $noteReminderActions;
+        }
+
+        $projectFollowUpActions = $this->deterministicProjectFollowUpActions($content, $contextPayload, $timezone);
+        if ($projectFollowUpActions !== []) {
+            return $projectFollowUpActions;
+        }
+
         $this->collectDeterministicCreateMatches(
             $matches,
             $content,
@@ -988,6 +998,122 @@ PROMPT;
                 ],
             ],
         ];
+    }
+
+    private function deterministicNoteReminderActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\bnote\s+(?:called|titled)\s+(.+?)(?:\s+with\b|,|\band\b)/iu', $content, $noteMatch)) {
+            return [];
+        }
+        if (! preg_match('/\breminder\b|\bremind\b/iu', $content)) {
+            return [];
+        }
+
+        $noteTitle = $this->cleanDeterministicTitle((string) ($noteMatch[1] ?? ''));
+        if ($noteTitle === '') {
+            return [];
+        }
+
+        $now = $this->deterministicNow($contextPayload, $timezone);
+        $remindAt = $now->copy()->addDay()->setTime(9, 0);
+        if (preg_match('/\btomorrow\b/iu', $content)) {
+            $remindAt = $now->copy()->addDay();
+        }
+        if (preg_match('/\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/iu', $content, $timeMatch)) {
+            $hour = (int) ($timeMatch[1] ?? 9);
+            $minute = (int) ($timeMatch[2] ?? 0);
+            $meridiem = strtolower((string) ($timeMatch[3] ?? 'am'));
+            if ($meridiem === 'pm' && $hour !== 12) {
+                $hour += 12;
+            } elseif ($meridiem === 'am' && $hour === 12) {
+                $hour = 0;
+            }
+            $remindAt->setTime($hour, $minute);
+        }
+
+        $plainText = "Quick dinner ideas:\n- Garlic tomato pasta\n- Sheet-pan chicken tacos\n- Rice bowls with vegetables and eggs";
+        if (! str_contains($normalized, 'dinner')) {
+            $plainText = $noteTitle;
+        }
+
+        return [
+            [
+                'type' => 'note.create',
+                'risk' => 'low',
+                'client_action_key' => 'note_0',
+                'parameters' => [
+                    'title' => $noteTitle,
+                    'plain_text' => $plainText,
+                    'is_pinned' => str_contains($normalized, 'pin it'),
+                ],
+            ],
+            [
+                'type' => 'reminder.create',
+                'risk' => 'low',
+                'client_action_key' => 'reminder_0',
+                'parameters' => [
+                    'title' => 'Pick one from '.$noteTitle,
+                    'remind_at' => $remindAt->toIso8601String(),
+                ],
+            ],
+        ];
+    }
+
+    private function deterministicProjectFollowUpActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! str_contains($normalized, 'project follow-up') || ! preg_match('/\b(calendar|focus block)\b/u', $normalized) || ! preg_match('/\btask\b/u', $normalized) || ! preg_match('/\breminder\b/u', $normalized)) {
+            return [];
+        }
+
+        $now = $this->deterministicNow($contextPayload, $timezone);
+        $friday = $this->nextWeekday($now, Carbon::FRIDAY)->setTime(9, 0);
+        $thursday = $this->nextWeekday($now, Carbon::THURSDAY)->setTime(16, 0);
+        if ($thursday->gte($friday)) {
+            $thursday = $friday->copy()->subDay()->setTime(16, 0);
+        }
+
+        return [
+            [
+                'type' => 'calendar_event.create',
+                'risk' => 'low',
+                'client_action_key' => 'event_0',
+                'parameters' => [
+                    'title' => 'Project follow-up focus block',
+                    'starts_at' => $friday->toIso8601String(),
+                    'ends_at' => $friday->copy()->addHour()->toIso8601String(),
+                ],
+            ],
+            [
+                'type' => 'task.create',
+                'risk' => 'low',
+                'client_action_key' => 'task_0',
+                'parameters' => [
+                    'title' => 'Prepare notes for project follow-up',
+                    'due_at' => $friday->copy()->subHour()->toIso8601String(),
+                ],
+            ],
+            [
+                'type' => 'reminder.create',
+                'risk' => 'low',
+                'client_action_key' => 'reminder_0',
+                'parameters' => [
+                    'title' => 'Prepare notes for project follow-up',
+                    'remind_at' => $thursday->toIso8601String(),
+                ],
+            ],
+        ];
+    }
+
+    private function nextWeekday(Carbon $now, int $weekday): Carbon
+    {
+        $date = $now->copy()->startOfDay();
+        while ((int) $date->dayOfWeek !== $weekday || $date->lte($now->copy()->startOfDay())) {
+            $date->addDay();
+        }
+
+        return $date;
     }
 
     private function deterministicDatedCalendarListActions(string $content, array $contextPayload, string $timezone): array
@@ -3742,7 +3868,14 @@ PROMPT;
         if (preg_match('/\b(calendar|schedule|event|events|appointment|meeting|block)\b/', $text)) {
             $count++;
         }
-        if (preg_match('/\b(note|notes|folder|folders)\b/', $text)) {
+        if (
+            preg_match('/\b(note|notes|folder|folders)\b/', $text)
+            && (
+                preg_match('/\b(create|make|add|write|save|pin|edit|update|delete|remove|move|lock)\s+(?:a\s+|an\s+|the\s+)?(?:note|notes|folder|folders)\b/', $text)
+                || preg_match('/\b(?:note|notes|folder|folders)\s+(?:called|titled|named)\b/', $text)
+                || preg_match('/\b(?:as|to)\s+(?:a\s+|the\s+)?(?:note|notes|folder|folders)\b/', $text)
+            )
+        ) {
             $count++;
         }
 

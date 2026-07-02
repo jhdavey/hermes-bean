@@ -5,6 +5,8 @@ namespace App\Console\Commands;
 use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\ConversationSession;
+use App\Models\MemoryItem;
+use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
@@ -22,6 +24,7 @@ class RunBeanProductionSmokeSuite extends Command
         {--count=100 : Number of prompts to run}
         {--timeout=45 : Seconds to wait for each queued run}
         {--cleanup : Delete created smoke resources after the run}
+        {--no-reset : Keep existing data in the default smoke account before running}
         {--suite-id= : Optional suite id for traceability}';
 
     protected $description = 'Run complex Bean assistant requests against a dedicated real production account.';
@@ -47,6 +50,10 @@ class RunBeanProductionSmokeSuite extends Command
 
         $workspace = $workspaces->resolveWorkspace($user, null);
         $profiles->ensureForWorkspace($workspace, $user);
+
+        if (! $this->option('no-reset') && $user->email === 'bean-prod-smoke-suite@example.com') {
+            $this->resetSmokeUserData($user);
+        }
 
         $this->info("Running {$count} Bean production smoke requests as {$user->email} in workspace {$workspace->id}.");
         $this->line("Suite: {$suiteId}");
@@ -179,6 +186,15 @@ class RunBeanProductionSmokeSuite extends Command
         CalendarEvent::whereIn('conversation_session_id', $sessionIds)->delete();
         Task::whereIn('conversation_session_id', $sessionIds)->delete();
         Reminder::whereIn('conversation_session_id', $sessionIds)->delete();
+    }
+
+    private function resetSmokeUserData(User $user): void
+    {
+        CalendarEvent::where('user_id', $user->id)->delete();
+        Task::where('user_id', $user->id)->delete();
+        Reminder::where('user_id', $user->id)->delete();
+        Note::where('user_id', $user->id)->delete();
+        MemoryItem::where('user_id', $user->id)->delete();
     }
 
     /**
