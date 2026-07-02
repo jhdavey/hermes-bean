@@ -76,6 +76,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 && str_contains($systemPrompt, 'Do not run a first-login onboarding interview in normal chat')
                 && str_contains($systemPrompt, 'guided signup collects account and Bean preferences')
                 && str_contains($systemPrompt, 'If the user explicitly asks to change Bean preferences later')
+                && str_contains($systemPrompt, 'use get_day_context rather than request history')
                 && data_get($payload, 'messages.1.role') === 'system'
                 && data_get($payload, 'messages.2.role') === 'user'
                 && data_get($payload, 'messages.2.content') === 'hello bean'
