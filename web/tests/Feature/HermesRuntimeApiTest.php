@@ -12,6 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class HermesRuntimeApiTest extends TestCase
@@ -253,6 +254,39 @@ class HermesRuntimeApiTest extends TestCase
         $event = CalendarEvent::where('title', 'Retreat')->firstOrFail();
         $this->assertSame('2026-05-18T17:00:00+00:00', $event->starts_at->utc()->toIso8601String());
         $this->assertSame('2026-05-22T00:00:00+00:00', $event->ends_at->utc()->toIso8601String());
+    }
+
+    public function test_runtime_deterministically_creates_multiple_dated_calendar_items_without_model_planner(): void
+    {
+        Queue::fake();
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
+        ]);
+
+        $token = $this->apiToken('calendar-list@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm',
+            'metadata' => $this->clientTemporalMetadata(),
+        ])->assertCreated()
+            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chen Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+
+        $events = CalendarEvent::where('conversation_session_id', $sessionId)->orderBy('starts_at')->get();
+
+        $this->assertCount(3, $events);
+        $this->assertSame('Dr Chen Cardio', $events[0]->title);
+        $this->assertSame('100 N Dean rd', $events[0]->location);
+        $this->assertSame('2026-07-09T19:00:00+00:00', $events[0]->starts_at->utc()->toIso8601String());
+        $this->assertSame('Ventura', $events[1]->title);
+        $this->assertNull($events[1]->location);
+        $this->assertSame('2026-07-15T22:00:00+00:00', $events[1]->starts_at->utc()->toIso8601String());
+        $this->assertSame('Azalea Lane', $events[2]->title);
+        $this->assertNull($events[2]->location);
+        $this->assertSame('2026-07-19T18:00:00+00:00', $events[2]->starts_at->utc()->toIso8601String());
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
     private function assistantResponse(string $content): array
