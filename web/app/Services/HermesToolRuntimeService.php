@@ -2760,7 +2760,7 @@ PROMPT;
                 'ok' => false,
                 'tool' => $name,
                 'error_code' => 'read_tool_failed',
-                'message' => 'I’m still checking the app data for that. I’ll ask for one more detail if I need it.',
+                'message' => 'I’m checking the latest app data now. I’ll ask for one more detail if I need it.',
             ];
         }
     }

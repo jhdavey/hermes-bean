@@ -529,7 +529,7 @@ String beanFriendlyChatFailureMessage(Object error) {
       guidance.toLowerCase().contains('upgrade')) {
     return guidance;
   }
-  return 'I’m on it. I’m syncing the latest result now.';
+  return 'I’m checking the latest app state now. If I need one more detail, I’ll ask.';
 }
 
 String _beanErrorGuidance(Object error) {
@@ -563,7 +563,8 @@ String _beanErrorGuidance(Object error) {
         'Bean is getting too many requests at once. Please give it a moment and try again.',
       >= 500 && < 600 =>
         'Bean’s service is having a moment on our side. Please try again in a bit.',
-      _ => 'Something unexpected happened. Please try again in a moment.',
+      _ =>
+        'Bean is checking the latest app state. Please try again in a moment.',
     };
   }
   if (error is SocketException) {
@@ -578,7 +579,7 @@ String _beanErrorGuidance(Object error) {
   if (error is PlatformException || error is MissingPluginException) {
     return 'I can’t open that on this device. Please update the app or try again.';
   }
-  return 'Something unexpected happened. Please try again in a moment.';
+  return 'Bean is checking the latest app state. Please try again in a moment.';
 }
 
 String? _subscriptionLimitMessageFromError(Object error) {

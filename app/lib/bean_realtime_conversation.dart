@@ -1060,7 +1060,7 @@ class BeanRealtimeConversation {
       if (run.status == 'failed') {
         _setBackgroundWorkActive(false);
         _deliverBackgroundResult(
-          'I’m on it. I’m syncing the latest result now.',
+          'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
           runId,
         );
         return;

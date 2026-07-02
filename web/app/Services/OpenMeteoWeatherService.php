@@ -696,7 +696,7 @@ class OpenMeteoWeatherService
             'provider' => 'open_meteo',
             'kind' => $kind,
             'error_code' => $errorCode,
-            'message' => 'I’m still checking live weather. I’ll ask for a city or date if I need one more detail.',
+            'message' => 'I’m checking live weather now. I’ll ask for a city or date if I need one more detail.',
         ];
     }
 

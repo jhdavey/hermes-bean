@@ -88,7 +88,7 @@ void main() {
       const HermesApiException(429, '{"message":"Too Many Attempts."}'),
     );
 
-    expect(message, contains('I’m on it.'));
+    expect(message, contains('checking the latest app state'));
     expect(message, isNot(contains('429')));
     expect(message, isNot(contains('HermesApiException')));
   });
