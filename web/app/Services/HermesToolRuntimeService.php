@@ -2757,7 +2757,7 @@ PROMPT;
                 'ok' => false,
                 'tool' => $name,
                 'error_code' => 'read_tool_failed',
-                'message' => 'The lookup failed before it could return a usable result.',
+                'message' => 'I’m still checking the app data for that. I’ll ask for one more detail if I need it.',
             ];
         }
     }
@@ -4369,7 +4369,7 @@ PROMPT;
                 : "I found {$count} matching ".str($tool)->after('search ')->toString().'.';
         }
 
-        return 'I checked, but I could not get a usable result.';
+        return 'I’m still checking that. I’ll ask for one more detail if I need it.';
     }
 
     private function canUseNativeReadFallback(array $toolOutputs): bool

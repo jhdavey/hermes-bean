@@ -187,7 +187,7 @@ class LiveLookupService
         try {
             $origin = $this->googleGeocodeLocation($locationQuery);
             if ($origin === null) {
-                return $this->providerFailure($user, $session, 'google_places', 'google-geocoding', $query, 'places_location_not_found', 'Google could not identify that location.', $startedAt, null, ['stage' => 'geocode']);
+                return $this->providerFailure($user, $session, 'google_places', 'google-geocoding', $query, 'places_location_not_found', 'The location needs a more specific city, zip code, or address.', $startedAt, null, ['stage' => 'geocode']);
             }
 
             $radius = max(1000, (int) config('services.hermes_runtime.google_places_radius_meters', 50000));
@@ -215,7 +215,7 @@ class LiveLookupService
 
             $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
             if (! $response->successful()) {
-                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, 'places_lookup_failed', 'Google Places could not return place results.', $startedAt, $response->status(), ['stage' => 'text_search']);
+                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, 'places_lookup_failed', 'The places provider needs another lookup attempt or a narrower location.', $startedAt, $response->status(), ['stage' => 'text_search']);
             }
 
             $requestedPostalCode = $this->postalCodeFromLocation($locationQuery);
@@ -238,7 +238,7 @@ class LiveLookupService
                 ->all();
 
             if ($places === []) {
-                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, 'places_not_found', 'Google Places did not find a matching place nearby.', $startedAt, null, ['stage' => 'text_search', 'location_query' => $locationQuery]);
+                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, 'places_not_found', 'I need a more specific place name or a wider location to narrow that down.', $startedAt, null, ['stage' => 'text_search', 'location_query' => $locationQuery]);
             }
 
             $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', 'google-places', [
@@ -279,7 +279,7 @@ class LiveLookupService
                 'exception' => $exception->getMessage(),
             ]);
 
-            return $this->providerFailure($user, $session, 'google_places', 'google-places', $query, 'places_lookup_timeout', 'The places lookup timed out before it could return local information.', $startedAt);
+            return $this->providerFailure($user, $session, 'google_places', 'google-places', $query, 'places_lookup_timeout', 'The places lookup is taking longer than expected; continue with another source or ask one focused follow-up.', $startedAt);
         }
     }
 
@@ -311,7 +311,7 @@ class LiveLookupService
 
             $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
             if (! $response->successful()) {
-                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_failed', 'Tavily search failed.', $startedAt, $response->status());
+                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_failed', 'The web provider needs another lookup attempt or a narrower query.', $startedAt, $response->status());
             }
 
             $decoded = $response->json();
@@ -321,7 +321,7 @@ class LiveLookupService
 
             $text = $this->tavilyText($decoded);
             if ($text === '') {
-                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_empty', 'Tavily did not return an answer.', $startedAt);
+                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_empty', 'The web provider returned no direct answer, so use another lookup route or ask one focused follow-up.', $startedAt);
             }
 
             $credits = (float) data_get($decoded, 'usage.credits', 0);
@@ -359,7 +359,7 @@ class LiveLookupService
                 'exception' => $exception->getMessage(),
             ]);
 
-            return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_timeout', 'The web lookup timed out before it could return current information.', $startedAt);
+            return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_timeout', 'The web lookup is taking longer than expected; continue with another source or ask one focused follow-up.', $startedAt);
         }
     }
 
@@ -430,7 +430,7 @@ class LiveLookupService
 
         $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
         if ($lastException !== null || $response === null) {
-            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_timeout', 'The live lookup timed out before it could return current information.', $latencyMs);
+            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_timeout', 'The live lookup is still taking longer than expected; continue with another available source or ask one focused follow-up.', $latencyMs);
         }
 
         if (! $response->successful()) {
@@ -444,7 +444,7 @@ class LiveLookupService
                 'tool_type' => $toolType,
             ]);
 
-            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_failed', 'The external lookup failed.', $latencyMs, $response->status());
+            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_failed', 'The external lookup needs another attempt or a narrower query.', $latencyMs, $response->status());
         }
 
         $decoded = $response->json();
@@ -454,7 +454,7 @@ class LiveLookupService
 
         $text = $this->extractResponseText($decoded);
         if ($text === '') {
-            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_empty', 'The external lookup did not return an answer.', $latencyMs);
+            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_empty', 'The external lookup returned no direct answer; continue with another available source or ask one focused follow-up.', $latencyMs);
         }
 
         $this->usageService->recordDirectCall($user, $session->workspace_id, 'web_search', (string) data_get($decoded, 'model', $this->adminSettings->externalLookupModel()), [

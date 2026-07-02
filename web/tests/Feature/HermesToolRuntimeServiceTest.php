@@ -1704,7 +1704,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 $messages = $request->data()['messages'] ?? [];
                 $toolOutput = collect($messages)->firstWhere('role', 'tool');
                 $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
-                \PHPUnit\Framework\Assert::assertSame('The live lookup timed out before it could return current information.', data_get($lookupResult, 'diagnostic_message'));
+                \PHPUnit\Framework\Assert::assertSame('The live lookup is still taking longer than expected; continue with another available source or ask one focused follow-up.', data_get($lookupResult, 'diagnostic_message'));
 
                 return Http::response([
                     'id' => 'chatcmpl-weather-final',
