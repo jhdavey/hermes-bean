@@ -4863,6 +4863,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _finishBeanVoiceDraft() async {
     if (!_beanVoiceListening) return;
+    setState(() {
+      _chatRunState = 'Thinking…';
+      _beanWorkItems = const [];
+      _beanWorkAcceptsOrphanPlanEvents = false;
+      _beanWorkFinalized = false;
+      _activeBeanWorkMessageId = null;
+      _beanWorkStagedCompletionIds.clear();
+    });
+    _cancelBeanWorkStatusClear();
+    _cancelBeanWorkStageTimers();
     await _realtimeConversation.endVoiceCaptureForTranscriptionOnly();
     final dictated = _beanVoiceDraft?.trim() ?? '';
     await _realtimeConversation.stop();
