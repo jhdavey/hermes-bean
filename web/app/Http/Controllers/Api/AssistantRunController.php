@@ -44,14 +44,13 @@ class AssistantRunController extends Controller
                 ->first();
 
             if ($existingRun instanceof AssistantRun) {
-                return response()->json(['data' => [
-                    'status' => $existingRun->status,
-                    'session' => $existingRun->session?->refresh() ?? $ownedSession->refresh(),
-                    'run' => $existingRun->refresh()->load(['session', 'userMessage', 'assistantMessage']),
-                    'user_message' => $existingRun->userMessage,
-                    'assistant_message' => $existingRun->assistantMessage,
-                    'events' => [],
-                ]], $existingRun->status === 'completed' ? 200 : 202);
+                $existingRun = $this->runs->recoverStaleRun($existingRun, $this->runtime)
+                    ->load(['session', 'userMessage', 'assistantMessage']);
+
+                return response()->json(
+                    ['data' => $this->runResponsePayload($existingRun, $ownedSession)],
+                    $this->runResponseStatus($existingRun)
+                );
             }
 
             $existingUserMessage = ConversationMessage::query()
@@ -149,14 +148,13 @@ class AssistantRunController extends Controller
             ->first();
 
         if ($existingRun instanceof AssistantRun) {
-            return response()->json(['data' => [
-                'status' => $existingRun->status,
-                'session' => $existingRun->session?->refresh() ?? $ownedSession->refresh(),
-                'run' => $existingRun->refresh()->load(['session', 'userMessage', 'assistantMessage']),
-                'user_message' => $existingRun->userMessage,
-                'assistant_message' => $existingRun->assistantMessage,
-                'events' => [],
-            ]], $existingRun->status === 'completed' ? 200 : 202);
+            $existingRun = $this->runs->recoverStaleRun($existingRun, $this->runtime)
+                ->load(['session', 'userMessage', 'assistantMessage']);
+
+            return response()->json(
+                ['data' => $this->runResponsePayload($existingRun, $ownedSession)],
+                $this->runResponseStatus($existingRun)
+            );
         }
 
         $existingUserMessage = ConversationMessage::query()
@@ -212,5 +210,22 @@ class AssistantRunController extends Controller
             ->findOrFail($run);
 
         return response()->json(['data' => $this->runs->cancelRun($ownedRun)], 202);
+    }
+
+    private function runResponsePayload(AssistantRun $run, ConversationSession $fallbackSession): array
+    {
+        return [
+            'status' => $run->status,
+            'session' => $run->session?->refresh() ?? $fallbackSession->refresh(),
+            'run' => $run,
+            'user_message' => $run->userMessage,
+            'assistant_message' => $run->assistantMessage,
+            'events' => [],
+        ];
+    }
+
+    private function runResponseStatus(AssistantRun $run): int
+    {
+        return in_array($run->status, ['completed', 'failed', 'cancelled'], true) ? 200 : 202;
     }
 }
