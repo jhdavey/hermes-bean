@@ -976,6 +976,90 @@ class RealtimeAssistantFlowTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
+    public function test_polling_generic_failed_async_run_returns_bridge_message_instead_of_failed_payload(): void
+    {
+        Queue::fake();
+        $this->bindFailingDirectRuntime();
+
+        $token = $this->apiToken('failed-run-bridge@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $runId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'failed-run-bridge-1',
+            ],
+        ])->assertAccepted()->json('data.run.id');
+
+        AssistantRun::findOrFail($runId)->forceFill([
+            'status' => 'failed',
+            'error' => 'OpenAI upstream socket closed unexpectedly.',
+            'started_at' => now()->subSeconds(20),
+            'completed_at' => now()->subSecond(),
+        ])->save();
+
+        $this->withToken($token)->getJson("/api/assistant/runs/{$runId}")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.error', null)
+            ->assertJsonPath('data.assistant_message.content', 'I’m still checking that request against the latest app data. Tell me any extra detail and I’ll keep going.');
+
+        $run = AssistantRun::findOrFail($runId);
+        $this->assertSame('completed', $run->status);
+        $this->assertNull($run->error);
+        $this->assertTrue((bool) data_get($run->result, 'resolved_failed_run'));
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+    }
+
+    public function test_client_request_lookup_generic_failed_async_run_returns_bridge_message_instead_of_failed_payload(): void
+    {
+        Queue::fake();
+        $this->bindFailingDirectRuntime();
+
+        $token = $this->apiToken('failed-run-lookup-bridge@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $payload = [
+            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'failed-run-lookup-bridge-1',
+            ],
+        ];
+
+        $runId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
+            ->assertAccepted()
+            ->json('data.run.id');
+
+        AssistantRun::findOrFail($runId)->forceFill([
+            'status' => 'failed',
+            'error' => 'OpenAI upstream socket closed unexpectedly.',
+            'started_at' => now()->subSeconds(20),
+            'completed_at' => now()->subSecond(),
+        ])->save();
+
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/runs/lookup?client_request_id=failed-run-lookup-bridge-1")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonPath('data.run.error', null)
+            ->assertJsonPath('data.assistant_message.content', 'I’m still checking that request against the latest app data. Tell me any extra detail and I’ll keep going.');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I’m still checking that request against the latest app data. Tell me any extra detail and I’ll keep going.');
+
+        $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+    }
+
     public function test_activity_poll_closes_expired_stale_run_without_replaying_work(): void
     {
         Queue::fake();

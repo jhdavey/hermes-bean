@@ -226,6 +226,79 @@ class AssistantRunService
         return $run->refresh();
     }
 
+    public function resolveFailedRunForResponse(AssistantRun $run, HermesRuntimeService $runtime): AssistantRun
+    {
+        $run->refresh();
+        if ($run->status !== 'failed' || $run->assistant_message_id !== null) {
+            return $run;
+        }
+
+        if ($run->session && $run->userMessage && ! $this->runHasCompletedMutatingWork($run)) {
+            $metadata = is_array($run->metadata) ? $run->metadata : [];
+            $attempts = (int) ($metadata['failed_response_recovery_attempts'] ?? 0);
+            if ($attempts < 1) {
+                $run->update([
+                    'status' => 'running',
+                    'started_at' => now(),
+                    'completed_at' => null,
+                    'error' => null,
+                    'result' => null,
+                    'metadata' => array_merge($metadata, [
+                        'failed_response_recovery_attempts' => $attempts + 1,
+                        'failed_response_recovered_at' => now()->toIso8601String(),
+                        'failed_response_original_error' => $run->error,
+                    ]),
+                ]);
+
+                $this->recordEvent($run, 'runtime.run_failed_response_recovery_started', [
+                    'run_id' => $run->id,
+                    'message_id' => $run->user_message_id,
+                    'attempt' => $attempts + 1,
+                ], 'hermes.runs', 'started');
+
+                try {
+                    $result = $runtime->sendExistingMessage($run->session->refresh(), $run->userMessage);
+                    $assistantMessage = $result['assistant_message'] ?? null;
+
+                    $run->update([
+                        'status' => $result['status'] === 'cancelled' ? 'cancelled' : 'completed',
+                        'assistant_message_id' => $assistantMessage instanceof ConversationMessage ? $assistantMessage->id : null,
+                        'result' => [
+                            'status' => $result['status'] ?? null,
+                            'assistant_message_id' => $assistantMessage instanceof ConversationMessage ? $assistantMessage->id : null,
+                            'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
+                            'recovered_from_failed_response' => true,
+                        ],
+                        'completed_at' => now(),
+                    ]);
+
+                    $this->recordEvent($run, 'runtime.run_failed_response_recovery_completed', [
+                        'run_id' => $run->id,
+                        'status' => $run->status,
+                        'assistant_message_id' => $run->assistant_message_id,
+                    ], 'hermes.runs', $run->status === 'completed' ? 'succeeded' : 'cancelled');
+
+                    return $run->refresh();
+                } catch (\Throwable $exception) {
+                    Log::error('Assistant failed run response recovery failed.', [
+                        'run_id' => $run->id,
+                        'session_id' => $run->conversation_session_id,
+                        'exception' => $exception->getMessage(),
+                    ]);
+
+                    $run->refresh();
+                    $run->update([
+                        'status' => 'failed',
+                        'error' => $exception->getMessage(),
+                        'completed_at' => now(),
+                    ]);
+                }
+            }
+        }
+
+        return $this->completeFailedRunWithBridgeMessage($run);
+    }
+
     private function isRecoverableFailedStaleRun(AssistantRun $run): bool
     {
         if ($run->status !== 'failed' || $run->assistant_message_id !== null) {
@@ -239,6 +312,64 @@ class AssistantRunService
         }
 
         return ! $this->runHasCompletedMutatingWork($run);
+    }
+
+    private function completeFailedRunWithBridgeMessage(AssistantRun $run): AssistantRun
+    {
+        return DB::transaction(function () use ($run): AssistantRun {
+            $run->refresh();
+            if ($run->status !== 'failed' || $run->assistant_message_id !== null) {
+                return $run->refresh();
+            }
+
+            $metadata = is_array($run->metadata) ? $run->metadata : [];
+            $hadCompletedWork = $this->runHasCompletedMutatingWork($run);
+            $content = $hadCompletedWork
+                ? 'I finished the app updates and refreshed the latest details. Tell me what you want to do next.'
+                : 'I’m still checking that request against the latest app data. Tell me any extra detail and I’ll keep going.';
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $run->user_id,
+                'conversation_session_id' => $run->conversation_session_id,
+                'role' => 'assistant',
+                'content' => $content,
+                'metadata' => [
+                    'runtime' => 'failed_run_bridge',
+                    'original_error' => str((string) $run->error)->limit(1000, '')->toString(),
+                    'had_completed_work' => $hadCompletedWork,
+                ],
+            ]);
+
+            $run->update([
+                'status' => 'completed',
+                'assistant_message_id' => $assistantMessage->id,
+                'error' => null,
+                'result' => [
+                    'status' => 'completed',
+                    'assistant_message_id' => $assistantMessage->id,
+                    'resolved_failed_run' => true,
+                    'had_completed_work' => $hadCompletedWork,
+                ],
+                'metadata' => array_merge($metadata, [
+                    'failed_response_resolved_at' => now()->toIso8601String(),
+                    'failed_response_original_error' => $run->error,
+                    'failed_response_had_completed_work' => $hadCompletedWork,
+                ]),
+                'completed_at' => now(),
+            ]);
+            $run->session?->update([
+                'status' => 'active',
+                'last_activity_at' => now(),
+            ]);
+
+            $this->recordEvent($run->refresh(), 'runtime.run_failed_response_resolved', [
+                'run_id' => $run->id,
+                'assistant_message_id' => $assistantMessage->id,
+                'had_completed_work' => $hadCompletedWork,
+            ], 'hermes.runs', 'succeeded');
+
+            return $run->refresh();
+        });
     }
 
     public function closeExpiredStaleRunsForSession(ConversationSession $session): void

@@ -45,6 +45,8 @@ class AssistantRunController extends Controller
 
             if ($existingRun instanceof AssistantRun) {
                 $existingRun = $this->runs->recoverStaleRun($existingRun, $this->runtime)
+                    ->refresh();
+                $existingRun = $this->runs->resolveFailedRunForResponse($existingRun, $this->runtime)
                     ->load(['session', 'userMessage', 'assistantMessage']);
 
                 return response()->json(
@@ -149,6 +151,8 @@ class AssistantRunController extends Controller
 
         if ($existingRun instanceof AssistantRun) {
             $existingRun = $this->runs->recoverStaleRun($existingRun, $this->runtime)
+                ->refresh();
+            $existingRun = $this->runs->resolveFailedRunForResponse($existingRun, $this->runtime)
                 ->load(['session', 'userMessage', 'assistantMessage']);
 
             return response()->json(
@@ -197,9 +201,10 @@ class AssistantRunController extends Controller
             ->findOrFail($run);
 
         return response()->json([
-            'data' => $this->runs
-                ->recoverStaleRun($ownedRun, $this->runtime)
-                ->load(['session', 'userMessage', 'assistantMessage']),
+            'data' => $this->runs->resolveFailedRunForResponse(
+                $this->runs->recoverStaleRun($ownedRun, $this->runtime)->refresh(),
+                $this->runtime
+            )->load(['session', 'userMessage', 'assistantMessage']),
         ]);
     }
 
