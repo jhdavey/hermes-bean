@@ -5151,15 +5151,40 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
 
     if (clientRequestId.isNotEmpty && lastError != null) {
-      try {
-        return await widget.apiClient.lookupQueuedMessage(
-          sessionId: sessionId,
-          clientRequestId: clientRequestId,
-        );
-      } catch (_) {
-        // Keep the original transport error so diagnostics point to the failed
-        // queue request instead of this best-effort recovery lookup.
+      for (var attempt = 0; attempt < 10; attempt++) {
+        try {
+          return await widget.apiClient.lookupQueuedMessage(
+            sessionId: sessionId,
+            clientRequestId: clientRequestId,
+          );
+        } catch (lookupError) {
+          if (!_shouldRetryQueuedBeanRequest(lookupError) || attempt >= 9) {
+            break;
+          }
+          await Future<void>.delayed(
+            Duration(milliseconds: 350 + (attempt * 250)),
+          );
+        }
       }
+    }
+
+    final fallbackSession = _session;
+    if (fallbackSession != null &&
+        fallbackSession.id == sessionId &&
+        lastError != null &&
+        _shouldRetryQueuedBeanRequest(lastError)) {
+      return HermesMessageResult(
+        status: 'completed',
+        session: fallbackSession,
+        events: const [],
+        assistantMessage: HermesMessage(
+          id: -DateTime.now().microsecondsSinceEpoch,
+          role: 'assistant',
+          content:
+              'I’m reconnecting to Bean now and checking whether that request reached the server.',
+          metadata: const {'runtime': 'local_transport_recovery'},
+        ),
+      );
     }
 
     throw lastError ?? StateError('Bean queue request failed.');
@@ -5168,6 +5193,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _shouldRetryQueuedBeanRequest(Object error) {
     if (error is HermesApiException) {
       return error.statusCode == 408 ||
+          error.statusCode == 500 ||
           error.statusCode == 502 ||
           error.statusCode == 503 ||
           error.statusCode == 504;
