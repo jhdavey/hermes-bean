@@ -218,6 +218,21 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 $message = data_get($response, 'choices.0.message', []);
                 $toolCalls = is_array($message) && is_array($message['tool_calls'] ?? null) ? $message['tool_calls'] : [];
 
+                if ($toolCalls !== [] && $this->messageIsCapabilityQuestion($userMessage)) {
+                    if ($turn >= 1) {
+                        $assistantContent = $this->capabilityQuestionFallbackContent();
+                        $finalResponseDurationMs ??= 0;
+                        break;
+                    }
+
+                    $messages[] = [
+                        'role' => 'system',
+                        'content' => 'The user asked whether Bean can do something, not to do it. Answer the capability question directly in one concise sentence and do not call tools.',
+                    ];
+
+                    continue;
+                }
+
                 if ($toolCalls === []) {
                     $candidateContent = $this->normalizedAssistantContent(data_get($message, 'content', ''));
                     if ($actions !== [] && $this->toolOutputsAllSuccessfulWrites($toolOutputs)) {
@@ -688,6 +703,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
     private function canUseCrudPlanner(ConversationMessage $message): bool
     {
         if (! (bool) config('services.hermes_runtime.crud_planner_enabled', true)) {
+            return false;
+        }
+
+        if ($this->messageIsCapabilityQuestion($message)) {
             return false;
         }
 
@@ -3469,6 +3488,7 @@ For clear create/update/delete requests with multiple independent app changes, e
 Laravel owns app mechanics: workspace access, database writes, validation, syncing, and tool results. Trust tool results. If a read/write tool says not found, ambiguous, or failed, respond naturally from that result.
 Timed read-tool *_at timestamps are formatted in the tool result timezone and match the user-visible app. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date.
 Use external_lookup for live information outside HeyBean, including current store hours, flights, hotel prices, weather, traffic, news, prices, availability, sports scores, or other current web facts. Do not invent current external facts. When external_lookup returns sources or citations, use them to answer concisely, include a brief source title or URL when useful, and mention uncertainty when results are incomplete.
+If the user is only asking whether Bean can create, update, delete, schedule, remember, look up, or otherwise do something, answer the capability question directly. Do not call write tools unless the user includes concrete details that make it an actual request.
 
 Prefer acting on clear scheduling/productivity requests instead of asking for optional details. Infer sensible defaults: current workspace, no category, not critical, no recurrence, and no extra notes unless the user says otherwise. For note requests, create/update/delete Notes records with note tools rather than memory unless the user explicitly asks Bean to remember a preference/fact. For durable user preferences, stable constraints, identity facts, project context, or explicit "remember/forget" requests, use search_memory plus remember_memory/update_memory/forget_memory. Do not save ordinary one-off requests as durable memory. For questions about what is scheduled, coming up, left, remaining, or still needs attention today or on a specific date, use get_day_context rather than request history. For "what did I ask/say/request/do" recall questions, use get_request_history or get_activity_timeline instead of guessing from recent context. For relative dates/times, use temporal_context.client_context and emit local ISO-8601 timestamps with the client's UTC offset.
 When setting recurrence, always use recurrence as one of: none, daily, weekly, monthly, yearly, specific_days, or interval. For custom intervals like "every 3 days", set recurrence to interval and put interval plus interval_unit in metadata. Never put an object in recurrence.
@@ -4017,6 +4037,10 @@ PROMPT;
 
     private function expectedWriteActionCount(ConversationMessage $message): int
     {
+        if ($this->messageIsCapabilityQuestion($message)) {
+            return 0;
+        }
+
         $rawText = str((string) $message->content)->lower()->squish()->toString();
         $text = str($rawText)
             ->lower()
@@ -4061,6 +4085,40 @@ PROMPT;
         }
 
         return max(1, min($count, 6));
+    }
+
+    private function messageIsCapabilityQuestion(ConversationMessage $message): bool
+    {
+        $text = str(str_replace('’', "'", (string) $message->content))
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s\'?.-]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($text === '') {
+            return false;
+        }
+
+        if (
+            ! preg_match('/\?$/u', $text)
+            && ! preg_match('/^(can|could|would|will|do|does|are|is)\b/u', $text)
+        ) {
+            return false;
+        }
+
+        if (preg_match('/\b(that says|saying|called|titled|named|at\s+\d|on\s+\d|tomorrow|today|tonight|this\s+(morning|afternoon|evening|week|month)|next\s+\w+|from\s+\d|to\s+\d|\d{1,2}:\d{2}|for\s+(tomorrow|today|tonight|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/u', $text)) {
+            return false;
+        }
+
+        return (bool) preg_match(
+            '/^(can|could|would|will|do|does|are|is)\s+(you|bean)\b.{0,120}\b(create|add|make|schedule|book|set|update|change|move|reschedule|delete|remove|cancel|complete|mark|remember|forget|look up|find|search|sync|manage|handle|help)\b.{0,80}\??$/u',
+            $text
+        );
+    }
+
+    private function capabilityQuestionFallbackContent(): string
+    {
+        return 'Yes - I can help with that when you give me the details.';
     }
 
     private function nativeActionFallbackContent(array $actions): string
