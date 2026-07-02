@@ -4760,16 +4760,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
     } catch (error) {
       if (!mounted) return;
+      final limitMessage = _subscriptionLimitMessageFromError(error);
       setState(() {
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
-        _chatRunState = 'Ready';
+        _chatRunState = 'Voice unavailable';
         _beanWorkItems = const [];
         _beanWorkAcceptsOrphanPlanEvents = false;
-        _error = beanFriendlyErrorMessage(
-          error,
-          action: 'start realtime voice',
-        );
+        _error =
+            limitMessage ??
+            'Voice is not available right now. Type the request and Bean will handle it from chat.';
       });
     }
   }

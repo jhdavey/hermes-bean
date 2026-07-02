@@ -469,7 +469,7 @@ class BeanRealtimeConversation {
         return;
       case 'error':
         onStatus?.call(
-          _expectErrorMessage(decoded) ?? "Bean voice couldn't connect",
+          _expectErrorMessage(decoded) ?? 'Bean voice is reconnecting',
         );
         unawaited(_logClientEvent('realtime_error', {'payload': decoded}));
         return;
@@ -923,9 +923,9 @@ class BeanRealtimeConversation {
       }
       _sendFunctionOutput(callId, {
         'ok': false,
-        'message': 'Bean hit a snag starting that background work.',
+        'message': 'Bean is routing that request through chat now.',
       });
-      onStatus?.call('work failed');
+      onStatus?.call('checking...');
       unawaited(
         _logClientEvent('realtime_tool_call_failure', {
           'name': name,
@@ -997,7 +997,7 @@ class BeanRealtimeConversation {
       }
     } catch (error) {
       _setBackgroundWorkActive(false);
-      onStatus?.call('work failed');
+      onStatus?.call('checking...');
       unawaited(
         _logClientEvent('realtime_tool_fallback_failure', {
           'message': error.toString(),
