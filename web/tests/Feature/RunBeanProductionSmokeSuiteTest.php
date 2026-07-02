@@ -6,11 +6,13 @@ use App\Console\Commands\RunBeanProductionSmokeSuite;
 use App\Models\ActivityEvent;
 use App\Models\AiUsageLog;
 use App\Models\AssistantRun;
+use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\MemoryEvent;
 use App\Models\MemoryItem;
 use App\Models\Note;
+use App\Models\Reminder;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use ReflectionMethod;
@@ -94,6 +96,107 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
             'REQ-071: Find the nearest Wawa to 32820 and tell me the address quickly.',
             'The nearest Wawa I found near 32820 is Wawa at 16959 E Colonial Dr, Orlando, FL 32820, USA about 1.4 miles away.',
         ));
+    }
+
+    public function test_followup_state_checks_detect_duplicates_and_missing_items(): void
+    {
+        $user = User::factory()->create();
+        $session = ConversationSession::create([
+            'user_id' => $user->id,
+            'title' => 'Followup smoke session',
+            'status' => 'active',
+            'runtime_mode' => 'tools',
+            'last_activity_at' => now(),
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'title' => 'Workout',
+            'starts_at' => now()->addHour(),
+            'ends_at' => now()->addHours(2),
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'title' => 'Workout',
+            'starts_at' => now()->addHours(3),
+            'ends_at' => now()->addHours(4),
+        ]);
+
+        $command = new RunBeanProductionSmokeSuite;
+        $method = new ReflectionMethod($command, 'followupStateFailures');
+        $method->setAccessible(true);
+
+        $failures = $method->invoke($command, $session, [
+            'assertions' => [
+                'calendar_title_counts' => ['Workout' => 1],
+                'minimum_reminder_title_contains_counts' => ['grocery' => 1],
+            ],
+        ]);
+
+        $this->assertContains('calendar_count:Workout:2/1', $failures);
+        $this->assertContains('reminder_min:grocery:0/1', $failures);
+    }
+
+    public function test_followup_state_checks_accept_expected_artifacts(): void
+    {
+        $user = User::factory()->create();
+        $session = ConversationSession::create([
+            'user_id' => $user->id,
+            'title' => 'Followup smoke session',
+            'status' => 'active',
+            'runtime_mode' => 'tools',
+            'last_activity_at' => now(),
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'title' => 'Workout',
+            'starts_at' => now()->addHour(),
+            'ends_at' => now()->addHours(2),
+        ]);
+        Reminder::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'title' => 'Reminder: grocery shopping',
+            'remind_at' => now()->addHour(),
+        ]);
+        $note = Note::create([
+            'user_id' => $user->id,
+            'title' => 'Egg Protein Note',
+            'body_html' => 'Egg Protein Note',
+            'plain_text' => 'Egg Protein Note',
+        ]);
+        ActivityEvent::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'event_type' => 'assistant.note.created',
+            'tool_name' => 'notes.create',
+            'status' => 'succeeded',
+            'payload' => ['note_id' => $note->id],
+        ]);
+        MemoryItem::create([
+            'user_id' => $user->id,
+            'type' => 'preference',
+            'status' => 'active',
+            'visibility' => 'workspace',
+            'content' => 'I prefer concise status updates for errands.',
+            'source_type' => 'assistant_tool',
+            'source_id' => $session->id,
+        ]);
+
+        $command = new RunBeanProductionSmokeSuite;
+        $method = new ReflectionMethod($command, 'followupStateFailures');
+        $method->setAccessible(true);
+
+        $this->assertSame([], $method->invoke($command, $session, [
+            'assertions' => [
+                'calendar_title_counts' => ['Workout' => 1],
+                'minimum_reminder_title_contains_counts' => ['grocery' => 1],
+                'note_title_counts' => ['Egg Protein Note' => 1],
+                'memory_contains' => ['concise status updates'],
+            ],
+        ]));
     }
 
     public function test_smoke_account_reset_clears_ai_usage_logs(): void

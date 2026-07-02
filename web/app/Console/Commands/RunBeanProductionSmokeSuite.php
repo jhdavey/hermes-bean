@@ -14,6 +14,7 @@ use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
 use App\Services\WorkspaceService;
@@ -27,6 +28,7 @@ class RunBeanProductionSmokeSuite extends Command
         {--email=bean-prod-smoke-suite@example.com : Dedicated production smoke user email}
         {--count=100 : Number of prompts to run}
         {--timeout=45 : Seconds to wait for each queued run}
+        {--scenario=single : Smoke scenario to run: single or followups}
         {--cleanup : Delete created smoke resources after the run}
         {--no-reset : Keep existing data in the default smoke account before running}
         {--suite-id= : Optional suite id for traceability}';
@@ -57,6 +59,10 @@ class RunBeanProductionSmokeSuite extends Command
 
         if (! $this->option('no-reset') && $user->email === 'bean-prod-smoke-suite@example.com') {
             $this->resetSmokeUserData($user);
+        }
+
+        if ((string) $this->option('scenario') === 'followups') {
+            return $this->runFollowupSuite($user, $workspace, $runs, $count, $timeout, $suiteId);
         }
 
         $this->info("Running {$count} Bean production smoke requests as {$user->email} in workspace {$workspace->id}.");
@@ -137,6 +143,117 @@ class RunBeanProductionSmokeSuite extends Command
             'passed' => count($results) - $failed->count(),
             'failed' => $failed->count(),
             'elapsed_ms' => $elapsedMs,
+            'results' => $results,
+        ];
+
+        $this->newLine();
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        if ($this->option('cleanup')) {
+            $this->cleanup($user, $suiteId);
+            $this->warn('Cleaned up resources for suite '.$suiteId.'.');
+        }
+
+        return $failed->isEmpty() ? self::SUCCESS : self::FAILURE;
+    }
+
+    private function runFollowupSuite(User $user, Workspace $workspace, AssistantRunService $runs, int $count, int $timeout, string $suiteId): int
+    {
+        $scenarios = array_slice($this->followupScenarios(), 0, $count);
+        $this->info('Running '.count($scenarios)." Bean follow-up smoke conversations as {$user->email} in workspace {$workspace->id}.");
+        $this->line("Suite: {$suiteId}");
+
+        $results = [];
+        $startedAt = microtime(true);
+
+        foreach ($scenarios as $index => $scenario) {
+            $case = $index + 1;
+            $session = ConversationSession::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'created_by_user_id' => $user->id,
+                'title' => "Production follow-up smoke {$case}",
+                'status' => 'active',
+                'runtime_mode' => 'tools',
+                'metadata' => [
+                    'prod_smoke' => true,
+                    'suite_id' => $suiteId,
+                    'case' => $case,
+                    'scenario' => 'followups',
+                    'scenario_name' => $scenario['name'],
+                ],
+                'last_activity_at' => now(),
+            ]);
+
+            $steps = [];
+            foreach ($scenario['steps'] as $stepIndex => $prompt) {
+                $queued = $runs->queueRun($session->refresh(), $prompt, [
+                    'source' => 'production_smoke',
+                    'prod_smoke' => true,
+                    'suite_id' => $suiteId,
+                    'case' => $case,
+                    'scenario' => 'followups',
+                    'scenario_name' => $scenario['name'],
+                    'step' => $stepIndex + 1,
+                    'client_context' => [
+                        'timezone' => 'America/New_York',
+                        'timezone_offset' => '-04:00',
+                        'timezone_offset_minutes' => -240,
+                        'current_local_time' => now('America/New_York')->toIso8601String(),
+                        'current_utc_time' => now('UTC')->toIso8601String(),
+                    ],
+                ], 'production_smoke');
+
+                $run = $this->waitForRun($queued['run'], $timeout);
+                $assistant = $run->assistantMessage?->content ?? '';
+                $durationMs = $run->created_at && $run->updated_at
+                    ? (int) $run->created_at->diffInMilliseconds($run->updated_at, true)
+                    : null;
+                $qualityFailures = $this->assistantQualityFailures($prompt, $assistant);
+                $stepFailed = $run->status !== 'completed' || $this->containsFailureCopy($assistant) || $qualityFailures !== [];
+
+                $steps[] = [
+                    'step' => $stepIndex + 1,
+                    'run_id' => $run->id,
+                    'status' => $run->status,
+                    'duration_ms' => $durationMs,
+                    'failed' => $stepFailed,
+                    'quality_failures' => $qualityFailures,
+                    'prompt' => $prompt,
+                    'assistant' => str($assistant)->squish()->limit(220)->toString(),
+                    'error' => $run->error,
+                ];
+            }
+
+            $stateFailures = $this->followupStateFailures($session->refresh(), $scenario);
+            $failed = collect($steps)->contains('failed', true) || $stateFailures !== [];
+            $results[] = [
+                'case' => $case,
+                'scenario' => $scenario['name'],
+                'session_id' => $session->id,
+                'failed' => $failed,
+                'state_failures' => $stateFailures,
+                'steps' => $steps,
+            ];
+
+            $this->line(sprintf(
+                '[%03d/%03d] %s scenario=%s %s',
+                $case,
+                count($scenarios),
+                $failed ? '<fg=red>FAIL</>' : '<fg=green>PASS</>',
+                $scenario['name'],
+                $stateFailures === [] ? str(collect($steps)->last()['assistant'] ?? 'No response')->squish()->limit(120)->toString() : '['.implode(', ', $stateFailures).']',
+            ));
+        }
+
+        $failed = collect($results)->where('failed', true)->values();
+        $summary = [
+            'suite_id' => $suiteId,
+            'scenario' => 'followups',
+            'count' => count($results),
+            'passed' => count($results) - $failed->count(),
+            'failed' => $failed->count(),
+            'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
             'results' => $results,
         ];
 
@@ -266,6 +383,84 @@ class RunBeanProductionSmokeSuite extends Command
             || str_contains($promptText, 'remains today');
     }
 
+    /**
+     * @param  array<string, mixed>  $scenario
+     * @return list<string>
+     */
+    private function followupStateFailures(ConversationSession $session, array $scenario): array
+    {
+        $assertions = is_array($scenario['assertions'] ?? null) ? $scenario['assertions'] : [];
+        $failures = [];
+
+        foreach ((array) ($assertions['calendar_title_counts'] ?? []) as $title => $expectedCount) {
+            $actual = CalendarEvent::where('conversation_session_id', $session->id)
+                ->whereRaw('lower(title) = ?', [strtolower((string) $title)])
+                ->count();
+            if ($actual !== (int) $expectedCount) {
+                $failures[] = 'calendar_count:'.$title.':'.$actual.'/'.$expectedCount;
+            }
+        }
+
+        foreach ((array) ($assertions['note_title_counts'] ?? []) as $title => $expectedCount) {
+            $actual = $this->notesCreatedInSession($session)
+                ->filter(fn (Note $note): bool => strcasecmp((string) $note->title, (string) $title) === 0)
+                ->count();
+            if ($actual !== (int) $expectedCount) {
+                $failures[] = 'note_count:'.$title.':'.$actual.'/'.$expectedCount;
+            }
+        }
+
+        foreach ((array) ($assertions['reminder_title_contains_counts'] ?? []) as $title => $expectedCount) {
+            $needle = strtolower((string) $title);
+            $actual = Reminder::where('conversation_session_id', $session->id)
+                ->get()
+                ->filter(fn (Reminder $reminder): bool => str_contains(strtolower((string) $reminder->title), $needle))
+                ->count();
+            if ($actual !== (int) $expectedCount) {
+                $failures[] = 'reminder_count:'.$title.':'.$actual.'/'.$expectedCount;
+            }
+        }
+
+        foreach ((array) ($assertions['minimum_reminder_title_contains_counts'] ?? []) as $title => $expectedCount) {
+            $needle = strtolower((string) $title);
+            $actual = Reminder::where('conversation_session_id', $session->id)
+                ->get()
+                ->filter(fn (Reminder $reminder): bool => str_contains(strtolower((string) $reminder->title), $needle))
+                ->count();
+            if ($actual < (int) $expectedCount) {
+                $failures[] = 'reminder_min:'.$title.':'.$actual.'/'.$expectedCount;
+            }
+        }
+
+        foreach ((array) ($assertions['memory_contains'] ?? []) as $needle) {
+            $memoryExists = MemoryItem::where('user_id', $session->user_id)
+                ->where('source_type', 'assistant_tool')
+                ->where('source_id', $session->id)
+                ->get()
+                ->contains(fn (MemoryItem $item): bool => str_contains(strtolower((string) $item->content), strtolower((string) $needle)));
+            if (! $memoryExists) {
+                $failures[] = 'memory_missing:'.$needle;
+            }
+        }
+
+        return array_values(array_unique($failures));
+    }
+
+    private function notesCreatedInSession(ConversationSession $session)
+    {
+        $noteIds = ActivityEvent::where('conversation_session_id', $session->id)
+            ->where('event_type', 'assistant.note.created')
+            ->get()
+            ->map(fn (ActivityEvent $event): mixed => data_get($event->payload ?? [], 'note_id'))
+            ->filter()
+            ->unique()
+            ->values();
+
+        return $noteIds->isEmpty()
+            ? collect()
+            : Note::withTrashed()->whereIn('id', $noteIds)->get();
+    }
+
     private function cleanup(User $user, string $suiteId): void
     {
         $sessionIds = ConversationSession::query()
@@ -328,6 +523,100 @@ class RunBeanProductionSmokeSuite extends Command
         if ($sessionIds->isNotEmpty()) {
             ConversationSession::whereIn('id', $sessionIds)->delete();
         }
+    }
+
+    /**
+     * @return list<array{name: string, steps: list<string>, assertions: array<string, mixed>}>
+     */
+    private function followupScenarios(): array
+    {
+        return [
+            [
+                'name' => 'capability_question_then_calendar_action',
+                'steps' => [
+                    'Can you create calendar events?',
+                    'Great, create one called Test Focus Block tomorrow at 9am for 45 minutes.',
+                ],
+                'assertions' => [
+                    'calendar_title_counts' => [
+                        'Test Focus Block' => 1,
+                    ],
+                ],
+            ],
+            [
+                'name' => 'event_plan_followup_without_duplicate_workout',
+                'steps' => [
+                    'Add a workout today from 5:30pm to 6:30pm. After you add it, ask whether I want grocery shopping and cooking dinner added after it.',
+                    'Yes please. Add grocery shopping for 45 minutes after the workout, then cooking dinner for 30 minutes after grocery shopping, and create 15-minute reminders for both.',
+                ],
+                'assertions' => [
+                    'calendar_title_counts' => [
+                        'Workout' => 1,
+                        'Grocery shopping' => 1,
+                        'Cook dinner' => 1,
+                    ],
+                    'minimum_reminder_title_contains_counts' => [
+                        'grocery' => 1,
+                        'cook' => 1,
+                    ],
+                ],
+            ],
+            [
+                'name' => 'note_followup_reminder_without_duplicate_note',
+                'steps' => [
+                    'Create a note called Boiled Egg Directions with three steps for boiling an egg.',
+                    'Also remind me tomorrow at 8am to review the Boiled Egg Directions note.',
+                ],
+                'assertions' => [
+                    'note_title_counts' => [
+                        'Boiled Egg Directions' => 1,
+                    ],
+                    'minimum_reminder_title_contains_counts' => [
+                        'boiled egg directions' => 1,
+                    ],
+                ],
+            ],
+            [
+                'name' => 'move_event_and_delete_related_reminder',
+                'steps' => [
+                    'Add a workout today from 5pm to 6pm, grocery shopping today from 6pm to 6:45pm, and a reminder 15 minutes before grocery shopping.',
+                    'Move grocery shopping to start after the workout at 6:15pm and delete the grocery shopping reminder.',
+                ],
+                'assertions' => [
+                    'calendar_title_counts' => [
+                        'Workout' => 1,
+                        'Grocery shopping' => 1,
+                    ],
+                    'reminder_title_contains_counts' => [
+                        'grocery shopping' => 0,
+                    ],
+                ],
+            ],
+            [
+                'name' => 'memory_save_then_recall',
+                'steps' => [
+                    'Remember that I prefer concise status updates for errands.',
+                    'What did you just save about errand updates?',
+                ],
+                'assertions' => [
+                    'memory_contains' => [
+                        'concise status updates',
+                    ],
+                ],
+            ],
+            [
+                'name' => 'lookup_then_save_note_from_context',
+                'steps' => [
+                    'How many grams of protein are in a boiled egg? Keep it brief.',
+                    'Save that as a note called Egg Protein Note.',
+                ],
+                'assertions' => [
+                    'note_title_counts' => [
+                        'Egg Protein Note' => 1,
+                    ],
+                ],
+            ],
+        ];
     }
 
     /**
