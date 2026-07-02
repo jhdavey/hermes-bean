@@ -346,6 +346,10 @@ class RunBeanProductionSmokeSuite extends Command
             $failures[] = 'missing_day_context';
         }
 
+        if ($this->promptLooksLikeRequestHistoryRecall($promptText) && ! preg_match('/\b(req-\d{3}|you asked|request history|asked)\b/u', $answerText)) {
+            $failures[] = 'missing_request_history';
+        }
+
         return array_values(array_unique($failures));
     }
 
@@ -381,6 +385,15 @@ class RunBeanProductionSmokeSuite extends Command
             || str_contains($promptText, 'remember today')
             || str_contains($promptText, 'look at today')
             || str_contains($promptText, 'remains today');
+    }
+
+    private function promptLooksLikeRequestHistoryRecall(string $promptText): bool
+    {
+        return str_contains($promptText, 'what did i ask')
+            || str_contains($promptText, 'what request did i make')
+            || str_contains($promptText, 'which request did i make')
+            || str_contains($promptText, 'what was my earlier request')
+            || str_contains($promptText, 'what did i request');
     }
 
     /**
@@ -739,11 +752,13 @@ class RunBeanProductionSmokeSuite extends Command
                 'What tasks, reminders, and events are left today, and give me a concise plan.',
                 'What do I have later today, and identify the next useful gap.',
                 'Review today and suggest the simplest next three steps.',
-                'What is still scheduled today, and tell me what I should do first.',
-                'What is coming up today after lunch, and suggest a low-stress sequence.',
-                'What do I need to remember today, and point out any tight timing.',
-                'Look at today and tell me if my evening is overloaded.',
-                'What remains today, and suggest one practical improvement to the plan.',
+            ],
+            [
+                'What did I ask for REQ-011? Answer with the exact request you find.',
+                'What request did I make about Dr Chen Cardio earlier in this smoke run?',
+                'Which request did I make about Roofing estimate? Include the REQ number.',
+                'What was my earlier request about Egg Protein Note, if any? If there was none, say so clearly.',
+                'What did I request in REQ-100? If it does not exist yet, say you cannot find that request.',
             ],
         );
 
