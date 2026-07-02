@@ -127,7 +127,7 @@ class QuickVoiceReplyController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Quick voice reply failed.',
+                'message' => 'Bean voice is reconnecting. Type the request and Bean will handle it in chat.',
                 'code' => 'openai_quick_voice_failed',
             ], 502);
         }
@@ -141,7 +141,7 @@ class QuickVoiceReplyController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Quick voice reply failed.',
+                'message' => 'Bean voice is reconnecting. Type the request and Bean will handle it in chat.',
                 'code' => 'openai_quick_voice_failed',
                 'status' => $response->status(),
             ], 502);

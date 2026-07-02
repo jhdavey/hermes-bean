@@ -9911,9 +9911,9 @@ if (mount) {
             }
             sendRealtimeFunctionOutput(callId, {
                 ok: false,
-                message: friendlyError(error, 'start that background work'),
+                message: 'Bean is routing that request through chat now.',
             });
-            setKioskVoiceStatus('error', 'work failed');
+            setKioskVoiceStatus('working', 'checking');
         }
     }
 
@@ -9977,7 +9977,7 @@ if (mount) {
             scheduleDashboardRealtimeRefresh([{ type: 'realtime_tool_fallback' }]);
         } catch (error) {
             setRealtimeBackgroundWorkActive(false);
-            setKioskVoiceStatus('error', friendlyError(error, 'start that background work'));
+            setKioskVoiceStatus('working', 'checking');
         }
     }
 
@@ -13569,8 +13569,29 @@ if (mount) {
 
     function friendlyError(error, action) {
         const message = error?.message || 'Something went wrong.';
+        const safeMessage = safeBeanErrorMessage(message);
+        if (safeMessage) return safeMessage;
         if (/failed to fetch/i.test(message)) return `Could not ${action}. Check your connection and try again.`;
         return message;
+    }
+
+    function safeBeanErrorMessage(message) {
+        const text = String(message || '').trim();
+        if (!text) return '';
+        const normalized = text.toLowerCase().replace(/\s+/g, ' ');
+        const staleFailurePhrases = [
+            'bean could not finish',
+            'could not finish that request',
+            'quick voice reply failed',
+            'realtime voice could not be started',
+            'realtime voice could not connect',
+            'work failed',
+            'start that background work',
+            'bean hit a snag starting',
+            "bean voice couldn't connect",
+        ];
+        if (!staleFailurePhrases.some((phrase) => normalized.includes(phrase))) return '';
+        return 'Bean is checking the latest app state now. If voice is unavailable, type the request and Bean will handle it in chat.';
     }
 
     function errorMarkup(message) {

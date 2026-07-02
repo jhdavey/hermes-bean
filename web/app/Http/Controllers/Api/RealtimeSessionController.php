@@ -128,7 +128,7 @@ class RealtimeSessionController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Realtime voice could not be started.',
+                'message' => 'Bean voice is reconnecting. Type the request and Bean will handle it in chat.',
                 'code' => 'openai_realtime_session_failed',
                 'status' => $upstreamStatus,
                 'upstream_message' => $upstreamMessage,
@@ -231,7 +231,7 @@ class RealtimeSessionController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Realtime voice could not connect.',
+                'message' => 'Bean voice is reconnecting. Type the request and Bean will handle it in chat.',
                 'code' => 'openai_realtime_call_failed',
                 'status' => $upstreamStatus,
                 'upstream_message' => $upstreamMessage,
