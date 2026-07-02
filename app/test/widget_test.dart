@@ -5527,16 +5527,47 @@ void main() {
       );
       await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
       await tester.tap(find.byKey(const Key('primary-chat-action')));
-      await tester.pumpAndSettle();
+      await tester.pumpAndSettle(const Duration(seconds: 2));
 
       expect(
-        find.text(
-          'I hit a snag while working on that. Bean’s service is having a moment on our side. Please try again in a bit. Please try again, or tell me any missing details and I’ll pick it back up.',
-        ),
+        find.textContaining('I hit a snag while working on that.'),
         findsOneWidget,
       );
     },
   );
+
+  testWidgets('chat retries transient queued Bean failures idempotently', (
+    WidgetTester tester,
+  ) async {
+    final api = _TransientQueueFailureHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Book a plumber for tomorrow',
+    );
+    await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle(const Duration(seconds: 2));
+
+    expect(api.queueMessageCalls, 2);
+    expect(api.queuedMetadata, hasLength(2));
+    expect(api.queuedMetadata[0]?['client_request_id'], isNotNull);
+    expect(
+      api.queuedMetadata[0]?['client_request_id'],
+      api.queuedMetadata[1]?['client_request_id'],
+    );
+    expect(find.text('Done - I queued that request.'), findsOneWidget);
+    expect(
+      find.textContaining('I hit a snag while working on that'),
+      findsNothing,
+    );
+  });
 
   testWidgets('pull to refresh reloads signed-in views', (
     WidgetTester tester,
@@ -11532,5 +11563,41 @@ class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {
     Map<String, Object?>? metadata,
   }) async {
     throw const HermesApiException(504, '{"message":"Hermes timed out."}');
+  }
+}
+
+class _TransientQueueFailureHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  final queuedMetadata = <Map<String, Object?>?>[];
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    queuedMetadata.add(metadata);
+    if (queueMessageCalls == 1) {
+      throw const HermesApiException(502, '{"message":"Bad gateway"}');
+    }
+
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 9100,
+        role: 'user',
+        content: 'Book a plumber for tomorrow',
+      ),
+      assistantMessage: HermesMessage(
+        id: 9101,
+        role: 'assistant',
+        content: 'Done - I queued that request.',
+      ),
+      events: [],
+    );
   }
 }

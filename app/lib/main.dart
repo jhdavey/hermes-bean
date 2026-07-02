@@ -4869,10 +4869,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           : useDirectConversationReply
           ? 'sending Bean conversation reply'
           : 'queueing Bean chat message';
+      final clientRequestId =
+          'flutter-chat-${DateTime.now().microsecondsSinceEpoch}-$localUserMessageId';
       final messageMetadata = _flutterChatMetadata(
-        additional: editingServerMessageId == null
-            ? const {}
-            : {'edited_message_id': editingServerMessageId},
+        additional: {
+          'client_request_id': clientRequestId,
+          if (editingServerMessageId != null)
+            'edited_message_id': editingServerMessageId,
+        },
       );
       final result = needsBeanIntroduction
           ? await _sendBeanIntroductionMessage(session.id, trimmed)
@@ -4889,7 +4893,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               content: trimmed,
               metadata: messageMetadata,
             )
-          : await widget.apiClient.queueMessage(
+          : await _queueBeanMessageWithRetry(
               sessionId: session.id,
               content: trimmed,
               metadata: messageMetadata,
@@ -5029,6 +5033,43 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
     }
+  }
+
+  Future<HermesMessageResult> _queueBeanMessageWithRetry({
+    required int sessionId,
+    required String content,
+    required Map<String, Object?> metadata,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await widget.apiClient.queueMessage(
+          sessionId: sessionId,
+          content: content,
+          metadata: metadata,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!_shouldRetryQueuedBeanRequest(error) || attempt >= 2) {
+          rethrow;
+        }
+        await Future<void>.delayed(
+          Duration(milliseconds: 300 + (attempt * 450)),
+        );
+      }
+    }
+
+    throw lastError ?? StateError('Bean queue request failed.');
+  }
+
+  bool _shouldRetryQueuedBeanRequest(Object error) {
+    if (error is HermesApiException) {
+      return error.statusCode == 408 ||
+          error.statusCode == 502 ||
+          error.statusCode == 503 ||
+          error.statusCode == 504;
+    }
+    return error is SocketException || error is TimeoutException;
   }
 
   bool _shouldUseDirectConversationReply(String content) {

@@ -548,6 +548,40 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class);
     }
 
+    public function test_async_run_endpoint_reuses_existing_client_request_id(): void
+    {
+        Queue::fake();
+
+        $token = $this->apiToken('async-run-idempotent@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $payload = [
+            'content' => 'Plan my afternoon',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'flutter-chat-test-1',
+            ],
+        ];
+
+        $first = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->json('data.run.id');
+
+        $second = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.user_message.content', 'Plan my afternoon')
+            ->json('data.run.id');
+
+        $this->assertSame($first, $second);
+        $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        $this->assertSame(1, ConversationSession::findOrFail($sessionId)->messages()->where('role', 'user')->count());
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
+    }
+
     public function test_polling_stale_async_run_recovers_deterministic_calendar_work(): void
     {
         Queue::fake();

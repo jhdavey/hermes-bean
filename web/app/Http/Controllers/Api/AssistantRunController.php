@@ -32,6 +32,28 @@ class AssistantRunController extends Controller
         ]);
         $user = User::findOrFail($ownedSession->user_id);
         $source = (string) ($data['source'] ?? 'http');
+        $clientRequestId = trim((string) data_get($data, 'metadata.client_request_id', ''));
+        if ($clientRequestId !== '') {
+            $existingRun = AssistantRun::query()
+                ->where('user_id', $ownedSession->user_id)
+                ->where('conversation_session_id', $ownedSession->id)
+                ->where('metadata->client_request_id', $clientRequestId)
+                ->with(['session', 'userMessage', 'assistantMessage'])
+                ->latest('id')
+                ->first();
+
+            if ($existingRun instanceof AssistantRun) {
+                return response()->json(['data' => [
+                    'status' => $existingRun->status,
+                    'session' => $existingRun->session?->refresh() ?? $ownedSession->refresh(),
+                    'run' => $existingRun->refresh()->load(['session', 'userMessage', 'assistantMessage']),
+                    'user_message' => $existingRun->userMessage,
+                    'assistant_message' => $existingRun->assistantMessage,
+                    'events' => [],
+                ]], $existingRun->status === 'completed' ? 200 : 202);
+            }
+        }
+
         $preflight = $this->usage->preflightDirect(
             $user,
             $ownedSession->workspace_id,
