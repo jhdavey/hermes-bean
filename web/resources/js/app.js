@@ -2863,6 +2863,12 @@ if (mount) {
         refreshBeanStatusTag();
     }
 
+    function ensureBeanWorkItemsForContent(content) {
+        if (state.beanWorkItems.some((item) => !beanWorkItemDone(item))) return;
+        const labels = beanWorkLabelsForTurn(content);
+        if (labels.length) resetBeanWorkItems(labels);
+    }
+
     function maxActivityEventId(events = []) {
         return normalizeList(events).reduce((maxId, event) => {
             const eventId = Number(event?.id || 0);
@@ -7921,6 +7927,7 @@ if (mount) {
         activeChatRequestId = requestId;
         const wasOnboarding = needsBeanOnboarding();
         const editingMessageId = options.editingMessageId ? String(options.editingMessageId) : '';
+        const clientRequestId = `web-chat-${Date.now()}-${requestId}`;
         let result = null;
         let assistantContent = '';
         window.clearTimeout(kioskAutoCloseTimer);
@@ -7951,6 +7958,7 @@ if (mount) {
             }
             startBeanWorkEventPolling(state.session.id);
             const metadata = {
+                client_request_id: clientRequestId,
                 client_context: clientContextPayload(),
                 ...(editingMessageId ? { edited_message_id: editingMessageId } : {}),
                 ...(options.voiceQuickReply || options.voiceQuickReplyPending
@@ -8007,6 +8015,17 @@ if (mount) {
             loadChatSessions({ resumeToday: false, shouldRender: false }).then(() => render()).catch(() => {});
         } catch (error) {
             if (!cancelledChatRequestIds.has(requestId)) {
+                const recovered = await recoverChatFailureFromServer({
+                    sessionId: state.session?.id,
+                    clientRequestId,
+                    content,
+                    requestId,
+                });
+                if (recovered) {
+                    result = recovered.result;
+                    assistantContent = recovered.assistantContent || '';
+                    return recovered;
+                }
                 assistantContent = friendlyError(error, 'send that message');
                 state.error = assistantContent;
                 state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: assistantContent });
@@ -8017,7 +8036,14 @@ if (mount) {
             if (activeChatRequestId === requestId) {
                 activeChatRequestId = 0;
                 state.busy = false;
-                stopBeanWorkEventPolling();
+                const shouldKeepPollingWork = result
+                    && ['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase())
+                    && state.session?.id;
+                if (shouldKeepPollingWork) {
+                    startBeanWorkEventPolling(state.session.id);
+                } else {
+                    stopBeanWorkEventPolling();
+                }
             }
             if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
                 scheduleBeanWorkStatusClear();
@@ -8029,6 +8055,82 @@ if (mount) {
             }
         }
         return { result, assistantContent };
+    }
+
+    async function recoverChatFailureFromServer({ sessionId, clientRequestId, content, requestId }) {
+        const requestKey = String(clientRequestId || '').trim();
+        if (!sessionId || !requestKey) return null;
+
+        const applyCompletedSession = (sessionPayload) => {
+            const messages = normalizeList(sessionPayload.messages);
+            const userIndex = messages.findIndex((message) => {
+                const metadata = message?.metadata || {};
+                return message?.role === 'user' && String(metadata.client_request_id || '') === requestKey;
+            });
+            if (userIndex < 0) return null;
+
+            const assistant = messages.slice(userIndex + 1).find((message) => message?.role === 'assistant') || null;
+            state.session = sessionPayload.session || sessionPayload;
+            state.messages = messages;
+            state.activity = normalizeList(sessionPayload.activity_events || sessionPayload.events).length
+                ? normalizeList(sessionPayload.activity_events || sessionPayload.events)
+                : state.activity;
+            state.activeBeanWorkMessageId = Number(messages[userIndex]?.id || 0) || state.activeBeanWorkMessageId;
+            if (assistant) {
+                const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(assistant.content || ''));
+                assistant.content = assistantContent;
+                state.chatRunState = 'Ready';
+                completeActiveBeanWorkItems('completed');
+                refreshOnly(false).catch(() => {});
+                return { result: { status: 'completed', session: state.session, user_message: messages[userIndex], assistant_message: assistant, events: [] }, assistantContent };
+            }
+
+            state.chatRunState = 'Working…';
+            ensureBeanWorkItemsForContent(content);
+            return { result: { status: 'queued', session: state.session, user_message: messages[userIndex], assistant_message: null, events: [] }, assistantContent: '' };
+        };
+
+        try {
+            const sessionPayload = await api(`/assistant/sessions/${sessionId}`);
+            const recovered = applyCompletedSession(sessionPayload);
+            if (recovered) return recovered;
+        } catch (_) {
+            // Fall through to run lookup; the request may have been queued.
+        }
+
+        try {
+            const lookup = await api(`/assistant/sessions/${sessionId}/runs/lookup?client_request_id=${encodeURIComponent(requestKey)}`);
+            state.session = lookup.session || state.session;
+            state.activity = normalizeList(lookup.events).length ? lookup.events : state.activity;
+            if (lookup.user_message) {
+                state.activeBeanWorkMessageId = Number(lookup.user_message.id || 0) || state.activeBeanWorkMessageId;
+                replaceLocalUserMessage(lookup.user_message);
+            }
+            applyBeanWorkEvents(lookup.events);
+            if (lookup.status === 'queued') {
+                state.chatRunState = 'Working…';
+                ensureBeanWorkItemsForContent(content);
+                return { result: lookup, assistantContent: '' };
+            }
+            if (lookup.assistant_message) {
+                const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(lookup.assistant_message.content || ''));
+                const assistantId = String(lookup.assistant_message.id || '');
+                if (!assistantId || !state.messages.some((message) => String(message.id || '') === assistantId)) {
+                    state.messages.push({
+                        ...lookup.assistant_message,
+                        content: assistantContent,
+                    });
+                }
+                state.chatRunState = lookup.status === 'blocked' ? 'Blocked' : 'Ready';
+                if (lookup.status === 'completed') completeActiveBeanWorkItems('completed');
+                refreshOnly(false).catch(() => {});
+                return { result: lookup, assistantContent };
+            }
+        } catch (_) {
+            return null;
+        }
+
+        return null;
     }
 
     async function startVoiceHoldInput() {
