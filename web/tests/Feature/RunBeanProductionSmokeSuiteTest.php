@@ -148,6 +148,48 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
         ));
     }
 
+    public function test_completed_run_is_not_ready_for_smoke_judgment_until_assistant_message_exists(): void
+    {
+        $user = User::factory()->create();
+        $session = ConversationSession::create([
+            'user_id' => $user->id,
+            'title' => 'Smoke readiness session',
+            'status' => 'active',
+            'runtime_mode' => 'tools',
+            'last_activity_at' => now(),
+        ]);
+        $userMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => 'Create a checklist note called Saturday Reset.',
+        ]);
+        $run = AssistantRun::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'user_message_id' => $userMessage->id,
+            'source' => 'production_smoke',
+            'status' => 'completed',
+            'input' => $userMessage->content,
+        ]);
+
+        $command = new RunBeanProductionSmokeSuite;
+        $method = new ReflectionMethod($command, 'runIsReadyForSmokeJudgment');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($command, $run->load('assistantMessage')));
+
+        $assistantMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'assistant',
+            'content' => 'Done - I created Saturday Reset.',
+        ]);
+        $run->update(['assistant_message_id' => $assistantMessage->id]);
+
+        $this->assertTrue($method->invoke($command, $run->refresh()->load('assistantMessage')));
+    }
+
     public function test_followup_state_checks_detect_duplicates_and_missing_items(): void
     {
         $user = User::factory()->create();

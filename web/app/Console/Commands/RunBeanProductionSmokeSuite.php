@@ -280,17 +280,43 @@ class RunBeanProductionSmokeSuite extends Command
 
         do {
             $fresh = AssistantRun::with(['assistantMessage', 'userMessage'])->findOrFail($run->id);
-            if (in_array($fresh->status, ['completed', 'failed', 'cancelled'], true)) {
+            if ($this->runIsReadyForSmokeJudgment($fresh)) {
                 return $fresh;
             }
 
             usleep(500_000);
         } while (microtime(true) < $deadline);
 
-        return app(AssistantRunService::class)->recoverStaleRun(
+        $recovered = app(AssistantRunService::class)->recoverStaleRun(
             AssistantRun::with(['assistantMessage', 'userMessage'])->findOrFail($run->id),
             app(\App\Services\HermesRuntimeService::class),
         );
+
+        $graceDeadline = microtime(true) + 5;
+        do {
+            $fresh = AssistantRun::with(['assistantMessage', 'userMessage'])->findOrFail($recovered->id);
+            if ($this->runIsReadyForSmokeJudgment($fresh)) {
+                return $fresh;
+            }
+
+            usleep(250_000);
+        } while (microtime(true) < $graceDeadline);
+
+        return AssistantRun::with(['assistantMessage', 'userMessage'])->findOrFail($recovered->id);
+    }
+
+    private function runIsReadyForSmokeJudgment(AssistantRun $run): bool
+    {
+        if (in_array($run->status, ['failed', 'cancelled'], true)) {
+            return true;
+        }
+
+        if ($run->status !== 'completed') {
+            return false;
+        }
+
+        return $run->assistantMessage instanceof ConversationMessage
+            && trim((string) $run->assistantMessage->content) !== '';
     }
 
     private function containsFailureCopy(string $content): bool
