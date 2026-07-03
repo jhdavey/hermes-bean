@@ -4438,12 +4438,14 @@ if (mount) {
     function assistantMessageShouldStayOutOfChat(message) {
         if (!message || message.role !== 'assistant') return false;
         const runtime = String(message.metadata?.runtime || '').trim();
-        if (['missing_run_bridge', 'direct_queue_bridge', 'async_queue_bridge'].includes(runtime)) return true;
+        if (['missing_run_bridge', 'direct_queue_bridge', 'async_queue_bridge', 'failed_run_bridge'].includes(runtime)) return true;
         const normalized = String(message.content || '').toLowerCase().replace(/\s+/g, ' ').trim();
         return normalized === 'i’m checking the latest app state now. if i need one more detail, i’ll ask.'
             || normalized === "i'm checking the latest app state now. if i need one more detail, i'll ask."
             || normalized === 'i didn’t receive that request cleanly. please send it once more and i’ll take it from there.'
-            || normalized === "i didn't receive that request cleanly. please send it once more and i'll take it from there.";
+            || normalized === "i didn't receive that request cleanly. please send it once more and i'll take it from there."
+            || normalized === 'i’m on it. i’m syncing against the latest app state now, and i’ll ask for one detail if i need it.'
+            || normalized === "i'm on it. i'm syncing against the latest app state now, and i'll ask for one detail if i need it.";
     }
 
     function pushVisibleAssistantMessage(message, content = null) {

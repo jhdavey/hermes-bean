@@ -32,6 +32,36 @@ class _FinalVoice {
   final bool suppressFinal;
 }
 
+bool _assistantMessageShouldStayOutOfRealtimeResult(HermesMessage? message) {
+  if (message == null || message.role != 'assistant') return false;
+
+  final runtime = message.metadata['runtime']?.toString();
+  if (runtime == 'missing_run_bridge' ||
+      runtime == 'direct_queue_bridge' ||
+      runtime == 'async_queue_bridge' ||
+      runtime == 'failed_run_bridge') {
+    return true;
+  }
+
+  final normalized = (message.content ?? '')
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  return normalized ==
+          'i’m checking the latest app state now. if i need one more detail, i’ll ask.' ||
+      normalized ==
+          "i'm checking the latest app state now. if i need one more detail, i'll ask." ||
+      normalized ==
+          'i didn’t receive that request cleanly. please send it once more and i’ll take it from there.' ||
+      normalized ==
+          "i didn't receive that request cleanly. please send it once more and i'll take it from there." ||
+      normalized ==
+          'i’m on it. i’m syncing against the latest app state now, and i’ll ask for one detail if i need it.' ||
+      normalized ==
+          "i'm on it. i'm syncing against the latest app state now, and i'll ask for one detail if i need it.";
+}
+
 class BeanRealtimeConversation {
   BeanRealtimeConversation({
     required this.apiClient,
@@ -1035,7 +1065,13 @@ class BeanRealtimeConversation {
         return;
       }
       if (run.status == 'completed') {
-        final content = run.assistantMessage?.content?.trim() ?? '';
+        final assistantMessage = run.assistantMessage;
+        if (_assistantMessageShouldStayOutOfRealtimeResult(assistantMessage)) {
+          _setBackgroundWorkActive(false);
+          _finishRealtimeTurnStatus();
+          return;
+        }
+        final content = assistantMessage?.content?.trim() ?? '';
         if (content.isEmpty) {
           _setBackgroundWorkActive(false);
           return;

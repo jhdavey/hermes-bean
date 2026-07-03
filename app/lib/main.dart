@@ -592,7 +592,8 @@ bool beanAssistantMessageShouldStayOutOfChat(HermesMessage message) {
   final runtime = message.metadata['runtime']?.toString();
   if (runtime == 'missing_run_bridge' ||
       runtime == 'direct_queue_bridge' ||
-      runtime == 'async_queue_bridge') {
+      runtime == 'async_queue_bridge' ||
+      runtime == 'failed_run_bridge') {
     return true;
   }
 
@@ -608,7 +609,11 @@ bool beanAssistantMessageShouldStayOutOfChat(HermesMessage message) {
       normalized ==
           'i didn’t receive that request cleanly. please send it once more and i’ll take it from there.' ||
       normalized ==
-          "i didn't receive that request cleanly. please send it once more and i'll take it from there.";
+          "i didn't receive that request cleanly. please send it once more and i'll take it from there." ||
+      normalized ==
+          'i’m on it. i’m syncing against the latest app state now, and i’ll ask for one detail if i need it.' ||
+      normalized ==
+          "i'm on it. i'm syncing against the latest app state now, and i'll ask for one detail if i need it.";
 }
 
 String _beanErrorGuidance(Object error) {

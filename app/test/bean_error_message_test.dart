@@ -144,6 +144,7 @@ void main() {
       'missing_run_bridge',
       'direct_queue_bridge',
       'async_queue_bridge',
+      'failed_run_bridge',
     ]) {
       expect(
         beanAssistantMessageShouldStayOutOfChat(
