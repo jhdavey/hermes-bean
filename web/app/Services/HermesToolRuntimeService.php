@@ -238,6 +238,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $toolExecutionDurationsMs = [];
         $finalResponseDurationMs = null;
         $expectedWriteActionCount = $this->expectedWriteActionCount($userMessage);
+        $nextNativeWorkOrder = 0;
 
         try {
             for ($turn = 0; $turn < 3; $turn++) {
@@ -318,7 +319,8 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'tool_calls' => $toolCalls,
                 ];
 
-                $plannedWorkByToolCall = $this->recordPlannedNativeWorkItems($session, $userMessage, $toolCalls);
+                $plannedWorkByToolCall = $this->recordPlannedNativeWorkItems($session, $userMessage, $toolCalls, $nextNativeWorkOrder);
+                $nextNativeWorkOrder += count($plannedWorkByToolCall);
                 $domainEvents = $domainEvents->concat(
                     collect($plannedWorkByToolCall)
                         ->pluck('event')
@@ -2808,10 +2810,10 @@ PROMPT;
         return is_scalar($action['client_action_key'] ?? null) ? (string) $action['client_action_key'] : '';
     }
 
-    private function recordPlannedNativeWorkItems(ConversationSession $session, ConversationMessage $userMessage, array $toolCalls): array
+    private function recordPlannedNativeWorkItems(ConversationSession $session, ConversationMessage $userMessage, array $toolCalls, int $startingOrder = 0): array
     {
         $planned = [];
-        $order = 0;
+        $order = $startingOrder;
 
         foreach ($toolCalls as $toolCall) {
             if (! is_array($toolCall)) {

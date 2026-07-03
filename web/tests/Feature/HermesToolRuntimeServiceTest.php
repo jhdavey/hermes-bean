@@ -371,6 +371,93 @@ class HermesToolRuntimeServiceTest extends TestCase
         ]);
     }
 
+    public function test_tool_runtime_keeps_work_item_order_across_separate_tool_turns(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-work-plan-turn-one',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_event_turn_one',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_calendar_event',
+                                'arguments' => json_encode([
+                                    'title' => 'Focus block',
+                                    'starts_at' => '2026-06-24T09:00:00-04:00',
+                                    'ends_at' => '2026-06-24T10:00:00-04:00',
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-work-plan-turn-two',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [[
+                            'id' => 'call_task_turn_two',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'create_task',
+                                'arguments' => json_encode([
+                                    'title' => 'Prep agenda',
+                                    'due_at' => '2026-06-24T08:00:00-04:00',
+                                ], JSON_THROW_ON_ERROR),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-work-plan-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Done — I added the focus block and agenda task.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->premiumApiToken('tool-work-plan-turns@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Set up a focus block and a prep agenda task for tomorrow morning',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-06-23T17:37:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $planned = collect($response->json('data.events'))
+            ->where('event_type', 'assistant.work_item.planned')
+            ->values();
+
+        $this->assertCount(2, $planned);
+        $this->assertSame('Create calendar event: Focus block', data_get($planned[0], 'payload.label'));
+        $this->assertSame(0, data_get($planned[0], 'payload.work_order'));
+        $this->assertSame('Create task: Prep agenda', data_get($planned[1], 'payload.label'));
+        $this->assertSame(1, data_get($planned[1], 'payload.work_order'));
+    }
+
     public function test_tool_runtime_saves_onboarding_profile_from_top_level_tool_fields(): void
     {
         Http::fakeSequence()
