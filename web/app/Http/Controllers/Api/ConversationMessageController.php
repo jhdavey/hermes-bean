@@ -235,7 +235,10 @@ class ConversationMessageController extends Controller
 
     private function shouldQueueWithoutDirectRuntime(array $metadata): bool
     {
-        return strtolower(trim((string) data_get($metadata, 'source', ''))) === 'flutter';
+        return in_array(strtolower(trim((string) data_get($metadata, 'source', ''))), [
+            'flutter',
+            'web_queued_chat',
+        ], true);
     }
 
     private function queuedResponse(

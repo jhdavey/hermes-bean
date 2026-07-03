@@ -3267,9 +3267,9 @@ if (mount) {
 
     function chatMarkup(options = {}) {
         const working = state.busy && state.chatRunState !== 'Ready';
-        const messages = state.messages.length ? state.messages : [
+        const messages = (state.messages.length ? state.messages : [
             { id: 'intro', role: 'assistant', content: needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey! How can I help?' },
-        ];
+        ]).filter((message) => !assistantMessageShouldStayOutOfChat(message));
         const expandLabel = state.chatExpanded ? 'Close' : 'Expand';
         const workStrip = chatDockedWorkStripMarkup();
         return `
@@ -4433,6 +4433,28 @@ if (mount) {
         return staleFailurePhrases.some((phrase) => normalized.includes(phrase))
             ? 'I’m checking the latest app state now. If I need one more detail, I’ll ask.'
             : content;
+    }
+
+    function assistantMessageShouldStayOutOfChat(message) {
+        if (!message || message.role !== 'assistant') return false;
+        const runtime = String(message.metadata?.runtime || '').trim();
+        if (['missing_run_bridge', 'direct_queue_bridge', 'async_queue_bridge'].includes(runtime)) return true;
+        const normalized = String(message.content || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        return normalized === 'i’m checking the latest app state now. if i need one more detail, i’ll ask.'
+            || normalized === "i'm checking the latest app state now. if i need one more detail, i'll ask."
+            || normalized === 'i didn’t receive that request cleanly. please send it once more and i’ll take it from there.'
+            || normalized === "i didn't receive that request cleanly. please send it once more and i'll take it from there.";
+    }
+
+    function pushVisibleAssistantMessage(message, content = null) {
+        if (!message || assistantMessageShouldStayOutOfChat(message)) return false;
+        const assistantId = String(message.id || '');
+        if (assistantId && state.messages.some((item) => String(item.id || '') === assistantId)) return false;
+        state.messages.push({
+            ...message,
+            content: content ?? safeAssistantDisplayContent(conversationalMessageContent(message.content || '')),
+        });
+        return true;
     }
 
     function structuredMessageJson(content) {
@@ -7958,6 +7980,7 @@ if (mount) {
             }
             startBeanWorkEventPolling(state.session.id);
             const metadata = {
+                source: 'web_queued_chat',
                 client_request_id: clientRequestId,
                 client_context: clientContextPayload(),
                 ...(editingMessageId ? { edited_message_id: editingMessageId } : {}),
@@ -7998,15 +8021,21 @@ if (mount) {
             applyBeanWorkEvents(result.events);
             if (result.assistant_message) {
                 assistantContent = safeAssistantDisplayContent(conversationalMessageContent(result.assistant_message.content || ''));
-                state.messages.push({
-                    ...result.assistant_message,
-                    content: assistantContent,
-                });
+                if (!pushVisibleAssistantMessage(result.assistant_message, assistantContent)) {
+                    assistantContent = '';
+                    state.chatRunState = 'Working…';
+                    ensureBeanWorkItemsForContent(content);
+                }
             }
             if (result.status === 'blocked' && isPlanLimitMessage(assistantContent)) {
                 state.error = assistantContent;
             }
-            state.chatRunState = result.status === 'blocked' ? 'Blocked' : 'Ready';
+            if (['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase())) {
+                state.chatRunState = 'Working…';
+                ensureBeanWorkItemsForContent(content);
+            } else if (state.chatRunState !== 'Working…') {
+                state.chatRunState = result.status === 'blocked' ? 'Blocked' : 'Ready';
+            }
             await refreshOnly(false);
             if (wasOnboarding && !needsBeanOnboarding()) {
                 state.onboardingJustCompleted = true;
@@ -8079,6 +8108,11 @@ if (mount) {
             if (assistant) {
                 const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(assistant.content || ''));
                 assistant.content = assistantContent;
+                if (assistantMessageShouldStayOutOfChat(assistant)) {
+                    state.chatRunState = 'Working…';
+                    ensureBeanWorkItemsForContent(content);
+                    return { result: { status: 'queued', session: state.session, user_message: messages[userIndex], assistant_message: null, events: [] }, assistantContent: '' };
+                }
                 state.chatRunState = 'Ready';
                 completeActiveBeanWorkItems('completed');
                 refreshOnly(false).catch(() => {});
@@ -8114,13 +8148,16 @@ if (mount) {
             }
             if (lookup.assistant_message) {
                 const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(lookup.assistant_message.content || ''));
-                const assistantId = String(lookup.assistant_message.id || '');
-                if (!assistantId || !state.messages.some((message) => String(message.id || '') === assistantId)) {
-                    state.messages.push({
-                        ...lookup.assistant_message,
-                        content: assistantContent,
-                    });
+                const assistant = {
+                    ...lookup.assistant_message,
+                    content: assistantContent,
+                };
+                if (assistantMessageShouldStayOutOfChat(assistant)) {
+                    state.chatRunState = 'Working…';
+                    ensureBeanWorkItemsForContent(content);
+                    return { result: { ...lookup, status: 'queued', assistant_message: null }, assistantContent: '' };
                 }
+                pushVisibleAssistantMessage(assistant, assistantContent);
                 state.chatRunState = lookup.status === 'blocked' ? 'Blocked' : 'Ready';
                 if (lookup.status === 'completed') completeActiveBeanWorkItems('completed');
                 refreshOnly(false).catch(() => {});
@@ -10229,6 +10266,13 @@ if (mount) {
         refreshRealtimeDashboardContext('realtime_run_completed').catch(() => {});
         const assistantMessage = run?.assistant_message || run?.assistantMessage || null;
         const content = safeAssistantDisplayContent(String(assistantMessage?.content || '').trim()).trim();
+        if (assistantMessageShouldStayOutOfChat({ ...assistantMessage, content })) {
+            setRealtimeBackgroundWorkActive(false);
+            state.chatRunState = 'Working…';
+            ensureBeanWorkItemsForContent(context.userContent || '');
+            render();
+            return;
+        }
         if (!content) {
             setRealtimeBackgroundWorkActive(false);
             deliverRealtimeBackgroundResult('I finished that request.', run?.id);
@@ -10253,11 +10297,9 @@ if (mount) {
     }
 
     function appendPersistedAssistantMessage(message) {
-        if (!message?.id || state.messages.some((item) => String(item.id) === String(message.id))) return;
-        state.messages.push({
-            ...message,
-            content: safeAssistantDisplayContent(conversationalMessageContent(message.content || '')),
-        });
+        if (!message?.id) return;
+        const content = safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
+        if (!pushVisibleAssistantMessage({ ...message, content }, content)) return;
         state.chatRunState = 'Ready';
         render();
         scrollChatToBottom();

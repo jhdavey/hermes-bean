@@ -580,6 +580,35 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class);
     }
 
+    public function test_web_chat_messages_queue_without_direct_runtime_or_bridge_message(): void
+    {
+        Queue::fake();
+
+        $token = $this->apiToken('web-chat-queue@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $this->bindRuntimeThatFailsIfCalled();
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm',
+            'metadata' => [
+                'source' => 'web_queued_chat',
+                'client_request_id' => 'web-chat-queue-1',
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.run.status', 'queued')
+            ->assertJsonPath('data.run.metadata.client_request_id', 'web-chat-queue-1')
+            ->assertJsonPath('data.assistant_message', null);
+
+        $this->assertSame('queued', ConversationSession::findOrFail($sessionId)->status);
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
+        $this->assertSame(0, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
+    }
+
     public function test_async_run_endpoint_queues_usage_limited_requests_for_runtime_message(): void
     {
         Queue::fake();
