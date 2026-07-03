@@ -188,6 +188,132 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
         $this->assertContains('reminder_min:grocery:0/1', $failures);
     }
 
+    public function test_work_item_quality_checks_flag_bad_labels_and_missing_completion(): void
+    {
+        $user = User::factory()->create();
+        $session = ConversationSession::create([
+            'user_id' => $user->id,
+            'title' => 'Smoke work item session',
+            'status' => 'active',
+            'runtime_mode' => 'tools',
+            'last_activity_at' => now(),
+        ]);
+        $userMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => 'Create a task for later this afternoon to vacuum the house.',
+        ]);
+        $assistantMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'assistant',
+            'content' => 'Done - I added vacuum the house to your tasks.',
+        ]);
+        $run = AssistantRun::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'user_message_id' => $userMessage->id,
+            'assistant_message_id' => $assistantMessage->id,
+            'source' => 'production_smoke',
+            'status' => 'completed',
+            'input' => $userMessage->content,
+        ]);
+        ActivityEvent::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'event_type' => 'assistant.work_item.planned',
+            'tool_name' => 'assistant.work',
+            'status' => 'planned',
+            'payload' => [
+                'work_item_id' => 'crud-plan-'.$userMessage->id.'-0',
+                'work_order' => 0,
+                'label' => 'Creating task: i need to the rest of my day i want a workout',
+                'message_id' => $userMessage->id,
+                'user_message_id' => $userMessage->id,
+            ],
+        ]);
+
+        $command = new RunBeanProductionSmokeSuite;
+        $method = new ReflectionMethod($command, 'workItemQualityFailures');
+        $method->setAccessible(true);
+
+        $failures = $method->invoke($command, $run);
+
+        $this->assertContains('work_item_bad_label:crud-plan-'.$userMessage->id.'-0:Creating task: i need to the rest of my day i want a workout', $failures);
+        $this->assertContains('work_item_not_completed:crud-plan-'.$userMessage->id.'-0:Creating task: i need to the rest of my day i want a workout', $failures);
+    }
+
+    public function test_work_item_quality_checks_accept_clean_lifecycle(): void
+    {
+        $user = User::factory()->create();
+        $session = ConversationSession::create([
+            'user_id' => $user->id,
+            'title' => 'Smoke work item session',
+            'status' => 'active',
+            'runtime_mode' => 'tools',
+            'last_activity_at' => now(),
+        ]);
+        $userMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => 'Create a task to vacuum the house.',
+        ]);
+        $assistantMessage = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'assistant',
+            'content' => 'Done - I added vacuum the house to your tasks.',
+        ]);
+        $run = AssistantRun::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'user_message_id' => $userMessage->id,
+            'assistant_message_id' => $assistantMessage->id,
+            'source' => 'production_smoke',
+            'status' => 'completed',
+            'input' => $userMessage->content,
+        ]);
+        $workItemId = 'crud-plan-'.$userMessage->id.'-0';
+        ActivityEvent::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'event_type' => 'assistant.work_item.planned',
+            'tool_name' => 'assistant.work',
+            'status' => 'planned',
+            'payload' => [
+                'work_item_id' => $workItemId,
+                'work_order' => 0,
+                'label' => 'Create task: Vacuum the house',
+                'message_id' => $userMessage->id,
+                'user_message_id' => $userMessage->id,
+            ],
+        ]);
+        ActivityEvent::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'event_type' => 'assistant.task.created',
+            'tool_name' => 'tasks.create',
+            'status' => 'succeeded',
+            'payload' => [
+                'task_id' => 123,
+                'title' => 'Vacuum the house',
+                'work_item_id' => $workItemId,
+                'work_order' => 0,
+                'work_label' => 'Create task: Vacuum the house',
+                'message_id' => $userMessage->id,
+                'user_message_id' => $userMessage->id,
+            ],
+        ]);
+
+        $command = new RunBeanProductionSmokeSuite;
+        $method = new ReflectionMethod($command, 'workItemQualityFailures');
+        $method->setAccessible(true);
+
+        $this->assertSame([], $method->invoke($command, $run));
+    }
+
     public function test_followup_state_checks_accept_expected_artifacts(): void
     {
         $user = User::factory()->create();

@@ -107,7 +107,10 @@ class RunBeanProductionSmokeSuite extends Command
             $durationMs = $run->created_at && $run->updated_at
                 ? (int) $run->created_at->diffInMilliseconds($run->updated_at, true)
                 : null;
-            $qualityFailures = $this->assistantQualityFailures($prompt, $assistant);
+            $qualityFailures = array_values(array_unique(array_merge(
+                $this->assistantQualityFailures($prompt, $assistant),
+                $this->workItemQualityFailures($run),
+            )));
             $failed = $run->status !== 'completed' || $this->containsFailureCopy($assistant) || $qualityFailures !== [];
 
             $results[] = [
@@ -209,7 +212,10 @@ class RunBeanProductionSmokeSuite extends Command
                 $durationMs = $run->created_at && $run->updated_at
                     ? (int) $run->created_at->diffInMilliseconds($run->updated_at, true)
                     : null;
-                $qualityFailures = $this->assistantQualityFailures($prompt, $assistant);
+                $qualityFailures = array_values(array_unique(array_merge(
+                    $this->assistantQualityFailures($prompt, $assistant),
+                    $this->workItemQualityFailures($run),
+                )));
                 $stepFailed = $run->status !== 'completed' || $this->containsFailureCopy($assistant) || $qualityFailures !== [];
 
                 $steps[] = [
@@ -484,6 +490,129 @@ class RunBeanProductionSmokeSuite extends Command
     }
 
     /**
+     * @return list<string>
+     */
+    private function workItemQualityFailures(AssistantRun $run): array
+    {
+        $run->loadMissing('userMessage');
+        $userMessage = $run->userMessage;
+        if (! $userMessage instanceof ConversationMessage) {
+            return [];
+        }
+
+        $prompt = str((string) $userMessage->content)->lower()->squish()->toString();
+        if (! $this->promptLooksLikeWriteRequest($prompt)) {
+            return [];
+        }
+
+        $events = ActivityEvent::query()
+            ->where('conversation_session_id', $run->conversation_session_id)
+            ->where(function ($query) use ($userMessage): void {
+                $query->where('payload->message_id', $userMessage->id)
+                    ->orWhere('payload->user_message_id', $userMessage->id);
+            })
+            ->orderBy('id')
+            ->get();
+
+        $planned = $events
+            ->filter(fn (ActivityEvent $event): bool => $event->event_type === 'assistant.work_item.planned')
+            ->values();
+
+        if ($planned->isEmpty()) {
+            return ['work_items_missing_plans'];
+        }
+
+        $failures = [];
+        $plannedIds = [];
+        $orders = [];
+        $labelsById = [];
+
+        foreach ($planned as $event) {
+            $payload = is_array($event->payload) ? $event->payload : [];
+            $id = trim((string) data_get($payload, 'work_item_id', ''));
+            $label = str((string) data_get($payload, 'label', data_get($payload, 'work_label', '')))
+                ->squish()
+                ->toString();
+            $order = data_get($payload, 'work_order');
+
+            if ($id === '') {
+                $failures[] = 'work_item_missing_id';
+                continue;
+            }
+            if (isset($plannedIds[$id])) {
+                $failures[] = 'work_item_duplicate_plan:'.$id;
+            }
+            $plannedIds[$id] = true;
+
+            if ($label === '') {
+                $failures[] = 'work_item_empty_label:'.$id;
+            } elseif ($this->workItemLabelLooksBad($label)) {
+                $failures[] = 'work_item_bad_label:'.$id.':'.$label;
+            }
+            $labelsById[$id] = $label;
+
+            if (! is_numeric($order)) {
+                $failures[] = 'work_item_missing_order:'.$id;
+            } else {
+                $numericOrder = (int) $order;
+                if (isset($orders[$numericOrder])) {
+                    $failures[] = 'work_item_duplicate_order:'.$numericOrder;
+                }
+                $orders[$numericOrder] = true;
+            }
+        }
+
+        foreach (array_keys($plannedIds) as $id) {
+            $completed = $events->contains(function (ActivityEvent $event) use ($id): bool {
+                $payload = is_array($event->payload) ? $event->payload : [];
+
+                return data_get($payload, 'work_item_id') === $id
+                    && $event->event_type !== 'assistant.work_item.planned'
+                    && $event->event_type !== 'runtime.planner_action_started'
+                    && in_array($event->status, ['succeeded', 'completed', 'recorded'], true);
+            });
+
+            if (! $completed) {
+                $failures[] = 'work_item_not_completed:'.$id.':'.($labelsById[$id] ?? '');
+            }
+        }
+
+        $completionEvents = $events->filter(function (ActivityEvent $event): bool {
+            $payload = is_array($event->payload) ? $event->payload : [];
+
+            return filled(data_get($payload, 'work_item_id'))
+                && $event->event_type !== 'assistant.work_item.planned'
+                && $event->event_type !== 'runtime.planner_action_started';
+        });
+
+        foreach ($completionEvents as $event) {
+            $payload = is_array($event->payload) ? $event->payload : [];
+            $id = (string) data_get($payload, 'work_item_id');
+            if (! isset($plannedIds[$id])) {
+                $failures[] = 'work_item_orphan_completion:'.$id;
+            }
+
+            $label = str((string) data_get($payload, 'work_label', ''))->squish()->toString();
+            if ($label !== '' && isset($labelsById[$id]) && $labelsById[$id] !== '' && $label !== $labelsById[$id]) {
+                $failures[] = 'work_item_label_changed:'.$id;
+            }
+        }
+
+        return array_values(array_unique($failures));
+    }
+
+    private function workItemLabelLooksBad(string $label): bool
+    {
+        $normalized = str($label)->lower()->squish()->toString();
+
+        if (mb_strlen($label) > 96) {
+            return true;
+        }
+
+        return (bool) preg_match('/\b(i need to|can you|could you|please|lets?|let\'s|for later this|create later for|task vacuum house)\b/u', $normalized);
+    }
+
+    /**
      * @param  array<string, mixed>  $scenario
      * @return list<string>
      */
@@ -727,15 +856,15 @@ class RunBeanProductionSmokeSuite extends Command
         $templates = array_merge(
             [
                 'Plan the rest of my afternoon: add a 45 minute workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan a focused home reset block: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan my evening reset: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan a healthy night: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan a productive after-work flow: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan a quick errands evening: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan a simple dinner prep evening: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan a balanced evening routine: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan a practical evening schedule: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
-                'Plan a low-stress night: add a workout, grocery store after that, cook dinner after that, create a simple dinner recipe note, and make a grocery checklist note.',
+                'Set up tomorrow morning: calendar focus block at 9am for 60 minutes, task to prep the agenda, reminder 30 minutes before, and a note called Agenda Prep.',
+                'Create a home reset plan for Saturday: calendar block at 10am, task to gather supplies, reminder Friday at 5pm, and a checklist note called Saturday Reset.',
+                'Organize a client follow-up: calendar call next Tuesday at 2pm, task to review notes, reminder one hour before, and a note called Client Follow-up Questions.',
+                'Build a car maintenance workflow: calendar block next Friday at 8am, task to check tire pressure, reminder the night before, and a note called Car Maintenance Checklist.',
+                'Plan an admin cleanup: calendar block tomorrow at 1pm, tasks for receipts and subscription review, reminder 20 minutes before, and a note called Admin Cleanup.',
+                'Prepare a family dinner plan for Sunday: calendar event at 6pm, task to buy ingredients, reminder Sunday morning, and a note with a short grocery list.',
+                'Set up a project review workflow: calendar block Monday at 11am, task to collect open questions, reminder Monday at 10am, and a note called Project Review.',
+                'Create a travel prep workflow: calendar block next Thursday at 7pm, task to pack chargers, reminder the day before, and a note called Travel Prep Checklist.',
+                'Plan a budget check: calendar block tomorrow at 4pm, task to compare bills, reminder 15 minutes before, and a note called Budget Check Notes.',
             ],
             [
                 'Add three calendar events: 7/9 Dr Chen Cardio at 100 N Dean Rd at 3pm, 7/15 Ventura at 6pm, and 7/19 Azalea Lane at 2pm.',
