@@ -5664,6 +5664,37 @@ void main() {
   });
 
   testWidgets(
+    'chat keeps retrying when queued lookup returns bridge response',
+    (WidgetTester tester) async {
+      final api = _BridgeLookupThenSuccessHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Please add Dr Chen Cardio on 7/9 at 3pm',
+      );
+      await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle(const Duration(seconds: 4));
+
+      expect(api.queueMessageCalls, 3);
+      expect(api.lookupQueuedMessageCalls, 2);
+      expect(api.issueReports, isEmpty);
+      expect(find.text('Done - I added Dr Chen Cardio.'), findsOneWidget);
+      expect(find.textContaining('Bean could not finish'), findsNothing);
+      expect(
+        find.textContaining('I didn’t receive that request'),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'chat recovers direct Bean work through lookup after parse failure',
     (WidgetTester tester) async {
       final api = _LookupRecoveryAfterParseFailureHermesApiClient();
@@ -11916,6 +11947,61 @@ class _LostQueueResponseHermesApiClient extends _SignedInFakeHermesApiClient {
         id: 9151,
         role: 'assistant',
         content: 'Done - I found that queued request.',
+      ),
+      events: [],
+    );
+  }
+}
+
+class _BridgeLookupThenSuccessHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  int lookupQueuedMessageCalls = 0;
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    throw const HermesApiException(502, '{"message":"Bad gateway"}');
+  }
+
+  @override
+  Future<HermesMessageResult> lookupQueuedMessage({
+    required int sessionId,
+    required String clientRequestId,
+  }) async {
+    lookupQueuedMessageCalls++;
+    if (lookupQueuedMessageCalls == 1) {
+      return const HermesMessageResult(
+        status: 'completed',
+        session: HermesSession(id: 42, status: 'active', title: 'Today'),
+        assistantMessage: HermesMessage(
+          id: 9160,
+          role: 'assistant',
+          content:
+              'I didn’t receive that request cleanly. Please send it once more and I’ll take it from there.',
+          metadata: {'runtime': 'missing_run_bridge'},
+        ),
+        events: [],
+      );
+    }
+
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 9161,
+        role: 'user',
+        content: 'Please add Dr Chen Cardio on 7/9 at 3pm',
+      ),
+      assistantMessage: HermesMessage(
+        id: 9162,
+        role: 'assistant',
+        content: 'Done - I added Dr Chen Cardio.',
       ),
       events: [],
     );

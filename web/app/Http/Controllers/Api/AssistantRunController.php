@@ -189,17 +189,15 @@ class AssistantRunController extends Controller
             }
         }
 
-        $assistantMessage = $this->missingRunBridgeMessage($ownedSession, $clientRequestId);
-
         return response()->json(['data' => [
-            'status' => 'completed',
+            'status' => 'queued',
             'session' => $ownedSession->refresh(),
             'run' => null,
             'user_message' => $existingUserMessage,
-            'assistant_message' => $assistantMessage,
+            'assistant_message' => null,
             'events' => [],
             'blocker' => null,
-        ]], 200);
+        ]], 202);
     }
 
     public function show(Request $request, string $run): JsonResponse

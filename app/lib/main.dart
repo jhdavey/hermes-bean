@@ -4967,6 +4967,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         : null;
     var chatPhase = 'preparing message';
     String? clientRequestId;
+    Map<String, Object?>? messageMetadataForRecovery;
     _cancelBeanClientRetryTimers();
     setState(() {
       _busy = true;
@@ -5021,6 +5022,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             'edited_message_id': editingServerMessageId,
         },
       );
+      messageMetadataForRecovery = messageMetadata;
       late final HermesMessageResult result;
       if (needsBeanIntroduction) {
         result = await _sendBeanIntroductionMessage(session.id, trimmed);
@@ -5214,6 +5216,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         runToken: runToken,
         session: session,
         clientRequestId: clientRequestId,
+        metadata:
+            messageMetadataForRecovery ??
+            _flutterChatMetadata(
+              additional: {
+                if (clientRequestId != null)
+                  'client_request_id': clientRequestId,
+                if (editingServerMessageId != null)
+                  'edited_message_id': editingServerMessageId,
+              },
+            ),
         localUserMessageId: localUserMessageId,
         originalContent: trimmed,
       );
@@ -5254,6 +5266,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     required int runToken,
     required HermesSession? session,
     required String? clientRequestId,
+    required Map<String, Object?> metadata,
     required int localUserMessageId,
     required String originalContent,
   }) async {
@@ -5269,6 +5282,28 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         clientRequestId: requestId,
       );
       if (!mounted || runToken != _chatRunToken) return true;
+      if (_queuedLookupResultShouldKeepRetrying(result)) {
+        setState(() {
+          if (result.userMessage != null) {
+            _replaceChatMessage(localUserMessageId, result.userMessage!);
+            _activeBeanWorkMessageId = result.userMessage!.id;
+          }
+          _session = result.session;
+          _chatRunState = 'Working in background';
+          _ensureBeanRequestWorkItem(originalContent);
+          _error = null;
+        });
+        unawaited(
+          _retryQueuedBeanRequestUntilAccepted(
+            runToken: runToken,
+            sessionId: activeSession.id,
+            content: originalContent,
+            metadata: metadata,
+            localUserMessageId: localUserMessageId,
+          ),
+        );
+        return true;
+      }
       _applyRecoveredChatResult(
         result,
         runToken: runToken,
@@ -5426,18 +5461,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (clientRequestId.isNotEmpty && lastError != null) {
       for (var attempt = 0; attempt < 10; attempt++) {
         try {
-          return await widget.apiClient.lookupQueuedMessage(
+          final recovered = await widget.apiClient.lookupQueuedMessage(
             sessionId: sessionId,
             clientRequestId: clientRequestId,
           );
+          if (!_queuedLookupResultShouldKeepRetrying(recovered)) {
+            return recovered;
+          }
         } catch (lookupError) {
           if (!_shouldRetryQueuedBeanRequest(lookupError) || attempt >= 9) {
             break;
           }
-          await Future<void>.delayed(
-            Duration(milliseconds: 350 + (attempt * 250)),
-          );
         }
+        await Future<void>.delayed(
+          Duration(milliseconds: 350 + (attempt * 250)),
+        );
       }
     }
 
@@ -5480,13 +5518,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           clientRequestId: clientRequestId,
         );
         if (!mounted || runToken != _chatRunToken) return;
-        _applyRecoveredChatResult(
-          recovered,
-          runToken: runToken,
-          localUserMessageId: localUserMessageId,
-          originalContent: content,
-        );
-        return;
+        if (!_queuedLookupResultShouldKeepRetrying(recovered)) {
+          _applyRecoveredChatResult(
+            recovered,
+            runToken: runToken,
+            localUserMessageId: localUserMessageId,
+            originalContent: content,
+          );
+          return;
+        }
       } catch (_) {
         // If lookup has not seen the request yet, retry the original
         // idempotent queue call below.
@@ -5515,6 +5555,19 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         });
       }
     }
+  }
+
+  bool _queuedLookupResultShouldKeepRetrying(HermesMessageResult result) {
+    if (result.run == null &&
+        result.status == 'queued' &&
+        result.assistantMessage == null) {
+      return true;
+    }
+
+    final assistantMessage = result.assistantMessage;
+    return result.run == null &&
+        assistantMessage != null &&
+        beanAssistantMessageShouldStayOutOfChat(assistantMessage);
   }
 
   Future<void> _sleepWithBeanClientRetryTimer(Duration duration) {
