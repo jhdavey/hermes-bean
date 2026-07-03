@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessAssistantRun;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
@@ -28,16 +29,10 @@ class AssistantRunController extends Controller
             'metadata' => ['nullable', 'array'],
             'source' => ['nullable', 'string', 'max:50'],
         ]);
-        $source = (string) ($data['source'] ?? 'http');
+        $source = (string) ($data['source'] ?? data_get($data, 'metadata.source', 'http'));
         $clientRequestId = trim((string) data_get($data, 'metadata.client_request_id', ''));
         if ($clientRequestId !== '') {
-            $existingRun = AssistantRun::query()
-                ->where('user_id', $ownedSession->user_id)
-                ->where('conversation_session_id', $ownedSession->id)
-                ->where('metadata->client_request_id', $clientRequestId)
-                ->with(['session', 'userMessage', 'assistantMessage'])
-                ->latest('id')
-                ->first();
+            $existingRun = $this->existingClientRequestRun($ownedSession, $clientRequestId);
 
             if ($existingRun instanceof AssistantRun) {
                 $existingRun = $this->runs->prepareRunForBackgroundResponse($existingRun)
@@ -85,6 +80,20 @@ class AssistantRunController extends Controller
                         $source
                     );
                 } catch (Throwable $exception) {
+                    if ($this->sourcePrefersAsyncPendingFallback($source)) {
+                        $existingRun = $this->existingClientRequestRun($ownedSession, $clientRequestId);
+                        if ($existingRun instanceof AssistantRun) {
+                            return $this->existingQueuedRunFallbackResponse($ownedSession, $existingRun, $exception, 'existing_message_queue_failed');
+                        }
+
+                        return $this->asyncPendingFallbackResponse(
+                            $ownedSession->refresh(),
+                            $existingUserMessage,
+                            $exception,
+                            'existing_message_queue_failed'
+                        );
+                    }
+
                     return $this->directRuntimeFallbackResponse(
                         $ownedSession->refresh(),
                         $existingUserMessage,
@@ -111,11 +120,27 @@ class AssistantRunController extends Controller
                 $source
             );
         } catch (Throwable $exception) {
+            if ($this->sourcePrefersAsyncPendingFallback($source) && $clientRequestId !== '') {
+                $existingRun = $this->existingClientRequestRun($ownedSession, $clientRequestId);
+                if ($existingRun instanceof AssistantRun) {
+                    return $this->existingQueuedRunFallbackResponse($ownedSession, $existingRun, $exception, 'queue_run_failed');
+                }
+            }
+
             $userMessage = $this->findOrCreateQueuedFallbackUserMessage(
                 $ownedSession->refresh(),
                 $data['content'],
                 $data['metadata'] ?? []
             );
+
+            if ($this->sourcePrefersAsyncPendingFallback($source)) {
+                return $this->asyncPendingFallbackResponse(
+                    $ownedSession->refresh(),
+                    $userMessage,
+                    $exception,
+                    'queue_run_failed'
+                );
+            }
 
             return $this->directRuntimeFallbackResponse(
                 $ownedSession->refresh(),
@@ -239,6 +264,17 @@ class AssistantRunController extends Controller
         return in_array($run->status, ['completed', 'failed', 'cancelled'], true) ? 200 : 202;
     }
 
+    private function existingClientRequestRun(ConversationSession $session, string $clientRequestId): ?AssistantRun
+    {
+        return AssistantRun::query()
+            ->where('user_id', $session->user_id)
+            ->where('conversation_session_id', $session->id)
+            ->where('metadata->client_request_id', $clientRequestId)
+            ->with(['session', 'userMessage', 'assistantMessage'])
+            ->latest('id')
+            ->first();
+    }
+
     private function findOrCreateQueuedFallbackUserMessage(ConversationSession $session, string $content, array $metadata): ConversationMessage
     {
         $clientRequestId = trim((string) data_get($metadata, 'client_request_id', ''));
@@ -263,6 +299,80 @@ class AssistantRunController extends Controller
             'content' => $content,
             'metadata' => $metadata ?: null,
         ]);
+    }
+
+    private function sourcePrefersAsyncPendingFallback(string $source): bool
+    {
+        return in_array($source, [
+            'flutter',
+            'web_queued_chat',
+            'production_smoke',
+        ], true);
+    }
+
+    private function asyncPendingFallbackResponse(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        Throwable $queueException,
+        string $fallbackSource
+    ): JsonResponse {
+        Log::warning('Bean async run queue failed; returning pending state for client retry.', [
+            'session_id' => $session->id,
+            'message_id' => $userMessage->id,
+            'fallback_source' => $fallbackSource,
+            'exception' => $queueException->getMessage(),
+        ]);
+
+        $session->update([
+            'status' => 'queued',
+            'last_activity_at' => now(),
+        ]);
+
+        return response()->json(['data' => [
+            'status' => 'queued',
+            'session' => $session->refresh(),
+            'run' => null,
+            'user_message' => $userMessage->refresh(),
+            'assistant_message' => null,
+            'events' => [],
+            'blocker' => null,
+        ]], 202);
+    }
+
+    private function existingQueuedRunFallbackResponse(
+        ConversationSession $session,
+        AssistantRun $run,
+        Throwable $queueException,
+        string $fallbackSource
+    ): JsonResponse {
+        Log::warning('Bean async run queue returned after creating run; returning existing run for client polling.', [
+            'session_id' => $session->id,
+            'run_id' => $run->id,
+            'message_id' => $run->user_message_id,
+            'fallback_source' => $fallbackSource,
+            'exception' => $queueException->getMessage(),
+        ]);
+
+        if (in_array($run->status, ['queued', 'running'], true)) {
+            try {
+                ProcessAssistantRun::dispatch($run->id);
+            } catch (Throwable $dispatchException) {
+                Log::warning('Bean async run redispatch failed after queue fallback.', [
+                    'session_id' => $session->id,
+                    'run_id' => $run->id,
+                    'fallback_source' => $fallbackSource,
+                    'exception' => $dispatchException->getMessage(),
+                ]);
+            }
+        }
+
+        $run = $this->runs->prepareRunForBackgroundResponse($run->refresh())
+            ->load(['session', 'userMessage', 'assistantMessage']);
+
+        return response()->json(
+            ['data' => $this->runResponsePayload($run, $session)],
+            $this->runResponseStatus($run)
+        );
     }
 
     private function directRuntimeFallbackResponse(

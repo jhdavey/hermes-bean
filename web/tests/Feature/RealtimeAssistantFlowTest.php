@@ -630,7 +630,7 @@ class RealtimeAssistantFlowTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class);
     }
 
-    public function test_async_run_endpoint_uses_direct_runtime_fallback_when_queue_creation_fails(): void
+    public function test_flutter_async_run_endpoint_returns_pending_state_when_queue_creation_fails(): void
     {
         Queue::fake();
         $this->bindFailingQueueService();
@@ -647,17 +647,18 @@ class RealtimeAssistantFlowTest extends TestCase
                 'source' => 'flutter',
                 'client_request_id' => 'queue-fallback-1',
             ],
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed')
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.run', null)
             ->assertJsonPath('data.user_message.content', 'Please add Dr Chen Cardio on 7/9 at 3pm')
-            ->assertJsonPath('data.assistant_message.content', 'Done - direct fallback handled the request.');
+            ->assertJsonPath('data.assistant_message', null);
 
         $this->assertSame(0, AssistantRun::where('conversation_session_id', $sessionId)->count());
         $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
-        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        $this->assertSame(0, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
     }
 
-    public function test_async_run_endpoint_returns_bridge_message_when_queue_and_direct_runtime_fail(): void
+    public function test_flutter_async_run_endpoint_does_not_create_bridge_message_when_queue_fails(): void
     {
         Queue::fake();
         $this->bindFailingQueueService();
@@ -674,16 +675,45 @@ class RealtimeAssistantFlowTest extends TestCase
                 'source' => 'flutter',
                 'client_request_id' => 'queue-bridge-1',
             ],
-        ])->assertOk()
-            ->assertJsonPath('data.status', 'completed')
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
             ->assertJsonPath('data.run', null)
             ->assertJsonPath('data.user_message.content', 'Please add Dr Chen Cardio on 7/9 at 3pm')
-            ->assertJsonPath('data.assistant_message.content', 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.');
+            ->assertJsonPath('data.assistant_message', null);
 
-        $this->assertSame('active', ConversationSession::findOrFail($sessionId)->status);
+        $this->assertSame('queued', ConversationSession::findOrFail($sessionId)->status);
         $this->assertSame(0, AssistantRun::where('conversation_session_id', $sessionId)->count());
         $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
-        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        $this->assertSame(0, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+    }
+
+    public function test_flutter_async_run_endpoint_returns_existing_run_when_queue_fails_after_creating_it(): void
+    {
+        Queue::fake();
+        $this->bindQueueServiceThatCreatesRunThenThrows();
+
+        $token = $this->apiToken('async-run-partial-queue@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $this->bindRuntimeThatFailsIfCalled();
+
+        $runId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Please add Dr Chen Cardio on 7/9 at 3pm',
+            'metadata' => [
+                'source' => 'flutter',
+                'client_request_id' => 'queue-created-then-failed-1',
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.assistant_message', null)
+            ->json('data.run.id');
+
+        $this->assertNotNull($runId);
+        $this->assertSame(1, AssistantRun::where('conversation_session_id', $sessionId)->count());
+        $this->assertSame(1, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'user')->count());
+        $this->assertSame(0, ConversationMessage::where('conversation_session_id', $sessionId)->where('role', 'assistant')->count());
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
     }
 
     public function test_async_run_endpoint_reuses_existing_client_request_id(): void
@@ -1569,6 +1599,58 @@ class RealtimeAssistantFlowTest extends TestCase
                 public function queueExistingMessage(ConversationSession $session, ConversationMessage $userMessage, array $metadata = [], string $source = 'http'): array
                 {
                     throw new \RuntimeException('Simulated queue outage.');
+                }
+            };
+        });
+    }
+
+    private function bindQueueServiceThatCreatesRunThenThrows(): void
+    {
+        $this->app->bind(AssistantRunService::class, function (): AssistantRunService {
+            return new class extends AssistantRunService
+            {
+                public function queueRun(ConversationSession $session, string $content, array $metadata = [], string $source = 'http'): array
+                {
+                    $userMessage = ConversationMessage::create([
+                        'user_id' => $session->user_id,
+                        'conversation_session_id' => $session->id,
+                        'role' => 'user',
+                        'content' => $content,
+                        'metadata' => $metadata ?: null,
+                    ]);
+
+                    $run = AssistantRun::create([
+                        'user_id' => $session->user_id,
+                        'workspace_id' => $session->workspace_id,
+                        'conversation_session_id' => $session->id,
+                        'user_message_id' => $userMessage->id,
+                        'source' => $source,
+                        'status' => 'queued',
+                        'input' => $content,
+                        'metadata' => $metadata ?: null,
+                    ]);
+
+                    ActivityEvent::create([
+                        'user_id' => $run->user_id,
+                        'workspace_id' => $run->workspace_id,
+                        'conversation_session_id' => $run->conversation_session_id,
+                        'conversation_message_id' => $run->user_message_id,
+                        'event_type' => 'runtime.run_queued',
+                        'tool_name' => 'hermes.runs',
+                        'status' => 'queued',
+                        'payload' => [
+                            'run_id' => $run->id,
+                            'message_id' => $userMessage->id,
+                            'source' => $source,
+                        ],
+                    ]);
+
+                    $session->update([
+                        'status' => 'queued',
+                        'last_activity_at' => now(),
+                    ]);
+
+                    throw new \RuntimeException('Simulated queue dispatch failure after run creation.');
                 }
             };
         });
