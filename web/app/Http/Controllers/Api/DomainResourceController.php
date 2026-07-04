@@ -646,6 +646,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
+        $this->normalizeAllDayTitleIntent($validated);
         $this->normalizeAllDayCalendarBounds($validated);
         $validated = $this->withDefaultUncategorizedColor($validated, true);
         if ($this->calendarRecurrenceRequested($validated['recurrence'] ?? null) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
@@ -687,6 +688,7 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
+        $this->normalizeAllDayTitleIntent($validated, $model);
         $validated = $this->withDefaultUncategorizedColor($validated);
         if ($this->recurringCalendarEvents->isGeneratedOccurrence($model)) {
             $validated['recurrence'] = null;
@@ -1903,6 +1905,34 @@ class DomainResourceController extends Controller
         if (array_key_exists('metadata', $attributes)) {
             $attributes['metadata'] = array_merge($metadata, ['all_day' => true]);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function normalizeAllDayTitleIntent(array &$attributes, ?CalendarEvent $event = null): void
+    {
+        if (! isset($attributes['title']) || ! is_string($attributes['title'])) {
+            return;
+        }
+
+        $title = trim($attributes['title']);
+        if (! preg_match('/^\s*all[\s-]?day\s*:\s*(.+)$/i', $title, $matches)) {
+            return;
+        }
+
+        $normalizedTitle = trim((string) ($matches[1] ?? ''));
+        if ($normalizedTitle !== '') {
+            $attributes['title'] = $normalizedTitle;
+        }
+
+        $metadata = array_key_exists('metadata', $attributes)
+            ? ($attributes['metadata'] ?? [])
+            : ($event?->metadata ?? []);
+        if (! is_array($metadata)) {
+            $metadata = [];
+        }
+        $attributes['metadata'] = array_merge($metadata, ['all_day' => true]);
     }
 
     /**

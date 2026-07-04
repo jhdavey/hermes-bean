@@ -129,6 +129,7 @@ class RealtimeVoiceQualityService
         $backgroundQueue = $this->backgroundQueueSummary($events);
         $backgroundProgress = $this->backgroundProgressSummary($events);
         $backgroundFailureTruthfulness = $this->backgroundFailureTruthfulnessSummary($events);
+        $webVoiceFirstSpeech = $this->webVoiceFirstSpeechSummary($events);
         $spokenNaturalness = $this->spokenNaturalnessSummary($events);
         $unsupportedDirectAnswer = $this->unsupportedDirectAnswerSummary($events);
         $spokenNaturalnessSample = (int) ($spokenNaturalness['sample_size'] ?? 0);
@@ -229,6 +230,9 @@ class RealtimeVoiceQualityService
                 'background_completion_quality' => $backgroundCompletion,
                 'background_progress_quality' => $backgroundProgress,
                 'minimum_background_progress_prompt_count' => self::TARGETS['minimum_background_progress_prompt_count'],
+                'web_voice_turn_started_count' => (int) ($eventCounts['web_voice_turn_started'] ?? 0),
+                'web_voice_first_speech_count' => (int) ($eventCounts['web_voice_first_speech'] ?? 0),
+                'web_voice_first_speech_quality' => $webVoiceFirstSpeech,
                 'background_failure_count' => $backgroundFailures,
                 'background_failure_rate' => $this->eventRate($backgroundFailures, $turns->count()),
                 'background_watch_failure_count' => $backgroundWatchFailures,
@@ -1918,6 +1922,56 @@ class RealtimeVoiceQualityService
             + (int) ($eventCounts['dashboard_context_refresh_failure'] ?? 0);
     }
 
+    private function webVoiceFirstSpeechSummary(Collection $events): array
+    {
+        $startedCount = $events
+            ->filter(fn (AiUsageLog $log): bool => data_get($log->metadata ?? [], 'event_type') === 'web_voice_turn_started')
+            ->count();
+        $firstSpeech = $events
+            ->filter(fn (AiUsageLog $log): bool => data_get($log->metadata ?? [], 'event_type') === 'web_voice_first_speech')
+            ->values();
+
+        if ($startedCount === 0 && $firstSpeech->isEmpty()) {
+            return [
+                'status' => 'no_data',
+                'started_count' => 0,
+                'sample_size' => 0,
+                'missing_first_speech_count' => 0,
+                'client_fallback_count' => 0,
+                'target_p95_first_speech_elapsed_ms' => self::TARGETS['p95_transcript_to_first_assistant_ms'],
+            ];
+        }
+
+        $elapsedValues = $firstSpeech
+            ->map(fn (AiUsageLog $log): mixed => data_get($log->metadata ?? [], 'details.elapsed_ms'))
+            ->filter(fn (mixed $value): bool => is_numeric($value))
+            ->map(fn (mixed $value): int => (int) $value)
+            ->sort()
+            ->values();
+        $clientFallbackCount = $firstSpeech
+            ->filter(fn (AiUsageLog $log): bool => data_get($log->metadata ?? [], 'details.speech_source') === 'client_fallback')
+            ->count();
+        $missingFirstSpeechCount = max(0, $startedCount - $firstSpeech->count());
+        $p95 = $elapsedValues->isEmpty() ? null : $this->nearestRankPercentile($elapsedValues, 0.95);
+
+        return [
+            'status' => $missingFirstSpeechCount === 0
+                && $elapsedValues->count() === $firstSpeech->count()
+                && $p95 !== null
+                && $p95 <= self::TARGETS['p95_transcript_to_first_assistant_ms']
+                    ? 'pass'
+                    : 'fail',
+            'started_count' => $startedCount,
+            'sample_size' => $firstSpeech->count(),
+            'elapsed_sample_size' => $elapsedValues->count(),
+            'missing_first_speech_count' => $missingFirstSpeechCount,
+            'client_fallback_count' => $clientFallbackCount,
+            'avg_first_speech_elapsed_ms' => $elapsedValues->isEmpty() ? null : (int) round($elapsedValues->avg()),
+            'p95_first_speech_elapsed_ms' => $p95,
+            'target_p95_first_speech_elapsed_ms' => self::TARGETS['p95_transcript_to_first_assistant_ms'],
+        ];
+    }
+
     private function eventRate(int $count, int $turnCount): ?float
     {
         if ($turnCount <= 0) {
@@ -2021,6 +2075,7 @@ class RealtimeVoiceQualityService
                 ? ''
                 : trim((string) data_get($log->metadata ?? [], 'details.assistant_text', '')),
             'flutter_realtime_progress_prompt_spoken' => trim((string) data_get($log->metadata ?? [], 'details.spoken_text', '')),
+            'web_voice_first_speech' => trim((string) data_get($log->metadata ?? [], 'details.text', '')),
             'realtime_background_completed', 'realtime_background_cancelled' => trim((string) data_get($log->metadata ?? [], 'details.spoken_text', '')),
             default => '',
         };
@@ -2075,6 +2130,7 @@ class RealtimeVoiceQualityService
             'false_app_capability_denial' => '/\bI (?:do not|don\'t|cannot|can\'t|am not able to|am unable to) (?:access|see|view|check|read|use|manage|update|create|change) (?:your )?(?:calendar|tasks?|to-?dos?|reminders?|notes?|workspace|HeyBean|app data|account)\b/i',
             'nonhuman_assistance_cliche' => '/\b(?:how can I assist you|how may I assist you|is there anything else I can assist you with|as your virtual assistant)\b/i',
             'bad_voice_mic_check' => '/\bI can read you\b/i',
+            'restart_prompt_after_request' => '/^(?:go ahead|i(?:\'m| am) listening|what can i help(?: you)? with|how can i help(?: you)?|how can i assist(?: you)?)\.?$/i',
             'internal_queue_tool' => '/\bqueue_bean_work\b/i',
             'function_call' => '/\b(?:function|tool) call(?:s|ed|ing)?\b/i',
             'calling_tool' => '/\b(?:call|calling|use|using|run|running|invoke|invoking|trigger|triggering) (?:a |the |my |that )?(?:tool|function)\b/i',

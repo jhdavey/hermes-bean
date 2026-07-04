@@ -290,6 +290,7 @@ if (mount) {
     let kioskRealtimeAssistantDraft = null;
     let kioskRealtimeSuppressNextAssistantPersist = false;
     let kioskRealtimeVoiceOnlyAssistant = false;
+    let kioskRealtimeVoiceOnlyKind = '';
     let kioskRealtimeIgnoreNextFunctionCalls = false;
     let kioskRealtimeInputAudioContext = null;
     let kioskRealtimeInputAudioSource = null;
@@ -2883,6 +2884,17 @@ if (mount) {
 
     function ensureRealtimeRequestWorkItem(content, status = 'running', options = {}) {
         if (options.freshRequest) prepareBeanWorkForFreshRequest();
+        const labels = beanWorkLabelsForRequest(content);
+        const label = labels[0] || beanWorkLabelForClause(normalizedVoiceCommand(content)) || 'Working on request';
+        if (!label || isGenericBeanWorkLabel(label)) return;
+        upsertBeanWorkItem('realtime-request', label, status, { source: 'local' });
+        logKioskRealtimeVoiceTrace('realtime_voice_work_item_seeded', {
+            summary: 'Seeded visible realtime work item.',
+            user_content: content,
+            label,
+            status,
+            item_count: state.beanWorkItems.length,
+        });
     }
 
     function beanWorkPlaceholderIndex(label) {
@@ -7894,6 +7906,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeVoiceOnlyKind = '';
         kioskRealtimeIgnoreNextFunctionCalls = false;
         setRealtimeBackgroundWorkActive(false);
         kioskRealtimeAwaitingFollowup = false;
@@ -8797,6 +8810,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeVoiceOnlyKind = '';
         kioskRealtimeIgnoreNextFunctionCalls = false;
         setRealtimeBackgroundWorkActive(false);
         kioskRealtimeAwaitingFollowup = false;
@@ -9178,8 +9192,9 @@ if (mount) {
         };
         kioskRealtimeSuppressNextAssistantPersist = true;
         kioskRealtimeVoiceOnlyAssistant = true;
+        kioskRealtimeVoiceOnlyKind = 'progress';
         kioskRealtimeIgnoreNextFunctionCalls = true;
-        logKioskRealtimeVoiceTrace('realtime_voice_progress_prompt', {
+        logKioskRealtimeVoiceTrace('flutter_realtime_progress_prompt', {
             summary: 'Sending realtime background progress prompt.',
             user_request: context.userContent || '',
             elapsed_ms: checkpoint.elapsedMs,
@@ -9433,7 +9448,7 @@ if (mount) {
                 summary: 'Wake phrase heard without a command yet.',
                 transcript: raw,
             });
-            setKioskVoiceStatus('listening', 'Go ahead');
+            setKioskVoiceStatus('listening', 'Listening');
             armKioskConversationTimeout(kioskRealtimeWakeContinuationMs);
             return;
         }
@@ -9645,6 +9660,18 @@ if (mount) {
         draft.content = text;
         kioskRealtimeLastAssistantText = text;
         recordRealtimeSpokenSegment(text);
+        if (kioskRealtimeVoiceOnlyAssistant && kioskRealtimeVoiceOnlyKind === 'progress') {
+            logKioskRealtimeVoiceTrace('flutter_realtime_progress_prompt_spoken', {
+                summary: 'Realtime background progress prompt was spoken.',
+                response_id: payload.response_id || null,
+                item_id: payload.item_id || null,
+                user_request: kioskRealtimeBackgroundProgressContext?.userContent || '',
+                elapsed_ms: kioskRealtimeBackgroundProgressContext?.startedAt
+                    ? Date.now() - kioskRealtimeBackgroundProgressContext.startedAt
+                    : null,
+                spoken_text: text,
+            });
+        }
         logKioskRealtimeVoiceTrace('realtime_voice_spoken', {
             summary: 'Realtime assistant spoken transcript completed.',
             response_id: payload.response_id || null,
@@ -9736,7 +9763,7 @@ if (mount) {
         if (reactivatedConversation) {
             kioskConversationActive = true;
         }
-        logKioskRealtimeVoiceTrace('realtime_voice_response_done', {
+        logKioskRealtimeVoiceTrace('flutter_realtime_response_done', {
             summary: 'Realtime response completed.',
             response_id: payload?.response?.id || payload?.response_id || null,
             user_content: pendingUserContent,
@@ -9745,6 +9772,7 @@ if (mount) {
             reactivated_conversation: reactivatedConversation,
             assistant_text: responseAssistantText,
             assistant_answered: assistantAnswered,
+            voice_only_assistant: kioskRealtimeVoiceOnlyAssistant,
             function_calls: functionCalls.map((item) => ({
                 name: item?.name || '',
                 call_id: item?.call_id || '',
@@ -9800,6 +9828,7 @@ if (mount) {
             kioskRealtimeAssistantDraft = null;
             kioskRealtimeSuppressNextAssistantPersist = false;
             kioskRealtimeVoiceOnlyAssistant = false;
+            kioskRealtimeVoiceOnlyKind = '';
             finishRealtimeTurnStatus();
             return;
         }
@@ -10016,6 +10045,7 @@ if (mount) {
             setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent });
         }
         showRealtimeWorkingInBackgroundWhenReady();
+        const toolCallStartedAt = Date.now();
         try {
             const result = await api('/assistant/realtime/tool-calls', {
                 method: 'POST',
@@ -10039,6 +10069,15 @@ if (mount) {
                 kioskRealtimePendingUser = null;
                 kioskRealtimeCurrentUserTurn = null;
                 ensureRealtimeRequestWorkItem(userContent);
+                logKioskRealtimeVoiceTrace('realtime_background_queued', {
+                    summary: 'Realtime background work queued.',
+                    user_content: userContent,
+                    run_id: result.run_id,
+                    source: name === 'queue_bean_work' ? 'tool_call' : 'direct_tool',
+                    acknowledged: Boolean(quickReplyText),
+                    acknowledgement_character_count: quickReplyText.length,
+                    queue_elapsed_ms: Date.now() - toolCallStartedAt,
+                });
                 startBeanWorkEventPolling(kioskRealtime?.sessionId || state.session?.id);
                 watchRealtimeAssistantRun(result.run_id, { quickReplyText, userContent });
             } else if (name === 'queue_bean_work') {
@@ -10096,6 +10135,7 @@ if (mount) {
         ensureRealtimeRequestWorkItem(content, 'running', { freshRequest: true });
         setRealtimeBackgroundWorkActive(true, { quickReplyText, userContent: content });
         showRealtimeWorkingInBackgroundWhenReady();
+        const fallbackQueueStartedAt = Date.now();
         try {
             const result = await api('/assistant/realtime/tool-calls', {
                 method: 'POST',
@@ -10110,6 +10150,15 @@ if (mount) {
                 },
             });
             if (result?.run_id) {
+                logKioskRealtimeVoiceTrace('realtime_background_queued', {
+                    summary: 'Realtime fallback background work queued.',
+                    user_content: content,
+                    run_id: result.run_id,
+                    source: 'fallback',
+                    acknowledged: Boolean(quickReplyText),
+                    acknowledgement_character_count: quickReplyText.length,
+                    queue_elapsed_ms: Date.now() - fallbackQueueStartedAt,
+                });
                 watchRealtimeAssistantRun(result.run_id, { quickReplyText, userContent: content });
             } else {
                 setRealtimeBackgroundWorkActive(false);
@@ -10277,6 +10326,13 @@ if (mount) {
         }
         if (!content) {
             setRealtimeBackgroundWorkActive(false);
+            logKioskRealtimeVoiceTrace('realtime_background_completed', {
+                summary: 'Realtime background work completed without assistant content.',
+                user_content: context.userContent || '',
+                run_id: run?.id || null,
+                spoken_text: 'I finished that request.',
+                spoken_character_count: 'I finished that request.'.length,
+            });
             deliverRealtimeBackgroundResult('I finished that request.', run?.id);
             return;
         }
@@ -10286,6 +10342,13 @@ if (mount) {
             appendPersistedAssistantMessage(assistantMessage);
             if (state.kioskVoiceEnabled && kioskRealtimeConnected() && kioskConversationActive) {
                 kioskRealtimeAwaitingFollowup = realtimeAssistantAwaitingFollowup(context.quickReplyText || '');
+                logKioskRealtimeVoiceTrace('realtime_background_completed', {
+                    summary: 'Realtime background work completed with chat handoff.',
+                    user_content: context.userContent || '',
+                    run_id: run?.id || null,
+                    spoken_text: 'Done. I put the details in chat.',
+                    spoken_character_count: 'Done. I put the details in chat.'.length,
+                });
                 deliverRealtimeBackgroundResult('Done. I put the details in chat.', run?.id);
             }
             return;
@@ -10293,6 +10356,13 @@ if (mount) {
         appendPersistedAssistantMessage(assistantMessage);
         if (kioskRealtimeConnected()) {
             setRealtimeBackgroundWorkActive(false);
+            logKioskRealtimeVoiceTrace('realtime_background_completed', {
+                summary: 'Realtime background work completed.',
+                user_content: context.userContent || '',
+                run_id: run?.id || null,
+                spoken_text: finalVoice.text || content,
+                spoken_character_count: String(finalVoice.text || content).length,
+            });
             deliverRealtimeBackgroundResult(finalVoice.text || content, run?.id);
             return;
         }
@@ -10425,6 +10495,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeVoiceOnlyKind = '';
         if (!sessionId) return;
         try {
             if (userTurn?.content && !userTurn.persisted) {
@@ -10774,6 +10845,7 @@ if (mount) {
         kioskRealtimeAssistantDraft = null;
         kioskRealtimeSuppressNextAssistantPersist = false;
         kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeVoiceOnlyKind = '';
         kioskRealtimeIgnoreNextFunctionCalls = false;
         setRealtimeBackgroundWorkActive(false);
         kioskRealtimeAwaitingFollowup = false;
@@ -10845,17 +10917,34 @@ if (mount) {
         const likelyNeedsAgentWork = voiceCommandNeedsAgentWork(content);
         const wantsDetailedChat = voiceCommandWantsDetailedChat(content);
         setKioskVoiceStatus('working', 'thinking');
+        logKioskRealtimeVoiceTrace('web_voice_turn_started', {
+            summary: 'Web voice turn started.',
+            user_content: content,
+            likely_needs_agent_work: likelyNeedsAgentWork,
+            wants_detailed_chat: wantsDetailedChat,
+        });
         const quickReplyTask = fetchKioskQuickReply(content, quickReplyGeneration);
         const quickReply = likelyNeedsAgentWork
-            ? await timeoutPromise(quickReplyTask, 900, null)
+            ? await timeoutPromise(quickReplyTask, 450, null)
             : await quickReplyTask;
         const quickReplyText = quickReply?.text || fallbackKioskQuickReply(content, likelyNeedsAgentWork);
+        const quickReplySource = quickReply?.text ? 'model' : (quickReplyText ? 'client_fallback' : 'none');
         const turnContract = kioskVoiceTurnContract(quickReply, quickReplyText, likelyNeedsAgentWork, wantsDetailedChat);
         const shouldContinueAgent = turnContract.shouldContinueAgent;
-        const allowLateQuickReply = !quickReplyText && likelyNeedsAgentWork;
+        const allowLateQuickReply = quickReplySource === 'none' && likelyNeedsAgentWork;
         let finalResponseReady = false;
         let quickReplySpeech = quickReplyText
-            ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments)
+            ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments).then((spoken) => {
+                logKioskRealtimeVoiceTrace('web_voice_first_speech', {
+                    summary: 'Web voice first speech finished.',
+                    user_content: content,
+                    speech_source: quickReplySource,
+                    elapsed_ms: Date.now() - turnStartedAt,
+                    spoken,
+                    text: quickReplyText,
+                });
+                return spoken;
+            })
             : Promise.resolve(false);
         trackKioskSpeechThenWorking(quickReplySpeech, quickReplyGeneration, () => finalResponseReady);
         voiceTurn.lastSpeech = quickReplySpeech;

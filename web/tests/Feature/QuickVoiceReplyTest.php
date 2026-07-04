@@ -63,11 +63,38 @@ class QuickVoiceReplyTest extends TestCase
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'do not ask whether they want you to create')
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'Finish complete thoughts')
                 && str_contains((string) data_get($payload, 'messages.0.content'), 'warm, friendly, and lightly upbeat')
+                && str_contains((string) data_get($payload, 'messages.0.content'), 'Do not say "go ahead"')
                 && data_get($payload, 'messages.1.role') === 'system'
                 && str_contains((string) data_get($payload, 'messages.1.content'), 'America/New_York')
                 && data_get($payload, 'messages.2.role') === 'user'
                 && data_get($payload, 'messages.2.content') === 'what should we have for dinner tonight?';
         });
+    }
+
+    public function test_quick_voice_reply_replaces_go_ahead_restart_prompt_for_actionable_requests(): void
+    {
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response([
+                'id' => 'chatcmpl-go-ahead',
+                'model' => 'gpt-quick-test',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Go ahead.',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $token = $this->apiToken('quick-voice-go-ahead@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/quick-reply', [
+            'content' => 'create an all day calendar event tomorrow called board retreat',
+        ])->assertOk()
+            ->assertJsonPath('data.text', "I'll check that now.")
+            ->assertJsonPath('data.continue_agent', true)
+            ->assertJsonPath('data.response_contract', 'acknowledged_background');
     }
 
     public function test_quick_voice_reply_continues_to_agent_for_live_external_requests(): void

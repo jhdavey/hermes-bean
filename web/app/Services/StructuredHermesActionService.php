@@ -610,6 +610,7 @@ class StructuredHermesActionService
         $metadata = $this->metadataWithRecurrence($parameters, [
             'created_by' => 'structured_hermes_action',
         ]);
+        $this->normalizeAllDayTitleIntent($parameters, $metadata);
         if ($this->parametersMarkAllDay($parameters, $metadata)) {
             $metadata['all_day'] = true;
             $endsAt = $this->inclusiveAllDayEnd($startsAt, $endsAt);
@@ -753,6 +754,7 @@ class StructuredHermesActionService
             );
         }
         $updatedMetadata = is_array($updates['metadata'] ?? null) ? $updates['metadata'] : ($calendarEvent->metadata ?? []);
+        $this->normalizeAllDayTitleIntent($updates, $updatedMetadata);
         if ($this->parametersMarkAllDay($parameters, $updatedMetadata)) {
             $updates['metadata'] = array_merge($updatedMetadata, ['all_day' => true]);
             $updates['ends_at'] = $this->inclusiveAllDayEnd(
@@ -1687,6 +1689,28 @@ class StructuredHermesActionService
         return $value === true
             || $value === 1
             || in_array(strtolower((string) $value), ['true', '1', 'yes'], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $parameters
+     * @param  array<string, mixed>  $metadata
+     */
+    private function normalizeAllDayTitleIntent(array &$parameters, array &$metadata): void
+    {
+        if (! isset($parameters['title']) || ! is_string($parameters['title'])) {
+            return;
+        }
+
+        $title = trim($parameters['title']);
+        if (! preg_match('/^\s*all[\s-]?day\s*:\s*(.+)$/i', $title, $matches)) {
+            return;
+        }
+
+        $normalizedTitle = trim((string) ($matches[1] ?? ''));
+        if ($normalizedTitle !== '') {
+            $parameters['title'] = $normalizedTitle;
+        }
+        $metadata['all_day'] = true;
     }
 
     private function inclusiveAllDayEnd(Carbon $startsAt, ?Carbon $endsAt): Carbon

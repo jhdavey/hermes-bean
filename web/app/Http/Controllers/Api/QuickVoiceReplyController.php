@@ -155,6 +155,9 @@ class QuickVoiceReplyController extends Controller
         $text = $this->personableVoiceText($text);
 
         $continueAgent = $stage === 'bridge' || $this->shouldContinueAgent($content);
+        if ($this->isRestartPrompt($text)) {
+            $text = $continueAgent ? "I'll check that now." : 'I heard you.';
+        }
         if ($text === '') {
             Log::info('Quick voice reply was empty; falling back to agent bridge.', [
                 'user_id' => $user->id,
@@ -260,6 +263,7 @@ You are Bean's live voice layer in the Hey Bean app.
 
 The user has just finished speaking. Give the first natural spoken reply immediately.
 Do not use canned support-agent phrases. Do not mention tools, models, background jobs, or internal work.
+Do not say "go ahead", "I'm listening", "what can I help with", or any phrase that asks the user to start over after they already made a request.
 Sound warm, friendly, and lightly upbeat, like a helpful person who is glad to help. Use natural spoken phrasing with contractions. Prefer "Sure, I'll check Orlando's weather now" over "I will check the weather for Orlando Florida".
 It is okay to use one brief friendly opener like "Sure", "Absolutely", or "Yeah" when it sounds natural. Do not overdo enthusiasm, use exclamation marks, or sound salesy.
 If the user asks a normal conversational question, answer with a useful first thought right away.
@@ -282,5 +286,10 @@ PROMPT;
             ->replaceMatches('/\s+/', ' ')
             ->trim()
             ->toString();
+    }
+
+    private function isRestartPrompt(string $text): bool
+    {
+        return preg_match('/^(?:go ahead|i(?:\'m| am) listening|what can i help(?: you)? with|how can i help(?: you)?|how can i assist(?: you)?)\.?$/i', trim($text)) === 1;
     }
 }

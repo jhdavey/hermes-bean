@@ -16,6 +16,7 @@ use App\Models\WorkspaceMembership;
 use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
+use App\Services\StructuredHermesActionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -425,6 +426,54 @@ class RealtimeAssistantFlowTest extends TestCase
         $this->assertSame('Reconnecting', data_get($log->metadata, 'message'));
         $this->assertSame('failed', data_get($log->metadata, 'details.ice_connection_state'));
         $this->assertContains('ice_webrtc_connection_failure', $log->action_types);
+    }
+
+    public function test_realtime_quality_reports_web_voice_first_speech_instrumentation(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-04T15:00:00Z'));
+
+        $token = $this->apiToken('web-voice-quality@example.com');
+        $user = User::where('email', 'web-voice-quality@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+        ])->assertCreated()->json('data.id');
+
+        foreach ([
+            ['event_type' => 'web_voice_turn_started', 'details' => ['user_content' => 'create a task', 'likely_needs_agent_work' => true]],
+            ['event_type' => 'web_voice_first_speech', 'details' => ['elapsed_ms' => 430, 'speech_source' => 'client_fallback', 'text' => "Sure, I'll create that now."]],
+        ] as $event) {
+            AiUsageLog::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $sessionId,
+                'provider' => 'openai',
+                'model' => 'gpt-realtime-test',
+                'route_tier' => 'realtime_voice_event',
+                'request_type' => 'realtime_voice_event',
+                'status' => 'completed',
+                'input_tokens' => 0,
+                'output_tokens' => 0,
+                'total_tokens' => 0,
+                'tool_call_count' => 0,
+                'estimated_cost_usd' => 0,
+                'action_types' => ['realtime_voice_event', $event['event_type']],
+                'metadata' => $event,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $this->withToken($token)->getJson('/api/assistant/realtime/quality?days=7&session_id='.$sessionId)
+            ->assertOk()
+            ->assertJsonPath('data.events.web_voice_turn_started_count', 1)
+            ->assertJsonPath('data.events.web_voice_first_speech_count', 1)
+            ->assertJsonPath('data.events.web_voice_first_speech_quality.status', 'pass')
+            ->assertJsonPath('data.events.web_voice_first_speech_quality.sample_size', 1)
+            ->assertJsonPath('data.events.web_voice_first_speech_quality.client_fallback_count', 1)
+            ->assertJsonPath('data.events.web_voice_first_speech_quality.p95_first_speech_elapsed_ms', 430)
+            ->assertJsonPath('data.speech.naturalness.sample_size', 1)
+            ->assertJsonPath('data.speech.naturalness.violation_count', 0);
     }
 
     public function test_realtime_usage_persists_voice_latency_metrics(): void
@@ -1061,6 +1110,59 @@ class RealtimeAssistantFlowTest extends TestCase
                 ->where('data.instructions', fn (string $value): bool => str_contains($value, '2026-06-05 through 2026-06-08'))
                 ->etc()
             );
+    }
+
+    public function test_calendar_create_normalizes_all_day_title_prefix(): void
+    {
+        $token = $this->apiToken('all-day-title-api@example.com');
+        $user = User::where('email', 'all-day-title-api@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+
+        $this->withToken($token)->postJson('/api/calendar-events', [
+            'workspace_id' => $workspace->id,
+            'title' => 'All day: Board retreat',
+            'starts_at' => '2026-07-10T00:00:00Z',
+            'status' => 'confirmed',
+        ])->assertCreated()
+            ->assertJsonPath('data.title', 'Board retreat')
+            ->assertJsonPath('data.metadata.all_day', true);
+
+        $event = CalendarEvent::where('title', 'Board retreat')->firstOrFail();
+        $this->assertTrue($event->metadata['all_day']);
+        $this->assertSame('2026-07-10T00:00:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-07-10T23:59:00+00:00', $event->ends_at->utc()->toIso8601String());
+    }
+
+    public function test_structured_calendar_create_normalizes_all_day_title_prefix(): void
+    {
+        $token = $this->apiToken('all-day-title-structured@example.com');
+        $user = User::where('email', 'all-day-title-structured@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        $session = ConversationSession::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'status' => 'active',
+            'runtime_mode' => 'tools',
+            'last_activity_at' => now(),
+        ]);
+
+        app(StructuredHermesActionService::class)->applyEnvelope($session, [
+            'actions' => [[
+                'type' => 'calendar.create',
+                'risk' => 'safe',
+                'parameters' => [
+                    'title' => 'All-day: Team offsite',
+                    'starts_at' => '2026-07-12T00:00:00Z',
+                    'status' => 'confirmed',
+                ],
+            ]],
+        ]);
+
+        $event = CalendarEvent::where('conversation_session_id', $session->id)->firstOrFail();
+        $this->assertSame('Team offsite', $event->title);
+        $this->assertTrue($event->metadata['all_day']);
+        $this->assertSame('2026-07-12T23:59:00+00:00', $event->ends_at->utc()->toIso8601String());
     }
 
     public function test_realtime_tool_call_queues_background_laravel_agent_run(): void
