@@ -9285,6 +9285,17 @@ if (mount) {
             || realtimeTranscriptLooksLikeAppWorkRequest(normalized);
     }
 
+    function realtimeContextualFollowUpKind(transcript) {
+        const normalized = normalizedRealtimeTranscript(transcript);
+        if (!normalized || realtimeTranscriptMentionsBean(normalized)) return '';
+        if (/^(?:no|nope|nah|cancel|stop|never mind|nevermind|don'?t|do not)\b/.test(normalized)) return 'decline';
+        if (/^(?:yes|yeah|yep|yup|sure|ok|okay|please|yes please|sure please|do it|do that|go ahead|sounds good|that works)\b/.test(normalized)) return 'confirmation';
+        if (/\b(?:actually|instead|change that|make that|correction|i meant|not .* but|wrong)\b/.test(normalized)) return 'correction';
+        if (/^(?:also|and|plus|then|next|after that)\b/.test(normalized)) return 'continuation';
+        if (/\b(?:that|it|this|those|them|the above|same|tomorrow|later|before|after)\b/.test(normalized)) return 'reference';
+        return realtimeTranscriptLooksLikeFollowup(normalized) ? 'continuation' : '';
+    }
+
     function realtimeTranscriptLooksLikeAppWorkRequest(transcript) {
         const command = normalizedVoiceCommand(transcript);
         if (!command || !voiceCommandNeedsAgentWork(command)) return false;
@@ -9743,7 +9754,6 @@ if (mount) {
             ...kioskRealtimePendingFunctionCalls,
             ...output.filter((item) => item?.type === 'function_call'),
         ]);
-        reportKioskRealtimeUsage(payload, functionCalls);
         kioskRealtimePendingFunctionCalls = [];
         const hasFunctionCall = functionCalls.length > 0;
         const assistantAnswered = responseAssistantText !== '';
@@ -9759,6 +9769,11 @@ if (mount) {
             pendingUserContent,
             responseAssistantText,
         );
+        reportKioskRealtimeUsage(payload, functionCalls, {
+            assistantText: responseAssistantText,
+            userTurn: activeUserTurn,
+            userContent: pendingUserContent,
+        });
         const reactivatedConversation = assistantAnswered && pendingUserContent && !kioskConversationActive;
         if (reactivatedConversation) {
             kioskConversationActive = true;
@@ -9917,15 +9932,64 @@ if (mount) {
         return strings.join(' ').replace(/\s+/g, ' ').trim();
     }
 
-    function reportKioskRealtimeUsage(payload, functionCalls = []) {
-        const usage = payload?.response?.usage;
+    function reportKioskRealtimeUsage(payload, functionCalls = [], context = {}) {
+        const usage = payload?.response?.usage || {};
         const sessionId = kioskRealtime?.sessionId || state.session?.id;
-        if (!usage || !sessionId || !state.token) return;
+        if (!sessionId || !state.token) return;
         const responseId = payload?.response?.id || payload?.response_id || null;
         const model = payload?.response?.model || null;
-        const voiceSeconds = kioskRealtimeAssistantOutputStartedAt
-            ? Math.max(1, Math.min(300, (Date.now() - kioskRealtimeAssistantOutputStartedAt) / 1000))
-            : 1;
+        const now = Date.now();
+        const turnStartedAt = Number(context.userTurn?.startedAt || 0);
+        const responseCreateAt = Number(kioskRealtimeResponseCreateSentAt || 0);
+        const assistantText = String(context.assistantText || '').trim();
+        const firstAssistantAt = Number(kioskRealtimeAssistantOutputStartedAt || (assistantText ? now : 0));
+        const spokenCharacterCount = assistantText.length;
+        const spokenSentenceCount = assistantText ? Math.max(1, (assistantText.match(/[.!?]+(?:\s|$)/g) || []).length) : 0;
+        const transcriptToResponseCreateMs = turnStartedAt && responseCreateAt && responseCreateAt >= turnStartedAt
+            ? responseCreateAt - turnStartedAt
+            : null;
+        const responseCreateToFirstAssistantMs = responseCreateAt && firstAssistantAt && firstAssistantAt >= responseCreateAt
+            ? firstAssistantAt - responseCreateAt
+            : null;
+        const transcriptToFirstAssistantMs = turnStartedAt && firstAssistantAt && firstAssistantAt >= turnStartedAt
+            ? firstAssistantAt - turnStartedAt
+            : null;
+        const turnCompletedMs = turnStartedAt && now >= turnStartedAt ? now - turnStartedAt : null;
+        const voiceSeconds = turnCompletedMs !== null
+            ? Math.max(1, Math.min(300, turnCompletedMs / 1000))
+            : (firstAssistantAt ? Math.max(1, Math.min(300, (now - firstAssistantAt) / 1000)) : 1);
+        const userContent = String(context.userContent || '').trim();
+        const contextualFollowUpKind = realtimeContextualFollowUpKind(userContent);
+        const body = {
+            session_id: sessionId,
+            model,
+            response_id: responseId,
+            usage,
+            voice_seconds: voiceSeconds,
+            tool_call_count: functionCalls.length,
+            action_types: ['realtime_voice', ...functionCalls.map((item) => item?.name).filter(Boolean)],
+            realtime_usage_missing: !payload?.response?.usage,
+            spoken_character_count: spokenCharacterCount,
+            spoken_sentence_count: spokenSentenceCount,
+            spoken_brevity_violation: spokenCharacterCount > 320 || spokenSentenceCount > 3,
+            is_follow_up_turn: Boolean(kioskConversationActive && !realtimeTranscriptMentionsBean(userContent)),
+            is_contextual_follow_up_turn: Boolean(contextualFollowUpKind),
+            contextual_follow_up_kind: contextualFollowUpKind || null,
+        };
+        if (transcriptToResponseCreateMs !== null) body.transcript_to_response_create_ms = transcriptToResponseCreateMs;
+        if (responseCreateToFirstAssistantMs !== null) body.response_create_to_first_assistant_ms = responseCreateToFirstAssistantMs;
+        if (transcriptToFirstAssistantMs !== null) body.transcript_to_first_assistant_ms = transcriptToFirstAssistantMs;
+        if (turnCompletedMs !== null) body.turn_completed_ms = turnCompletedMs;
+        logKioskRealtimeVoiceTrace('realtime_usage_recorded', {
+            summary: 'Recorded realtime voice usage telemetry.',
+            response_id: responseId,
+            usage_missing: !payload?.response?.usage,
+            transcript_to_first_assistant_ms: transcriptToFirstAssistantMs,
+            turn_completed_ms: turnCompletedMs,
+            spoken_character_count: spokenCharacterCount,
+            spoken_sentence_count: spokenSentenceCount,
+            contextual_follow_up_kind: contextualFollowUpKind || '',
+        });
         fetchWithTimeout('/api/assistant/realtime/usage', {
             method: 'POST',
             headers: {
@@ -9933,15 +9997,7 @@ if (mount) {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${state.token}`,
             },
-            body: JSON.stringify({
-                session_id: sessionId,
-                model,
-                response_id: responseId,
-                usage,
-                voice_seconds: voiceSeconds,
-                tool_call_count: functionCalls.length,
-                action_types: ['realtime_voice', ...functionCalls.map((item) => item?.name).filter(Boolean)],
-            }),
+            body: JSON.stringify(body),
         }, 6000).then(async (response) => {
             if (response.ok) return;
             const payload = await response.json().catch(() => null);

@@ -463,7 +463,7 @@ class RealtimeSessionController extends Controller
             'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
             'model' => ['nullable', 'string', 'max:120'],
             'response_id' => ['nullable', 'string', 'max:255'],
-            'usage' => ['required', 'array'],
+            'usage' => ['present', 'array'],
             'usage.input_tokens' => ['sometimes', 'integer', 'min:0'],
             'usage.output_tokens' => ['sometimes', 'integer', 'min:0'],
             'usage.input_token_details' => ['sometimes', 'array'],
@@ -491,7 +491,7 @@ class RealtimeSessionController extends Controller
         $session = ConversationSession::where('user_id', $user->id)->findOrFail($data['session_id']);
         $workspaceId = $session->workspace_id;
         $usage = $this->usageService->usageFromOpenAiResponse([
-            'usage' => $data['usage'],
+            'usage' => $data['usage'] ?? [],
         ]);
         $voiceSeconds = (float) ($data['voice_seconds'] ?? 0);
         $model = (string) ($data['model'] ?? $this->adminSettings->realtimeModel());

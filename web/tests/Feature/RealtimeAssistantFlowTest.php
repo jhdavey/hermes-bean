@@ -535,6 +535,46 @@ class RealtimeAssistantFlowTest extends TestCase
         $this->assertFalse((bool) data_get($log->metadata, 'realtime_usage_missing'));
     }
 
+    public function test_realtime_usage_accepts_missing_provider_usage_with_latency_metrics(): void
+    {
+        $token = $this->apiToken('realtime-usage-missing@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/assistant/realtime/usage', [
+            'session_id' => $sessionId,
+            'model' => 'gpt-realtime-test',
+            'response_id' => 'resp_missing_usage',
+            'usage' => [],
+            'voice_seconds' => 2.4,
+            'transcript_to_response_create_ms' => 220,
+            'response_create_to_first_assistant_ms' => 410,
+            'transcript_to_first_assistant_ms' => 630,
+            'turn_completed_ms' => 2400,
+            'spoken_character_count' => 44,
+            'spoken_sentence_count' => 1,
+            'spoken_brevity_violation' => false,
+            'realtime_usage_missing' => true,
+            'tool_call_count' => 0,
+            'action_types' => ['realtime_voice'],
+        ])->assertCreated()
+            ->assertJsonPath('data.ok', true);
+
+        $log = AiUsageLog::where('conversation_session_id', $sessionId)
+            ->where('request_type', 'realtime_voice')
+            ->firstOrFail();
+
+        $this->assertSame(0, $log->input_tokens);
+        $this->assertSame(0, $log->output_tokens);
+        $this->assertSame(0, $log->audio_input_tokens);
+        $this->assertSame(0, $log->audio_output_tokens);
+        $this->assertSame('resp_missing_usage', data_get($log->metadata, 'response_id'));
+        $this->assertSame(630, data_get($log->metadata, 'transcript_to_first_assistant_ms'));
+        $this->assertSame(2400, data_get($log->metadata, 'turn_completed_ms'));
+        $this->assertTrue((bool) data_get($log->metadata, 'realtime_usage_missing'));
+    }
+
     public function test_realtime_quality_reports_voice_benchmark_status_from_recent_telemetry(): void
     {
         Carbon::setTestNow('2026-07-03 12:00:00');
