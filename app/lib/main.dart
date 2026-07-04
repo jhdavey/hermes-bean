@@ -490,20 +490,58 @@ String _normalizedVoiceCommand(String transcript) {
       .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
-  return normalized
-      .replaceFirst(RegExp(r'^(hey\s+bean|heybean|bean)\s+'), '')
+  return _stripLeadingVoiceFillers(
+    _stripNormalizedWakePhrase(_stripLeadingVoiceFillers(normalized)),
+  ).trim();
+}
+
+String _stripLeadingVoiceFillers(String command) {
+  if (command.isEmpty) return command;
+  if (RegExp(r'^(?:uh huh|mm hmm|mhm)\b').hasMatch(command)) {
+    return command;
+  }
+  return command
+      .replaceFirst(
+        RegExp(r"^(?:(?:uh|um|umm|erm|er|ah|hmm|hm|mm|mhm|well|so)\s+)+"),
+        '',
+      )
+      .trim();
+}
+
+String _stripNormalizedWakePhrase(String command) {
+  if (command.isEmpty) return command;
+  final wakeStarter = r'(?:hey|hay|hi|hello|okay|ok|kay)';
+  final beanVariant =
+      r'(?:bean|beans|been|ben|beam|beem|bein|being|bin|bing|bien|bain|bane|dean|deen)';
+  final compactBeanVariant =
+      r'b(?:ean|eans|een|en|eam|eem|ein|eing|in|ing|ien|ain|ane)';
+
+  return command
+      .replaceFirst(
+        RegExp(
+          '^(?:'
+          '$wakeStarter\\s+$beanVariant|'
+          '$wakeStarter\\s*$compactBeanVariant|'
+          '$wakeStarter\\s+(?:b|bee)|'
+          r'a\s+bean|'
+          r'heybean|'
+          r'bean'
+          r')\s+',
+        ),
+        '',
+      )
       .trim();
 }
 
 bool _voiceCommandIsCancel(String command) {
   final directCommand = command.replaceFirst(RegExp(r'\s+bean$'), '').trim();
   if (RegExp(
-    r"^(?:stop|stop it|stop talking|be quiet|quiet|cancel|cancel that|cancel this|cancel response|cancel request|never\s*mind|nevermind|forget it|that's all|that is all)$",
+    r"^(?:stop|stop it|stop talking|stop right there|stop for now|pause|pause it|pause for now|pause for a second|hold up|hold on|hold that thought|hang on|hang on a second|wait|wait stop|wait a second|one second|just a second|one sec|give me a second|give me one second|give me a moment|stop for a second|let me stop you|be quiet|quiet|cancel|cancel it|cancel that|cancel this|cancel response|cancel request|cancel the request|cancel my request|never\s*mind|nevermind|forget it|forget that|forget this|scratch that|that's all|that is all|stop listening|we'?re done|we are done)$",
   ).hasMatch(directCommand)) {
     return true;
   }
   return RegExp(
-    r"\b(?:stop talking|be quiet|never\s*mind|nevermind|forget it)\b",
+    r"\b(?:stop talking|stop right there|stop for now|pause for now|pause for a second|hold up|hold on|hold that thought|hang on|hang on a second|wait stop|wait a second|one second|just a second|one sec|give me (?:a|one) second|give me a moment|stop for a second|let me stop you|be quiet|cancel (?:it|that|this|the request|my request)|never\s*mind|nevermind|forget (?:it|that|this)|scratch that|stop listening)\b",
   ).hasMatch(command);
 }
 
@@ -3648,80 +3686,94 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     WidgetsBinding.instance.addObserver(this);
     _realtimeConversation =
         widget.realtimeConversation ??
-        BeanRealtimeConversation(
-          apiClient: widget.apiClient,
-          onStatus: (status) {
-            if (!mounted) return;
-            setState(() => _chatRunState = status);
-          },
-          onTranscript: (role, text) {
-            if (!mounted || text.trim().isEmpty) return;
-            setState(() {
-              final trimmed = text.trim();
-              if (role == 'user') {
-                final command = _normalizedVoiceCommand(trimmed);
-                if (_beanVoiceListening && _voiceCommandIsCancel(command)) {
-                  _chatRunState = 'Bean voice ready';
-                  _beanVoiceDraft = null;
-                  unawaited(_realtimeConversation.interrupt());
-                  return;
-                }
-                _beanVoiceDraft = _beanVoiceListening ? trimmed : null;
-                _chatRunState = _beanVoiceListening ? 'Listening' : 'Ready';
-                if (_beanVoiceListening) return;
-                final alreadyDisplayed =
-                    _messages.isNotEmpty &&
-                    _messages.last.role == 'user' &&
-                    _messages.last.content?.trim() == trimmed;
-                if (!alreadyDisplayed) {
-                  _messages.add(
-                    HermesMessage(
-                      id: _nextLocalMessageId(),
-                      role: 'user',
-                      content: trimmed,
-                      metadata: const {'realtime': true},
-                    ),
-                  );
-                }
-                return;
-              }
-              final alreadyDisplayed = _messages.any(
-                (message) =>
-                    message.role != 'user' &&
-                    message.content?.trim() == trimmed &&
-                    message.metadata['realtime'] == true,
-              );
-              if (alreadyDisplayed) return;
-              _messages.add(
-                HermesMessage(
-                  id: _nextLocalMessageId(),
-                  role: 'assistant',
-                  content: trimmed,
-                  metadata: const {'realtime': true},
-                ),
-              );
-              _chatRunState = _assistantResponseIsDetailed(trimmed)
-                  ? 'Full details are in chat'
-                  : (_beanVoiceListening ? 'listening' : 'Ready');
-            });
-          },
-          onRunQueued: (runId, userContent) {
-            if (!mounted) return;
-            setState(() {
-              _activeAssistantRunId = runId;
-              _chatRunState = 'working...';
-              _ensureBeanRequestWorkItem(userContent, freshRequest: true);
-            });
-            unawaited(_pollQueuedRun(runId, _chatRunToken));
-            unawaited(_pollDashboardChanges());
-          },
-        );
+        BeanRealtimeConversation(apiClient: widget.apiClient);
+    _configureRealtimeConversationCallbacks();
     unawaited(_reminderNotifications.initialize());
     _reminderDueTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _checkReminderDueState(),
     );
     _bootstrap();
+  }
+
+  void _configureRealtimeConversationCallbacks() {
+    _realtimeConversation.configureCallbacks(
+      onStatus: (status) {
+        if (!mounted) return;
+        setState(() => _chatRunState = status);
+      },
+      onTranscript: (role, text) {
+        if (!mounted || text.trim().isEmpty) return;
+        setState(() {
+          final trimmed = text.trim();
+          if (role == 'user') {
+            final command = _normalizedVoiceCommand(trimmed);
+            if (_beanVoiceListening && _voiceCommandIsCancel(command)) {
+              _chatRunState = 'Bean voice ready';
+              _beanVoiceDraft = null;
+              unawaited(_realtimeConversation.interrupt());
+              return;
+            }
+            _beanVoiceDraft = _beanVoiceListening ? trimmed : null;
+            _chatRunState = _beanVoiceListening ? 'Listening' : 'Ready';
+            if (_beanVoiceListening) return;
+            final alreadyDisplayed =
+                _messages.isNotEmpty &&
+                _messages.last.role == 'user' &&
+                _messages.last.content?.trim() == trimmed;
+            if (!alreadyDisplayed) {
+              _messages.add(
+                HermesMessage(
+                  id: _nextLocalMessageId(),
+                  role: 'user',
+                  content: trimmed,
+                  metadata: const {'realtime': true},
+                ),
+              );
+            }
+            return;
+          }
+          final alreadyDisplayed = _messages.any(
+            (message) =>
+                message.role != 'user' &&
+                message.content?.trim() == trimmed &&
+                message.metadata['realtime'] == true,
+          );
+          if (alreadyDisplayed) return;
+          _messages.add(
+            HermesMessage(
+              id: _nextLocalMessageId(),
+              role: 'assistant',
+              content: trimmed,
+              metadata: const {'realtime': true},
+            ),
+          );
+          _chatRunState = _assistantResponseIsDetailed(trimmed)
+              ? 'Full details are in chat'
+              : (_beanVoiceListening ? 'listening' : 'Ready');
+        });
+      },
+      onRunQueued: (runId, userContent) {
+        if (!mounted) return;
+        setState(() {
+          _activeAssistantRunId = runId;
+          _chatRunState = 'working...';
+          _ensureBeanRequestWorkItem(userContent, freshRequest: true);
+        });
+        unawaited(_pollQueuedRun(runId, _chatRunToken));
+        unawaited(_pollDashboardChanges());
+      },
+      onSessionEnded: (_) {
+        if (!mounted) return;
+        setState(() {
+          _beanVoiceListening = false;
+          _beanVoiceDraft = null;
+          _chatRunState = 'Voice disconnected';
+          _error =
+              'Bean voice lost the live connection. Start voice again or type the request and Bean will handle it from chat.';
+        });
+      },
+    );
   }
 
   @override
@@ -32906,6 +32958,9 @@ class _BeanFabState extends State<_BeanFab>
   void didUpdateWidget(covariant _BeanFab oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.listening != widget.listening) {
+      if (!widget.listening && _pressRecording) {
+        _pressRecording = false;
+      }
       _syncPulseAnimation();
     }
   }

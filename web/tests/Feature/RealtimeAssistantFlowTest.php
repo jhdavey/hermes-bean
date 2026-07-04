@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\ProcessAssistantRun;
+use App\Models\AiUsageLog;
 use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
@@ -12,10 +13,12 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
+use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -95,17 +98,125 @@ class RealtimeAssistantFlowTest extends TestCase
             && $request->hasHeader('OpenAI-Safety-Identifier')
             && data_get($request->data(), 'session.type') === 'realtime'
             && data_get($request->data(), 'session.tools.0.name') === 'queue_bean_work'
+            && str_contains((string) data_get($request->data(), 'session.tools.0.parameters.properties.content.description'), 'exact latest user request')
+            && str_contains((string) data_get($request->data(), 'session.tools.0.parameters.properties.content.description'), 'do not summarize')
             && data_get($request->data(), 'session.audio.input.transcription.model') === 'gpt-4o-mini-transcribe'
-            && data_get($request->data(), 'session.audio.input.transcription.prompt') === null
-            && data_get($request->data(), 'session.audio.input.turn_detection.type') === 'server_vad'
-            && data_get($request->data(), 'session.audio.input.turn_detection.silence_duration_ms') === 800
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'Hey Bean')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'Hey Ben')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'Hay Beans')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'Hey Beam')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'Hey Being')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'Hey Dean')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'clearly an assistant wake phrase')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'HeyBean')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'Google Calendar')
+            && str_contains((string) data_get($request->data(), 'session.audio.input.transcription.prompt'), 'recycling')
+            && data_get($request->data(), 'session.audio.input.turn_detection.type') === 'semantic_vad'
+            && data_get($request->data(), 'session.audio.input.turn_detection.eagerness') === 'high'
             && data_get($request->data(), 'session.audio.input.turn_detection.create_response') === false
+            && data_get($request->data(), 'session.audio.input.turn_detection.interrupt_response') === true
             && preg_match('/^[A-Za-z0-9_-]+$/', (string) data_get($request->data(), 'session.tracing.group_id')) === 1
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Only respond when the user is clearly talking to Bean')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Voice brevity contract')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'at most two short sentences')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Do not read long lists')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Never describe yourself as an AI')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Never say you cannot access')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'follow-up questions')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'when is that')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'where is it')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'what time is that')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), "who's going")
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'short confirmations')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'absolutely')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'exactly')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'correct')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), "that's right")
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'you got it')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'last option')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'bottom one')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'pick option B')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'both')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'all of them')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'the first two')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Tuesday at three')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Friday morning')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'tomorrow morning')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'tomorrow at three')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'tonight at seven')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'day after tomorrow')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'this afternoon')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'next weekend')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'later today')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'anchor-time')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'after lunch')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'during lunch')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'lunchtime')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'after work')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'before school')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'on Friday')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'on June 12')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'from 2 to 3')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'between 1 and 2')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'until 5')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'by Friday')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'by end of day')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'before lunch')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'in 20 minutes')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'for half an hour')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'time-shift')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'an hour earlier')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), '30 minutes later')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'a little later')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), '10 minutes before')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'at the start')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'no alert')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'urgent')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'high priority')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'low priority')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'done')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'completed')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'still open')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'not done yet')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'every Friday')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'weekdays')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'just once')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'no repeat')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'with Sam')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'on Zoom')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'short declines')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'maybe later')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'neither')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'none of them')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Treat corrections')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), "that's wrong")
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'no, the other one')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'no, Tuesday')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'no, at three')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'no, make it tomorrow')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'undo or reversal follow-ups')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'exact latest user request unless the target is unclear')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'continuation, elaboration, repeat, and answer-shaping requests')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'tell me more')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'I missed that')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'quick version')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'elaborate')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'If the user interrupts while you are speaking')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'hold that thought')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'wait a second')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'let me stop you')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Accuracy contract')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Never infer absence from silence')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'realtime_fresh_context_unavailable')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'content set exactly to user_request')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Do not summarize or alter user_request')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Yes, I can hear you.')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'current time/date questions')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Dashboard context snapshot')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Conversation contract')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'exact latest user request')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'whether Bean can create, update, delete, undo, revert')
+            && str_contains((string) data_get($request->data(), 'session.tools.0.description'), 'reversing calendar/task/reminder data')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Take out trash')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Dentist')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'timezone_offset'));
@@ -126,6 +237,26 @@ class RealtimeAssistantFlowTest extends TestCase
             'runtime_mode' => 'chat',
             'metadata' => ['daily_date' => '2026-06-01'],
         ])->assertCreated()->json('data.id');
+        $user = User::where('email', 'realtime-existing-session@example.com')->firstOrFail();
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Move my dentist appointment to tomorrow afternoon.',
+        ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'I need one detail: which dentist appointment should I move?',
+        ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
+            'metadata' => ['runtime' => 'direct_queue_bridge'],
+        ]);
 
         $this->withToken($token)->postJson('/api/ai/realtime/session', [
             'session_id' => $sessionId,
@@ -143,6 +274,12 @@ class RealtimeAssistantFlowTest extends TestCase
             'id' => $sessionId,
             'runtime_mode' => 'chat',
         ]);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/realtime/client_secrets'
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Recent conversation turns from this Bean session')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'User: Move my dentist appointment to tomorrow afternoon.')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Bean: I need one detail: which dentist appointment should I move?')
+            && ! str_contains((string) data_get($request->data(), 'session.instructions'), 'I’m checking the latest app state now'));
     }
 
     public function test_realtime_session_marks_upstream_bad_requests_as_not_retryable(): void
@@ -278,6 +415,437 @@ class RealtimeAssistantFlowTest extends TestCase
             ],
         ])->assertOk()
             ->assertJsonPath('data.ok', true);
+
+        $log = AiUsageLog::where('conversation_session_id', $sessionId)
+            ->where('request_type', 'realtime_voice_event')
+            ->firstOrFail();
+
+        $this->assertSame('ice_webrtc_connection_failure', data_get($log->metadata, 'event_type'));
+        $this->assertSame('working', data_get($log->metadata, 'phase'));
+        $this->assertSame('Reconnecting', data_get($log->metadata, 'message'));
+        $this->assertSame('failed', data_get($log->metadata, 'details.ice_connection_state'));
+        $this->assertContains('ice_webrtc_connection_failure', $log->action_types);
+    }
+
+    public function test_realtime_usage_persists_voice_latency_metrics(): void
+    {
+        $token = $this->apiToken('realtime-usage@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+        ])->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson('/api/assistant/realtime/usage', [
+            'session_id' => $sessionId,
+            'model' => 'gpt-realtime-test',
+            'response_id' => 'resp_voice_123',
+            'usage' => [
+                'input_tokens' => 20,
+                'output_tokens' => 12,
+                'input_token_details' => ['audio_tokens' => 9],
+                'output_token_details' => ['audio_tokens' => 6],
+            ],
+            'voice_seconds' => 1.25,
+            'transcript_to_response_create_ms' => 180,
+            'response_create_to_first_assistant_ms' => 340,
+            'transcript_to_first_assistant_ms' => 520,
+            'turn_completed_ms' => 1250,
+            'spoken_character_count' => 38,
+            'spoken_sentence_count' => 1,
+            'spoken_brevity_violation' => false,
+            'is_follow_up_turn' => true,
+            'is_contextual_follow_up_turn' => true,
+            'contextual_follow_up_kind' => 'confirmation',
+            'realtime_usage_missing' => false,
+            'tool_call_count' => 1,
+            'action_types' => ['realtime_voice'],
+        ])->assertCreated()
+            ->assertJsonPath('data.ok', true);
+
+        $log = AiUsageLog::where('conversation_session_id', $sessionId)
+            ->where('request_type', 'realtime_voice')
+            ->firstOrFail();
+
+        $this->assertSame('gpt-realtime-test', $log->model);
+        $this->assertSame(20, $log->input_tokens);
+        $this->assertSame(12, $log->output_tokens);
+        $this->assertSame(9, $log->audio_input_tokens);
+        $this->assertSame(6, $log->audio_output_tokens);
+        $this->assertSame(1, $log->tool_call_count);
+        $this->assertSame('resp_voice_123', data_get($log->metadata, 'response_id'));
+        $this->assertSame(1.25, data_get($log->metadata, 'voice_seconds'));
+        $this->assertSame(180, data_get($log->metadata, 'transcript_to_response_create_ms'));
+        $this->assertSame(340, data_get($log->metadata, 'response_create_to_first_assistant_ms'));
+        $this->assertSame(520, data_get($log->metadata, 'transcript_to_first_assistant_ms'));
+        $this->assertSame(1250, data_get($log->metadata, 'turn_completed_ms'));
+        $this->assertSame(38, data_get($log->metadata, 'spoken_character_count'));
+        $this->assertSame(1, data_get($log->metadata, 'spoken_sentence_count'));
+        $this->assertFalse((bool) data_get($log->metadata, 'spoken_brevity_violation'));
+        $this->assertTrue((bool) data_get($log->metadata, 'is_follow_up_turn'));
+        $this->assertTrue((bool) data_get($log->metadata, 'is_contextual_follow_up_turn'));
+        $this->assertSame('confirmation', data_get($log->metadata, 'contextual_follow_up_kind'));
+        $this->assertFalse((bool) data_get($log->metadata, 'realtime_usage_missing'));
+    }
+
+    public function test_realtime_quality_reports_voice_benchmark_status_from_recent_telemetry(): void
+    {
+        Carbon::setTestNow('2026-07-03 12:00:00');
+        $token = $this->apiToken('realtime-quality@example.com');
+        $user = User::where('email', 'realtime-quality@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+        ])->assertCreated()->json('data.id');
+
+        foreach ([
+            ['response_id' => 'resp_fast_1', 'first_ms' => 520, 'turn_ms' => 1400, 'chars' => 42, 'sentences' => 1, 'brevity_violation' => false, 'follow_up' => false, 'contextual_follow_up' => false, 'usage_missing' => false],
+            ['response_id' => 'resp_fast_2', 'first_ms' => 650, 'turn_ms' => 1800, 'chars' => 68, 'sentences' => 2, 'brevity_violation' => false, 'follow_up' => true, 'contextual_follow_up' => true, 'contextual_follow_up_kind' => 'reference', 'usage_missing' => false],
+            ['response_id' => 'resp_slow_1', 'first_ms' => 1500, 'turn_ms' => 6100, 'chars' => 390, 'sentences' => 5, 'brevity_violation' => true, 'follow_up' => true, 'contextual_follow_up' => false, 'usage_missing' => true],
+        ] as $index => $turn) {
+            AiUsageLog::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $sessionId,
+                'provider' => 'openai',
+                'model' => 'gpt-realtime-test',
+                'route_tier' => 'realtime_voice',
+                'request_type' => 'realtime_voice',
+                'status' => 'completed',
+                'input_tokens' => 10,
+                'output_tokens' => 8,
+                'audio_input_tokens' => 4,
+                'audio_output_tokens' => 3,
+                'total_tokens' => 18,
+                'tool_call_count' => $index === 2 ? 1 : 0,
+                'estimated_cost_usd' => 0.001,
+                'action_types' => ['realtime_voice'],
+                'metadata' => [
+                    'response_id' => $turn['response_id'],
+                    'voice_seconds' => $turn['turn_ms'] / 1000,
+                    'transcript_to_response_create_ms' => 180,
+                    'response_create_to_first_assistant_ms' => $turn['first_ms'] - 180,
+                    'transcript_to_first_assistant_ms' => $turn['first_ms'],
+                    'turn_completed_ms' => $turn['turn_ms'],
+                    'spoken_character_count' => $turn['chars'],
+                    'spoken_sentence_count' => $turn['sentences'],
+                    'spoken_brevity_violation' => $turn['brevity_violation'],
+                    'is_follow_up_turn' => $turn['follow_up'],
+                    'is_contextual_follow_up_turn' => $turn['contextual_follow_up'],
+                    'contextual_follow_up_kind' => $turn['contextual_follow_up_kind'] ?? null,
+                    'realtime_usage_missing' => $turn['usage_missing'],
+                ],
+                'created_at' => now()->subMinutes($index),
+                'updated_at' => now()->subMinutes($index),
+            ]);
+        }
+
+        foreach ([
+            'flutter_realtime_barge_in',
+            'flutter_realtime_followup_idle_timeout',
+            'realtime_background_queued',
+            'realtime_background_completed',
+            'realtime_background_cancel_failure',
+            'flutter_realtime_in_flight_cancel_failure',
+            'flutter_realtime_premature_completion_claim',
+            'dashboard_context_pre_response_success',
+            'webrtc_connection_failure',
+            'dashboard_context_pre_response_ack_timeout',
+            'flutter_realtime_response_done',
+            'flutter_realtime_barge_in_recovered',
+            'flutter_realtime_followup_ready',
+            'flutter_realtime_audio_done_ready',
+            'flutter_realtime_progress_prompt',
+            'flutter_realtime_progress_prompt_spoken',
+            'flutter_realtime_pending_response_deferred_by_speech',
+            'flutter_realtime_pending_response_recovered_after_non_actionable_speech',
+        ] as $eventType) {
+            $details = match ($eventType) {
+                'flutter_realtime_barge_in' => [
+                    'cancel_sent' => true,
+                    'output_audio_cleared' => true,
+                    'truncate_attempted' => true,
+                    'truncate_sent' => true,
+                    'cancel_dispatch_ms' => 18,
+                    'interrupted_internal_prompt' => true,
+                ],
+                'dashboard_context_pre_response_success' => [
+                    'elapsed_ms' => 82,
+                    'ack_budget_ms' => 138,
+                ],
+                'realtime_background_queued' => [
+                    'run_id' => 123,
+                    'source' => 'tool_call',
+                    'acknowledged' => true,
+                    'acknowledgement_character_count' => 18,
+                    'queue_elapsed_ms' => 520,
+                ],
+                'realtime_background_completed' => [
+                    'run_id' => 123,
+                    'spoken_character_count' => 42,
+                    'spoken_text' => 'Lunch with Sam is scheduled for tomorrow at noon.',
+                ],
+                'flutter_realtime_response_done' => [
+                    'user_content' => 'what about tomorrow',
+                    'assistant_text' => 'Tomorrow has two meetings.',
+                    'assistant_answered' => true,
+                    'is_follow_up_turn' => true,
+                    'is_contextual_follow_up_turn' => true,
+                    'contextual_follow_up_kind' => 'reference',
+                    'function_calls' => [],
+                ],
+                'flutter_realtime_barge_in_recovered' => [
+                    'user_content' => 'what about tomorrow',
+                    'assistant_answered' => true,
+                    'has_user_content' => true,
+                    'function_call_count' => 0,
+                    'response_id' => 'resp_followup',
+                    'recovery_elapsed_ms' => 980,
+                ],
+                'flutter_realtime_followup_ready' => [
+                    'ready_elapsed_ms' => 12,
+                    'conversation_active' => true,
+                    'mic_enabled' => true,
+                    'microphone_track_count' => 1,
+                    'is_follow_up_turn' => true,
+                    'is_contextual_follow_up_turn' => true,
+                    'contextual_follow_up_kind' => 'reference',
+                    'turn_completed_ms' => 1400,
+                ],
+                'flutter_realtime_audio_done_ready' => [
+                    'response_id' => 'resp_fast_2',
+                    'ready_elapsed_ms' => 0,
+                    'status' => 'listening',
+                    'conversation_active' => true,
+                    'mic_enabled' => true,
+                    'microphone_track_count' => 1,
+                    'transcription_only_release_pending' => false,
+                    'background_work_active' => false,
+                    'audio_elapsed_ms' => 1180,
+                ],
+                'flutter_realtime_progress_prompt' => [
+                    'user_request' => 'schedule lunch with Sam tomorrow',
+                    'elapsed_ms' => 8000,
+                    'instruction' => 'Give one brief, natural progress update.',
+                ],
+                'flutter_realtime_progress_prompt_spoken' => [
+                    'user_request' => 'schedule lunch with Sam tomorrow',
+                    'elapsed_ms' => 8000,
+                    'spoken_text' => 'Still working on that for you.',
+                ],
+                'flutter_realtime_pending_response_deferred_by_speech' => [
+                    'user_content' => 'what is next',
+                    'response_create_was_in_flight' => true,
+                ],
+                'flutter_realtime_pending_response_recovered_after_non_actionable_speech' => [
+                    'user_content' => 'what is next',
+                    'transcript' => '',
+                    'synthetic' => false,
+                    'recovery_elapsed_ms' => 260,
+                ],
+                default => [],
+            };
+            AiUsageLog::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $sessionId,
+                'provider' => 'openai',
+                'model' => 'gpt-realtime-test',
+                'route_tier' => 'realtime_voice_event',
+                'request_type' => 'realtime_voice_event',
+                'status' => 'completed',
+                'input_tokens' => 0,
+                'output_tokens' => 0,
+                'total_tokens' => 0,
+                'tool_call_count' => 0,
+                'estimated_cost_usd' => 0,
+                'action_types' => ['realtime_voice_event', $eventType],
+                'metadata' => ['event_type' => $eventType, 'details' => $details],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $this->withToken($token)->getJson('/api/assistant/realtime/quality?days=7&session_id='.$sessionId)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'needs_attention')
+            ->assertJsonPath('data.benchmark', 'siri_alexa_voice_responsiveness')
+            ->assertJsonPath('data.gate.status', 'fail')
+            ->assertJsonPath('data.gate.requirements.latency.status', 'fail')
+            ->assertJsonPath('data.gate.requirements.latency.targets.p50_transcript_to_first_assistant_ms', 700)
+            ->assertJsonPath('data.gate.requirements.latency.targets.p95_transcript_to_first_assistant_ms', 1200)
+            ->assertJsonPath('data.gate.requirements.latency.targets.p95_full_turn_ms', 5000)
+            ->assertJsonPath('data.gate.requirements.latency.observed.p95_transcript_to_first_assistant_ms', 1500)
+            ->assertJsonPath('data.gate.requirements.latency.observed.p95_full_turn_ms', 6100)
+            ->assertJsonPath('data.gate.requirements.barge_in_interruption_recovery.status', 'fail')
+            ->assertJsonPath('data.gate.requirements.fresh_context_accuracy.status', 'fail')
+            ->assertJsonPath('data.gate.requirements.contextual_followups.status', 'fail')
+            ->assertJsonPath('data.gate.requirements.natural_voice.status', 'fail')
+            ->assertJsonPath('data.gate.requirements.live_session_reliability.status', 'fail')
+            ->assertJsonPath('data.window.turn_sample_size', 3)
+            ->assertJsonPath('data.window.event_sample_size', 18)
+            ->assertJsonPath('data.metrics.transcript_to_first_assistant_ms.p50_ms', 650)
+            ->assertJsonPath('data.metrics.transcript_to_first_assistant_ms.p95_ms', 1500)
+            ->assertJsonPath('data.metrics.transcript_to_first_assistant_ms.status', 'fail')
+            ->assertJsonPath('data.metrics.turn_completed_ms.p95_ms', 6100)
+            ->assertJsonPath('data.speech.brevity.status', 'fail')
+            ->assertJsonPath('data.speech.brevity.sample_size', 3)
+            ->assertJsonPath('data.speech.brevity.violation_count', 1)
+            ->assertJsonPath('data.speech.brevity.violation_rate', 0.3333)
+            ->assertJsonPath('data.speech.brevity.max_sentence_count', 5)
+            ->assertJsonPath('data.speech.naturalness.status', 'pass')
+            ->assertJsonPath('data.speech.naturalness.sample_size', 3)
+            ->assertJsonPath('data.speech.naturalness.violation_count', 0)
+            ->assertJsonPath('data.speech.naturalness.duplicate_response_count', 0)
+            ->assertJsonPath('data.speech.naturalness.target_duplicate_response_count', 0)
+            ->assertJsonPath('data.conversation.status', 'fail')
+            ->assertJsonPath('data.conversation.follow_up_sample_size', 3)
+            ->assertJsonPath('data.conversation.follow_up_turn_count', 2)
+            ->assertJsonPath('data.conversation.contextual_follow_up_turn_count', 1)
+            ->assertJsonPath('data.conversation.micro_follow_up_kind_count', 1)
+            ->assertJsonPath('data.conversation.micro_follow_up_kind_counts.reference', 1)
+            ->assertJsonPath('data.conversation.target_min_micro_follow_up_kind_count', 5)
+            ->assertJsonPath('data.conversation.untyped_contextual_follow_up_count', 0)
+            ->assertJsonPath('data.conversation.follow_up_turn_rate', 0.6667)
+            ->assertJsonPath('data.conversation.contextual_follow_up_turn_rate', 0.3333)
+            ->assertJsonPath('data.conversation.target_min_follow_up_turn_count', 2)
+            ->assertJsonPath('data.conversation.target_min_contextual_follow_up_turn_count', 1)
+            ->assertJsonPath('data.contextual_follow_up_resolution.status', 'pass')
+            ->assertJsonPath('data.contextual_follow_up_resolution.sample_size', 1)
+            ->assertJsonPath('data.contextual_follow_up_resolution.resolved_count', 1)
+            ->assertJsonPath('data.contextual_follow_up_resolution.unresolved_count', 0)
+            ->assertJsonPath('data.telemetry.usage_sample_size', 3)
+            ->assertJsonPath('data.telemetry.usage_missing_count', 1)
+            ->assertJsonPath('data.telemetry.usage_missing_rate', 0.3333)
+            ->assertJsonPath('data.events.barge_in_count', 1)
+            ->assertJsonPath('data.events.barge_in_rate', 0.3333)
+            ->assertJsonPath('data.events.barge_in_quality.status', 'pass')
+            ->assertJsonPath('data.events.barge_in_quality.p95_cancel_dispatch_ms', 18)
+            ->assertJsonPath('data.events.barge_in_quality.dispatch_error_count', 0)
+            ->assertJsonPath('data.events.barge_in_quality.internal_prompt_count', 1)
+            ->assertJsonPath('data.events.barge_in_quality.target_min_internal_prompt_count', 1)
+            ->assertJsonPath('data.events.minimum_barge_in_count', 1)
+            ->assertJsonPath('data.events.barge_in_recovery_quality.status', 'pass')
+            ->assertJsonPath('data.events.barge_in_recovery_quality.sample_size', 1)
+            ->assertJsonPath('data.events.barge_in_recovery_quality.p95_recovery_elapsed_ms', 980)
+            ->assertJsonPath('data.events.barge_in_recovery_quality.missing_response_id_count', 0)
+            ->assertJsonPath('data.events.minimum_barge_in_recovery_count', 1)
+            ->assertJsonPath('data.events.follow_up_readiness_quality.status', 'fail')
+            ->assertJsonPath('data.events.follow_up_readiness_quality.sample_size', 1)
+            ->assertJsonPath('data.events.follow_up_readiness_quality.p95_ready_elapsed_ms', 12)
+            ->assertJsonPath('data.events.follow_up_readiness_quality.target_p95_ready_elapsed_ms', 120)
+            ->assertJsonPath('data.events.follow_up_readiness_quality.micro_follow_up_ready_kind_count', 1)
+            ->assertJsonPath('data.events.follow_up_readiness_quality.micro_follow_up_ready_kind_counts.reference', 1)
+            ->assertJsonPath('data.events.follow_up_readiness_quality.target_min_micro_follow_up_ready_kind_count', 5)
+            ->assertJsonPath('data.events.follow_up_readiness_quality.untyped_contextual_follow_up_ready_count', 0)
+            ->assertJsonPath('data.events.minimum_follow_up_ready_count', 1)
+            ->assertJsonPath('data.events.follow_up_ready_count', 1)
+            ->assertJsonPath('data.events.follow_up_ready_rate', 0.3333)
+            ->assertJsonPath('data.events.pending_response_deferred_count', 1)
+            ->assertJsonPath('data.events.pending_response_deferred_rate', 0.3333)
+            ->assertJsonPath('data.events.pending_response_recovered_count', 1)
+            ->assertJsonPath('data.events.pending_response_recovered_rate', 0.3333)
+            ->assertJsonPath('data.events.pending_response_recovery_quality.status', 'pass')
+            ->assertJsonPath('data.events.pending_response_recovery_quality.sample_size', 1)
+            ->assertJsonPath('data.events.pending_response_recovery_quality.recovered_count', 1)
+            ->assertJsonPath('data.events.pending_response_recovery_quality.unrecovered_count', 0)
+            ->assertJsonPath('data.events.pending_response_recovery_quality.p95_recovery_elapsed_ms', 260)
+            ->assertJsonPath('data.events.pending_response_recovery_quality.target_p95_recovery_elapsed_ms', 700)
+            ->assertJsonPath('data.events.minimum_pending_response_recovery_count', 1)
+            ->assertJsonPath('data.events.audio_done_readiness_quality.status', 'pass')
+            ->assertJsonPath('data.events.audio_done_readiness_quality.sample_size', 1)
+            ->assertJsonPath('data.events.audio_done_readiness_quality.p95_ready_elapsed_ms', 0)
+            ->assertJsonPath('data.events.audio_done_readiness_quality.target_p95_ready_elapsed_ms', 80)
+            ->assertJsonPath('data.events.minimum_audio_done_ready_count', 1)
+            ->assertJsonPath('data.events.audio_done_ready_count', 1)
+            ->assertJsonPath('data.events.audio_done_ready_rate', 0.3333)
+            ->assertJsonPath('data.events.follow_up_idle_timeout_count', 1)
+            ->assertJsonPath('data.events.follow_up_idle_timeout_rate', 0.3333)
+            ->assertJsonPath('data.events.background_queue_quality.status', 'pass')
+            ->assertJsonPath('data.events.background_queue_quality.sample_size', 1)
+            ->assertJsonPath('data.events.background_queue_quality.fallback_count', 0)
+            ->assertJsonPath('data.events.background_queue_quality.target_fallback_count', 0)
+            ->assertJsonPath('data.events.background_queue_quality.unacknowledged_count', 0)
+            ->assertJsonPath('data.events.background_queue_quality.p95_queue_elapsed_ms', 520)
+            ->assertJsonPath('data.events.background_queue_quality.target_p95_queue_elapsed_ms', 1800)
+            ->assertJsonPath('data.events.minimum_background_queued_count', 1)
+            ->assertJsonPath('data.events.background_progress_prompt_count', 1)
+            ->assertJsonPath('data.events.background_progress_prompt_rate', 0.3333)
+            ->assertJsonPath('data.events.background_progress_prompt_spoken_count', 1)
+            ->assertJsonPath('data.events.background_progress_prompt_spoken_rate', 0.3333)
+            ->assertJsonPath('data.events.background_progress_prompt_skipped_count', 0)
+            ->assertJsonPath('data.events.background_progress_prompt_skipped_rate', 0)
+            ->assertJsonPath('data.events.background_progress_quality.status', 'pass')
+            ->assertJsonPath('data.events.background_progress_quality.sample_size', 1)
+            ->assertJsonPath('data.events.background_progress_quality.spoken_sample_size', 1)
+            ->assertJsonPath('data.events.background_progress_quality.duplicate_count', 0)
+            ->assertJsonPath('data.events.background_progress_quality.target_duplicate_count', 0)
+            ->assertJsonPath('data.events.background_progress_quality.p95_first_progress_elapsed_ms', 8000)
+            ->assertJsonPath('data.events.background_progress_quality.target_p95_first_progress_elapsed_ms', 8500)
+            ->assertJsonPath('data.events.minimum_background_progress_prompt_count', 1)
+            ->assertJsonPath('data.events.background_completed_count', 1)
+            ->assertJsonPath('data.events.background_completed_rate', 0.3333)
+            ->assertJsonPath('data.events.minimum_background_completed_count', 1)
+            ->assertJsonPath('data.events.background_completion_quality.status', 'pass')
+            ->assertJsonPath('data.events.background_completion_quality.duplicate_count', 0)
+            ->assertJsonPath('data.events.background_completion_quality.target_duplicate_count', 0)
+            ->assertJsonPath('data.events.background_failure_count', 0)
+            ->assertJsonPath('data.events.background_watch_failure_count', 0)
+            ->assertJsonPath('data.events.background_watch_failure_status', 'pass')
+            ->assertJsonPath('data.events.background_silent_completion_count', 0)
+            ->assertJsonPath('data.events.background_completed_after_voice_closed_count', 0)
+            ->assertJsonPath('data.events.background_completion_deferred_count', 0)
+            ->assertJsonPath('data.events.background_cancelled_after_voice_closed_count', 0)
+            ->assertJsonPath('data.events.background_cancelled_after_voice_closed_status', 'pass')
+            ->assertJsonPath('data.events.background_completion_status', 'pass')
+            ->assertJsonPath('data.events.background_cancel_failure_count', 1)
+            ->assertJsonPath('data.events.background_cancel_status', 'fail')
+            ->assertJsonPath('data.events.in_flight_cancel_failure_count', 1)
+            ->assertJsonPath('data.events.in_flight_cancel_failure_rate', 0.3333)
+            ->assertJsonPath('data.events.in_flight_cancel_status', 'fail')
+            ->assertJsonPath('data.events.interrupt_signal_failure_count', 0)
+            ->assertJsonPath('data.events.interrupt_signal_status', 'pass')
+            ->assertJsonPath('data.events.realtime_error_count', 0)
+            ->assertJsonPath('data.events.realtime_error_status', 'pass')
+            ->assertJsonPath('data.events.response_failure_count', 0)
+            ->assertJsonPath('data.events.response_failure_status', 'pass')
+            ->assertJsonPath('data.events.unanswered_response_quality.status', 'pass')
+            ->assertJsonPath('data.events.unanswered_response_quality.unanswered_count', 0)
+            ->assertJsonPath('data.events.tool_call_failure_count', 0)
+            ->assertJsonPath('data.events.tool_call_failure_status', 'pass')
+            ->assertJsonPath('data.events.tool_fallback_failure_count', 0)
+            ->assertJsonPath('data.events.tool_fallback_failure_status', 'pass')
+            ->assertJsonPath('data.events.premature_completion_claim_count', 1)
+            ->assertJsonPath('data.events.premature_completion_claim_rate', 0.3333)
+            ->assertJsonPath('data.events.premature_completion_claim_status', 'fail')
+            ->assertJsonPath('data.events.unsupported_direct_answer_count', 0)
+            ->assertJsonPath('data.events.unsupported_direct_answer_status', 'pass')
+            ->assertJsonPath('data.events.unsupported_direct_answer_quality.status', 'pass')
+            ->assertJsonPath('data.events.unsupported_direct_answer_quality.missing_fresh_context_count', 0)
+            ->assertJsonPath('data.events.unsupported_direct_answer_quality.background_required_count', 0)
+            ->assertJsonPath('data.events.unsupported_direct_answer_queued_count', 0)
+            ->assertJsonPath('data.events.webrtc_failure_count', 1)
+            ->assertJsonPath('data.events.webrtc_failure_rate', 0.3333)
+            ->assertJsonPath('data.events.transport_failure_count', 1)
+            ->assertJsonPath('data.events.transport_failure_rate', 0.3333)
+            ->assertJsonPath('data.events.transport_failure_status', 'fail')
+            ->assertJsonPath('data.events.dashboard_context_pre_response_success_count', 1)
+            ->assertJsonPath('data.events.dashboard_context_pre_response_success_rate', 0.3333)
+            ->assertJsonPath('data.events.context_refresh_success_count', 1)
+            ->assertJsonPath('data.events.context_refresh_success_rate', 0.3333)
+            ->assertJsonPath('data.events.minimum_context_refresh_success_count', 1)
+            ->assertJsonPath('data.events.context_refresh_quality.status', 'fail')
+            ->assertJsonPath('data.events.context_refresh_quality.success_count', 1)
+            ->assertJsonPath('data.events.context_refresh_quality.ack_timeout_count', 1)
+            ->assertJsonPath('data.events.context_refresh_quality.p95_elapsed_ms', 82)
+            ->assertJsonPath('data.events.context_refresh_quality.target_p95_elapsed_ms', 220)
+            ->assertJsonPath('data.events.dashboard_context_pre_response_ack_timeout_count', 1)
+            ->assertJsonPath('data.events.dashboard_context_pre_response_ack_timeout_rate', 0.3333)
+            ->assertJsonPath('data.events.context_freshness_failure_count', 1)
+            ->assertJsonPath('data.events.context_freshness_failure_rate', 0.3333)
+            ->assertJsonPath('data.events.context_freshness_status', 'fail')
+            ->assertJsonPath('data.recent_slow_turns.0.transcript_to_first_assistant_ms', 1500)
+            ->assertJsonPath('data.recent_slow_turns.0.turn_completed_ms', 6100);
+
+        Carbon::setTestNow();
     }
 
     public function test_realtime_dashboard_context_endpoint_returns_snapshot_and_full_instructions(): void
@@ -380,7 +948,7 @@ class RealtimeAssistantFlowTest extends TestCase
         $token = $this->apiToken('realtime-context-weather@example.com');
         $user = User::where('email', 'realtime-context-weather@example.com')->firstOrFail();
         $workspace = Workspace::findOrFail($user->default_workspace_id);
-        $profile = app(\App\Services\AgentProfileService::class)->ensureForWorkspace($workspace, $user);
+        $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
         $settings = $profile->settings ?? [];
         data_set($settings, 'weather.location', 'Orlando, Florida');
         $settings['home_location'] = 'Orlando, Florida';
@@ -525,6 +1093,42 @@ class RealtimeAssistantFlowTest extends TestCase
             'conversation_session_id' => $sessionId,
             'role' => 'user',
             'content' => 'Move lunch tomorrow to noon',
+        ]);
+
+        Queue::assertPushed(ProcessAssistantRun::class, fn (ProcessAssistantRun $job): bool => $job->assistantRunId === $run->id);
+    }
+
+    public function test_realtime_tool_call_preserves_user_request_argument_when_content_is_missing(): void
+    {
+        Queue::fake();
+
+        $token = $this->apiToken('realtime-tool-user-request@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'runtime_mode' => 'realtime',
+        ])->assertCreated()->json('data.id');
+
+        $exactRequest = 'Please add Dr Chen Cardio on 7/9 at 3pm at 100 N Dean Rd.';
+
+        $this->withToken($token)->postJson('/api/assistant/realtime/tool-calls', [
+            'session_id' => $sessionId,
+            'tool_name' => 'queue_bean_work',
+            'call_id' => 'call_user_request',
+            'arguments' => [
+                'user_request' => $exactRequest,
+                'client_context' => ['timezone_offset' => '-04:00'],
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.ok', true);
+
+        $run = AssistantRun::firstOrFail();
+        $this->assertSame('realtime', $run->source);
+        $this->assertSame('queued', $run->status);
+        $this->assertSame($exactRequest, $run->input);
+
+        $this->assertDatabaseHas('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => $exactRequest,
         ]);
 
         Queue::assertPushed(ProcessAssistantRun::class, fn (ProcessAssistantRun $job): bool => $job->assistantRunId === $run->id);
@@ -1466,7 +2070,7 @@ class RealtimeAssistantFlowTest extends TestCase
                     return $session;
                 }
 
-                public function progressEvents(ConversationSession $session): \Illuminate\Support\Collection
+                public function progressEvents(ConversationSession $session): Collection
                 {
                     return collect();
                 }
@@ -1506,7 +2110,7 @@ class RealtimeAssistantFlowTest extends TestCase
                     return $session;
                 }
 
-                public function progressEvents(ConversationSession $session): \Illuminate\Support\Collection
+                public function progressEvents(ConversationSession $session): Collection
                 {
                     return collect();
                 }
@@ -1568,7 +2172,7 @@ class RealtimeAssistantFlowTest extends TestCase
                     throw new \RuntimeException('Synchronous runtime should not be called.');
                 }
 
-                public function progressEvents(ConversationSession $session): \Illuminate\Support\Collection
+                public function progressEvents(ConversationSession $session): Collection
                 {
                     throw new \RuntimeException('Synchronous runtime should not be called.');
                 }

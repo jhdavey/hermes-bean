@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands;
 
-use App\Models\AssistantRun;
 use App\Models\ActivityEvent;
 use App\Models\AiUsageLog;
+use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
@@ -17,6 +17,8 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
+use App\Services\HermesRuntimeService;
+use App\Services\RealtimeVoiceQualityService;
 use App\Services\WorkspaceService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Hash;
@@ -28,7 +30,11 @@ class RunBeanProductionSmokeSuite extends Command
         {--email=bean-prod-smoke-suite@example.com : Dedicated production smoke user email}
         {--count=100 : Number of prompts to run}
         {--timeout=45 : Seconds to wait for each queued run}
-        {--scenario=single : Smoke scenario to run: single or followups}
+        {--scenario=single : Smoke scenario to run: single, followups, or voice-quality}
+        {--voice-days=7 : Days of realtime voice telemetry to evaluate for voice-quality}
+        {--voice-min-turns=10 : Minimum realtime voice turns required for voice-quality}
+        {--user-id= : Existing user id to evaluate for voice-quality}
+        {--workspace-id= : Existing workspace id to evaluate for voice-quality}
         {--cleanup : Delete created smoke resources after the run}
         {--no-reset : Keep existing data in the default smoke account before running}
         {--suite-id= : Optional suite id for traceability}';
@@ -39,10 +45,24 @@ class RunBeanProductionSmokeSuite extends Command
         WorkspaceService $workspaces,
         AgentProfileService $profiles,
         AssistantRunService $runs,
+        RealtimeVoiceQualityService $voiceQuality,
     ): int {
         $count = max(1, min(100, (int) $this->option('count')));
         $timeout = max(5, min(180, (int) $this->option('timeout')));
         $suiteId = (string) ($this->option('suite-id') ?: 'prod-smoke-'.now()->format('Ymd-His').'-'.Str::lower(Str::random(5)));
+
+        if ((string) $this->option('scenario') === 'voice-quality') {
+            [$user, $workspace] = $this->resolveVoiceQualitySubject($workspaces);
+
+            return $this->runVoiceQualityGate(
+                $user,
+                $workspace,
+                max(1, min(30, (int) $this->option('voice-days'))),
+                max(1, min(500, (int) $this->option('voice-min-turns'))),
+                $suiteId,
+                $voiceQuality,
+            );
+        }
 
         $user = User::firstOrCreate(
             ['email' => strtolower(trim((string) $this->option('email')))],
@@ -55,6 +75,7 @@ class RunBeanProductionSmokeSuite extends Command
         $user->forceFill(['subscription_tier' => 'pro'])->save();
 
         $workspace = $workspaces->resolveWorkspace($user, null);
+
         $profiles->ensureForWorkspace($workspace, $user);
 
         if (! $this->option('no-reset') && $user->email === 'bean-prod-smoke-suite@example.com') {
@@ -158,6 +179,102 @@ class RunBeanProductionSmokeSuite extends Command
         }
 
         return $failed->isEmpty() ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * @return array{0: User, 1: Workspace}
+     */
+    private function resolveVoiceQualitySubject(WorkspaceService $workspaces): array
+    {
+        $userId = $this->option('user-id');
+        if ($userId !== null && $userId !== '') {
+            $user = User::query()->findOrFail((int) $userId);
+            $workspaceId = $this->option('workspace-id');
+            $workspace = $workspaceId !== null && $workspaceId !== ''
+                ? Workspace::query()->findOrFail((int) $workspaceId)
+                : $workspaces->resolveWorkspace($user, null);
+
+            return [$user, $workspace];
+        }
+
+        $user = User::firstOrCreate(
+            ['email' => strtolower(trim((string) $this->option('email')))],
+            [
+                'name' => 'Bean Production Smoke',
+                'password' => Hash::make(Str::random(40)),
+                'subscription_tier' => 'pro',
+            ],
+        );
+        $user->forceFill(['subscription_tier' => 'pro'])->save();
+
+        return [$user, $workspaces->resolveWorkspace($user, null)];
+    }
+
+    private function runVoiceQualityGate(User $user, Workspace $workspace, int $days, int $minTurns, string $suiteId, RealtimeVoiceQualityService $voiceQuality): int
+    {
+        $since = now()->subDays($days);
+        $turns = AiUsageLog::query()
+            ->where('user_id', $user->id)
+            ->where('workspace_id', $workspace->id)
+            ->where('request_type', 'realtime_voice')
+            ->where('created_at', '>=', $since)
+            ->latest('created_at')
+            ->limit(500)
+            ->get(['id', 'conversation_session_id', 'model', 'tool_call_count', 'metadata', 'created_at']);
+        $events = AiUsageLog::query()
+            ->where('user_id', $user->id)
+            ->where('workspace_id', $workspace->id)
+            ->where('request_type', 'realtime_voice_event')
+            ->where('created_at', '>=', $since)
+            ->latest('created_at')
+            ->limit(500)
+            ->get(['id', 'conversation_session_id', 'metadata', 'created_at']);
+
+        $summary = $voiceQuality->benchmarkSummary($turns, $events, $days, minimumTurns: $minTurns, includeRecentSlowTurns: false);
+        $failures = $voiceQuality->benchmarkFailures($summary);
+        $summary['suite_id'] = $suiteId;
+        $summary['user_id'] = $user->id;
+        $summary['workspace_id'] = $workspace->id;
+        $summary['failed'] = $failures !== [];
+        $summary['failures'] = $failures;
+        $summary['verification'] = [
+            'scenario' => 'voice-quality',
+            'email' => $user->email,
+            'days' => $days,
+            'minimum_turns' => $minTurns,
+            'turn_sample_size' => $turns->count(),
+            'event_sample_size' => $events->count(),
+            'required_micro_follow_up_kinds' => [
+                'confirmation',
+                'decline',
+                'correction',
+                'continuation',
+                'reference',
+            ],
+            'observed_micro_follow_up_kind_counts' => data_get($summary, 'conversation.micro_follow_up_kind_counts', []),
+            'observed_micro_follow_up_ready_kind_counts' => data_get($summary, 'events.follow_up_readiness_quality.micro_follow_up_ready_kind_counts', []),
+            'generated_at' => now()->toIso8601String(),
+            'rerun_command' => $this->voiceQualityRerunCommand($user, $workspace, $days, $minTurns, $suiteId),
+        ];
+
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        return $failures === [] ? self::SUCCESS : self::FAILURE;
+    }
+
+    private function voiceQualityRerunCommand(User $user, Workspace $workspace, int $days, int $minTurns, string $suiteId): string
+    {
+        $subject = $this->option('user-id') !== null && $this->option('user-id') !== ''
+            ? sprintf('--user-id=%d --workspace-id=%d', $user->id, $workspace->id)
+            : sprintf('--email=%s', $user->email);
+
+        return sprintf(
+            'php artisan bean:production-smoke --scenario=voice-quality %s --voice-days=%d --voice-min-turns=%d --suite-id=%s',
+            $subject,
+            $days,
+            $minTurns,
+            $suiteId,
+        );
     }
 
     private function runFollowupSuite(User $user, Workspace $workspace, AssistantRunService $runs, int $count, int $timeout, string $suiteId): int
@@ -289,7 +406,7 @@ class RunBeanProductionSmokeSuite extends Command
 
         $recovered = app(AssistantRunService::class)->recoverStaleRun(
             AssistantRun::with(['assistantMessage', 'userMessage'])->findOrFail($run->id),
-            app(\App\Services\HermesRuntimeService::class),
+            app(HermesRuntimeService::class),
         );
 
         $graceDeadline = microtime(true) + 5;
@@ -394,6 +511,15 @@ class RunBeanProductionSmokeSuite extends Command
         $specificHistoryFailure = $this->specificRequestHistoryFailure($promptText, $answerText);
         if ($specificHistoryFailure !== null) {
             $failures[] = $specificHistoryFailure;
+        }
+
+        if ($this->promptLooksLikeMemoryRecall($promptText) && ! preg_match('/\b(saved|remembered|prefer|preference|concise|status|updates?|errands?)\b/u', $answerText)) {
+            $failures[] = 'missing_memory_recall';
+        }
+
+        $specificMemoryFailure = $this->specificMemoryRecallFailure($promptText, $answerText);
+        if ($specificMemoryFailure !== null) {
+            $failures[] = $specificMemoryFailure;
         }
 
         return array_values(array_unique($failures));
@@ -504,6 +630,30 @@ class RunBeanProductionSmokeSuite extends Command
         return null;
     }
 
+    private function promptLooksLikeMemoryRecall(string $promptText): bool
+    {
+        return str_contains($promptText, 'what did you just save')
+            || str_contains($promptText, 'what did you save about')
+            || str_contains($promptText, 'what do you remember about')
+            || str_contains($promptText, 'what did i tell you about')
+            || str_contains($promptText, 'what did i say about');
+    }
+
+    private function specificMemoryRecallFailure(string $promptText, string $answerText): ?string
+    {
+        if (! $this->promptLooksLikeMemoryRecall($promptText)) {
+            return null;
+        }
+
+        if (str_contains($promptText, 'errand updates')) {
+            return str_contains($answerText, 'concise') && str_contains($answerText, 'status') && str_contains($answerText, 'updates')
+                ? null
+                : 'wrong_memory_recall_errand_updates';
+        }
+
+        return null;
+    }
+
     private function answerAsksUsefulClarifyingQuestion(string $answerText): bool
     {
         return str_contains($answerText, 'which ')
@@ -563,6 +713,7 @@ class RunBeanProductionSmokeSuite extends Command
 
             if ($id === '') {
                 $failures[] = 'work_item_missing_id';
+
                 continue;
             }
             if (isset($plannedIds[$id])) {

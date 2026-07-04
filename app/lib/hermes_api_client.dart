@@ -1290,6 +1290,22 @@ class HermesApiClient {
     return _expectMap(data['data']);
   }
 
+  Future<Map<String, Object?>> realtimeVoiceQuality({
+    int days = 7,
+    int? sessionId,
+    int? workspaceId,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/assistant/realtime/quality', {
+        'days': days.toString(),
+        if (sessionId != null) 'session_id': sessionId.toString(),
+        if (workspaceId != null) 'workspace_id': workspaceId.toString(),
+      }),
+    );
+    return _expectMap(data['data']);
+  }
+
   Future<Map<String, Object?>> submitRealtimeToolCall({
     required int sessionId,
     required String toolName,
@@ -1344,6 +1360,37 @@ class HermesApiClient {
         if (phase != null) 'phase': phase,
         if (message != null) 'message': message,
         if (details.isNotEmpty) 'details': details,
+      },
+    );
+  }
+
+  Future<void> recordRealtimeUsage({
+    required int sessionId,
+    String? model,
+    String? responseId,
+    required Map<String, Object?> usage,
+    double? voiceSeconds,
+    Map<String, Object?> latencyMetrics = const {},
+    Map<String, Object?> speechMetrics = const {},
+    Map<String, Object?> turnMetrics = const {},
+    int? toolCallCount,
+    List<String> actionTypes = const [],
+  }) async {
+    await _sendJson(
+      'POST',
+      '/assistant/realtime/usage',
+      body: {
+        'session_id': sessionId,
+        if (model != null && model.isNotEmpty) 'model': model,
+        if (responseId != null && responseId.isNotEmpty)
+          'response_id': responseId,
+        'usage': usage,
+        if (voiceSeconds != null) 'voice_seconds': voiceSeconds,
+        ...latencyMetrics,
+        ...speechMetrics,
+        ...turnMetrics,
+        if (toolCallCount != null) 'tool_call_count': toolCallCount,
+        if (actionTypes.isNotEmpty) 'action_types': actionTypes,
       },
     );
   }
