@@ -21,6 +21,7 @@ use App\Services\HermesRuntimeService;
 use App\Services\RealtimeVoiceQualityService;
 use App\Services\WorkspaceService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -32,6 +33,7 @@ class RunBeanProductionSmokeSuite extends Command
         {--timeout=45 : Seconds to wait for each queued run}
         {--scenario=single : Smoke scenario to run: single, followups, or voice-quality}
         {--voice-days=7 : Days of realtime voice telemetry to evaluate for voice-quality}
+        {--voice-since= : ISO-8601 timestamp to evaluate realtime voice telemetry from}
         {--voice-min-turns=10 : Minimum realtime voice turns required for voice-quality}
         {--user-id= : Existing user id to evaluate for voice-quality}
         {--workspace-id= : Existing workspace id to evaluate for voice-quality}
@@ -58,6 +60,7 @@ class RunBeanProductionSmokeSuite extends Command
                 $user,
                 $workspace,
                 max(1, min(30, (int) $this->option('voice-days'))),
+                $this->voiceSinceOption(),
                 max(1, min(500, (int) $this->option('voice-min-turns'))),
                 $suiteId,
                 $voiceQuality,
@@ -210,9 +213,18 @@ class RunBeanProductionSmokeSuite extends Command
         return [$user, $workspaces->resolveWorkspace($user, null)];
     }
 
-    private function runVoiceQualityGate(User $user, Workspace $workspace, int $days, int $minTurns, string $suiteId, RealtimeVoiceQualityService $voiceQuality): int
+    private function voiceSinceOption(): ?Carbon
     {
-        $since = now()->subDays($days);
+        $since = $this->option('voice-since');
+
+        return $since !== null && trim((string) $since) !== ''
+            ? Carbon::parse((string) $since)
+            : null;
+    }
+
+    private function runVoiceQualityGate(User $user, Workspace $workspace, int $days, ?Carbon $sinceOption, int $minTurns, string $suiteId, RealtimeVoiceQualityService $voiceQuality): int
+    {
+        $since = $sinceOption ?? now()->subDays($days);
         $turns = AiUsageLog::query()
             ->where('user_id', $user->id)
             ->where('workspace_id', $workspace->id)
@@ -230,7 +242,14 @@ class RunBeanProductionSmokeSuite extends Command
             ->limit(500)
             ->get(['id', 'conversation_session_id', 'metadata', 'created_at']);
 
-        $summary = $voiceQuality->benchmarkSummary($turns, $events, $days, minimumTurns: $minTurns, includeRecentSlowTurns: false);
+        $summary = $voiceQuality->benchmarkSummary(
+            $turns,
+            $events,
+            $days,
+            since: $sinceOption?->toIso8601String(),
+            minimumTurns: $minTurns,
+            includeRecentSlowTurns: false,
+        );
         $failures = $voiceQuality->benchmarkFailures($summary);
         $summary['suite_id'] = $suiteId;
         $summary['user_id'] = $user->id;
@@ -241,6 +260,7 @@ class RunBeanProductionSmokeSuite extends Command
             'scenario' => 'voice-quality',
             'email' => $user->email,
             'days' => $days,
+            'since' => $sinceOption?->toIso8601String(),
             'minimum_turns' => $minTurns,
             'turn_sample_size' => $turns->count(),
             'event_sample_size' => $events->count(),
@@ -254,7 +274,7 @@ class RunBeanProductionSmokeSuite extends Command
             'observed_micro_follow_up_kind_counts' => data_get($summary, 'conversation.micro_follow_up_kind_counts', []),
             'observed_micro_follow_up_ready_kind_counts' => data_get($summary, 'events.follow_up_readiness_quality.micro_follow_up_ready_kind_counts', []),
             'generated_at' => now()->toIso8601String(),
-            'rerun_command' => $this->voiceQualityRerunCommand($user, $workspace, $days, $minTurns, $suiteId),
+            'rerun_command' => $this->voiceQualityRerunCommand($user, $workspace, $days, $sinceOption, $minTurns, $suiteId),
         ];
 
         $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
@@ -262,16 +282,19 @@ class RunBeanProductionSmokeSuite extends Command
         return $failures === [] ? self::SUCCESS : self::FAILURE;
     }
 
-    private function voiceQualityRerunCommand(User $user, Workspace $workspace, int $days, int $minTurns, string $suiteId): string
+    private function voiceQualityRerunCommand(User $user, Workspace $workspace, int $days, ?Carbon $sinceOption, int $minTurns, string $suiteId): string
     {
         $subject = $this->option('user-id') !== null && $this->option('user-id') !== ''
             ? sprintf('--user-id=%d --workspace-id=%d', $user->id, $workspace->id)
             : sprintf('--email=%s', $user->email);
+        $window = $sinceOption !== null
+            ? sprintf('--voice-since=%s', $sinceOption->toIso8601String())
+            : sprintf('--voice-days=%d', $days);
 
         return sprintf(
-            'php artisan bean:production-smoke --scenario=voice-quality %s --voice-days=%d --voice-min-turns=%d --suite-id=%s',
+            'php artisan bean:production-smoke --scenario=voice-quality %s %s --voice-min-turns=%d --suite-id=%s',
             $subject,
-            $days,
+            $window,
             $minTurns,
             $suiteId,
         );

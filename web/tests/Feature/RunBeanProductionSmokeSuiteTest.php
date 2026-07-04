@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Services\RealtimeVoiceQualityService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use ReflectionMethod;
 use Tests\TestCase;
@@ -2246,12 +2247,30 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
         $suiteId = 'voice-quality-target-suite';
         $user = User::factory()->create(['email' => 'voice-quality-target@example.com']);
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user);
+        $since = Carbon::parse('2026-07-04T10:00:00Z');
+        AiUsageLog::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'provider' => 'openai',
+            'model' => 'gpt-realtime-test',
+            'route_tier' => 'realtime',
+            'request_type' => 'realtime_voice',
+            'status' => 'completed',
+            'metadata' => [
+                'transcript_to_first_assistant_ms' => 420,
+                'spoken_brevity_violation' => false,
+            ],
+        ])->forceFill([
+            'created_at' => $since->copy()->subMinute(),
+            'updated_at' => $since->copy()->subMinute(),
+        ])->save();
 
         $exitCode = Artisan::call('bean:production-smoke', [
             '--scenario' => 'voice-quality',
             '--user-id' => $user->id,
             '--workspace-id' => $workspace->id,
             '--voice-days' => 7,
+            '--voice-since' => $since->toIso8601String(),
             '--voice-min-turns' => 1,
             '--suite-id' => $suiteId,
         ]);
@@ -2265,12 +2284,14 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
         $this->assertSame($user->id, $summary['user_id']);
         $this->assertSame($workspace->id, $summary['workspace_id']);
         $this->assertSame($user->email, data_get($summary, 'verification.email'));
+        $this->assertSame($since->toIso8601String(), data_get($summary, 'window.since'));
+        $this->assertSame($since->toIso8601String(), data_get($summary, 'verification.since'));
         $this->assertSame(1, data_get($summary, 'verification.minimum_turns'));
         $this->assertSame(0, data_get($summary, 'verification.turn_sample_size'));
         $this->assertSame(0, data_get($summary, 'verification.event_sample_size'));
         $this->assertSame('no_data', data_get($summary, 'gate.status'));
         $this->assertSame(
-            "php artisan bean:production-smoke --scenario=voice-quality --user-id={$user->id} --workspace-id={$workspace->id} --voice-days=7 --voice-min-turns=1 --suite-id={$suiteId}",
+            "php artisan bean:production-smoke --scenario=voice-quality --user-id={$user->id} --workspace-id={$workspace->id} --voice-since={$since->toIso8601String()} --voice-min-turns=1 --suite-id={$suiteId}",
             data_get($summary, 'verification.rerun_command'),
         );
     }
