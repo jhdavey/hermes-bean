@@ -112,7 +112,6 @@ if (mount) {
         activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
         mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
-        micOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 18 18"/><path d="M9 5.3V5a3 3 0 0 1 5.1-2.1A3 3 0 0 1 15 5v5"/><path d="M9 9v3a3 3 0 0 0 5.1 2.1"/><path d="M19 10v2a7 7 0 0 1-7 7m0 0a7 7 0 0 1-7-7v-2m7 9v3"/></svg>',
         menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
         trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>',
         moreVertical: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
@@ -3295,28 +3294,23 @@ if (mount) {
                 <div class="hb-chat-input-stack ${workStrip ? 'hb-chat-input-stack-working' : ''}">
                     ${workStrip}
                     <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''} ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat">
-                        ${chatMicrophoneToggleMarkup()}
                         <textarea name="message" placeholder="${state.voiceListening ? 'Listening' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
                         <button class="hb-button-secondary hb-chat-text-send-button" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send message">${icons.send}</button>
-                        <button class="${state.busy ? 'hb-button-danger' : 'hb-button'} hb-chat-voice-button" type="button" ${state.busy ? 'data-cancel-turn' : 'data-voice-hold'} aria-label="${state.busy ? 'Stop Bean' : 'Hold to talk'}">${state.busy ? icons.stop : `<img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">`}</button>
+                        ${chatBeanVoiceButtonMarkup()}
                     </form>
                 </div>
             </section>`;
     }
 
-    function chatMicrophoneToggleMarkup() {
+    function chatBeanVoiceButtonMarkup() {
         const model = kioskVoiceStatusTagModel();
-        const enabled = state.kioskVoiceEnabled;
-        const ready = model.ready;
-        const label = enabled ? (ready ? 'Mic on' : 'Mic starting') : 'Mic off';
-        const actionLabel = enabled
-            ? 'Turn off passive Hey Bean microphone'
-            : 'Turn on passive Hey Bean microphone';
-        const statusClass = enabled ? `hb-chat-mic-toggle-${model.phase}` : 'hb-chat-mic-toggle-disabled';
+        const phaseClass = `hb-chat-voice-button-${model.phase}`;
         return `
-            <button class="hb-chat-mic-toggle ${enabled ? 'hb-chat-mic-toggle-on' : ''} ${statusClass}" type="button" data-toggle-kiosk-mic aria-pressed="${enabled ? 'true' : 'false'}" aria-label="${escapeAttr(actionLabel)}" title="${escapeAttr(actionLabel)}">
-                <span class="hb-chat-mic-toggle-icon" aria-hidden="true">${enabled ? icons.mic : icons.micOff}</span>
-                <span class="hb-chat-mic-toggle-label">${escapeHtml(label)}</span>
+            <button class="hb-button hb-chat-voice-button ${phaseClass} ${model.ready ? 'hb-chat-voice-button-on' : ''} ${model.cancelable ? 'hb-chat-voice-button-cancelable' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-pressed="${model.ready ? 'true' : 'false'}" aria-label="${escapeAttr(model.actionLabel)}" title="${escapeAttr(model.actionLabel)}">
+                <span class="hb-chat-voice-button-status" aria-hidden="true"></span>
+                <span class="hb-chat-voice-button-logo" aria-hidden="true">
+                    <img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">
+                </span>
             </button>`;
     }
 
@@ -5507,7 +5501,6 @@ if (mount) {
             scrollChatToBottom();
         }));
         mount.querySelectorAll('[data-toggle-kiosk-voice]').forEach((button) => button.addEventListener('click', toggleKioskVoiceMode));
-        mount.querySelectorAll('[data-toggle-kiosk-mic]').forEach((button) => button.addEventListener('click', toggleKioskMicrophoneMode));
         mount.querySelectorAll('[data-mobile-bean-button]').forEach((button) => {
             button.addEventListener('pointerdown', handleMobileBeanPointerDown);
             button.addEventListener('click', handleMobileBeanClick);
@@ -12039,29 +12032,6 @@ if (mount) {
         localStorage.removeItem(kioskVoiceKey);
         stopKioskVoiceMode();
         render();
-    }
-
-    async function toggleKioskMicrophoneMode() {
-        if (state.kioskVoiceEnabled) {
-            localStorage.removeItem(kioskVoiceKey);
-            state.kioskVoiceEnabled = false;
-            state.kioskVoiceMessage = '';
-            state.kioskVoicePhase = 'idle';
-            kioskRealtimeUnavailable = false;
-            stopKioskVoiceMode();
-            render();
-            return;
-        }
-
-        state.kioskVoiceEnabled = true;
-        kioskRealtimeUnavailable = false;
-        localStorage.setItem(kioskVoiceKey, 'true');
-        kioskConversationActive = false;
-        state.kioskVoicePhase = 'working';
-        state.kioskVoiceMessage = 'Connecting';
-        render();
-        await unlockKioskAudio();
-        startKioskVoiceMode({ requestPermission: true });
     }
 
     function kioskMicrophoneAccessMessage(error) {
