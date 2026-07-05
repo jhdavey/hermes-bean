@@ -204,7 +204,6 @@ if (mount) {
         voiceDraft: '',
         voiceStatus: '',
         voiceStatusTone: '',
-        chatExpanded: false,
         kioskVoiceEnabled: kioskVoiceRequested(),
         kioskVoicePhase: 'idle',
         kioskVoiceMessage: '',
@@ -664,7 +663,6 @@ if (mount) {
             applyBillingReturnNotice();
             if (needsBeanOnboarding()) {
                 state.selected = 'bean';
-                state.chatExpanded = false;
                 state.chatRunState = 'Onboarding';
             }
             if (state.selected === 'admin') {
@@ -726,7 +724,6 @@ if (mount) {
             applyBillingReturnNotice();
             if (needsBeanOnboarding()) {
                 state.selected = 'bean';
-                state.chatExpanded = false;
                 state.chatRunState = 'Onboarding';
             }
             saveDashboardCache();
@@ -1704,7 +1701,6 @@ if (mount) {
             <div class="hb-app">
                 ${betaBannerMarkup()}
                 <header class="hb-topbar">
-                    ${topBeanControlsMarkup()}
                     <span class="hb-spacer"></span>
                     <div class="hb-topbar-date-line">
                         <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTopbarTime(now))}</time>
@@ -1722,7 +1718,6 @@ if (mount) {
                 </main>
                 ${state.selected === 'bean' ? '' : approvalSheetMarkup()}
                 ${bottomMenuMarkup()}
-                ${state.chatExpanded && state.selected !== 'bean' ? desktopChatMarkup({ expanded: true }) : ''}
                 ${onboardingTourMarkup()}
             </div>`;
     }
@@ -3282,12 +3277,10 @@ if (mount) {
         const messages = (state.messages.length ? state.messages : [
             { id: 'intro', role: 'assistant', content: needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey! How can I help?' },
         ]).filter((message) => !assistantMessageShouldStayOutOfChat(message));
-        const expandLabel = state.chatExpanded ? 'Close' : 'Expand';
         const workStrip = chatDockedWorkStripMarkup();
         const messageListId = options.messageListId || 'hb-chat-messages';
         return `
             <section class="hb-chat ${options.compact ? 'hb-chat-compact' : ''}">
-                ${options.expandable ? `<div class="hb-chat-top"><span class="hb-spacer"></span><button class="hb-button-secondary hb-chat-expand-action" type="button" data-toggle-chat-expand aria-label="${escapeAttr(expandLabel)}">${escapeHtml(expandLabel)}</button></div>` : ''}
                 ${errorMarkup(state.error)}
                 <div class="hb-chat-messages" id="${escapeAttr(messageListId)}">
                     ${onboardingInterviewIntroMarkup()}
@@ -3438,30 +3431,6 @@ if (mount) {
                     </div>
                 </article>
             </section>`;
-    }
-
-    function desktopChatMarkup(options = {}) {
-        return `
-            <section class="hb-desktop-chat ${options.expanded ? 'hb-desktop-chat-expanded' : ''}" aria-label="Bean chat">
-                ${chatMarkup({ expandable: true })}
-            </section>`;
-    }
-
-    function floatingBeanButtonMarkup() {
-        return `
-            <button class="hb-bean-button hb-floating-bean-button ${state.chatExpanded ? 'hb-bean-button-active' : ''}" type="button" data-toggle-chat-expand aria-label="${state.chatExpanded ? 'Close Bean chat' : 'Open Bean chat'}">
-                <img src="${escapeAttr(logoUrl)}" alt="">
-            </button>`;
-    }
-
-    function topBeanControlsMarkup() {
-        return `
-            <div class="hb-topbar-bean-controls">
-                <button class="hb-bean-button hb-topbar-bean-button ${state.chatExpanded || state.selected === 'bean' ? 'hb-bean-button-active' : ''}" type="button" data-toggle-chat-expand aria-label="${state.chatExpanded ? 'Close Bean chat' : 'Open Bean chat'}" title="Bean chat">
-                    <img src="${escapeAttr(logoUrl)}" alt="">
-                </button>
-                ${kioskVoicePillMarkup({ topbar: true, workStatus: true })}
-            </div>`;
     }
 
     function kioskVoiceStatusTagModel(options = {}) {
@@ -3824,7 +3793,7 @@ if (mount) {
                     <span aria-hidden="true"></span>
                     <button class="hb-command-center-toggle" type="button" data-toggle-command-center-chat aria-label="${state.commandCenterChatCollapsed ? 'Expand chat' : 'Collapse chat'}" title="${state.commandCenterChatCollapsed ? 'Expand chat' : 'Collapse chat'}">${state.commandCenterChatCollapsed ? '^' : 'v'}</button>
                 </div>
-                ${state.commandCenterChatCollapsed ? '<div class="hb-command-center-chat-collapsed" aria-hidden="true"></div>' : `<div class="hb-command-center-chat">${chatMarkup({ expandable: true, compact: true, messageListId: 'hb-command-center-chat-messages' })}</div>`}
+                ${state.commandCenterChatCollapsed ? '<div class="hb-command-center-chat-collapsed" aria-hidden="true"></div>' : `<div class="hb-command-center-chat">${chatMarkup({ compact: true, messageListId: 'hb-command-center-chat-messages' })}</div>`}
             </section>`;
     }
 
@@ -4074,7 +4043,7 @@ if (mount) {
     }
 
     function mobileBeanButtonMarkup() {
-        const active = state.selected === 'bean' || state.chatExpanded;
+        const active = state.selected === 'bean';
         const listening = state.voiceListening;
         return `
             ${beanWorkStatusMarkup({ mobile: true })}
@@ -5419,26 +5388,12 @@ if (mount) {
 
     function bindSignedInActions() {
         mount.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => {
-            if (button.dataset.nav === 'bean') {
-                state.chatExpanded = true;
-                state.error = '';
-                state.notice = '';
-                render();
-                scrollChatToBottom();
-                return;
-            }
             state.selected = button.dataset.nav;
-            if (state.selected !== 'bean') state.chatExpanded = false;
             state.error = '';
             state.notice = '';
             history.pushState({}, '', pathForView(state.selected));
             render();
             if (state.selected === 'admin') loadAdminUsage();
-            scrollChatToBottom();
-        }));
-        mount.querySelectorAll('[data-toggle-chat-expand]').forEach((button) => button.addEventListener('click', () => {
-            state.chatExpanded = !state.chatExpanded;
-            render();
             scrollChatToBottom();
         }));
         mount.querySelectorAll('[data-toggle-kiosk-voice]').forEach((button) => button.addEventListener('click', toggleKioskVoiceMode));
@@ -5449,7 +5404,6 @@ if (mount) {
         });
         mount.querySelector('[data-onboarding-dashboard]')?.addEventListener('click', () => {
             state.selected = 'today';
-            state.chatExpanded = false;
             state.onboardingJustCompleted = false;
             state.error = '';
             state.notice = '';
@@ -7950,7 +7904,6 @@ if (mount) {
 
     function openBeanTextChat() {
         state.selected = 'bean';
-        state.chatExpanded = false;
         state.error = '';
         state.notice = '';
         render();
@@ -8079,7 +8032,7 @@ if (mount) {
         let assistantContent = '';
         window.clearTimeout(kioskAutoCloseTimer);
         if (options.autoOpenChat && state.selected !== 'bean') {
-            state.chatExpanded = true;
+            state.selected = 'bean';
         }
         if (editingMessageId) {
             const editIndex = state.messages.findIndex((message) => String(message.id) === editingMessageId && message.role === 'user');
@@ -8204,9 +8157,6 @@ if (mount) {
             }
             render();
             scrollChatToBottom();
-            if (options.autoCloseChatMs) {
-                scheduleKioskChatAutoClose(options.autoCloseChatMs);
-            }
         }
         return { result, assistantContent };
     }
@@ -11468,20 +11418,9 @@ if (mount) {
 
     function openKioskChat() {
         if (state.selected === 'bean') return;
-        state.chatExpanded = true;
+        state.selected = 'bean';
         render();
         scrollChatToBottom();
-    }
-
-    function scheduleKioskChatAutoClose(delay) {
-        window.clearTimeout(kioskAutoCloseTimer);
-        kioskAutoCloseTimer = window.setTimeout(() => {
-            kioskAutoCloseTimer = 0;
-            if (state.selected !== 'bean' && state.chatExpanded && !state.busy) {
-                state.chatExpanded = false;
-                render();
-            }
-        }, delay);
     }
 
     async function fetchKioskQuickReply(content, generation, options = {}) {
@@ -13729,8 +13668,7 @@ if (mount) {
 
     function scrollChatToBottom() {
         requestAnimationFrame(() => {
-            const scroller = document.querySelector('.hb-desktop-chat-expanded #hb-chat-messages')
-                || document.getElementById('hb-chat-messages')
+            const scroller = document.getElementById('hb-chat-messages')
                 || document.getElementById('hb-command-center-chat-messages');
             if (scroller) scroller.scrollTop = scroller.scrollHeight;
         });

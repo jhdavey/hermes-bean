@@ -4208,10 +4208,6 @@
     gap: 8px;
 }
 
-.hb-desktop-chat {
-    display: none;
-}
-
 .hb-chat-top {
     grid-row: 1;
     display: flex;
@@ -4226,10 +4222,6 @@
     font-size: 14px;
     font-weight: 650;
     text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.hb-chat-expand-action {
     white-space: nowrap;
 }
 
@@ -4918,51 +4910,6 @@
     overflow-y: hidden;
     resize: none;
     outline: 0;
-}
-
-.hb-desktop-chat-expanded {
-    position: fixed;
-    inset: 0;
-    z-index: 100;
-    display: grid;
-    place-items: center;
-    padding: 12px;
-    background: rgba(15, 23, 42, .28);
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    backdrop-filter: blur(3px);
-}
-
-.hb-desktop-chat-expanded .hb-chat {
-    width: min(1120px, 100%);
-    height: min(860px, calc(100vh - 24px));
-    margin: 0 auto;
-    padding: 12px;
-    border: 1px solid var(--hb-border-strong);
-    border-radius: 20px;
-    background: var(--hb-surface);
-    box-shadow: 0 28px 90px rgba(15, 23, 42, .34);
-}
-
-.hb-desktop-chat-expanded .hb-chat-messages {
-    padding: 12px 4px;
-}
-
-.hb-desktop-chat-expanded .hb-chat-top {
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--hb-border);
-}
-
-.hb-desktop-chat-expanded .hb-chat-expand-action {
-    background: var(--hb-accent);
-    color: var(--hb-accent-ink);
-    border-color: var(--hb-accent);
-}
-
-.hb-desktop-chat-expanded .hb-chat-dock {
-    --hb-chat-input-max-height: 120px;
-    border-color: var(--hb-border-strong);
 }
 
 .hb-bottom-menu {
@@ -6770,7 +6717,7 @@
     }
 
     .hb-dashboard-grid {
-        grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+        grid-template-columns: minmax(0, 1fr) minmax(256px, 304px);
         align-items: start;
         height: 100%;
         min-height: 0;
@@ -6852,106 +6799,6 @@
         padding-right: 2px;
     }
 
-    .hb-desktop-chat {
-        min-height: 0;
-        display: block;
-        padding: 3px;
-        background: var(--hb-surface);
-        border: 1px solid var(--hb-border);
-        border-radius: 0;
-    }
-
-    .hb-desktop-chat .hb-chat {
-        width: 100%;
-        height: 100%;
-    }
-
-    .hb-desktop-chat .hb-chat-top {
-        gap: 4px;
-    }
-
-    .hb-desktop-chat .hb-button-ghost {
-        min-height: 34px;
-        padding: 7px 9px;
-        font-size: 12px;
-    }
-
-    .hb-desktop-chat .hb-chat-expand-action {
-        min-height: 34px;
-        padding: 7px 10px;
-        font-size: 12px;
-    }
-
-    .hb-desktop-chat .hb-chat-messages {
-        padding-bottom: 6px;
-    }
-
-    .hb-desktop-chat .hb-chat-history {
-        max-height: 260px;
-        padding: 6px;
-        border-radius: 14px;
-    }
-
-    .hb-desktop-chat .hb-message {
-        max-width: 100%;
-        padding: 10px;
-        border-radius: 14px;
-        font-size: 13px;
-    }
-
-    .hb-desktop-chat .hb-chat-dock {
-        border-radius: 16px;
-        padding: 6px;
-    }
-
-    .hb-desktop-chat .hb-chat-dock textarea {
-        min-height: 38px;
-        padding: 9px 6px;
-    }
-
-    .hb-desktop-chat-expanded {
-        position: fixed;
-        inset: 0;
-        z-index: 100;
-        display: grid;
-        place-items: center;
-        padding: 18px;
-        background: rgba(15, 23, 42, .28);
-        border: 0;
-        border-radius: 0;
-        box-shadow: none;
-        backdrop-filter: blur(3px);
-    }
-
-    .hb-desktop-chat-expanded .hb-chat {
-        width: min(1120px, 100%);
-        height: min(860px, calc(100vh - 36px));
-        margin: 0 auto;
-        padding: 14px;
-        border: 1px solid var(--hb-border-strong);
-        border-radius: 20px;
-        background: var(--hb-surface);
-        box-shadow: 0 28px 90px rgba(15, 23, 42, .34);
-    }
-
-    .hb-desktop-chat-expanded .hb-chat-messages {
-        padding: 12px 4px;
-    }
-
-    .hb-desktop-chat-expanded .hb-chat-top {
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--hb-border);
-    }
-
-    .hb-desktop-chat-expanded .hb-chat-expand-action {
-        background: var(--hb-accent);
-        color: #fff;
-        border-color: var(--hb-accent);
-    }
-
-    .hb-desktop-chat-expanded .hb-chat-dock {
-        border-color: var(--hb-border-strong);
-    }
 }
 
 @media (min-width: 1121px) {
