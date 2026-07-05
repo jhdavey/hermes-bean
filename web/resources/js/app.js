@@ -199,6 +199,7 @@ if (mount) {
         activeBeanWorkMessageId: null,
         beanWorkItems: [],
         commandCenterChatCollapsed: false,
+        commandCenterChatRatio: 0.38,
         voiceListening: false,
         voiceRecognition: null,
         voiceDraft: '',
@@ -247,6 +248,7 @@ if (mount) {
     let mobileBeanPressing = false;
     let mobileBeanHoldStarted = false;
     let mobileBeanClickSuppressed = false;
+    let commandCenterResizeDrag = null;
     let timelineDrag = null;
     let timelineSuppressClick = false;
     let dashboardChangeAbort = null;
@@ -3784,17 +3786,107 @@ if (mount) {
     function commandCenterMarkup() {
         const items = commandCenterAgendaItems();
         const loading = state.dashboardDataLoading && !items.length;
+        const chatPercent = commandCenterChatPercent();
         return `
-            <section class="hb-card hb-command-center-card ${state.commandCenterChatCollapsed ? 'hb-command-center-card-collapsed' : ''}" aria-label="Bean command center">
+            <section class="hb-card hb-command-center-card ${state.commandCenterChatCollapsed ? 'hb-command-center-card-collapsed' : ''}" aria-label="Bean command center" data-command-center-shell style="--hb-command-center-chat-size:${chatPercent}%">
                 <div class="hb-command-center-agenda">
                     ${loading ? dashboardLoadingMarkup('Loading today...') : commandCenterAgendaMarkup(items)}
                 </div>
-                <div class="hb-command-center-divider" role="separator" aria-orientation="horizontal">
+                <div class="hb-command-center-divider" role="separator" aria-orientation="horizontal" aria-valuemin="24" aria-valuemax="72" aria-valuenow="${Math.round(chatPercent)}" aria-label="Resize Bean chat area" tabindex="0" data-command-center-resizer>
                     <span aria-hidden="true"></span>
                     <button class="hb-command-center-toggle" type="button" data-toggle-command-center-chat aria-label="${state.commandCenterChatCollapsed ? 'Expand chat' : 'Collapse chat'}" title="${state.commandCenterChatCollapsed ? 'Expand chat' : 'Collapse chat'}">${state.commandCenterChatCollapsed ? '^' : 'v'}</button>
                 </div>
-                ${state.commandCenterChatCollapsed ? '<div class="hb-command-center-chat-collapsed" aria-hidden="true"></div>' : `<div class="hb-command-center-chat">${chatMarkup({ compact: true, messageListId: 'hb-command-center-chat-messages' })}</div>`}
+                <div class="hb-command-center-chat ${state.commandCenterChatCollapsed ? 'hb-command-center-chat-collapsed' : ''}">${chatMarkup({ compact: true, messageListId: 'hb-command-center-chat-messages' })}</div>
             </section>`;
+    }
+
+    function commandCenterChatPercent() {
+        return (commandCenterChatRatio() * 100).toFixed(1);
+    }
+
+    function commandCenterChatRatio() {
+        return clampCommandCenterChatRatio(Number(state.commandCenterChatRatio || 0.38));
+    }
+
+    function clampCommandCenterChatRatio(value) {
+        if (!Number.isFinite(value)) return 0.38;
+        return Math.min(0.72, Math.max(0.24, value));
+    }
+
+    function setCommandCenterChatRatio(value) {
+        const ratio = clampCommandCenterChatRatio(value);
+        state.commandCenterChatRatio = ratio;
+        const shell = mount.querySelector('[data-command-center-shell]');
+        const divider = mount.querySelector('[data-command-center-resizer]');
+        shell?.style.setProperty('--hb-command-center-chat-size', `${(ratio * 100).toFixed(1)}%`);
+        divider?.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
+    }
+
+    function bindCommandCenterResize() {
+        const divider = mount.querySelector('[data-command-center-resizer]');
+        if (!divider) return;
+        divider.addEventListener('pointerdown', startCommandCenterResize);
+        divider.addEventListener('keydown', handleCommandCenterResizeKey);
+    }
+
+    function startCommandCenterResize(event) {
+        if (event.target.closest('[data-toggle-command-center-chat]')) return;
+        if (state.commandCenterChatCollapsed) return;
+        const shell = event.currentTarget.closest('[data-command-center-shell]');
+        if (!shell) return;
+        const rect = shell.getBoundingClientRect();
+        if (rect.height <= 0) return;
+        event.preventDefault();
+        commandCenterResizeDrag = {
+            pointerId: event.pointerId,
+            shell,
+            startY: event.clientY,
+            height: rect.height,
+            ratio: commandCenterChatRatio(),
+        };
+        shell.classList.add('hb-command-center-card-resizing');
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        window.addEventListener('pointermove', updateCommandCenterResize, true);
+        window.addEventListener('pointerup', finishCommandCenterResize, true);
+        window.addEventListener('pointercancel', finishCommandCenterResize, true);
+    }
+
+    function updateCommandCenterResize(event) {
+        const drag = commandCenterResizeDrag;
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        event.preventDefault();
+        setCommandCenterChatRatio(drag.ratio + ((drag.startY - event.clientY) / drag.height));
+    }
+
+    function finishCommandCenterResize(event) {
+        const drag = commandCenterResizeDrag;
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        drag.shell.classList.remove('hb-command-center-card-resizing');
+        commandCenterResizeDrag = null;
+        window.removeEventListener('pointermove', updateCommandCenterResize, true);
+        window.removeEventListener('pointerup', finishCommandCenterResize, true);
+        window.removeEventListener('pointercancel', finishCommandCenterResize, true);
+        scrollChatToBottom();
+    }
+
+    function handleCommandCenterResizeKey(event) {
+        if (state.commandCenterChatCollapsed) return;
+        const step = event.shiftKey ? 0.08 : 0.04;
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setCommandCenterChatRatio(commandCenterChatRatio() + step);
+            scrollChatToBottom();
+        } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setCommandCenterChatRatio(commandCenterChatRatio() - step);
+        } else if (event.key === 'Home') {
+            event.preventDefault();
+            setCommandCenterChatRatio(0.24);
+        } else if (event.key === 'End') {
+            event.preventDefault();
+            setCommandCenterChatRatio(0.72);
+            scrollChatToBottom();
+        }
     }
 
     function commandCenterAgendaMarkup(items) {
@@ -5477,6 +5569,7 @@ if (mount) {
             render();
             if (!state.commandCenterChatCollapsed) scrollChatToBottom();
         });
+        bindCommandCenterResize();
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelector('[data-admin-settings-form]')?.addEventListener('submit', saveAdminSettings);
         mount.querySelector('[data-admin-plan-limits-form]')?.addEventListener('submit', saveAdminPlanLimits);
