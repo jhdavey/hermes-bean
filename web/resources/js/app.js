@@ -198,6 +198,7 @@ if (mount) {
         editingChatMessageId: '',
         activeBeanWorkMessageId: null,
         beanWorkItems: [],
+        commandCenterChatCollapsed: false,
         voiceListening: false,
         voiceRecognition: null,
         voiceDraft: '',
@@ -1766,8 +1767,7 @@ if (mount) {
             <div class="hb-shell hb-dashboard-grid ${showSideColumn ? '' : 'hb-dashboard-grid-single'}">
                 <div class="hb-primary-column">${primary}</div>
                 ${showSideColumn ? `<aside class="hb-side-column">
-                    ${atAGlanceMarkup()}
-                    ${todayTasksMarkup()}
+                    ${commandCenterMarkup()}
                 </aside>` : ''}
             </div>`;
     }
@@ -3284,11 +3284,12 @@ if (mount) {
         ]).filter((message) => !assistantMessageShouldStayOutOfChat(message));
         const expandLabel = state.chatExpanded ? 'Close' : 'Expand';
         const workStrip = chatDockedWorkStripMarkup();
+        const messageListId = options.messageListId || 'hb-chat-messages';
         return `
-            <section class="hb-chat">
+            <section class="hb-chat ${options.compact ? 'hb-chat-compact' : ''}">
                 ${options.expandable ? `<div class="hb-chat-top"><span class="hb-spacer"></span><button class="hb-button-secondary hb-chat-expand-action" type="button" data-toggle-chat-expand aria-label="${escapeAttr(expandLabel)}">${escapeHtml(expandLabel)}</button></div>` : ''}
                 ${errorMarkup(state.error)}
-                <div class="hb-chat-messages" id="hb-chat-messages">
+                <div class="hb-chat-messages" id="${escapeAttr(messageListId)}">
                     ${onboardingInterviewIntroMarkup()}
                     ${messages.map((message, index) => messageMarkup(message, index, messages)).join('')}
                     ${working ? '' : pendingApprovalChatMarkup()}
@@ -3811,31 +3812,135 @@ if (mount) {
             </details>`;
     }
 
-    function todayTasksMarkup() {
-        const today = new Date();
-        const tasks = activeTopLevelTasks().filter((task) => itemOverdue(task, 'task') || isSameDay(task.due_at || task.dueAt, today)).sort(compareTasks);
+    function commandCenterMarkup() {
+        const items = commandCenterAgendaItems();
+        const loading = state.dashboardDataLoading && !items.length;
         return `
-            <section class="hb-card hb-card-pad hb-today-tasks-card">
-                <div class="hb-section-action-row">
-                    ${sectionTitle(icons.tasks, 'Tasks for today', `${tasks.length} tasks`)}
+            <section class="hb-card hb-command-center-card ${state.commandCenterChatCollapsed ? 'hb-command-center-card-collapsed' : ''}" aria-label="Bean command center">
+                <div class="hb-command-center-agenda">
+                    ${loading ? dashboardLoadingMarkup('Loading today...') : commandCenterAgendaMarkup(items)}
                 </div>
-                ${state.dashboardDataLoading && !tasks.length ? dashboardLoadingMarkup('Loading today tasks...') : itemListMarkup(tasks, 'task', 'No tasks scheduled for today')}
+                <div class="hb-command-center-divider" role="separator" aria-orientation="horizontal">
+                    <span aria-hidden="true"></span>
+                    <button class="hb-command-center-toggle" type="button" data-toggle-command-center-chat aria-label="${state.commandCenterChatCollapsed ? 'Expand chat' : 'Collapse chat'}" title="${state.commandCenterChatCollapsed ? 'Expand chat' : 'Collapse chat'}">${state.commandCenterChatCollapsed ? '^' : 'v'}</button>
+                </div>
+                ${state.commandCenterChatCollapsed ? '<div class="hb-command-center-chat-collapsed" aria-hidden="true"></div>' : `<div class="hb-command-center-chat">${chatMarkup({ expandable: true, compact: true, messageListId: 'hb-command-center-chat-messages' })}</div>`}
             </section>`;
     }
 
-    function atAGlanceMarkup() {
-        const days = [new Date(), addDays(new Date(), 1), addDays(new Date(), 2)];
-        const eventCount = eventsForDays(days).length;
-        const loadingEvents = state.dashboardDataLoading && !eventCount;
+    function commandCenterAgendaMarkup(items) {
+        if (!items.length) {
+            return '<div class="hb-command-center-empty">Nothing else scheduled for today.</div>';
+        }
         return `
-            <section class="hb-card hb-card-pad hb-glance-card">
-                <div class="hb-section-action-row">
-                    ${sectionTitle(icons.calendar, 'At a glance', `${eventCount} upcoming ${eventCount === 1 ? 'event' : 'events'}`)}
-                </div>
-                <div class="hb-glance-list">
-                    ${loadingEvents ? dashboardLoadingMarkup('Loading upcoming events...') : days.map((day) => glanceDayMarkup(day)).join('')}
-                </div>
-            </section>`;
+            <div class="hb-command-center-agenda-list" aria-label="Today's list">
+                ${items.map(commandCenterAgendaItemMarkup).join('')}
+            </div>`;
+    }
+
+    function commandCenterAgendaItemMarkup(item) {
+        const dataAttr = item.kind === 'event'
+            ? `data-edit-event="${escapeAttr(item.id)}"`
+            : item.kind === 'task'
+                ? `data-edit-task="${escapeAttr(item.id)}"`
+                : `data-edit-reminder="${escapeAttr(item.id)}"`;
+        const notesIcon = item.kind === 'event' && item.hasNotes ? `<span class="hb-command-center-notes" aria-label="Has notes" title="Has notes">${icons.notes}</span>` : '';
+        return `
+            <button class="hb-command-center-row hb-command-center-row-${escapeAttr(item.kind)}" type="button" ${dataAttr}>
+                <span class="hb-command-center-time">${escapeHtml(item.timeLabel)}</span>
+                <span class="hb-command-center-dot" aria-hidden="true"></span>
+                <span class="hb-command-center-copy">
+                    <strong>${escapeHtml(item.title || 'Untitled')}</strong>
+                    <small>${escapeHtml(item.subtitle || commandCenterKindLabel(item.kind))}</small>
+                </span>
+                ${notesIcon}
+            </button>`;
+    }
+
+    function commandCenterAgendaItems() {
+        const now = new Date();
+        const todayStart = parseLocalDate(dateOnly(now));
+        const endOfToday = addMinutes(addDays(todayStart, 1), -1);
+        const items = [];
+
+        state.calendar.forEach((event) => {
+            if (!eventIntersectsDay(event, todayStart)) return;
+            const startValue = event.starts_at || event.startsAt;
+            if (!startValue) return;
+            const start = parseLocalDate(startValue);
+            if (Number.isNaN(start.getTime())) return;
+            const allDay = eventAllDay(event);
+            const fallbackEnd = allDay ? addDays(todayStart, 1) : start;
+            const end = event.ends_at || event.endsAt ? parseLocalDate(event.ends_at || event.endsAt) : fallbackEnd;
+            if (!allDay && !Number.isNaN(end.getTime()) && end < now) return;
+            items.push({
+                id: event.id,
+                kind: 'event',
+                title: event.title || event.name || 'Untitled event',
+                time: allDay ? todayStart : (start < now && end > now ? now : start),
+                timeLabel: eventTime(event),
+                subtitle: eventLocationText(event),
+                hasNotes: Boolean(eventNotesText(event)),
+            });
+        });
+
+        activeTopLevelTasks().forEach((task) => {
+            const dueValue = task.due_at || task.dueAt || '';
+            if (!dueValue) return;
+            const due = parseLocalDate(dueValue);
+            if (Number.isNaN(due.getTime())) return;
+            const dueDay = parseLocalDate(dateOnly(due));
+            if (dueDay > todayStart) return;
+            const dateOnlyDue = wireValueLooksDateOnly(dueValue);
+            const overdue = dueDay < todayStart || (!dateOnlyDue && due < now);
+            items.push({
+                id: task.id,
+                kind: 'task',
+                title: task.title || task.name || 'Untitled task',
+                time: overdue ? due : (dateOnlyDue ? endOfToday : due),
+                timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatTime(due)),
+                subtitle: [overdue ? 'overdue' : '', task.category || ''].filter(Boolean).join(' · '),
+            });
+        });
+
+        pendingReminders().forEach((reminder) => {
+            const dueValue = reminderDateValue(reminder);
+            if (!dueValue) return;
+            const due = parseLocalDate(dueValue);
+            if (Number.isNaN(due.getTime())) return;
+            const dueDay = parseLocalDate(dateOnly(due));
+            if (dueDay > todayStart) return;
+            const dateOnlyDue = wireValueLooksDateOnly(dueValue);
+            const overdue = dueDay < todayStart || (!dateOnlyDue && due < now);
+            items.push({
+                id: reminder.id,
+                kind: 'reminder',
+                title: reminder.title || reminder.name || 'Untitled reminder',
+                time: overdue ? due : (dateOnlyDue ? endOfToday : due),
+                timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatTime(due)),
+                subtitle: [overdue ? 'overdue' : '', reminder.category || ''].filter(Boolean).join(' · '),
+            });
+        });
+
+        return items.sort((a, b) => {
+            const timeOrder = a.time - b.time;
+            if (timeOrder !== 0) return timeOrder;
+            const kindOrder = commandCenterKindRank(a.kind) - commandCenterKindRank(b.kind);
+            if (kindOrder !== 0) return kindOrder;
+            return String(a.title || '').localeCompare(String(b.title || ''));
+        });
+    }
+
+    function commandCenterKindLabel(kind) {
+        return { event: 'Event', task: 'Task', reminder: 'Reminder' }[kind] || 'Item';
+    }
+
+    function commandCenterKindRank(kind) {
+        return { event: 0, task: 1, reminder: 2 }[kind] ?? 3;
+    }
+
+    function wireValueLooksDateOnly(value) {
+        return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
     }
 
     function glanceDayMarkup(day) {
@@ -4303,7 +4408,7 @@ if (mount) {
         const expanded = kind === 'task' && state.expandedTaskIds.has(String(item.id));
         const expandable = kind === 'task' && (taskNotes || subtasks.length || (!completed && !taskParentId(item)));
         return `
-            <article class="hb-item hb-item-${kind} ${completed ? 'hb-item-complete' : ''} ${overdue ? 'hb-item-overdue' : ''}" style="${completed ? '' : `background:${hexAlpha(color, .14)};border-color:${hexAlpha(color, .34)}`}">
+            <article class="hb-item hb-item-${kind} ${completed ? 'hb-item-complete' : ''} ${overdue ? 'hb-item-overdue' : ''}" style="--hb-item-color:${escapeAttr(color)}">
                 ${kind === 'task' && critical ? '<span class="hb-star hb-item-critical-star">★</span>' : ''}
                 <label class="hb-check"><input type="checkbox" data-toggle-${kind}="${item.id}" ${completed ? 'checked' : ''}></label>
                 <button class="hb-item-main" type="button" data-edit-${kind}="${item.id}">
@@ -5413,6 +5518,11 @@ if (mount) {
             shiftMonth(Number(button.dataset.shiftMonth || 0));
         }));
         mount.querySelectorAll('[data-refresh-app]').forEach((button) => button.addEventListener('click', refreshCurrentView));
+        mount.querySelector('[data-toggle-command-center-chat]')?.addEventListener('click', () => {
+            state.commandCenterChatCollapsed = !state.commandCenterChatCollapsed;
+            render();
+            if (!state.commandCenterChatCollapsed) scrollChatToBottom();
+        });
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelector('[data-admin-settings-form]')?.addEventListener('submit', saveAdminSettings);
         mount.querySelector('[data-admin-plan-limits-form]')?.addEventListener('submit', saveAdminPlanLimits);
@@ -13619,7 +13729,9 @@ if (mount) {
 
     function scrollChatToBottom() {
         requestAnimationFrame(() => {
-            const scroller = document.getElementById('hb-chat-messages');
+            const scroller = document.querySelector('.hb-desktop-chat-expanded #hb-chat-messages')
+                || document.getElementById('hb-chat-messages')
+                || document.getElementById('hb-command-center-chat-messages');
             if (scroller) scroller.scrollTop = scroller.scrollHeight;
         });
     }

@@ -84,14 +84,34 @@ class _HeyBeanRuntimeServices {
   static String preferredMapApp = 'google';
 }
 
-Color _sectionDividerColor({double? alpha}) => HeyBeanTheme.accent.withValues(
-  alpha: alpha ?? (HeyBeanTheme.isDark ? .30 : .24),
+Color _sectionDividerColor({double? alpha}) => HeyBeanTheme.border.withValues(
+  alpha: alpha ?? (HeyBeanTheme.isDark ? .52 : .72),
 );
 
 BoxDecoration _sectionDividerDecoration({double? alpha}) => BoxDecoration(
   border: Border(
     top: BorderSide(color: _sectionDividerColor(alpha: alpha)),
   ),
+);
+
+Color _quietBorderColor({double alpha = .58}) =>
+    HeyBeanTheme.border.withValues(alpha: HeyBeanTheme.isDark ? alpha : alpha);
+
+Color _quietSurfaceColor({double alpha = 1}) => HeyBeanTheme.surface.withValues(
+  alpha: HeyBeanTheme.isDark ? math.min(alpha, .92) : alpha,
+);
+
+Color _quietMutedSurfaceColor({double alpha = .68}) => HeyBeanTheme.surface2
+    .withValues(alpha: HeyBeanTheme.isDark ? math.min(alpha, .62) : alpha);
+
+BoxDecoration _quietSurfaceDecoration({
+  double radius = 14,
+  double borderAlpha = .54,
+  Color? color,
+}) => BoxDecoration(
+  color: color ?? _quietSurfaceColor(),
+  borderRadius: BorderRadius.circular(radius),
+  border: Border.all(color: _quietBorderColor(alpha: borderAlpha)),
 );
 
 class _BeanNotesIcon extends StatelessWidget {
@@ -1432,7 +1452,7 @@ class HeyBeanTheme {
         surfaceTintColor: Colors.transparent,
         titleTextStyle: textTheme.titleLarge?.copyWith(
           color: textColor,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w700,
         ),
         contentTextStyle: textTheme.bodyMedium?.copyWith(
           color: mutedColor,
@@ -1440,7 +1460,7 @@ class HeyBeanTheme {
           height: 1.35,
         ),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
           side: BorderSide(color: borderColor),
         ),
       ),
@@ -1449,7 +1469,7 @@ class HeyBeanTheme {
         modalBackgroundColor: surfaceColor,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
         ),
       ),
       dividerTheme: DividerThemeData(
@@ -1484,35 +1504,35 @@ class HeyBeanTheme {
           fontWeight: FontWeight.w700,
         ),
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
+          horizontal: 14,
+          vertical: 12,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: borderColor),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: borderColor),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
             color: accentColor.withValues(alpha: .62),
-            width: 1.2,
+            width: 1,
           ),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
             color: isDarkTheme ? darkDestructive : lightDestructive,
           ),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
             color: isDarkTheme ? darkDestructive : lightDestructive,
-            width: 1.2,
+            width: 1,
           ),
         ),
       ),
@@ -1598,20 +1618,22 @@ InputDecoration _longFormInputDecoration({
   hintText: hintText,
   prefixIcon: prefixIcon,
   alignLabelWithHint: true,
-  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+  filled: true,
+  fillColor: _quietMutedSurfaceColor(alpha: .34),
+  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
   border: OutlineInputBorder(
     borderRadius: BorderRadius.circular(16),
-    borderSide: BorderSide(color: HeyBeanTheme.border),
+    borderSide: BorderSide(color: _quietBorderColor(alpha: .44)),
   ),
   enabledBorder: OutlineInputBorder(
     borderRadius: BorderRadius.circular(16),
-    borderSide: BorderSide(color: HeyBeanTheme.border),
+    borderSide: BorderSide(color: _quietBorderColor(alpha: .44)),
   ),
   focusedBorder: OutlineInputBorder(
     borderRadius: BorderRadius.circular(16),
     borderSide: BorderSide(
-      color: HeyBeanTheme.accent.withValues(alpha: .56),
-      width: 1.2,
+      color: HeyBeanTheme.accent.withValues(alpha: .48),
+      width: 1,
     ),
   ),
 );
@@ -4905,9 +4927,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (content.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: content));
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Copied')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Copied'),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(16, 0, 16, 16),
+        duration: Duration(milliseconds: 1),
+      ),
+    );
   }
 
   Future<void> _stopAgent() async {
@@ -8726,30 +8753,12 @@ ${_truncateDiagnostic(stack, 2200)}
           : HeyBeanTheme.lightSystemOverlayStyle,
       child: Container(
         key: const Key('heybean-background-gradient'),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            stops: [0, .5, 1],
-            colors: [HeyBeanTheme.bg0, HeyBeanTheme.bg1, HeyBeanTheme.bg2],
-          ),
-        ),
+        decoration: BoxDecoration(color: HeyBeanTheme.bg0),
         child: Stack(
           children: [
-            Positioned.fill(
+            const Positioned.fill(
               key: Key('green-glow-left'),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment(-1.12, -1.2),
-                    radius: 1.1,
-                    colors: [
-                      HeyBeanTheme.accent.withValues(alpha: .10),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
+              child: SizedBox.shrink(),
             ),
             Scaffold(
               appBar: AppBar(
@@ -13329,9 +13338,9 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       key: const Key('command-center-home'),
       builder: (context, constraints) {
         final maxChatHeight = math.max(0.0, constraints.maxHeight - 150.0);
-        final minChatHeight = math.min(150.0, maxChatHeight);
+        final minChatHeight = math.min(72.0, maxChatHeight);
         final fallbackChatHeight = math.min(
-          math.max(220.0, constraints.maxHeight * .34),
+          math.max(128.0, constraints.maxHeight * .22),
           maxChatHeight,
         );
         final expandedChatHeight = (_expandedChatHeight ?? fallbackChatHeight)
@@ -13646,7 +13655,7 @@ class _CommandCenterSplitDivider extends StatelessWidget {
             child: Container(
               key: const Key('command-center-chat-divider-line'),
               height: 1,
-              color: HeyBeanTheme.accent,
+              color: _quietBorderColor(alpha: .52),
             ),
           ),
           const SizedBox(width: 4),
@@ -13663,7 +13672,7 @@ class _CommandCenterSplitDivider extends StatelessWidget {
                     ? Icons.keyboard_arrow_up_rounded
                     : Icons.keyboard_arrow_down_rounded,
                 size: 20,
-                color: HeyBeanTheme.accentStrong,
+                color: HeyBeanTheme.muted,
               ),
             ),
           ),
@@ -13697,16 +13706,16 @@ class _CommandCenterAgendaList extends StatelessWidget {
       return Container(
         key: const Key('command-center-agenda-empty'),
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: HeyBeanTheme.surface.withValues(alpha: .62),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: HeyBeanTheme.border),
+        decoration: _quietSurfaceDecoration(
+          radius: 18,
+          color: _quietSurfaceColor(alpha: .62),
+          borderAlpha: .32,
         ),
         child: Text(
           'Nothing else scheduled for today.',
           style: TextStyle(
             color: HeyBeanTheme.muted,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
           ),
         ),
       );
@@ -13719,7 +13728,7 @@ class _CommandCenterAgendaList extends StatelessWidget {
           key: const Key('command-center-agenda-list'),
           padding: EdgeInsets.zero,
           itemCount: items.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 6),
+          separatorBuilder: (context, index) => const SizedBox(height: 2),
           itemBuilder: (context, index) =>
               _CommandCenterAgendaRow(item: items[index], onTap: onItemTap),
         ),
@@ -13748,11 +13757,6 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       _CommandCenterAgendaKind.task => HeyBeanTheme.warning,
       _CommandCenterAgendaKind.reminder => const Color(0xFF3B82F6),
     };
-    final icon = switch (item.kind) {
-      _CommandCenterAgendaKind.event => Icons.event_rounded,
-      _CommandCenterAgendaKind.task => Icons.checklist_rounded,
-      _CommandCenterAgendaKind.reminder => Icons.notifications_rounded,
-    };
     final kindLabel = switch (item.kind) {
       _CommandCenterAgendaKind.event => 'Event',
       _CommandCenterAgendaKind.task => 'Task',
@@ -13762,17 +13766,18 @@ class _CommandCenterAgendaRow extends StatelessWidget {
     const timeWidth = 58.0;
 
     return Material(
-      key: Key('command-center-agenda-${item.key}'),
       color: Colors.transparent,
+      key: Key('command-center-agenda-${item.key}'),
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
         onTap: () => onTap(item),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
           decoration: BoxDecoration(
-            color: HeyBeanTheme.surface.withValues(alpha: .82),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: HeyBeanTheme.border),
+            border: Border(
+              bottom: BorderSide(color: _quietBorderColor(alpha: .30)),
+            ),
           ),
           child: Row(
             children: [
@@ -13784,68 +13789,52 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                       item.kind == _CommandCenterAgendaKind.event,
                 ),
               ),
+              const SizedBox(width: 8),
               Container(
-                width: 28,
-                height: 28,
+                width: 7,
+                height: 7,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(999),
+                  color: color.withValues(alpha: .82),
+                  shape: BoxShape.circle,
                 ),
-                child: Icon(icon, color: color, size: 16),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            item.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: HeyBeanTheme.text,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        if (hasEventNotes) ...[
-                          const SizedBox(width: 6),
-                          Icon(
-                            Icons.notes_rounded,
-                            key: Key('command-center-event-notes-${item.key}'),
-                            size: 14,
-                            color: HeyBeanTheme.muted,
-                          ),
-                        ],
-                      ],
-                    ),
-                    if (item.subtitle.isNotEmpty)
-                      Text(
-                        item.subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: HeyBeanTheme.muted,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      )
-                    else
-                      Text(
-                        kindLabel,
-                        style: TextStyle(
-                          color: HeyBeanTheme.muted,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: HeyBeanTheme.text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      item.subtitle.isNotEmpty ? item.subtitle : kindLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ],
                 ),
               ),
+              if (hasEventNotes)
+                Icon(
+                  Icons.notes_rounded,
+                  key: Key('command-center-event-notes-${item.key}'),
+                  size: 14,
+                  color: HeyBeanTheme.muted,
+                ),
             ],
           ),
         ),
@@ -13874,7 +13863,7 @@ class _CommandCenterAgendaTimeLabel extends StatelessWidget {
     final style = TextStyle(
       color: HeyBeanTheme.muted,
       fontSize: 12,
-      fontWeight: FontWeight.w900,
+      fontWeight: FontWeight.w700,
       height: 1.05,
     );
     if (canStack) {
@@ -14026,7 +14015,8 @@ class _HeroChatCardState extends State<_HeroChatCard> {
 
   void _scrollToBottom({bool immediate = false}) {
     if (!_scrollController.hasClients) return;
-    final target = _scrollController.position.maxScrollExtent;
+    final maxScrollExtent = _scrollController.position.maxScrollExtent;
+    final target = maxScrollExtent <= 180 ? 0.0 : maxScrollExtent;
     if (immediate) {
       _scrollController.jumpTo(target);
       return;
@@ -14050,30 +14040,31 @@ class _HeroChatCardState extends State<_HeroChatCard> {
               Expanded(
                 child: Builder(
                   builder: (context) {
-                    return ListView.builder(
+                    return SingleChildScrollView(
                       key: const Key('chat-message-list'),
                       controller: _scrollController,
-                      padding: const EdgeInsets.only(bottom: 12, top: 8),
-                      itemCount: widget.messages.length,
-                      itemBuilder: (context, index) {
-                        final message = widget.messages[index];
-                        final isUser = message.role == 'user';
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _MessageBubble(
-                            sender: isUser ? 'You' : 'Bean',
-                            message: message.content ?? '',
-                            alignRight: isUser,
-                            onCopy: isUser
-                                ? () =>
-                                      unawaited(widget.onMessageCopied(message))
-                                : null,
-                            onEdit: isUser && !widget.busy
-                                ? () => widget.onMessageEdited(message)
-                                : null,
-                          ),
-                        );
-                      },
+                      padding: const EdgeInsets.only(bottom: 8, top: 6),
+                      child: Column(
+                        children: [
+                          for (final message in widget.messages)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: _MessageBubble(
+                                sender: message.role == 'user' ? 'You' : 'Bean',
+                                message: message.content ?? '',
+                                alignRight: message.role == 'user',
+                                onCopy: message.role == 'user'
+                                    ? () => unawaited(
+                                        widget.onMessageCopied(message),
+                                      )
+                                    : null,
+                                onEdit: message.role == 'user' && !widget.busy
+                                    ? () => widget.onMessageEdited(message)
+                                    : null,
+                              ),
+                            ),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -14178,18 +14169,20 @@ class _ChatInputDock extends StatelessWidget {
     decoration: BoxDecoration(
       color: HeyBeanTheme.surface,
       borderRadius: BorderRadius.only(
-        topLeft: Radius.circular(attachedToWorkStrip ? 0 : 22),
-        topRight: Radius.circular(attachedToWorkStrip ? 0 : 22),
+        topLeft: Radius.circular(attachedToWorkStrip ? 0 : 18),
+        topRight: Radius.circular(attachedToWorkStrip ? 0 : 18),
       ),
       border: Border.all(
-        color: listening ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
-        width: listening ? 2 : 1,
+        color: listening
+            ? HeyBeanTheme.accentStrong.withValues(alpha: .72)
+            : _quietBorderColor(alpha: .46),
+        width: listening ? 1.4 : 1,
       ),
       boxShadow: const [
         BoxShadow(
-          color: Color(0x14000000),
-          blurRadius: 22,
-          offset: Offset(0, 10),
+          color: Color(0x0F000000),
+          blurRadius: 14,
+          offset: Offset(0, 6),
         ),
       ],
     ),
@@ -14546,6 +14539,8 @@ class _QuickPromptRail extends StatelessWidget {
   }
 }
 
+enum _SentMessageAction { copy, edit }
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.sender,
@@ -14567,27 +14562,73 @@ class _MessageBubble extends StatelessWidget {
     final bubble = Container(
       key: alignRight ? const Key('user-message-bubble') : null,
       constraints: const BoxConstraints(maxWidth: 560),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: alignRight
-            ? HeyBeanTheme.accent.withValues(alpha: .12)
-            : HeyBeanTheme.surface2,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HeyBeanTheme.border),
+            ? HeyBeanTheme.accent.withValues(alpha: .08)
+            : _quietMutedSurfaceColor(alpha: .54),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _quietBorderColor(alpha: .38)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(
-                sender,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: HeyBeanTheme.accentStrong,
-                  fontWeight: FontWeight.w800,
+              Expanded(
+                child: Text(
+                  sender,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: HeyBeanTheme.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
+              if (hasActions)
+                PopupMenuButton<_SentMessageAction>(
+                  key: const Key('sent-message-actions-trigger'),
+                  tooltip: 'Message actions',
+                  position: PopupMenuPosition.under,
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    Icons.more_horiz_rounded,
+                    size: 18,
+                    color: HeyBeanTheme.muted,
+                  ),
+                  onOpened: () =>
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar(),
+                  onSelected: (action) {
+                    switch (action) {
+                      case _SentMessageAction.copy:
+                        onCopy?.call();
+                      case _SentMessageAction.edit:
+                        onEdit?.call();
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    if (onCopy != null)
+                      const PopupMenuItem<_SentMessageAction>(
+                        key: Key('chat-copy-sent-message-action'),
+                        value: _SentMessageAction.copy,
+                        child: ListTile(
+                          dense: true,
+                          leading: Icon(Icons.copy_rounded),
+                          title: Text('Copy'),
+                        ),
+                      ),
+                    if (onEdit != null)
+                      const PopupMenuItem<_SentMessageAction>(
+                        key: Key('chat-edit-sent-message-action'),
+                        value: _SentMessageAction.edit,
+                        child: ListTile(
+                          dense: true,
+                          leading: Icon(Icons.edit_rounded),
+                          title: Text('Edit'),
+                        ),
+                      ),
+                  ],
+                ),
             ],
           ),
           const SizedBox(height: 4),
@@ -14598,51 +14639,7 @@ class _MessageBubble extends StatelessWidget {
 
     return Align(
       alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
-      child: hasActions
-          ? Material(
-              color: Colors.transparent,
-              child: InkWell(
-                key: const Key('sent-message-actions-trigger'),
-                borderRadius: BorderRadius.circular(18),
-                onTap: () => _showSentMessageActions(context),
-                child: bubble,
-              ),
-            )
-          : bubble,
-    );
-  }
-
-  void _showSentMessageActions(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (onCopy != null)
-              ListTile(
-                key: const Key('chat-copy-sent-message-action'),
-                leading: Icon(Icons.copy_rounded),
-                title: Text('Copy'),
-                onTap: () {
-                  Navigator.pop(context);
-                  onCopy?.call();
-                },
-              ),
-            if (onEdit != null)
-              ListTile(
-                key: const Key('chat-edit-sent-message-action'),
-                leading: Icon(Icons.edit_rounded),
-                title: Text('Edit'),
-                onTap: () {
-                  Navigator.pop(context);
-                  onEdit?.call();
-                },
-              ),
-          ],
-        ),
-      ),
+      child: bubble,
     );
   }
 }
@@ -14910,6 +14907,19 @@ class _PlanLimitErrorBanner extends StatelessWidget {
                   ],
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  key: const Key('plan-limit-upgrade-action'),
+                  onPressed: () => launchExternalUrl(_pricingUrl),
+                  icon: Icon(Icons.arrow_upward_rounded),
+                  label: Text('Upgrade plan'),
+                ),
+              ),
               if (onDismissed != null) ...[
                 const SizedBox(width: 8),
                 IconButton(
@@ -14924,16 +14934,6 @@ class _PlanLimitErrorBanner extends StatelessWidget {
                 ),
               ],
             ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              key: const Key('plan-limit-upgrade-action'),
-              onPressed: () => launchExternalUrl(_pricingUrl),
-              icon: Icon(Icons.arrow_upward_rounded),
-              label: Text('Upgrade plan'),
-            ),
           ),
         ],
       ),
@@ -18854,13 +18854,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     return Scaffold(
       key: const Key('calendar-event-detail-page'),
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [HeyBeanTheme.bg0, HeyBeanTheme.bg1],
-          ),
-        ),
+        decoration: BoxDecoration(color: HeyBeanTheme.bg0),
         child: SafeArea(
           child: Column(
             children: [
@@ -18869,7 +18863,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    IconButton.filledTonal(
+                    IconButton.outlined(
                       key: const Key('event-detail-back-action'),
                       onPressed: () => Navigator.of(context).pop(),
                       icon: Icon(Icons.arrow_back_rounded),
@@ -18881,7 +18875,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         title: 'Event Details',
                         titleKey: const Key('event-detail-header-title'),
                         subtitle: 'Schedule, details, and calendar sync',
-                        trailing: IconButton.filledTonal(
+                        trailing: IconButton.outlined(
                           key: const Key('event-detail-critical-toggle'),
                           tooltip: _isCritical
                               ? 'Remove critical star'
@@ -18954,7 +18948,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                           Icon(
                                             Icons.calendar_today_rounded,
                                             size: 20,
-                                            color: HeyBeanTheme.accentStrong,
+                                            color: HeyBeanTheme.muted,
                                           ),
                                           const SizedBox(width: 10),
                                           Expanded(
@@ -18963,7 +18957,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                               style: TextStyle(
                                                 color: HeyBeanTheme.text,
                                                 fontSize: 13,
-                                                fontWeight: FontWeight.w900,
+                                                fontWeight: FontWeight.w600,
                                               ),
                                             ),
                                           ),
@@ -18983,7 +18977,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                     Icons.info_outline_rounded,
                                     semanticLabel: 'All day event info',
                                     size: 18,
-                                    color: HeyBeanTheme.accentStrong,
+                                    color: HeyBeanTheme.muted,
                                   ),
                                   onPressed: () => _showInfoSheet(
                                     context,
@@ -19043,7 +19037,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         subtitle: 'Location, notes, and status',
                         iconWidget: _BeanNotesIcon(
                           size: 18,
-                          color: HeyBeanTheme.accentStrong,
+                          color: HeyBeanTheme.muted,
                         ),
                         children: [
                           _buildLocationEditor(),
@@ -19073,8 +19067,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 children: [
                                   Icon(
                                     Icons.notes_rounded,
-                                    color: HeyBeanTheme.accentStrong,
-                                    size: 20,
+                                    color: HeyBeanTheme.muted,
+                                    size: 18,
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
@@ -19082,7 +19076,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                     style: TextStyle(
                                       color: HeyBeanTheme.text,
                                       fontSize: 13,
-                                      fontWeight: FontWeight.w800,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ],
@@ -19185,7 +19179,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 ),
                               ),
                               const SizedBox(width: 10),
-                              IconButton.filledTonal(
+                              IconButton.outlined(
                                 key: const Key('event-category-add-action'),
                                 onPressed: _savingCategory
                                     ? null
@@ -19569,9 +19563,11 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
           decoration: BoxDecoration(
             color: HeyBeanTheme.isDark
-                ? HeyBeanTheme.surface.withValues(alpha: .96)
-                : const Color(0xEEF8FBF6),
-            border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+                ? HeyBeanTheme.surface.withValues(alpha: .97)
+                : HeyBeanTheme.surface.withValues(alpha: .97),
+            border: Border(
+              top: BorderSide(color: _quietBorderColor(alpha: .40)),
+            ),
           ),
           child: Row(
             children: [
@@ -19647,12 +19643,12 @@ class _LocationSuggestionTile extends StatelessWidget {
     children: [
       ListTile(
         dense: true,
-        leading: Icon(Icons.place_outlined, color: HeyBeanTheme.accentStrong),
+        leading: Icon(Icons.place_outlined, color: HeyBeanTheme.muted),
         title: Text(
           suggestion.primaryText,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontWeight: FontWeight.w800),
+          style: TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle:
             suggestion.secondaryText == null ||
@@ -19757,11 +19753,7 @@ class _MapPreviewFallback extends StatelessWidget {
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(color: HeyBeanTheme.surface2),
     child: Center(
-      child: Icon(
-        Icons.location_pin,
-        color: HeyBeanTheme.accentStrong,
-        size: 38,
-      ),
+      child: Icon(Icons.location_pin, color: HeyBeanTheme.muted, size: 34),
     ),
   );
 }
@@ -19794,17 +19786,17 @@ class _EventCategoryChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final backgroundColor = selected
-        ? HeyBeanTheme.accent.withValues(alpha: HeyBeanTheme.isDark ? .18 : .10)
+        ? HeyBeanTheme.accent.withValues(alpha: HeyBeanTheme.isDark ? .12 : .08)
         : HeyBeanTheme.surface;
     final borderColor = selected
-        ? HeyBeanTheme.accentStrong.withValues(alpha: .70)
-        : HeyBeanTheme.border;
+        ? HeyBeanTheme.accentStrong.withValues(alpha: .46)
+        : _quietBorderColor(alpha: .38);
     final textColor = selected ? HeyBeanTheme.text : HeyBeanTheme.text;
 
     return Material(
       color: backgroundColor,
       shape: StadiumBorder(
-        side: BorderSide(color: borderColor, width: selected ? 1.8 : 1.2),
+        side: BorderSide(color: borderColor, width: selected ? 1.2 : 1),
       ),
       child: Padding(
         padding: const EdgeInsets.only(left: 4, right: 4, top: 4, bottom: 4),
@@ -19827,8 +19819,8 @@ class _EventCategoryChip extends StatelessWidget {
                       style: TextStyle(
                         color: textColor,
                         fontWeight: selected
-                            ? FontWeight.w900
-                            : FontWeight.w700,
+                            ? FontWeight.w700
+                            : FontWeight.w500,
                       ),
                     ),
                     if (selected) ...[
@@ -19836,7 +19828,7 @@ class _EventCategoryChip extends StatelessWidget {
                       Icon(
                         Icons.check_circle_rounded,
                         size: 15,
-                        color: HeyBeanTheme.accent,
+                        color: HeyBeanTheme.muted,
                       ),
                     ],
                   ],
@@ -19857,7 +19849,7 @@ class _EventCategoryChip extends StatelessWidget {
                 icon: Icon(
                   Icons.edit_rounded,
                   size: 16,
-                  color: saving ? HeyBeanTheme.muted : HeyBeanTheme.text,
+                  color: HeyBeanTheme.muted,
                 ),
               ),
             IconButton(
@@ -19911,22 +19903,14 @@ class _ColorSwatchButton extends StatelessWidget {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
-              color: selected ? HeyBeanTheme.accent : HeyBeanTheme.border,
-              width: selected ? 2 : 1,
+              color: selected
+                  ? HeyBeanTheme.text.withValues(alpha: .62)
+                  : _quietBorderColor(alpha: .38),
+              width: selected ? 1.4 : 1,
             ),
           ),
           child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: .24),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             child: selected
                 ? Icon(Icons.check_rounded, color: Colors.white, size: 16)
                 : null,
@@ -20144,17 +20128,10 @@ class _RainbowColorSlider extends StatelessWidget {
             child: Center(
               child: Container(
                 key: const Key('event-category-color-slider-gradient'),
-                height: 10,
+                height: 8,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(999),
                   gradient: const LinearGradient(colors: _gradientColors),
-                  boxShadow: [
-                    BoxShadow(
-                      color: selectedColor.withValues(alpha: .24),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
                 ),
               ),
             ),
@@ -20172,9 +20149,9 @@ class _RainbowColorSlider extends StatelessWidget {
                 border: Border.all(color: Colors.white, width: 2),
                 boxShadow: [
                   BoxShadow(
-                    color: selectedColor.withValues(alpha: .45),
-                    blurRadius: 12,
-                    offset: const Offset(0, 3),
+                    color: Colors.black.withValues(alpha: .12),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),
@@ -20214,13 +20191,13 @@ class _EventFieldLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
+      Icon(icon, size: 17, color: HeyBeanTheme.muted),
       const SizedBox(width: 8),
       Text(
         label,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
           color: HeyBeanTheme.text,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w600,
         ),
       ),
     ],
@@ -22291,11 +22268,13 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
           padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
           child: Container(
             height: mediaQuery.size.height - topInset,
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
             decoration: BoxDecoration(
               color: HeyBeanTheme.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-              border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+              border: Border(
+                top: BorderSide(color: _quietBorderColor(alpha: .42)),
+              ),
             ),
             child: SafeArea(
               top: false,
@@ -22371,7 +22350,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                       ),
                                       decoration: BoxDecoration(
                                         color: Colors.white.withValues(
-                                          alpha: .72,
+                                          alpha: HeyBeanTheme.isDark
+                                              ? .04
+                                              : .58,
                                         ),
                                         borderRadius: BorderRadius.circular(
                                           999,
@@ -22385,7 +22366,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                           Icon(
                                             Icons.schedule_rounded,
                                             size: 18,
-                                            color: HeyBeanTheme.accentStrong,
+                                            color: HeyBeanTheme.muted,
                                           ),
                                           const SizedBox(width: 8),
                                           Expanded(
@@ -22439,7 +22420,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                               subtitle: 'Notes and importance',
                               iconWidget: _BeanNotesIcon(
                                 size: 18,
-                                color: HeyBeanTheme.accentStrong,
+                                color: HeyBeanTheme.muted,
                               ),
                               children: [
                                 TextFormField(
@@ -22471,12 +22452,12 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                         'Category',
                                         style: TextStyle(
                                           color: HeyBeanTheme.text,
-                                          fontWeight: FontWeight.w900,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
                                     ),
                                     if (onEventCategorySaved != null)
-                                      IconButton.filledTonal(
+                                      IconButton.outlined(
                                         key: const Key(
                                           'title-time-editor-category-add-action',
                                         ),
@@ -23005,9 +22986,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                     child: Container(
                       padding: const EdgeInsets.fromLTRB(0, 10, 0, 0),
                       decoration: BoxDecoration(
-                        color: HeyBeanTheme.surface.withValues(alpha: .94),
+                        color: HeyBeanTheme.surface.withValues(alpha: .97),
                         border: Border(
-                          top: BorderSide(color: HeyBeanTheme.border),
+                          top: BorderSide(color: _quietBorderColor(alpha: .40)),
                         ),
                       ),
                       child: Column(
@@ -23095,6 +23076,88 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
         );
       },
     ),
+  );
+}
+
+class _QuietFilterOption {
+  const _QuietFilterOption({
+    required this.key,
+    required this.value,
+    required this.label,
+  });
+
+  final Key key;
+  final String value;
+  final String label;
+}
+
+class _QuietFilterBar extends StatelessWidget {
+  const _QuietFilterBar({
+    required this.options,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final List<_QuietFilterOption> options;
+  final String selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(3),
+    decoration: BoxDecoration(
+      color: _quietMutedSurfaceColor(alpha: .46),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: _quietBorderColor(alpha: .38)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final option in options)
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 1),
+              child: _QuietFilterButton(
+                key: option.key,
+                label: option.label,
+                selected: option.value == selected,
+                onPressed: () => onSelected(option.value),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class _QuietFilterButton extends StatelessWidget {
+  const _QuietFilterButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => TextButton(
+    onPressed: onPressed,
+    style: TextButton.styleFrom(
+      minimumSize: const Size(0, 34),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      foregroundColor: selected ? HeyBeanTheme.text : HeyBeanTheme.muted,
+      backgroundColor: selected ? _quietSurfaceColor() : Colors.transparent,
+      textStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+    ),
+    child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
   );
 }
 
@@ -23206,38 +23269,33 @@ class _TaskListCardState extends State<_TaskListCard> {
       key: const Key('tasks-view'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            ChoiceChip(
-              key: const Key('task-filter-open'),
-              label: Text('Active'),
-              selected: !_showCompleted && !_showAll,
-              onSelected: (_) => setState(() {
-                _showCompleted = false;
-                _showAll = false;
-              }),
+        _QuietFilterBar(
+          selected: _showAll
+              ? 'all'
+              : _showCompleted
+              ? 'done'
+              : 'active',
+          options: const [
+            _QuietFilterOption(
+              key: Key('task-filter-open'),
+              value: 'active',
+              label: 'Active',
             ),
-            ChoiceChip(
-              key: const Key('task-filter-done'),
-              label: Text('Done'),
-              selected: _showCompleted && !_showAll,
-              onSelected: (_) => setState(() {
-                _showCompleted = true;
-                _showAll = false;
-              }),
+            _QuietFilterOption(
+              key: Key('task-filter-done'),
+              value: 'done',
+              label: 'Done',
             ),
-            ChoiceChip(
-              key: const Key('task-filter-all'),
-              label: Text('All tasks'),
-              selected: _showAll,
-              onSelected: (_) => setState(() {
-                _showCompleted = false;
-                _showAll = true;
-              }),
+            _QuietFilterOption(
+              key: Key('task-filter-all'),
+              value: 'all',
+              label: 'All tasks',
             ),
           ],
+          onSelected: (value) => setState(() {
+            _showCompleted = value == 'done';
+            _showAll = value == 'all';
+          }),
         ),
         const SizedBox(height: 12),
         if (widget.loading && visibleTasks.isEmpty)
@@ -23674,38 +23732,33 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       key: const Key('reminders-view'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            ChoiceChip(
-              key: const Key('reminder-filter-pending'),
-              label: Text('Pending'),
-              selected: !_showCompleted && !_showAll,
-              onSelected: (_) => setState(() {
-                _showCompleted = false;
-                _showAll = false;
-              }),
+        _QuietFilterBar(
+          selected: _showAll
+              ? 'all'
+              : _showCompleted
+              ? 'completed'
+              : 'pending',
+          options: const [
+            _QuietFilterOption(
+              key: Key('reminder-filter-pending'),
+              value: 'pending',
+              label: 'Pending',
             ),
-            ChoiceChip(
-              key: const Key('reminder-filter-completed'),
-              label: Text('Completed'),
-              selected: _showCompleted && !_showAll,
-              onSelected: (_) => setState(() {
-                _showCompleted = true;
-                _showAll = false;
-              }),
+            _QuietFilterOption(
+              key: Key('reminder-filter-completed'),
+              value: 'completed',
+              label: 'Completed',
             ),
-            ChoiceChip(
-              key: const Key('reminder-filter-all'),
-              label: Text('All reminders'),
-              selected: _showAll,
-              onSelected: (_) => setState(() {
-                _showCompleted = false;
-                _showAll = true;
-              }),
+            _QuietFilterOption(
+              key: Key('reminder-filter-all'),
+              value: 'all',
+              label: 'All reminders',
             ),
           ],
+          onSelected: (value) => setState(() {
+            _showCompleted = value == 'completed';
+            _showAll = value == 'all';
+          }),
         ),
         const SizedBox(height: 12),
         if (widget.loading && visibleReminders.isEmpty)
@@ -24206,10 +24259,9 @@ class _MemoryComposer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: HeyBeanTheme.accent.withValues(alpha: .10),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: HeyBeanTheme.border),
+    decoration: _quietSurfaceDecoration(
+      color: _quietMutedSurfaceColor(alpha: .48),
+      borderAlpha: .38,
     ),
     child: Padding(
       padding: const EdgeInsets.all(14),
@@ -24218,7 +24270,7 @@ class _MemoryComposer extends StatelessWidget {
         children: [
           Text(
             'Add knowledge',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 10),
           TextField(
@@ -25485,7 +25537,7 @@ class _NotesViewState extends State<_NotesView> {
     final unpinned = notes.where((note) => !note.isPinned).toList();
     return Container(
       key: const Key('notes-view'),
-      color: HeyBeanTheme.surface2,
+      color: HeyBeanTheme.bg0,
       child: Column(
         children: [
           Padding(
@@ -25503,7 +25555,7 @@ class _NotesViewState extends State<_NotesView> {
                     style: TextStyle(
                       color: HeyBeanTheme.text,
                       fontSize: 24,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w700,
                       letterSpacing: 0,
                     ),
                   ),
@@ -25516,10 +25568,10 @@ class _NotesViewState extends State<_NotesView> {
                       icon: Icon(Icons.more_vert_rounded),
                       tooltip: 'Notes options',
                       style: IconButton.styleFrom(
-                        foregroundColor: HeyBeanTheme.text,
-                        side: BorderSide(color: HeyBeanTheme.border),
-                        backgroundColor: HeyBeanTheme.surface,
-                        fixedSize: const Size(38, 38),
+                        foregroundColor: HeyBeanTheme.muted,
+                        side: BorderSide(color: _quietBorderColor(alpha: .36)),
+                        backgroundColor: _quietSurfaceColor(alpha: .72),
+                        fixedSize: const Size(36, 36),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -25591,7 +25643,7 @@ class _NotesViewState extends State<_NotesView> {
                         style: TextStyle(
                           color: HeyBeanTheme.muted,
                           fontSize: 13,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -25688,7 +25740,7 @@ class _NotesViewState extends State<_NotesView> {
                       onTapOutside: _dismissEditorFocus,
                       style: TextStyle(
                         fontSize: 30,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                       ),
                       decoration: const InputDecoration(
                         border: InputBorder.none,
@@ -25772,16 +25824,16 @@ class _NotesViewState extends State<_NotesView> {
   Widget _keyboardToolbar() => SafeArea(
     top: false,
     child: Material(
-      elevation: 10,
+      elevation: 0,
       color: HeyBeanTheme.surface,
       child: Container(
-        height: 54,
+        height: 48,
         decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+          border: Border(top: BorderSide(color: _quietBorderColor(alpha: .42))),
         ),
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           children: [
             _formatButton(
               'H1',
@@ -25844,16 +25896,18 @@ class _NotesViewState extends State<_NotesView> {
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         backgroundColor: active
-            ? HeyBeanTheme.accent.withValues(alpha: .14)
+            ? HeyBeanTheme.accent.withValues(alpha: .08)
             : null,
-        foregroundColor: active ? HeyBeanTheme.accentStrong : null,
+        foregroundColor: active ? HeyBeanTheme.text : HeyBeanTheme.muted,
         side: BorderSide(
-          color: active ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
+          color: active
+              ? HeyBeanTheme.accentStrong.withValues(alpha: .42)
+              : _quietBorderColor(alpha: .36),
         ),
-        minimumSize: const Size(42, 38),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        minimumSize: const Size(40, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
       ),
-      child: Text(label, style: TextStyle(fontWeight: FontWeight.w900)),
+      child: Text(label, style: TextStyle(fontWeight: FontWeight.w600)),
     ),
   );
 
@@ -25864,6 +25918,10 @@ class _NotesViewState extends State<_NotesView> {
           key: key,
           onPressed: onPressed,
           icon: Icon(icon),
+          style: IconButton.styleFrom(
+            foregroundColor: HeyBeanTheme.muted,
+            side: BorderSide(color: _quietBorderColor(alpha: .36)),
+          ),
         ),
       );
 
@@ -25876,7 +25934,7 @@ class _NotesViewState extends State<_NotesView> {
       hintText: 'Search',
       isDense: true,
       filled: true,
-      fillColor: HeyBeanTheme.surface,
+      fillColor: _quietSurfaceColor(alpha: .72),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.all(Radius.circular(999)),
@@ -25888,7 +25946,10 @@ class _NotesViewState extends State<_NotesView> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(999)),
-        borderSide: BorderSide(color: HeyBeanTheme.accentStrong, width: 1.5),
+        borderSide: BorderSide(
+          color: HeyBeanTheme.accentStrong.withValues(alpha: .48),
+          width: 1,
+        ),
       ),
     ),
     onChanged: (_) => setState(() {}),
@@ -25964,7 +26025,7 @@ class _NotesListOptionsSheetState extends State<_NotesListOptionsSheet> {
                       style: TextStyle(
                         color: HeyBeanTheme.text,
                         fontSize: 20,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
@@ -25984,7 +26045,7 @@ class _NotesListOptionsSheetState extends State<_NotesListOptionsSheet> {
                     iconWidget: _BeanNotesIcon(
                       size: 22,
                       color: widget.selectedFolder == 'all'
-                          ? HeyBeanTheme.accentStrong
+                          ? HeyBeanTheme.text
                           : HeyBeanTheme.muted,
                     ),
                     label: 'All Notes',
@@ -26086,16 +26147,16 @@ class _NotesOptionsSection extends StatelessWidget {
           style: TextStyle(
             color: HeyBeanTheme.muted,
             fontSize: 12,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w600,
             letterSpacing: 0,
           ),
         ),
       ),
       DecoratedBox(
-        decoration: BoxDecoration(
-          color: HeyBeanTheme.surface,
-          border: Border.all(color: HeyBeanTheme.border),
-          borderRadius: BorderRadius.circular(999),
+        decoration: _quietSurfaceDecoration(
+          radius: 14,
+          color: _quietSurfaceColor(alpha: .82),
+          borderAlpha: .36,
         ),
         child: children.isEmpty
             ? Padding(
@@ -26104,7 +26165,7 @@ class _NotesOptionsSection extends StatelessWidget {
                   emptyText ?? 'Nothing to show',
                   style: TextStyle(
                     color: HeyBeanTheme.muted,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               )
@@ -26145,7 +26206,7 @@ class _NotesOptionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
     color: selected
-        ? HeyBeanTheme.accent.withValues(alpha: 0.14)
+        ? HeyBeanTheme.accent.withValues(alpha: 0.08)
         : HeyBeanTheme.surface,
     child: InkWell(
       onTap: onTap,
@@ -26158,10 +26219,8 @@ class _NotesOptionRow extends StatelessWidget {
               iconWidget ??
                   Icon(
                     icon,
-                    color: selected
-                        ? HeyBeanTheme.accentStrong
-                        : HeyBeanTheme.muted,
-                    size: 22,
+                    color: selected ? HeyBeanTheme.text : HeyBeanTheme.muted,
+                    size: 20,
                   ),
               const SizedBox(width: 14),
               Expanded(
@@ -26170,10 +26229,8 @@ class _NotesOptionRow extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: selected
-                        ? HeyBeanTheme.accentInk
-                        : HeyBeanTheme.text,
-                    fontWeight: selected ? FontWeight.w900 : FontWeight.w800,
+                    color: HeyBeanTheme.text,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
               ),
@@ -26185,7 +26242,7 @@ class _NotesOptionRow extends StatelessWidget {
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
                       fontSize: 13,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -26194,7 +26251,7 @@ class _NotesOptionRow extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 10),
                   child: Icon(
                     Icons.check_rounded,
-                    color: HeyBeanTheme.accentStrong,
+                    color: HeyBeanTheme.muted,
                     size: 20,
                   ),
                 ),
@@ -26271,7 +26328,7 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
               style: TextStyle(
                 color: HeyBeanTheme.text,
                 fontSize: 20,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
@@ -26279,7 +26336,7 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
               'Choose which additional workspaces this note is synced to.',
               style: TextStyle(
                 color: HeyBeanTheme.muted,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w500,
               ),
             ),
             const SizedBox(height: 14),
@@ -26302,7 +26359,7 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
                       style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontSize: 12,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -26768,6 +26825,7 @@ class _NewNoteFolderDialogState extends State<_NewNoteFolderDialog> {
       textCapitalization: TextCapitalization.sentences,
       textInputAction: TextInputAction.done,
       onSubmitted: (_) => _submit(),
+      decoration: const InputDecoration(hintText: 'Folder name'),
     ),
     actions: [
       TextButton(
@@ -26806,13 +26864,13 @@ class _NoteSection extends StatelessWidget {
       children: [
         if (title != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 6),
             child: Text(
               title!,
               style: TextStyle(
                 color: HeyBeanTheme.muted,
-                fontSize: 13,
-                fontWeight: FontWeight.w900,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -26851,7 +26909,7 @@ class _NoteListTile extends StatelessWidget {
               note.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: FontWeight.w800),
+              style: TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
           if (note.isPinned)
@@ -26865,6 +26923,7 @@ class _NoteListTile extends StatelessWidget {
         text.isEmpty ? 'No additional text' : text,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: HeyBeanTheme.muted),
       ),
       trailing: Icon(Icons.chevron_right_rounded, color: HeyBeanTheme.muted),
     );
@@ -27090,7 +27149,7 @@ class _SettingsView extends StatelessWidget {
             const _SectionTitle(
               icon: Icons.settings_rounded,
               title: 'Settings',
-              subtitle: 'Focused Hermes Bean preferences',
+              subtitle: '',
               infoKey: Key('settings-info'),
               infoTitle: 'Settings help',
               infoBullets: [
@@ -27489,12 +27548,13 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: HeyBeanTheme.accent.withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(14),
+                  color: _quietMutedSurfaceColor(alpha: .42),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _quietBorderColor(alpha: .32)),
                 ),
                 child: Icon(
                   Icons.credit_card_rounded,
-                  color: HeyBeanTheme.accentStrong,
+                  color: HeyBeanTheme.muted,
                 ),
               ),
               const SizedBox(width: 12),
@@ -27506,7 +27566,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                       'Billing',
                       style: TextStyle(
                         color: HeyBeanTheme.text,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -27516,7 +27576,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                           : statusLine,
                       style: TextStyle(
                         color: HeyBeanTheme.muted,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -27525,7 +27585,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                       key: const Key('settings-payment-method-summary'),
                       style: TextStyle(
                         color: HeyBeanTheme.muted,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                     if (accessEndLine != null) ...[
@@ -27957,10 +28017,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.palette_outlined,
-                      color: HeyBeanTheme.accentStrong,
-                    ),
+                    Icon(Icons.palette_outlined, color: HeyBeanTheme.muted),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -27968,7 +28025,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                         children: [
                           Text(
                             'Appearance',
-                            style: TextStyle(fontWeight: FontWeight.w800),
+                            style: TextStyle(fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 3),
                           Text(
@@ -27976,7 +28033,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                             style: TextStyle(
                               color: HeyBeanTheme.muted,
                               fontSize: 12,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
@@ -27989,18 +28046,9 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                         color: selectedTheme.accent,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: HeyBeanTheme.surface,
-                          width: 2,
+                          color: _quietBorderColor(alpha: .34),
+                          width: 1,
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(
-                              alpha: HeyBeanTheme.isDark ? .28 : .14,
-                            ),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -28126,25 +28174,16 @@ class _ThemeSwatchButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
           color: selected
-              ? theme.accent.withValues(alpha: .11)
+              ? theme.accent.withValues(alpha: .08)
               : HeyBeanTheme.surface.withValues(
                   alpha: HeyBeanTheme.isDark ? .86 : .72,
                 ),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected
-                ? theme.accentStrong.withValues(alpha: .46)
-                : HeyBeanTheme.border,
+                ? theme.accentStrong.withValues(alpha: .34)
+                : _quietBorderColor(alpha: .38),
           ),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: theme.accent.withValues(alpha: .10),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
-              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -28156,15 +28195,6 @@ class _ThemeSwatchButton extends StatelessWidget {
                 color: theme.accent,
                 shape: BoxShape.circle,
                 border: Border.all(color: HeyBeanTheme.surface, width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(
-                      alpha: HeyBeanTheme.isDark ? .28 : .14,
-                    ),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
               ),
             ),
             const SizedBox(width: 8),
@@ -28298,13 +28328,13 @@ class _NotificationPreferencesCardState
             children: [
               Icon(
                 Icons.notifications_active_outlined,
-                color: HeyBeanTheme.accentStrong,
+                color: HeyBeanTheme.muted,
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   'Notification preferences',
-                  style: TextStyle(fontWeight: FontWeight.w800),
+                  style: TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -28317,7 +28347,10 @@ class _NotificationPreferencesCardState
               ? null
               : (value) => _save(_preferences.copyWith(reminderPush: value)),
           title: Text('Reminder push notifications'),
-          secondary: Icon(Icons.phone_iphone_rounded),
+          secondary: Icon(
+            Icons.phone_iphone_rounded,
+            color: HeyBeanTheme.muted,
+          ),
         ),
         SwitchListTile.adaptive(
           key: const Key('reminder-email-preference'),
@@ -28326,7 +28359,7 @@ class _NotificationPreferencesCardState
               ? null
               : (value) => _save(_preferences.copyWith(reminderEmail: value)),
           title: Text('Reminder emails'),
-          secondary: Icon(Icons.email_outlined),
+          secondary: Icon(Icons.email_outlined, color: HeyBeanTheme.muted),
         ),
       ],
     ),
@@ -28386,7 +28419,7 @@ class _MapPreferencesCardState extends State<_MapPreferencesCard> {
       children: [
         Row(
           children: [
-            Icon(Icons.near_me_outlined, color: HeyBeanTheme.accentStrong),
+            Icon(Icons.near_me_outlined, color: HeyBeanTheme.muted),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -28394,7 +28427,7 @@ class _MapPreferencesCardState extends State<_MapPreferencesCard> {
                 children: [
                   Text(
                     'Map preference',
-                    style: TextStyle(fontWeight: FontWeight.w800),
+                    style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -28402,7 +28435,7 @@ class _MapPreferencesCardState extends State<_MapPreferencesCard> {
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
                       fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
@@ -29945,22 +29978,33 @@ class _TaskItemTileState extends State<_TaskItemTile> {
     final completed = _taskIsCompleted(task);
     final categoryColor = _safeCategoryColor(task.color);
     final surfaceColor = completed
-        ? HeyBeanTheme.surface
+        ? _quietSurfaceColor(alpha: .42)
         : categoryColor.withValues(alpha: .14);
-    final borderColor = completed
-        ? HeyBeanTheme.border
-        : categoryColor.withValues(alpha: .34);
+    final borderColor = _quietBorderColor(alpha: completed ? .28 : .38);
     return Container(
       key: Key('task-row-surface-${task.id}'),
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       decoration: BoxDecoration(
         color: surfaceColor,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
       ),
       child: Stack(
         children: [
+          if (!completed)
+            Positioned(
+              left: 0,
+              top: 12,
+              bottom: 12,
+              child: Container(
+                width: 3,
+                decoration: BoxDecoration(
+                  color: categoryColor.withValues(alpha: .72),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -30023,7 +30067,7 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                                         _expanded
                                             ? Icons.keyboard_arrow_up_rounded
                                             : Icons.keyboard_arrow_down_rounded,
-                                        color: Colors.black,
+                                        color: HeyBeanTheme.muted,
                                         size: 18,
                                       ),
                                     ),
@@ -30032,14 +30076,14 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                             ),
                             if (widget.subtitle.isNotEmpty) ...[
                               const SizedBox(height: 3),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  widget.subtitle,
-                                  style: TextStyle(
-                                    color: HeyBeanTheme.muted,
-                                    fontSize: 12,
-                                  ),
+                              Text(
+                                widget.subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: HeyBeanTheme.muted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
                             ],
@@ -30053,7 +30097,11 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                       key: Key('task-edit-action-${task.id}'),
                       tooltip: 'Edit task',
                       onPressed: widget.onTap,
-                      icon: Icon(Icons.edit_outlined),
+                      icon: Icon(
+                        Icons.edit_outlined,
+                        color: HeyBeanTheme.muted,
+                        size: 20,
+                      ),
                     ),
                 ],
               ),
@@ -30068,9 +30116,11 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                           key: Key('task-notes-${task.id}'),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: HeyBeanTheme.surface.withValues(alpha: .62),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: HeyBeanTheme.border),
+                            color: _quietMutedSurfaceColor(alpha: .42),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _quietBorderColor(alpha: .32),
+                            ),
                           ),
                           child: Text(
                             task.notes!.trim(),
@@ -30132,8 +30182,8 @@ class _TaskItemTileState extends State<_TaskItemTile> {
               right: 4,
               child: Icon(
                 Icons.star_rounded,
-                color: HeyBeanTheme.warning,
-                size: 16,
+                color: HeyBeanTheme.warning.withValues(alpha: .88),
+                size: 14,
               ),
             ),
         ],
@@ -30226,79 +30276,106 @@ class _ReminderItemTile extends StatelessWidget {
     final critical = _reminderIsCritical(reminder);
     final categoryColor = _safeCategoryColor(reminder.color);
     final surfaceColor = completed
-        ? HeyBeanTheme.surface
+        ? _quietSurfaceColor(alpha: .42)
         : categoryColor.withValues(alpha: .14);
-    final borderColor = completed
-        ? HeyBeanTheme.border
-        : categoryColor.withValues(alpha: .34);
+    final borderColor = _quietBorderColor(alpha: completed ? .28 : .38);
     return Container(
       key: Key('reminder-row-surface-${reminder.id}'),
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       decoration: BoxDecoration(
         color: surfaceColor,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
       ),
-      child: Row(
+      child: Stack(
         children: [
-          Checkbox(
-            key: Key('reminder-complete-checkbox-${reminder.id}'),
-            value: completed,
-            onChanged: (_) => onCompleted(reminder),
-            activeColor: HeyBeanTheme.accentStrong,
-          ),
-          Expanded(
-            child: InkWell(
-              key: Key('reminder-row-action-${reminder.id}'),
-              borderRadius: BorderRadius.circular(12),
-              onTap: onTap,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+          if (!completed)
+            Positioned(
+              left: 0,
+              top: 12,
+              bottom: 12,
+              child: Container(
+                width: 3,
+                decoration: BoxDecoration(
+                  color: categoryColor.withValues(alpha: .72),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+          Row(
+            children: [
+              Checkbox(
+                key: Key('reminder-complete-checkbox-${reminder.id}'),
+                value: completed,
+                onChanged: (_) => onCompleted(reminder),
+                activeColor: HeyBeanTheme.accentStrong,
+              ),
+              Expanded(
+                child: InkWell(
+                  key: Key('reminder-row-action-${reminder.id}'),
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (critical) ...[
-                          Icon(
-                            Icons.star_rounded,
-                            size: 15,
-                            color: HeyBeanTheme.warning,
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        Expanded(
-                          child: Text(
-                            reminder.title,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              decoration: completed
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                              color: completed
-                                  ? HeyBeanTheme.muted
-                                  : HeyBeanTheme.text,
+                        Row(
+                          children: [
+                            if (critical) ...[
+                              Icon(
+                                Icons.star_rounded,
+                                size: 14,
+                                color: HeyBeanTheme.warning.withValues(
+                                  alpha: .88,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            Expanded(
+                              child: Text(
+                                reminder.title,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  decoration: completed
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                  color: completed
+                                      ? HeyBeanTheme.muted
+                                      : HeyBeanTheme.text,
+                                ),
+                              ),
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: HeyBeanTheme.muted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ),
-          IconButton(
-            key: Key('reminder-edit-action-${reminder.id}'),
-            tooltip: 'Edit reminder',
-            onPressed: onTap,
-            icon: Icon(Icons.edit_outlined),
+              IconButton(
+                key: Key('reminder-edit-action-${reminder.id}'),
+                tooltip: 'Edit reminder',
+                onPressed: onTap,
+                icon: Icon(
+                  Icons.edit_outlined,
+                  color: HeyBeanTheme.muted,
+                  size: 20,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -30329,14 +30406,17 @@ class _CompactItemTile extends StatelessWidget {
       decoration: _sectionDividerDecoration(alpha: .22),
       child: Row(
         children: [
-          Icon(icon, color: HeyBeanTheme.accentStrong),
+          Icon(icon, color: HeyBeanTheme.muted, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(fontWeight: FontWeight.w800)),
-                Text(subtitle, style: TextStyle(color: HeyBeanTheme.muted)),
+                Text(title, style: TextStyle(fontWeight: FontWeight.w600)),
+                Text(
+                  subtitle,
+                  style: TextStyle(color: HeyBeanTheme.muted, fontSize: 12),
+                ),
               ],
             ),
           ),
@@ -30356,12 +30436,14 @@ class _EmptySurface extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     width: double.infinity,
     padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: HeyBeanTheme.surface2,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: HeyBeanTheme.border),
+    decoration: _quietSurfaceDecoration(
+      color: _quietMutedSurfaceColor(alpha: .52),
+      borderAlpha: .42,
     ),
-    child: Text(label, style: TextStyle(color: HeyBeanTheme.muted)),
+    child: Text(
+      label,
+      style: TextStyle(color: HeyBeanTheme.muted, fontWeight: FontWeight.w500),
+    ),
   );
 }
 
@@ -30380,10 +30462,9 @@ class _InlineLoadingSurface extends StatelessWidget {
     final content = Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface2,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HeyBeanTheme.border),
+      decoration: _quietSurfaceDecoration(
+        color: _quietMutedSurfaceColor(alpha: .52),
+        borderAlpha: .42,
       ),
       child: Row(
         mainAxisSize: fillHeight ? MainAxisSize.min : MainAxisSize.max,
@@ -30404,7 +30485,7 @@ class _InlineLoadingSurface extends StatelessWidget {
             label,
             style: TextStyle(
               color: HeyBeanTheme.muted,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -30413,10 +30494,10 @@ class _InlineLoadingSurface extends StatelessWidget {
     if (!fillHeight) return content;
     return Container(
       alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface.withValues(alpha: .62),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: HeyBeanTheme.border),
+      decoration: _quietSurfaceDecoration(
+        radius: 18,
+        color: _quietSurfaceColor(alpha: .62),
+        borderAlpha: .36,
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 260),
@@ -30435,16 +30516,9 @@ class _InlineLoadingBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: HeyBeanTheme.surface.withValues(alpha: .94),
+        color: _quietSurfaceColor(alpha: .94),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: HeyBeanTheme.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: _quietBorderColor(alpha: .42)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -30465,7 +30539,7 @@ class _InlineLoadingBadge extends StatelessWidget {
               style: TextStyle(
                 color: HeyBeanTheme.muted,
                 fontSize: 11,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -31366,8 +31440,8 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      Icon(icon, color: HeyBeanTheme.accentStrong),
-      const SizedBox(width: 10),
+      Icon(icon, color: HeyBeanTheme.muted, size: 18),
+      const SizedBox(width: 8),
       Expanded(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -31376,14 +31450,15 @@ class _SectionTitle extends StatelessWidget {
               title,
               style: Theme.of(
                 context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             if (subtitle.isNotEmpty)
               Text(
                 subtitle,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: HeyBeanTheme.muted),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: HeyBeanTheme.muted,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
           ],
         ),
@@ -31413,26 +31488,24 @@ class _FormEditorHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.only(bottom: 14),
+    padding: const EdgeInsets.only(bottom: 12),
     decoration: BoxDecoration(
-      border: Border(bottom: BorderSide(color: Color(0x1A1C314E))),
+      border: Border(bottom: BorderSide(color: _quietBorderColor(alpha: .34))),
     ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 38,
-          height: 38,
+          width: 30,
+          height: 30,
           decoration: BoxDecoration(
-            color: HeyBeanTheme.accent.withValues(alpha: .10),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: HeyBeanTheme.accent.withValues(alpha: .16),
-            ),
+            color: _quietMutedSurfaceColor(alpha: .38),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _quietBorderColor(alpha: .30)),
           ),
-          child: Icon(icon, color: HeyBeanTheme.accentStrong, size: 21),
+          child: Icon(icon, color: HeyBeanTheme.muted, size: 17),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -31442,7 +31515,7 @@ class _FormEditorHeader extends StatelessWidget {
                 key: titleKey,
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: HeyBeanTheme.text,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
                   height: 1.1,
                 ),
               ),
@@ -31453,7 +31526,7 @@ class _FormEditorHeader extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: HeyBeanTheme.muted,
                     height: 1.35,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
@@ -31492,8 +31565,14 @@ class _MobileFormSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 15),
-    decoration: _sectionDividerDecoration(alpha: primary ? .36 : null),
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    decoration: BoxDecoration(
+      border: Border(
+        bottom: BorderSide(
+          color: _quietBorderColor(alpha: primary ? .44 : .30),
+        ),
+      ),
+    ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -31501,8 +31580,7 @@ class _MobileFormSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (iconWidget != null || icon != null) ...[
-              iconWidget ??
-                  Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
+              iconWidget ?? Icon(icon, size: 17, color: HeyBeanTheme.muted),
               const SizedBox(width: 8),
             ],
             Expanded(
@@ -31515,7 +31593,7 @@ class _MobileFormSection extends StatelessWidget {
                       color: HeyBeanTheme.text,
                       fontSize: 13,
                       height: 1.2,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   if (subtitle != null && subtitle!.isNotEmpty) ...[
@@ -31526,7 +31604,7 @@ class _MobileFormSection extends StatelessWidget {
                         color: HeyBeanTheme.muted,
                         fontSize: 12,
                         height: 1.35,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -31544,9 +31622,9 @@ class _MobileFormSection extends StatelessWidget {
           ],
         ),
         if (children.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           for (var index = 0; index < children.length; index++) ...[
-            if (index > 0) const SizedBox(height: 12),
+            if (index > 0) const SizedBox(height: 10),
             children[index],
           ],
         ],
@@ -31577,19 +31655,19 @@ class _MobileFormSwitch extends StatelessWidget {
     key: widgetKey,
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: _sectionDividerColor(alpha: .20)),
+      border: Border.all(color: _quietBorderColor(alpha: .34)),
     ),
     child: SwitchListTile(
       value: value,
       onChanged: onChanged,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       dense: true,
       title: Text(
         title,
         style: TextStyle(
           color: HeyBeanTheme.text,
           fontSize: 13,
-          fontWeight: FontWeight.w900,
+          fontWeight: FontWeight.w600,
         ),
       ),
       subtitle: Text(
@@ -31598,12 +31676,12 @@ class _MobileFormSwitch extends StatelessWidget {
           color: HeyBeanTheme.muted,
           fontSize: 12,
           height: 1.35,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
         ),
       ),
       secondary: icon == null
           ? null
-          : Icon(icon, color: HeyBeanTheme.accentStrong),
+          : Icon(icon, color: HeyBeanTheme.muted, size: 20),
     ),
   );
 }
@@ -31621,11 +31699,12 @@ class _InfoIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => IconButton(
     tooltip: 'More info about $title',
+    visualDensity: VisualDensity.compact,
     icon: Icon(
       Icons.info_outline_rounded,
       semanticLabel: 'More info',
-      size: 20,
-      color: HeyBeanTheme.accentStrong,
+      size: 18,
+      color: HeyBeanTheme.muted,
     ),
     onPressed: () => _showInfoSheet(context, title: title, bullets: bullets),
   );
@@ -31649,13 +31728,13 @@ Future<void> _showInfoSheet(
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
       decoration: BoxDecoration(
         color: HeyBeanTheme.surface,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: HeyBeanTheme.border),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _quietBorderColor(alpha: .46)),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x26000000),
-            blurRadius: 30,
-            offset: Offset(0, 16),
+            color: Color(0x16000000),
+            blurRadius: 22,
+            offset: Offset(0, 10),
           ),
         ],
       ),
@@ -31679,7 +31758,7 @@ Future<void> _showInfoSheet(
               title,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: HeyBeanTheme.text,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 12),
@@ -31694,7 +31773,7 @@ Future<void> _showInfoSheet(
                       child: Icon(
                         Icons.circle,
                         size: 6,
-                        color: HeyBeanTheme.accentStrong,
+                        color: HeyBeanTheme.muted,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -32480,7 +32559,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
 
     return SizedBox(
       key: const Key('heybean-bottom-menu'),
-      height: 78 + dockBottomPadding,
+      height: 74 + dockBottomPadding,
       child: Stack(
         alignment: Alignment.topCenter,
         clipBehavior: Clip.none,
@@ -32489,13 +32568,15 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             top: _beanBottomMenuSurfaceInset,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: HeyBeanTheme.surface.withValues(alpha: .94),
-                border: Border(top: BorderSide(color: HeyBeanTheme.border)),
+                color: HeyBeanTheme.surface.withValues(alpha: .97),
+                border: Border(
+                  top: BorderSide(color: _quietBorderColor(alpha: .42)),
+                ),
                 boxShadow: const [
                   BoxShadow(
-                    color: Color(0x1A020617),
-                    blurRadius: 18,
-                    offset: Offset(0, -4),
+                    color: Color(0x10020617),
+                    blurRadius: 12,
+                    offset: Offset(0, -2),
                   ),
                 ],
               ),
@@ -32521,7 +32602,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                         onPressed: () => onSelected(_HomeDestination.reminders),
                       ),
                     ),
-                    const SizedBox(width: 96),
+                    const SizedBox(width: 86),
                     Expanded(
                       child: _MenuIconButton(
                         key: const Key('nav-notes'),
@@ -32553,7 +32634,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             ),
           ),
           Positioned(
-            top: 9,
+            top: 12,
             child: _BeanFab(
               selected: selected == _HomeDestination.bean,
               listening: beanListening,
@@ -32600,15 +32681,15 @@ class _BeanWorkDockStrip extends StatelessWidget {
         decoration: BoxDecoration(
           color: HeyBeanTheme.surface.withValues(alpha: .98),
           borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(18),
-            topRight: Radius.circular(18),
+            topLeft: Radius.circular(14),
+            topRight: Radius.circular(14),
           ),
-          border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .24)),
+          border: Border.all(color: _quietBorderColor(alpha: .42)),
           boxShadow: [
             BoxShadow(
-              color: HeyBeanTheme.accent.withValues(alpha: .10),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
+              color: Colors.black.withValues(alpha: .06),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -32643,9 +32724,9 @@ class _BeanWorkDockStrip extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: HeyBeanTheme.accentStrong,
+                        color: HeyBeanTheme.text,
                         fontSize: 12,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -32655,7 +32736,7 @@ class _BeanWorkDockStrip extends StatelessWidget {
                       style: TextStyle(
                         color: HeyBeanTheme.muted,
                         fontSize: 11,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                 ],
@@ -32686,7 +32767,7 @@ class _BeanWorkDockStrip extends StatelessWidget {
                                 ? HeyBeanTheme.muted
                                 : HeyBeanTheme.text,
                             fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
@@ -32787,20 +32868,13 @@ class _BeanResponsePreviewTagState extends State<_BeanResponsePreviewTag> {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: HeyBeanTheme.surface.withValues(alpha: .97),
-                border: Border.all(
-                  color: HeyBeanTheme.accent.withValues(alpha: .34),
-                ),
-                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: _quietBorderColor(alpha: .42)),
+                borderRadius: BorderRadius.circular(14),
                 boxShadow: [
                   BoxShadow(
-                    color: HeyBeanTheme.accent.withValues(alpha: .22),
-                    blurRadius: 30,
-                    offset: const Offset(0, 12),
-                  ),
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: .10),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
+                    color: Colors.black.withValues(alpha: .08),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
@@ -32814,18 +32888,12 @@ class _BeanResponsePreviewTagState extends State<_BeanResponsePreviewTag> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      width: 8,
-                      height: 8,
+                      width: 6,
+                      height: 6,
                       margin: const EdgeInsets.only(top: 5),
                       decoration: BoxDecoration(
                         color: HeyBeanTheme.accentStrong,
                         borderRadius: BorderRadius.circular(999),
-                        boxShadow: [
-                          BoxShadow(
-                            color: HeyBeanTheme.accent.withValues(alpha: .45),
-                            blurRadius: 12,
-                          ),
-                        ],
                       ),
                     ),
                     const SizedBox(width: 9),
@@ -32837,7 +32905,7 @@ class _BeanResponsePreviewTagState extends State<_BeanResponsePreviewTag> {
                         style: TextStyle(
                           color: HeyBeanTheme.text,
                           fontSize: 12,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w600,
                           height: 1.25,
                         ),
                       ),
@@ -32884,10 +32952,8 @@ class _MenuIconButton extends StatelessWidget {
             iconWidget ??
                 Icon(
                   icon,
-                  color: selected
-                      ? HeyBeanTheme.accentStrong
-                      : HeyBeanTheme.muted,
-                  size: 24,
+                  color: selected ? HeyBeanTheme.text : HeyBeanTheme.muted,
+                  size: 22,
                 ),
             const SizedBox(height: 3),
             Text(
@@ -32895,11 +32961,9 @@ class _MenuIconButton extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: selected
-                    ? HeyBeanTheme.accentStrong
-                    : HeyBeanTheme.muted,
+                color: selected ? HeyBeanTheme.text : HeyBeanTheme.muted,
                 fontSize: 10,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
           ],
@@ -33032,8 +33096,8 @@ class _BeanFabState extends State<_BeanFab>
       onTapUp: (_) => _handleTapUp(),
       onTapCancel: _handleTapCancel,
       child: SizedBox(
-        width: 98,
-        height: 98,
+        width: 88,
+        height: 88,
         child: Stack(
           alignment: Alignment.center,
           clipBehavior: Clip.none,
@@ -33047,8 +33111,8 @@ class _BeanFabState extends State<_BeanFab>
                     _pulseController.value,
                   );
                   return Container(
-                    width: 82 + (pulse * 18),
-                    height: 82 + (pulse * 18),
+                    width: 72 + (pulse * 14),
+                    height: 72 + (pulse * 14),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: activeColor.withValues(alpha: .06 + (pulse * .06)),
@@ -33057,8 +33121,8 @@ class _BeanFabState extends State<_BeanFab>
                           color: activeColor.withValues(
                             alpha: .12 + (pulse * .08),
                           ),
-                          blurRadius: 24 + (pulse * 18),
-                          spreadRadius: 5 + (pulse * 8),
+                          blurRadius: 18 + (pulse * 14),
+                          spreadRadius: 3 + (pulse * 6),
                         ),
                       ],
                     ),
@@ -33079,17 +33143,17 @@ class _BeanFabState extends State<_BeanFab>
                     border: Border.all(
                       color: visuallyListening || widget.selected
                           ? activeColor
-                          : HeyBeanTheme.border,
-                      width: visuallyListening ? 4 : 2.5,
+                          : _quietBorderColor(alpha: .54),
+                      width: visuallyListening ? 3 : 1.6,
                     ),
                     boxShadow: [
                       BoxShadow(
                         color: visuallyListening
-                            ? activeColor.withValues(alpha: .18)
-                            : Colors.black.withValues(alpha: .14),
-                        blurRadius: visuallyListening ? 32 : 22,
-                        spreadRadius: visuallyListening ? 3 : 0,
-                        offset: const Offset(0, 10),
+                            ? activeColor.withValues(alpha: .14)
+                            : Colors.black.withValues(alpha: .08),
+                        blurRadius: visuallyListening ? 24 : 14,
+                        spreadRadius: visuallyListening ? 2 : 0,
+                        offset: const Offset(0, 6),
                       ),
                     ],
                   ),
