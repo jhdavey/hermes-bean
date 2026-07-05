@@ -672,6 +672,18 @@
     border-color: rgba(var(--hb-accent-rgb), .24);
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-mic-toggle {
+    border-color: rgba(148, 163, 184, .16);
+    background: rgba(23, 30, 38, .88);
+    color: var(--hb-muted);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-mic-toggle-on {
+    border-color: rgba(var(--hb-accent-rgb), .32);
+    background: rgba(var(--hb-accent-rgb), .13);
+    color: var(--hb-accent);
+}
+
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-work-count {
     background: rgba(var(--hb-accent-rgb), .16);
     color: var(--hb-text);
@@ -3039,10 +3051,25 @@
 }
 
 .hb-command-center-chat .hb-chat-text-send-button,
-.hb-command-center-chat .hb-chat-voice-button {
+.hb-command-center-chat .hb-chat-voice-button,
+.hb-command-center-chat .hb-chat-mic-toggle {
     width: 40px;
     min-width: 40px;
     height: 40px;
+}
+
+.hb-command-center-chat .hb-chat-mic-toggle {
+    grid-template-columns: 1fr;
+    padding: 0;
+}
+
+.hb-command-center-chat .hb-chat-mic-toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-card,
@@ -4782,7 +4809,7 @@
 .hb-chat-dock {
     --hb-chat-input-max-height: 68px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     gap: 8px;
     align-items: end;
     padding: 8px;
@@ -4893,11 +4920,80 @@
 }
 
 .hb-chat-text-send-button,
-.hb-chat-voice-button {
+.hb-chat-voice-button,
+.hb-chat-mic-toggle {
     width: 44px;
     min-width: 44px;
     height: 44px;
     padding: 0;
+}
+
+.hb-chat-mic-toggle {
+    appearance: none;
+    position: relative;
+    display: inline-grid;
+    grid-template-columns: 18px auto;
+    place-items: center;
+    align-content: center;
+    column-gap: 5px;
+    width: auto;
+    min-width: 74px;
+    padding: 0 9px;
+    border: 1px solid var(--hb-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--hb-surface) 94%, var(--hb-muted));
+    color: var(--hb-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1;
+    transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease;
+}
+
+.hb-chat-mic-toggle:hover {
+    border-color: rgba(var(--hb-accent-rgb), .24);
+    color: var(--hb-text);
+}
+
+.hb-chat-mic-toggle:focus-visible {
+    outline: 3px solid rgba(var(--hb-accent-rgb), .18);
+    outline-offset: 2px;
+}
+
+.hb-chat-mic-toggle-on {
+    border-color: rgba(var(--hb-accent-rgb), .26);
+    background: rgba(var(--hb-accent-rgb), .08);
+    color: var(--hb-accent-strong);
+}
+
+.hb-chat-mic-toggle-working,
+.hb-chat-mic-toggle-speaking,
+.hb-chat-mic-toggle-responding {
+    border-color: rgba(var(--hb-accent-strong-rgb), .28);
+    background: rgba(var(--hb-accent-rgb), .10);
+}
+
+.hb-chat-mic-toggle-error {
+    border-color: rgba(220, 38, 38, .24);
+    background: rgba(220, 38, 38, .07);
+    color: var(--hb-destructive);
+}
+
+.hb-chat-mic-toggle-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+}
+
+.hb-chat-mic-toggle-icon svg {
+    width: 17px;
+    height: 17px;
+}
+
+.hb-chat-mic-toggle-label {
+    white-space: nowrap;
 }
 
 .hb-chat-text-send-button svg {
