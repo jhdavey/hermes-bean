@@ -2120,6 +2120,7 @@ class HermesPlanLimits {
     this.connectedAccountLimit,
     this.historyDays,
     this.historyCutoff,
+    this.noteLimit,
     this.recurringTasksEnabled = false,
     this.recurringRemindersEnabled = false,
     this.recurringCalendarEnabled = false,
@@ -2134,6 +2135,7 @@ class HermesPlanLimits {
   final int? connectedAccountLimit;
   final int? historyDays;
   final String? historyCutoff;
+  final int? noteLimit;
   final bool recurringTasksEnabled;
   final bool recurringRemindersEnabled;
   final bool recurringCalendarEnabled;
@@ -2157,6 +2159,7 @@ class HermesPlanLimits {
       historyDays: _readIntOrNull(json['history_days'] ?? json['historyDays']),
       historyCutoff: (json['history_cutoff'] ?? json['historyCutoff'])
           ?.toString(),
+      noteLimit: _readIntOrNull(json['note_limit'] ?? json['noteLimit']),
       recurringTasksEnabled: _readBool(
         json['recurring_tasks_enabled'] ?? json['recurringTasksEnabled'],
       ),

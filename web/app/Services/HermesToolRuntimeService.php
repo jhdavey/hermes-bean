@@ -3517,7 +3517,7 @@ PROMPT;
                 'ok' => false,
                 'tool' => 'search_notes',
                 'error_code' => 'subscription_limit_reached',
-                'message' => 'Notes are available on Premium, Pro, and Enterprise plans.',
+                'message' => 'Notes are available on this plan after upgrading.',
             ];
         }
 
@@ -4969,7 +4969,8 @@ PROMPT;
                 $errorCode = (string) ($item['error_code'] ?? '');
 
                 return $errorCode === 'subscription_limit_reached'
-                    || str_contains($message, 'available on Premium, Pro, and Enterprise plans');
+                    || str_contains($message, 'available on Premium, Pro, and Enterprise plans')
+                    || str_contains($message, 'Your current plan includes up to');
             })
             ->values();
 
@@ -4994,7 +4995,9 @@ PROMPT;
         });
 
         if ($hasNoteFailure) {
-            return 'Notes are available on Premium, Pro, and Enterprise plans. Upgrade your plan to create and manage notes.';
+            $message = trim((string) ($entitlementFailures->first()['message'] ?? ''));
+
+            return ($message === '' ? 'Your current plan note limit has been reached.' : rtrim($message, '.')).'. Upgrade your plan to create and manage more notes.';
         }
 
         $message = trim((string) ($entitlementFailures->first()['message'] ?? ''));

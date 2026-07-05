@@ -3244,7 +3244,7 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_app_crud_planner_returns_upgrade_message_for_base_plan_note_requests(): void
+    public function test_app_crud_planner_returns_upgrade_message_when_base_plan_note_limit_is_reached(): void
     {
         config()->set('services.hermes_runtime.crud_planner_enabled', true);
 
@@ -3255,20 +3255,32 @@ class HermesToolRuntimeServiceTest extends TestCase
                     'parameters' => [
                         'title' => 'hello',
                         'plain_text' => 'hello',
+                        'body' => 'hello',
                     ],
                 ],
             ]), 200);
 
         $token = $this->apiToken('tool-base-note-plan@example.com');
+        $user = User::where('email', 'tool-base-note-plan@example.com')->firstOrFail();
+        $workspace = $user->workspaces()->firstOrFail();
+        for ($i = 1; $i <= 10; $i++) {
+            Note::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'created_by_user_id' => $user->id,
+                'title' => "Existing note {$i}",
+                'plain_text' => 'Already at the base note limit.',
+            ]);
+        }
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
         $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'create a new note called hello',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Notes are available on Premium, Pro, and Enterprise plans. Upgrade your plan to create and manage notes.')
+            ->assertJsonPath('data.assistant_message.content', 'Your current plan includes up to 10 notes. Upgrade your plan to create and manage more notes.')
             ->assertJsonFragment(['event_type' => 'assistant.action.failed'])
-            ->assertJsonFragment(['reason' => 'Notes are available on Premium, Pro, and Enterprise plans.']);
+            ->assertJsonFragment(['reason' => 'Your current plan includes up to 10 notes.']);
 
         $this->assertStringNotContainsString('Please try those again', $response->json('data.assistant_message.content'));
         $this->assertDatabaseMissing('notes', [

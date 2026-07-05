@@ -2175,7 +2175,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   bool get _notesEnabled {
     final user = _user;
-    return user != null && (user.isAdmin || user.planLimits.notesEnabled);
+    final noteLimit = user?.planLimits.noteLimit;
+    return user != null &&
+        (user.isAdmin ||
+            user.planLimits.notesEnabled ||
+            noteLimit == null ||
+            noteLimit > 0);
   }
 
   void _markDashboardDataMutated() {
@@ -7575,7 +7580,7 @@ ${_truncateDiagnostic(stack, 2200)}
     if (!_notesEnabled) {
       throw HermesApiException(
         402,
-        'Notes are available on Premium, Pro, and Enterprise plans.',
+        'Notes are available on this plan after upgrading.',
       );
     }
     final saved = note == null
@@ -9326,6 +9331,7 @@ const List<_SignupPlanOption> _signupPlanOptions = [
       'Tasks, reminders, and calendar in one daily view',
       'Bean chat and voice for everyday requests',
       '1 connected calendar',
+      'Up to 10 Notes for plans, lists, and longer writing',
       'Push reminders for the things you cannot miss',
       'Recent history so Bean can follow the thread of your day',
     ],
@@ -9346,7 +9352,7 @@ const List<_SignupPlanOption> _signupPlanOptions = [
       'Expanded Bean capacity for everyday planning',
       'Push and email reminders working together',
       'Recurring tasks and reminders for repeating routines',
-      'Notes with folders for plans, lists, and longer writing',
+      'Unlimited Notes with folders for plans, lists, and longer writing',
       'Multiple calendar connections',
       '1 year of searchable context and history',
       'The best fit for most households and busy personal lives',
@@ -9370,7 +9376,7 @@ const List<_SignupPlanOption> _signupPlanOptions = [
       'Maximum Bean capacity for high-volume days',
       'More room for connected tools and background work',
       'Unlimited connected accounts',
-      'Notes across every workspace',
+      'Unlimited Notes across every workspace',
       "Full Bean's Knowledge and history",
       'Priority background work when Bean is handling more',
       'Priority support',
@@ -12960,6 +12966,12 @@ class _CommandCenterContent extends StatelessWidget {
           onMessageCopied: onChatMessageCopied,
           onMessageEdited: onChatMessageEdited,
         );
+        final noteLimit = user.planLimits.noteLimit;
+        final notesEnabled =
+            user.isAdmin ||
+            user.planLimits.notesEnabled ||
+            noteLimit == null ||
+            noteLimit > 0;
         final selectedPanel = switch (selectedDestination) {
           _HomeDestination.today => _TodayHomeView(
             user: user,
@@ -13034,7 +13046,7 @@ class _CommandCenterContent extends StatelessWidget {
             activeWorkspaceId: user.activeWorkspace?.id,
           ),
           _HomeDestination.notes =>
-            user.isAdmin || user.planLimits.notesEnabled
+            notesEnabled
                 ? _NotesView(
                     folders: noteFolders,
                     notes: notes,
@@ -13048,7 +13060,7 @@ class _CommandCenterContent extends StatelessWidget {
                   )
                 : _PlanLimitErrorBanner(
                     message:
-                        'Notes are available on Premium, Pro, and Enterprise plans.',
+                        'Notes are available on this plan after upgrading.',
                     launchExternalUrl: launchExternalUrl,
                   ),
           _HomeDestination.memory => _MemoryView(

@@ -50,12 +50,13 @@ if (mount) {
             label: 'Base',
             price: '$4.99',
             yearlyPrice: '$49.99',
-            summary: '2 workspaces, Bean chat and voice, connected calendar planning, push reminders, and recent context.',
+            summary: '2 workspaces, up to 10 Notes, Bean chat and voice, connected calendar planning, push reminders, and recent context.',
             trial: 'Base 14-day free trial selected',
             bestFor: 'For getting your personal day into one organized place.',
             features: [
                 'Tasks, reminders, calendar, chat, and voice',
                 '2 workspaces and 1 connected calendar',
+                'Up to 10 Notes for plans, lists, and longer writing',
                 'Push reminders and recent Bean context',
             ],
         },
@@ -63,13 +64,13 @@ if (mount) {
             label: 'Premium',
             price: '$19.99',
             yearlyPrice: '$199.99',
-            summary: '5 workspaces, expanded Bean capacity, Notes, email reminders, recurring routines, multiple calendars, and 1 year of history.',
+            summary: '5 workspaces, expanded Bean capacity, unlimited Notes, email reminders, recurring routines, multiple calendars, and 1 year of history.',
             trial: 'Premium 14-day free trial selected',
             bestFor: 'Best for busy households and daily routines.',
             popular: true,
             features: [
                 '5 workspaces for home, work, school, and projects',
-                'Notes with folders for plans, lists, and longer writing',
+                'Unlimited Notes with folders for plans, lists, and longer writing',
                 'Push and email reminders with recurring routines',
                 'Multiple calendars and 1 year of history',
             ],
@@ -78,12 +79,12 @@ if (mount) {
             label: 'Pro',
             price: '$49.99',
             yearlyPrice: '$499.99',
-            summary: 'Unlimited workspaces, maximum Bean capacity, Notes, unlimited connected accounts, full history, and priority background work.',
+            summary: 'Unlimited workspaces, maximum Bean capacity, unlimited Notes, unlimited connected accounts, full history, and priority background work.',
             trial: 'Pro 14-day free trial selected',
             bestFor: 'For running Bean across every part of life.',
             features: [
                 'Unlimited workspaces and connected accounts',
-                'Notes across every workspace',
+                'Unlimited Notes across every workspace',
                 'Highest Bean usage and external tool budget',
                 "Full Bean's Knowledge, priority background work, priority support",
             ],
@@ -1827,7 +1828,7 @@ if (mount) {
 
     function notesMarkup() {
         if (!notesEnabled()) {
-            return planLimitUpgradeMarkup('Notes are available on Premium, Pro, and Enterprise plans.');
+            return planLimitUpgradeMarkup('Notes are available on this plan after upgrading.');
         }
 
         const folders = normalizeNoteFolders(state.noteFolders);
@@ -2432,6 +2433,7 @@ if (mount) {
             <label><span>History days</span><input class="hb-input" type="number" min="0" name="history_days" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.history_days ?? limits.historyDays))}"></label>
             <label><span>Daily Bean cost</span><input class="hb-input" type="number" min="0" step="0.01" name="daily_cost_limit" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.daily_cost_limit ?? limits.dailyCostLimit))}"></label>
             <label><span>Daily external cost</span><input class="hb-input" type="number" min="0" step="0.01" name="daily_external_cost_limit" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.daily_external_cost_limit ?? limits.dailyExternalCostLimit))}"></label>
+            <label><span>Note limit</span><input class="hb-input" type="number" min="0" name="note_limit" placeholder="Unlimited" value="${escapeAttr(limitInputValue(limits.note_limit ?? limits.noteLimit))}"></label>
             <div class="hb-admin-kill-grid">
                 ${adminSwitchMarkup('recurring_tasks_enabled', 'Recurring tasks', 'Allow recurring tasks for this tier/customer.', Boolean(limits.recurring_tasks_enabled ?? limits.recurringTasksEnabled))}
                 ${adminSwitchMarkup('recurring_reminders_enabled', 'Recurring reminders', 'Allow recurring reminders for this tier/customer.', Boolean(limits.recurring_reminders_enabled ?? limits.recurringRemindersEnabled))}
@@ -7009,6 +7011,7 @@ if (mount) {
             history_days: nullableNumber(container.querySelector('input[name="history_days"]')?.value),
             daily_cost_limit: nullableNumber(container.querySelector('input[name="daily_cost_limit"]')?.value),
             daily_external_cost_limit: nullableNumber(container.querySelector('input[name="daily_external_cost_limit"]')?.value),
+            note_limit: nullableNumber(container.querySelector('input[name="note_limit"]')?.value),
             recurring_tasks_enabled: checked('recurring_tasks_enabled'),
             recurring_reminders_enabled: checked('recurring_reminders_enabled'),
             recurring_calendar_enabled: checked('recurring_calendar_enabled'),
@@ -13351,7 +13354,8 @@ if (mount) {
     function notesEnabled() {
         if (userIsAdmin()) return true;
         const limits = currentPlanLimits();
-        return Boolean(limits.notes_enabled ?? limits.notesEnabled);
+        const noteLimit = limits.note_limit ?? limits.noteLimit;
+        return Boolean(limits.notes_enabled ?? limits.notesEnabled) || noteLimit === null || Number(noteLimit) > 0;
     }
 
     function calendarHistoryCutoffDate() {

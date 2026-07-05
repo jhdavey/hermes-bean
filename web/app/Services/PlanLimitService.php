@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AdminSetting;
 use App\Models\EnterpriseCustomerLimit;
+use App\Models\Note;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
@@ -17,6 +18,7 @@ class PlanLimitService
         'history_days',
         'daily_cost_limit',
         'daily_external_cost_limit',
+        'note_limit',
         'recurring_tasks_enabled',
         'recurring_reminders_enabled',
         'recurring_calendar_enabled',
@@ -164,11 +166,12 @@ class PlanLimitService
             'connected_account_limit' => $limits['connected_account_limit'] ?? null,
             'history_days' => $limits['history_days'] ?? null,
             'history_cutoff' => $this->historyCutoffFor($user)?->toIso8601String(),
+            'note_limit' => $limits['note_limit'] ?? null,
             'recurring_tasks_enabled' => (bool) ($limits['recurring_tasks_enabled'] ?? false),
             'recurring_reminders_enabled' => (bool) ($limits['recurring_reminders_enabled'] ?? false),
             'recurring_calendar_enabled' => (bool) ($limits['recurring_calendar_enabled'] ?? false),
             'email_reminders_enabled' => (bool) ($limits['email_reminders_enabled'] ?? false),
-            'notes_enabled' => (bool) ($limits['notes_enabled'] ?? false),
+            'notes_enabled' => $this->notesAllowedByLimits($limits),
             'priority_background_work' => (bool) ($limits['priority_background_work'] ?? false),
         ];
     }
@@ -180,7 +183,33 @@ class PlanLimitService
 
     public function canUseNotes(User $user): bool
     {
-        return (bool) ($this->limitsFor($user)['notes_enabled'] ?? false);
+        $limits = $this->limitsFor($user);
+        $noteLimit = $limits['note_limit'] ?? null;
+
+        return (bool) ($limits['notes_enabled'] ?? false)
+            || $this->notesAllowedByLimitValue($noteLimit);
+    }
+
+    public function noteLimitFor(User $user): ?int
+    {
+        $limit = $this->limitsFor($user)['note_limit'] ?? null;
+
+        return is_numeric($limit) ? (int) $limit : null;
+    }
+
+    public function enforceNoteCreationLimit(User $user, int $additionalNotes = 1): ?JsonResponse
+    {
+        $limit = $this->noteLimitFor($user);
+        if ($limit === null) {
+            return null;
+        }
+
+        $currentNotes = Note::query()->where('user_id', $user->id)->count();
+        if ($currentNotes + max(0, $additionalNotes) > $limit) {
+            return $this->limitResponse("Your current plan includes up to {$limit} note".($limit === 1 ? '' : 's').'.');
+        }
+
+        return null;
     }
 
     public function canUseRecurringTasks(User $user): bool
@@ -291,6 +320,7 @@ class PlanLimitService
                 'history_days' => 365,
                 'daily_cost_limit' => $this->usageLimitValue('premium', 'cost_limit', (float) ($usageLimits['premium_cost_limit'] ?? 5.00)),
                 'daily_external_cost_limit' => $this->usageLimitValue('premium', 'external_cost_limit', (float) ($usageLimits['premium_external_cost_limit'] ?? 1.00)),
+                'note_limit' => null,
                 'recurring_tasks_enabled' => true,
                 'recurring_reminders_enabled' => true,
                 'recurring_calendar_enabled' => true,
@@ -305,6 +335,7 @@ class PlanLimitService
                 'history_days' => null,
                 'daily_cost_limit' => $this->usageLimitValue('pro', 'cost_limit', (float) ($usageLimits['pro_cost_limit'] ?? 20.00)),
                 'daily_external_cost_limit' => $this->usageLimitValue('pro', 'external_cost_limit', (float) ($usageLimits['pro_external_cost_limit'] ?? 5.00)),
+                'note_limit' => null,
                 'recurring_tasks_enabled' => true,
                 'recurring_reminders_enabled' => true,
                 'recurring_calendar_enabled' => true,
@@ -319,11 +350,12 @@ class PlanLimitService
                 'history_days' => 14,
                 'daily_cost_limit' => $this->usageLimitValue('base', 'cost_limit', (float) ($usageLimits['base_cost_limit'] ?? 1.00)),
                 'daily_external_cost_limit' => $this->usageLimitValue('base', 'external_cost_limit', (float) ($usageLimits['base_external_cost_limit'] ?? 0.25)),
+                'note_limit' => 10,
                 'recurring_tasks_enabled' => false,
                 'recurring_reminders_enabled' => false,
                 'recurring_calendar_enabled' => false,
                 'email_reminders_enabled' => false,
-                'notes_enabled' => false,
+                'notes_enabled' => true,
                 'priority_background_work' => false,
             ],
         };
@@ -349,6 +381,7 @@ class PlanLimitService
             'history_days' => null,
             'daily_cost_limit' => null,
             'daily_external_cost_limit' => null,
+            'note_limit' => null,
             'recurring_tasks_enabled' => true,
             'recurring_reminders_enabled' => true,
             'recurring_calendar_enabled' => true,
@@ -376,6 +409,17 @@ class PlanLimitService
     private function settingKey(string $plan): string
     {
         return 'plan_limits.'.$plan;
+    }
+
+    private function notesAllowedByLimits(array $limits): bool
+    {
+        return (bool) ($limits['notes_enabled'] ?? false)
+            || $this->notesAllowedByLimitValue($limits['note_limit'] ?? null);
+    }
+
+    private function notesAllowedByLimitValue(mixed $noteLimit): bool
+    {
+        return $noteLimit === null || (is_numeric($noteLimit) && (int) $noteLimit > 0);
     }
 
     private function usageSettingMap(string $plan): array

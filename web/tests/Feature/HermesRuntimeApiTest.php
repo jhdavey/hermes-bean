@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
@@ -582,19 +583,31 @@ class HermesRuntimeApiTest extends TestCase
                     'parameters' => [
                         'title' => 'Note: hello',
                         'plain_text' => 'hello',
+                        'body' => 'hello',
                     ],
                 ]],
             ], JSON_THROW_ON_ERROR)), 200),
         ]);
 
         $token = $this->apiToken('base-note-limit@example.com');
+        $user = User::where('email', 'base-note-limit@example.com')->firstOrFail();
+        $workspace = $user->workspaces()->firstOrFail();
+        for ($i = 1; $i <= 10; $i++) {
+            Note::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'created_by_user_id' => $user->id,
+                'title' => "Existing note {$i}",
+                'plain_text' => 'Already at the base note limit.',
+            ]);
+        }
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
             'content' => 'Can you create a note that says hello',
             'metadata' => $this->clientTemporalMetadata(),
         ])->assertCreated()
-            ->assertJsonPath('data.assistant_message.content', 'Notes are available on Premium, Pro, and Enterprise plans. Upgrade your plan to create and manage notes.');
+            ->assertJsonPath('data.assistant_message.content', 'Your current plan includes up to 10 notes. Upgrade your plan to create and manage more notes.');
 
         $this->assertDatabaseMissing('notes', [
             'conversation_session_id' => $sessionId,

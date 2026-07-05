@@ -182,27 +182,40 @@ class PlanLimitEntitlementTest extends TestCase
             ->assertStatus(402);
     }
 
-    public function test_notes_are_premium_and_up(): void
+    public function test_base_plan_allows_ten_notes_then_requires_upgrade(): void
     {
         $baseToken = $this->apiToken('base-notes@example.com');
         $premiumToken = $this->apiToken('premium-notes@example.com');
+        $baseUser = User::where('email', 'base-notes@example.com')->firstOrFail();
+        $baseWorkspace = Workspace::where('personal_owner_user_id', $baseUser->id)->firstOrFail();
         $premiumUser = User::where('email', 'premium-notes@example.com')->firstOrFail();
         $premiumUser->forceFill(['subscription_tier' => 'premium'])->save();
         $premiumWorkspace = Workspace::where('personal_owner_user_id', $premiumUser->id)->firstOrFail();
 
         $this->withToken($baseToken)->getJson('/api/notes')
-            ->assertStatus(402)
-            ->assertJsonPath('error.code', 'subscription_limit_reached');
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
 
-        $this->withToken($baseToken)->postJson('/api/note-folders', [
+        $baseFolder = $this->withToken($baseToken)->postJson('/api/note-folders', [
             'name' => 'Projects',
         ])
-            ->assertStatus(402)
-            ->assertJsonPath('error.code', 'subscription_limit_reached');
+            ->assertCreated()
+            ->json('data');
+
+        for ($i = 1; $i <= 10; $i++) {
+            $this->withToken($baseToken)->postJson('/api/notes', [
+                'title' => "Base note {$i}",
+                'plain_text' => 'Base users can write up to ten notes.',
+                'note_folder_id' => $baseFolder['id'],
+            ])
+                ->assertCreated()
+                ->assertJsonPath('data.title', "Base note {$i}");
+        }
 
         $this->withToken($baseToken)->postJson('/api/notes', [
-            'title' => 'Blocked note',
-            'plain_text' => 'Base users need to upgrade for Notes.',
+            'title' => 'Eleventh note',
+            'plain_text' => 'Base users need to upgrade after ten notes.',
+            'note_folder_id' => $baseFolder['id'],
         ])
             ->assertStatus(402)
             ->assertJsonPath('error.code', 'subscription_limit_reached');
@@ -222,10 +235,17 @@ class PlanLimitEntitlementTest extends TestCase
             ->assertJsonPath('data.title', 'Premium note');
 
         $this->assertDatabaseHas('note_folders', [
+            'user_id' => $baseUser->id,
+            'workspace_id' => $baseWorkspace->id,
+            'name' => 'Projects',
+        ]);
+        $this->assertDatabaseHas('note_folders', [
             'user_id' => $premiumUser->id,
             'workspace_id' => $premiumWorkspace->id,
             'name' => 'Projects',
         ]);
+        $this->assertSame(10, Note::where('user_id', $baseUser->id)->count());
+        $this->assertSame(1, NoteFolder::where('user_id', $baseUser->id)->count());
         $this->assertSame(1, Note::where('user_id', $premiumUser->id)->count());
         $this->assertSame(1, NoteFolder::where('user_id', $premiumUser->id)->count());
     }
@@ -247,6 +267,7 @@ class PlanLimitEntitlementTest extends TestCase
         $this->assertNull($limits['calendar_connection_limit']);
         $this->assertNull($limits['connected_account_limit']);
         $this->assertNull($limits['history_days']);
+        $this->assertNull($limits['note_limit']);
         $this->assertTrue($limits['recurring_tasks_enabled']);
         $this->assertTrue($limits['recurring_reminders_enabled']);
         $this->assertTrue($limits['recurring_calendar_enabled']);
@@ -622,11 +643,12 @@ class PlanLimitEntitlementTest extends TestCase
             'history_days' => 14,
             'daily_cost_limit' => 1.0,
             'daily_external_cost_limit' => 0.25,
+            'note_limit' => 10,
             'recurring_tasks_enabled' => false,
             'recurring_reminders_enabled' => false,
             'recurring_calendar_enabled' => false,
             'email_reminders_enabled' => false,
-            'notes_enabled' => false,
+            'notes_enabled' => true,
             'priority_background_work' => false,
             ...$overrides,
         ];

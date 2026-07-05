@@ -27,6 +27,7 @@ use App\Services\StructuredHermesActionService;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -282,6 +283,9 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        if ($response = $this->planLimits->enforceNoteCreationLimit($request->user(), $this->additionalNotesForSync($workspace->id, $validated['sync_to_workspace_ids'] ?? []))) {
+            return $response;
+        }
         $validated = $this->normalizedNoteAttributes($validated);
         $syncTo = $validated['sync_to_workspace_ids'] ?? [];
         unset($validated['sync_to_workspace_ids']);
@@ -1208,6 +1212,22 @@ class DomainResourceController extends Controller
             $this->deleteWorkspaceItemLinksFor($type, $idsToRemove);
         }
 
+        if ($model instanceof Note) {
+            $remainingWorkspaceIds = $linkedItems
+                ->reject(fn (Model $item): bool => $itemsToRemove->contains(fn (Model $removed): bool => (int) $removed->id === (int) $item->id))
+                ->keys()
+                ->map(fn ($id): int => (int) $id)
+                ->all();
+            $notesToCreate = collect($workspaceIds)
+                ->map(fn ($id): int => (int) $id)
+                ->filter(fn (int $id): bool => $id > 0 && ! in_array($id, $remainingWorkspaceIds, true))
+                ->unique()
+                ->count();
+            if ($response = $this->planLimits->enforceNoteCreationLimit($request->user(), $notesToCreate)) {
+                throw new HttpResponseException($response);
+            }
+        }
+
         $this->syncTo($request, $model, $workspaceIds);
     }
 
@@ -1862,7 +1882,16 @@ class DomainResourceController extends Controller
     {
         return $this->planLimits->canUseNotes($request->user())
             ? null
-            : $this->planLimits->limitResponse('Notes are available on Premium, Pro, and Enterprise plans.');
+            : $this->planLimits->limitResponse('Notes are available on this plan after upgrading.');
+    }
+
+    private function additionalNotesForSync(int $workspaceId, array $syncToWorkspaceIds): int
+    {
+        return 1 + collect($syncToWorkspaceIds)
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0 && $id !== $workspaceId)
+            ->unique()
+            ->count();
     }
 
     /**

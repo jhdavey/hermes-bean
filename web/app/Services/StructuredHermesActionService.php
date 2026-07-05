@@ -495,6 +495,9 @@ class StructuredHermesActionService
         if (str_starts_with($type, 'note.')) {
             $this->guardNotesAccess($session);
         }
+        if ($type === 'note.create') {
+            $this->guardNoteCreationAccess($session);
+        }
         if (str_starts_with($type, 'note_folder.')) {
             $this->guardNotesAccess($session);
         }
@@ -1749,7 +1752,15 @@ class StructuredHermesActionService
     private function guardNotesAccess(ConversationSession $session): void
     {
         if (! $this->planLimits->canUseNotes($this->sessionUser($session))) {
-            throw new InvalidArgumentException('Notes are available on Premium, Pro, and Enterprise plans.');
+            throw new InvalidArgumentException('Notes are available on this plan after upgrading.');
+        }
+    }
+
+    private function guardNoteCreationAccess(ConversationSession $session): void
+    {
+        $response = $this->planLimits->enforceNoteCreationLimit($this->sessionUser($session));
+        if ($response !== null) {
+            throw new InvalidArgumentException((string) data_get($response->getData(true), 'message', 'Your current plan note limit has been reached.'));
         }
     }
 
