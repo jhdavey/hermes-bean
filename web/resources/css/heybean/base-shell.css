@@ -1129,6 +1129,11 @@
     font-weight: 500;
 }
 
+.hb-all-day-toggle .hb-inline-info-popover {
+    right: auto;
+    left: 0;
+}
+
 .hb-inline-info[open] .hb-inline-info-popover,
 .hb-inline-info:hover .hb-inline-info-popover,
 .hb-inline-info:focus-within .hb-inline-info-popover {
