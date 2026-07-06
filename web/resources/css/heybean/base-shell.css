@@ -791,6 +791,7 @@
 
 .hb-auth-card-register {
     padding: 24px;
+    width: min(720px, 100%);
 }
 
 .hb-auth-title {
@@ -821,6 +822,12 @@
     gap: 0;
     color: transparent;
     font-size: 0;
+}
+
+.hb-auth-card-register .hb-label {
+    gap: 7px;
+    color: var(--hb-muted);
+    font-size: 12px;
 }
 
 .hb-auth-card .hb-input {
@@ -870,6 +877,123 @@
     font-size: 15px;
     font-weight: 500;
     line-height: 1.55;
+}
+
+.hb-guided-signup-form {
+    gap: 14px;
+}
+
+.hb-guided-signup-progress {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.hb-guided-signup-progress span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid rgba(var(--hb-accent-rgb), .18);
+    border-radius: 14px;
+    background: rgba(var(--hb-accent-rgb), .07);
+    color: var(--hb-accent-strong);
+    font-size: 11px;
+    font-weight: 850;
+}
+
+.hb-guided-signup-progress strong {
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--hb-accent);
+    color: var(--hb-accent-ink);
+    font-size: 11px;
+}
+
+.hb-guided-signup-section {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--hb-border);
+    border-radius: 18px;
+    background: var(--hb-surface2);
+}
+
+.hb-guided-signup-section > strong {
+    color: var(--hb-text);
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 950;
+}
+
+.hb-guided-signup-section > p {
+    margin: -3px 0 0;
+    color: var(--hb-muted);
+    font-size: 13px;
+    line-height: 1.4;
+    font-weight: 650;
+}
+
+.hb-guided-theme-mode-group {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hb-guided-theme-mode-group .hb-theme-mode-option:has(input:checked) {
+    border-color: color-mix(in srgb, var(--hb-accent) 58%, var(--hb-border));
+    background: color-mix(in srgb, var(--hb-accent) 12%, var(--hb-surface));
+}
+
+.hb-guided-personality-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.hb-guided-personality-option {
+    display: grid;
+    gap: 4px;
+    min-height: 88px;
+    padding: 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    background: var(--hb-surface);
+    cursor: pointer;
+    transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+
+.hb-guided-personality-option:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--hb-accent) 38%, var(--hb-border));
+}
+
+.hb-guided-personality-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.hb-guided-personality-option span {
+    color: var(--hb-text);
+    font-size: 13px;
+    font-weight: 950;
+}
+
+.hb-guided-personality-option small {
+    color: var(--hb-muted);
+    font-size: 12px;
+    line-height: 1.3;
+    font-weight: 650;
+}
+
+.hb-guided-personality-option.is-selected,
+.hb-guided-personality-option:has(input:checked) {
+    border-color: color-mix(in srgb, var(--hb-accent) 58%, var(--hb-border));
+    background: color-mix(in srgb, var(--hb-accent) 12%, var(--hb-surface));
 }
 
 .hb-form {

@@ -236,7 +236,7 @@
     <section class="cta-band" id="early-access">
         <div class="wrap">
             <h2>Start with one place for the day you actually have.</h2>
-            <p class="hero-subhead">Join the HeyBean beta and we will send an invite as soon as we can onboard you.</p>
+            <p class="hero-subhead">Join the HeyBean beta for product updates, or create an account when you are ready to start.</p>
             <form class="hero-actions" method="POST" action="{{ route('early-access.store') }}">
                 @csrf
                 <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address" style="min-height:56px;width:min(360px,100%);border:1px solid var(--pb-border);border-radius:9999px;padding:0 20px;font:inherit;color:var(--pb-ink);outline:none">

@@ -3773,6 +3773,12 @@ void main() {
     await tester.tap(find.byKey(const Key('guided-onboarding-send')));
     await tester.pumpAndSettle();
 
+    expect(
+      find.text(
+        'Your account has been created. Check your email to verify. Next, what personality type would you like me to have?',
+      ),
+      findsOneWidget,
+    );
     expect(api.registeredUsers, [
       {
         'name': 'testing',
@@ -3915,6 +3921,81 @@ void main() {
     expect(stripeHandler.preparedSetupIntentIds, ['seti_test_base']);
     expect(stripeHandler.presentedSheets, 1);
     expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+  });
+
+  testWidgets('guided Bean signup keeps light mode copy for light selection', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _FakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+        stripePaymentHandler: _FakeStripePaymentHandler(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('guided-signup-action')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('guided-onboarding-input')),
+      'testing',
+    );
+    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('guided-theme-mode-light')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Ok, I\'ll keep it in Light mode. What email address should I use for your account? Please text it here.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('switched to Light'), findsNothing);
+  });
+
+  testWidgets('guided Bean signup explains invalid email format', (
+    WidgetTester tester,
+  ) async {
+    final api = _FakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        stripePaymentHandler: _FakeStripePaymentHandler(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('guided-signup-action')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('guided-onboarding-input')),
+      'testing',
+    );
+    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('guided-theme-mode-light')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('guided-onboarding-input')),
+      'teston@email.com,',
+    );
+    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('teston@email.com,'), findsOneWidget);
+    expect(
+      find.text(
+        'That email format does not look right. Please send it like name@example.com, without extra punctuation.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('could not check that email'), findsNothing);
+    expect(api.emailAvailabilityChecks, isEmpty);
   });
 
   testWidgets(
@@ -11856,6 +11937,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   final passwordResetRequests = <String>[];
   final registeredUsers = <Map<String, String>>[];
   final takenEmails = <String>{};
+  final emailAvailabilityChecks = <String>[];
   final checkoutRequests = <Map<String, String>>[];
   int sendMessageCalls = 0;
   int branchMessageCalls = 0;
@@ -11973,6 +12055,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     required String email,
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
+    emailAvailabilityChecks.add(normalizedEmail);
     return HermesEmailAvailability(
       email: normalizedEmail,
       available: !takenEmails.contains(normalizedEmail),

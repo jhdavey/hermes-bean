@@ -68,7 +68,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee(route('early-access.store'), false)
             ->assertSee('class="public-beta-banner"', false)
             ->assertSee('HeyBean is currently in Beta.', false)
-            ->assertSee('href="/register">Sign up here</a> to join the waitlist.', false)
+            ->assertSee('href="/register">Sign up here</a> to create your beta account.', false)
             ->assertSee('class="navlinks"', false)
             ->assertSee('href="/pricing">Pricing</a>', false)
             ->assertSee('href="/#reviews">Reviews</a>', false)
@@ -101,25 +101,28 @@ class LandingPageFeatureTest extends TestCase
         }
     }
 
-    public function test_register_route_shows_beta_waitlist_banner_and_copy(): void
+    public function test_register_route_shows_guided_beta_account_setup_copy(): void
     {
         $this->get('/register')
             ->assertOk()
             ->assertSee('HeyBean is currently in Beta.', false)
-            ->assertSee('href="/register">Sign up here</a> to join the waitlist.', false)
+            ->assertSee('href="/register">Sign up here</a> to create your beta account.', false)
             ->assertSee('data-auth-mode="register"', false);
 
         $appJs = file_get_contents(resource_path('js/app.js'))."\n"
             .file_get_contents(resource_path('js/heybean/config.js'))."\n"
             .file_get_contents(resource_path('js/heybean/webApp.js'));
 
-        $this->assertStringContainsString('We are currently onboarding beta users.', $appJs);
-        $this->assertStringContainsString("Sign up for early access and we'll let you know as soon as we are ready to onboard you!", $appJs);
-        $this->assertStringContainsString('Sign up for early access', $appJs);
-        $this->assertStringContainsString('Thank you for signing up for early access!', $appJs);
-        $this->assertStringContainsString('We look forward to onboarding you soon!', $appJs);
-        $this->assertStringContainsString('data-register-early-access-home', $appJs);
-        $this->assertStringNotContainsString('/subscribe?plan=', $appJs);
+        $this->assertStringContainsString('Bean setup', $appJs);
+        $this->assertStringContainsString('Create your account, choose your appearance, and set Bean preferences before plan setup.', $appJs);
+        $this->assertStringContainsString('Do you prefer light or dark mode?', $appJs);
+        $this->assertStringContainsString('Next, what personality type would you like me to have?', $appJs);
+        $this->assertStringContainsString('Your account has been created. Check your email to verify. Next, choose your plan.', $appJs);
+        $this->assertStringContainsString('Create account', $appJs);
+        $this->assertStringContainsString('Command center', $appJs);
+        $this->assertStringContainsString('Calendar views', $appJs);
+        $this->assertStringContainsString('Notes hold plans, lists, and longer writing.', $appJs);
+        $this->assertStringContainsString('/subscribe?plan=', $appJs);
     }
 
     public function test_pricing_page_shows_plans_and_trial_ctas(): void

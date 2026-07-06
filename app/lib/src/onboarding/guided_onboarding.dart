@@ -294,23 +294,36 @@ class _GuidedBeanOnboardingScreenState
     widget.onPreviewThemeMode(mode.key);
     _addUser(mode.label);
     await _respondBean(
-      _nextResponseVariation([
-        '${mode.label} it is. What email address would you like to use for your account? Please text it here.',
-        'Done, I switched to ${mode.label}. What email address should I use for your account? Please text it here.',
-        'You got it — ${mode.label}. What email address would you like tied to this account? Please send it here.',
-      ]),
+      _nextResponseVariation(_themeModeAcknowledgements(mode)),
     );
     setState(() => _step = _GuidedOnboardingStep.email);
     _focusInput();
   }
 
+  List<String> _themeModeAcknowledgements(HeyBeanThemeModeOption mode) {
+    if (mode.key == 'light') {
+      return const [
+        'Light mode it is. I will keep it there. What email address would you like to use for your account? Please text it here.',
+        'Ok, I\'ll keep it in Light mode. What email address should I use for your account? Please text it here.',
+        'You got it. I\'ll keep it in Light mode. What email address would you like tied to this account? Please send it here.',
+      ];
+    }
+
+    return [
+      '${mode.label} it is. What email address would you like to use for your account? Please text it here.',
+      'Done, I switched to ${mode.label}. What email address should I use for your account? Please text it here.',
+      'You got it — ${mode.label}. What email address would you like tied to this account? Please send it here.',
+    ];
+  }
+
   Future<void> _handleEmail(String value) async {
-    final email = value.toLowerCase();
-    final valid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
-    if (!valid) {
-      _setError(
-        'That email does not look valid. Please text the address you want to use.',
+    final email = value.trim().toLowerCase();
+    if (!_looksLikeEmailAddress(email)) {
+      _addUser(email);
+      await _respondBean(
+        'That email format does not look right. Please send it like name@example.com, without extra punctuation.',
       );
+      _focusInput();
       return;
     }
     _addUser(email);
@@ -358,6 +371,14 @@ class _GuidedBeanOnboardingScreenState
     _focusInput();
   }
 
+  bool _looksLikeEmailAddress(String value) {
+    if (value.length > 254) return false;
+    return RegExp(
+      r'^[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}$',
+      caseSensitive: false,
+    ).hasMatch(value);
+  }
+
   Future<void> _handlePassword(String value) async {
     if (value.length < 12) {
       _setError('Use at least 12 characters so your account is protected.');
@@ -372,9 +393,7 @@ class _GuidedBeanOnboardingScreenState
       setState(() => _busy = false);
       await _respondBean(
         _nextResponseVariation([
-          'Your account has been created. If email verification is required, you can handle it later without losing your setup. Now, what personality type would you like me to have?',
-          'All set — your account is created. If email verification is needed, you can do that later without losing this setup. What personality type should I use?',
-          'Done, your account is ready. You can handle email verification later if needed. Next, choose the personality style you want from me.',
+          'Your account has been created. Check your email to verify. Next, what personality type would you like me to have?',
         ]),
         scrollBehavior: _GuidedScrollBehavior.none,
         widgetKey: _personalityIntroKey,

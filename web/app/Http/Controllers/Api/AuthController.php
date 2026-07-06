@@ -85,6 +85,12 @@ class AuthController extends Controller
             'password' => ['required', 'string', 'min:12', 'confirmed'],
             'plan' => ['sometimes', 'nullable', Rule::in(['base', 'premium', 'pro'])],
             'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
+            'theme_mode' => ['sometimes', 'string', Rule::in(self::THEME_MODE_KEYS)],
+            'agent_personality' => ['sometimes', 'string', Rule::in(AgentProfileService::personalityKeys())],
+            'onboarding_priorities' => ['sometimes', 'array', 'max:5'],
+            'onboarding_priorities.*' => ['string', 'max:80'],
+            'onboarding_context' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'home_city' => ['sometimes', 'nullable', 'string', 'max:120'],
         ]);
 
         $user = DB::transaction(function () use ($data): User {
@@ -93,10 +99,23 @@ class AuthController extends Controller
                 'email' => $data['email'],
                 'password' => Hash::make($data['password']),
                 'subscription_tier' => 'base',
+                'theme_mode' => $data['theme_mode'] ?? 'light',
             ]);
 
-            app(AgentProfileService::class)->ensureForUser($user);
+            $profiles = app(AgentProfileService::class);
+            $profile = $profiles->ensureForUser($user);
             app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+            if (array_key_exists('agent_personality', $data)) {
+                $profiles->applyOnboarding($profile, [
+                    'agent_personality' => $data['agent_personality'],
+                    'onboarding_priorities' => $data['onboarding_priorities'] ?? ['Planning', 'Reminders', 'Focus'],
+                    'onboarding_context' => $data['onboarding_context'] ?? null,
+                ], 'guided_signup');
+                $user->forceFill(['onboard_complete' => true])->save();
+            }
+            if (array_key_exists('home_city', $data)) {
+                $profiles->updateHomeCitySettings($profile->refresh(), $data['home_city']);
+            }
             EarlyAccessSignup::updateOrCreate(
                 ['email' => $user->email],
                 [

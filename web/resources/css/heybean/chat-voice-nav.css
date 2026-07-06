@@ -390,6 +390,26 @@
     box-shadow: 0 20px 46px rgba(15, 23, 42, .18);
 }
 
+.hb-onboarding-tour-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.hb-onboarding-tour-card-head strong {
+    color: var(--hb-text);
+    font-size: 18px;
+    line-height: 1.1;
+    font-weight: 950;
+}
+
+.hb-onboarding-tour-card-head span {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 900;
+}
+
 .hb-onboarding-tour-card p {
     margin: 0;
     color: var(--hb-text);
@@ -450,11 +470,26 @@
     top: 78px;
 }
 
+.hb-onboarding-tour-notes .hb-onboarding-tour-highlight {
+    left: 50%;
+    bottom: 16px;
+    width: 58px;
+    height: 58px;
+    transform: translateX(-50%);
+}
+
+.hb-onboarding-tour-notes .hb-onboarding-tour-card {
+    left: 50%;
+    bottom: 92px;
+    transform: translateX(-50%);
+}
+
 @media (max-width: 720px) {
     .hb-onboarding-tour-card {
         left: 16px !important;
         right: 16px !important;
         width: auto;
+        transform: none !important;
     }
 
     .hb-onboarding-tour-date-month .hb-onboarding-tour-highlight {

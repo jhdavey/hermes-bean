@@ -142,6 +142,38 @@ export function mountHeyBeanWebApp(mount) {
         notice: '',
         modal: null,
     };
+    const guidedSignupPersonalities = [
+        {
+            key: 'balanced',
+            label: 'Balanced helper',
+            description: 'A calm, practical default that keeps replies concise and useful.',
+        },
+        {
+            key: 'coach',
+            label: 'Motivating coach',
+            description: 'An encouraging style that gives gentle nudges and helps you keep momentum.',
+        },
+        {
+            key: 'organizer',
+            label: 'Detail organizer',
+            description: 'A structured planner that pays close attention to dates, times, and follow-up.',
+        },
+        {
+            key: 'creative',
+            label: 'Creative partner',
+            description: 'A brainstorming partner that turns ideas into practical lists, notes, and plans.',
+        },
+        {
+            key: 'direct',
+            label: 'Direct operator',
+            description: 'A brief, action-first style that leads with the answer or completed work.',
+        },
+        {
+            key: 'gentle',
+            label: 'Gentle companion',
+            description: 'A patient, low-pressure style that keeps busy days feeling manageable.',
+        },
+    ];
 
     applyAppTheme();
     systemDarkScheme?.addEventListener?.('change', () => {
@@ -1406,8 +1438,8 @@ export function mountHeyBeanWebApp(mount) {
                         <div class="hb-auth-title">
                             ${register ? '' : `<img src="${escapeAttr(logoUrl)}" alt="">`}
                             <div>
-                                <h1>${forgot ? 'Reset password' : register ? 'We are currently onboarding beta users.' : 'Login'}</h1>
-                                ${register ? "<p class=\"hb-register-intro\">Sign up for early access and we'll let you know as soon as we are ready to onboard you!</p>" : ''}
+                                <h1>${forgot ? 'Reset password' : register ? 'Bean setup' : 'Login'}</h1>
+                                ${register ? '<p class="hb-register-intro">Create your account, choose your appearance, and set Bean preferences before plan setup.</p>' : ''}
                             </div>
                         </div>
                         ${errorMarkup(state.error)}
@@ -1424,22 +1456,77 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function authFormMarkup(register) {
+        if (register) return guidedSignupFormMarkup();
+
         return `
-            <form class="hb-form" data-action="${register ? 'register' : 'login'}">
-                ${register ? labelInput('Name', 'name', 'text', '', 'autocomplete="name"') : ''}
+            <form class="hb-form" data-action="login">
                 ${labelInput('Email', 'email', 'email', '', 'required autocomplete="email"')}
-                ${register && state.selectedPlan ? `<input type="hidden" name="plan" value="${escapeAttr(state.selectedPlan)}">` : ''}
-                ${register ? `<input type="hidden" name="billing_interval" value="${escapeAttr(normalizedBillingInterval(state.selectedBillingInterval))}">` : ''}
-                ${register ? `
+                ${labelInput('Password', 'password', 'password', '', 'required autocomplete="current-password" minlength="1"')}
+                <label class="hb-checkbox-row"><input type="checkbox" name="remember" ${state.remember ? 'checked' : ''}> Remember me</label>
+                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Signing in…' : 'Sign in'}</button>
+                <div class="hb-link-row">
+                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Create an account</button>
+                    <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
+                </div>
+            </form>`;
+    }
+
+    function guidedSignupFormMarkup() {
+        const selectedPlan = state.selectedPlan && subscriptionPlans[state.selectedPlan]
+            ? state.selectedPlan
+            : '';
+        return `
+            <form class="hb-form hb-guided-signup-form" data-action="register">
+                <div class="hb-guided-signup-progress" aria-label="Signup progress">
+                    ${['Name', 'Appearance', 'Account', 'Personality', 'Plan'].map((step, index) => `<span><strong>${index + 1}</strong>${escapeHtml(step)}</span>`).join('')}
+                </div>
+                <section class="hb-guided-signup-section">
+                    <strong>Hello, please enter your name below.</strong>
+                    ${labelInput('Name', 'name', 'text', '', 'required autocomplete="name"')}
+                </section>
+                <section class="hb-guided-signup-section">
+                    <strong>Do you prefer light or dark mode?</strong>
+                    <p>You can also choose Auto, and you can change this anytime in Appearance settings.</p>
+                    <div class="hb-theme-mode-group hb-guided-theme-mode-group" role="radiogroup" aria-label="Theme mode">
+                        ${['light', 'dark', 'auto'].map((key) => {
+                            const mode = themeModesByKey.get(key);
+                            return `
+                                <label class="hb-theme-mode-option">
+                                    <input type="radio" name="theme_mode" value="${escapeAttr(key)}" ${key === 'light' ? 'checked' : ''}>
+                                    <span>${escapeHtml(mode.label)}</span>
+                                    <small>${escapeHtml(key === 'light' ? 'Keep light mode' : mode.detail)}</small>
+                                </label>`;
+                        }).join('')}
+                    </div>
+                </section>
+                <section class="hb-guided-signup-section">
+                    <strong>What email address should I use for your account?</strong>
+                    ${labelInput('Email', 'email', 'email', '', 'required autocomplete="email"')}
                     ${labelInput('Password', 'password', 'password', '', 'required autocomplete="new-password" minlength="12"')}
                     ${labelInput('Confirm password', 'password_confirmation', 'password', '', 'required autocomplete="new-password" minlength="12"')}
-                ` : `
-                    ${labelInput('Password', 'password', 'password', '', 'required autocomplete="current-password" minlength="1"')}
-                    <label class="hb-checkbox-row"><input type="checkbox" name="remember" ${state.remember ? 'checked' : ''}> Remember me</label>
-                `}
-                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? (register ? 'Signing up…' : 'Signing in…') : (register ? 'Sign up for early access' : 'Sign in')}</button>
+                    <p>Your account will be created now. Check your email to verify after signup.</p>
+                </section>
+                <section class="hb-guided-signup-section">
+                    <strong>Next, what personality type would you like me to have?</strong>
+                    <div class="hb-guided-personality-list" role="radiogroup" aria-label="Bean personality">
+                        ${guidedSignupPersonalities.map((option, index) => `
+                            <label class="hb-guided-personality-option">
+                                <input type="radio" name="agent_personality" value="${escapeAttr(option.key)}" ${index === 0 ? 'checked' : ''}>
+                                <span>${escapeHtml(option.label)}</span>
+                                <small>${escapeHtml(option.description)}</small>
+                            </label>`).join('')}
+                    </div>
+                </section>
+                <section class="hb-guided-signup-section">
+                    <strong>Optional city context</strong>
+                    <p>This helps Bean with weather related questions and local planning. You can skip it and add it later.</p>
+                    ${labelInput('City', 'home_city', 'text', '', 'autocomplete="address-level2"')}
+                </section>
+                ${selectedPlan ? `<input type="hidden" name="plan" value="${escapeAttr(selectedPlan)}">` : ''}
+                <input type="hidden" name="billing_interval" value="${escapeAttr(normalizedBillingInterval(state.selectedBillingInterval))}">
+                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Creating account…' : 'Create account'}</button>
                 <div class="hb-link-row">
-                    <button class="hb-button-ghost ${register ? 'hb-auth-switch-action' : ''}" type="button" data-auth-mode="${register ? 'login' : 'register'}">${register ? '<span class="hb-auth-link-prompt">Already have an account?</span><span class="hb-auth-link-action">Sign In</span>' : 'Join the waitlist'}</button>
+                    <button class="hb-button-ghost hb-auth-switch-action" type="button" data-auth-mode="login"><span class="hb-auth-link-prompt">Already have an account?</span><span class="hb-auth-link-action">Sign In</span></button>
                     <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
                 </div>
             </form>`;
@@ -1480,9 +1567,10 @@ export function mountHeyBeanWebApp(mount) {
                             </div>
                             <div class="hb-subscribe-kicker">14-day free trial</div>
                             <h1>${confirmed ? 'Your subscription is ready' : 'Choose your Bean subscription'}</h1>
-                            <p>${confirmed ? subscriptionConfirmationCopy(liveConfirmed, selectedPlan) : 'Your account is created. Pick the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.'}</p>
+                            <p>${confirmed ? subscriptionConfirmationCopy(liveConfirmed, selectedPlan) : 'Your account has been created. Check your email to verify. Next, choose the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.'}</p>
                             ${subscriptionProgressMarkup(confirmed ? 4 : 2)}
                             ${errorMarkup(state.error)}
+                            ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
                             ${canceled ? '<div class="hb-error"><strong>Checkout was canceled</strong><span>No charge was made. Choose a plan when you are ready to continue.</span></div>' : ''}
                             ${confirmed ? subscriptionConfirmationMarkup(selectedPlan, subscription, liveConfirmed) : subscriptionPlanSelectionMarkup(selectedPlan)}
                         </div>
@@ -1494,8 +1582,8 @@ export function mountHeyBeanWebApp(mount) {
     function subscriptionProgressMarkup(activeStep) {
         const steps = [
             ['1', 'Account'],
-            ['2', 'Plan'],
-            ['3', 'Payment'],
+            ['2', 'Bean setup'],
+            ['3', 'Plan'],
             ['4', 'Dashboard'],
         ];
         return `
@@ -3366,19 +3454,28 @@ export function mountHeyBeanWebApp(mount) {
     const onboardingTourSteps = [
         {
             target: 'bean',
-            caption: 'Hold for voice to text, or tap to type',
-        },
-        {
-            target: 'create',
-            caption: 'Create new events, tasks, and reminders here',
-        },
-        {
-            target: 'critical',
-            caption: "Your critical count includes today's critical events, and tasks that have been marked critical, or are overdue",
+            title: 'Command center',
+            caption: "This is your command center. I'm always here to help, just tell me what you need, and above, you'll see today's events, tasks, and reminders.",
         },
         {
             target: 'date-month',
-            caption: 'These will snap you back to the current day or month at any point',
+            title: 'Calendar views',
+            caption: 'Calendar buttons at the top help you move between today, day view, and month view without losing your place.',
+        },
+        {
+            target: 'create',
+            title: 'Tasks',
+            caption: 'Tasks are for things you need to complete. Bean can create them from a sentence, and you can check them off when done.',
+        },
+        {
+            target: 'critical',
+            title: 'Reminders',
+            caption: 'Reminders are lightweight nudges. Use them for quick time-based follow-up without cluttering your task list.',
+        },
+        {
+            target: 'notes',
+            title: 'Notes',
+            caption: 'Notes hold plans, lists, and longer writing. Folders keep them organized, and formatting helps structure what matters.',
         },
     ];
 
@@ -3422,6 +3519,10 @@ export function mountHeyBeanWebApp(mount) {
             <section class="hb-onboarding-tour hb-onboarding-tour-${escapeAttr(step.target)}" role="dialog" aria-modal="true" aria-live="polite" aria-label="HeyBean tour">
                 <div class="hb-onboarding-tour-highlight" data-tour-highlight="${escapeAttr(step.target)}" aria-hidden="true"></div>
                 <article class="hb-onboarding-tour-card">
+                    <div class="hb-onboarding-tour-card-head">
+                        <strong>${escapeHtml(step.title)}</strong>
+                        <span>${escapeHtml(`${state.onboardingTourStep + 1}/${onboardingTourSteps.length}`)}</span>
+                    </div>
                     <p>${escapeHtml(step.caption)}</p>
                     <div class="hb-onboarding-tour-actions">
                         <button class="hb-button-ghost" type="button" data-onboarding-tour-skip>Skip</button>
@@ -4823,8 +4924,8 @@ export function mountHeyBeanWebApp(mount) {
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="register-success-title">
                 <section class="hb-card hb-modal hb-register-success-modal">
                     <div class="hb-register-success-icon" aria-hidden="true">${icons.checkCircle}</div>
-                    <h2 id="register-success-title">Thank you for signing up for early access!</h2>
-                    <p>We look forward to onboarding you soon!</p>
+                    <h2 id="register-success-title">Your account has been created.</h2>
+                    <p>Check your email to verify, then finish plan setup.</p>
                     <div class="hb-modal-actions hb-issue-report-success-actions">
                         <button class="hb-button" type="button" data-register-early-access-home>Done</button>
                     </div>
@@ -5271,7 +5372,7 @@ export function mountHeyBeanWebApp(mount) {
         const personality = profilePersonality(profile);
         const ttsVoice = profileTtsVoice(profile);
         const ttsInstructions = profileTtsInstructions(profile);
-        const options = ['balanced', 'coach', 'organizer', 'creative'];
+        const options = ['balanced', 'coach', 'organizer', 'creative', 'direct', 'gentle'];
         const voices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
@@ -5469,15 +5570,20 @@ export function mountHeyBeanWebApp(mount) {
                 return;
             }
             const payload = action === 'register'
-                ? { name: data.name, email: data.email, password: data.password, password_confirmation: data.password_confirmation, ...(data.plan ? { plan: data.plan } : {}), billing_interval: normalizedBillingInterval(data.billing_interval || state.selectedBillingInterval) }
+                ? registerPayload(data)
                 : { email: data.email, password: data.password };
             const result = await api(`/auth/${action}`, { method: 'POST', body: payload });
             if (action === 'register') {
+                persistToken(result.token, true);
                 state.busy = false;
                 state.subscriptionCheckoutStatus = '';
                 state.user = result.user || null;
                 state.subscriptionSummary = null;
-                state.modal = { type: 'register-early-access-success' };
+                state.selectedPlan = result.selected_plan || data.plan || state.selectedPlan || 'premium';
+                state.selectedBillingInterval = normalizedBillingInterval(result.selected_billing_interval || data.billing_interval || state.selectedBillingInterval);
+                state.phase = 'subscription';
+                state.notice = 'Your account has been created. Check your email to verify. Next, choose your plan.';
+                history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan)}&billing_interval=${encodeURIComponent(state.selectedBillingInterval)}`);
                 render();
                 return;
             }
@@ -5487,9 +5593,46 @@ export function mountHeyBeanWebApp(mount) {
             await loadSignedIn();
         } catch (error) {
             state.busy = false;
-            state.error = friendlyError(error, action === 'register' ? 'sign up for early access' : action === 'forgot' ? 'send a password reset link' : 'sign in');
+            state.error = friendlyError(error, action === 'register' ? 'create your account' : action === 'forgot' ? 'send a password reset link' : 'sign in');
             render();
         }
+    }
+
+    function registerPayload(data) {
+        const personality = guidedSignupPersonalities.some((option) => option.key === data.agent_personality)
+            ? data.agent_personality
+            : 'balanced';
+        const homeCity = String(data.home_city || '').trim();
+        const context = [
+            'Completed guided Bean signup onboarding.',
+            `Preferred Bean personality: ${signupPersonalityBaseLabel(personality)}.`,
+            homeCity ? `City-level location: ${homeCity}.` : '',
+        ].filter(Boolean).join(' ');
+
+        return {
+            name: data.name,
+            email: data.email,
+            password: data.password,
+            password_confirmation: data.password_confirmation,
+            ...(data.plan ? { plan: data.plan } : {}),
+            billing_interval: normalizedBillingInterval(data.billing_interval || state.selectedBillingInterval),
+            theme_mode: ['light', 'dark', 'auto'].includes(data.theme_mode) ? data.theme_mode : 'light',
+            agent_personality: personality,
+            onboarding_priorities: ['Planning', 'Reminders', 'Focus'],
+            onboarding_context: context,
+            ...(homeCity ? { home_city: homeCity } : {}),
+        };
+    }
+
+    function signupPersonalityBaseLabel(personality) {
+        return {
+            balanced: 'Balanced',
+            coach: 'Coach',
+            organizer: 'Organizer',
+            creative: 'Creative',
+            direct: 'Direct',
+            gentle: 'Gentle',
+        }[personality] || 'Balanced';
     }
 
     async function startSubscriptionCheckout(plan) {
@@ -14284,7 +14427,14 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function personalityLabel(value = 'balanced') {
-        return { balanced: 'Balanced', coach: 'Coach', organizer: 'Organizer', creative: 'Creative' }[value] || 'Balanced';
+        return {
+            balanced: 'Balanced',
+            coach: 'Coach',
+            organizer: 'Organizer',
+            creative: 'Creative',
+            direct: 'Direct',
+            gentle: 'Gentle',
+        }[value] || 'Balanced';
     }
 
     function userInitials(name = '', email = '') {

@@ -30,9 +30,21 @@ class AuthAndAccountLifecycleTest extends TestCase
             'password' => 'correct-horse-battery-staple',
             'password_confirmation' => 'correct-horse-battery-staple',
             'plan' => 'pro',
+            'theme_mode' => 'light',
+            'agent_personality' => 'organizer',
+            'onboarding_priorities' => ['Planning', 'Reminders', 'Focus'],
+            'onboarding_context' => 'Completed guided Bean signup onboarding. Preferred Bean personality: Organizer. City-level location: Orlando.',
+            'home_city' => 'Orlando',
         ])->assertCreated()
             ->assertJsonPath('data.user.email', 'bean@example.com')
             ->assertJsonPath('data.user.subscription_tier', 'base')
+            ->assertJsonPath('data.user.theme_mode', 'light')
+            ->assertJsonPath('data.user.needs_bean_onboarding', false)
+            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.personality_type', 'organizer')
+            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.onboarding.completed', true)
+            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.onboarding.priorities.0', 'Planning')
+            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.onboarding.context', 'Completed guided Bean signup onboarding. Preferred Bean personality: Organizer. City-level location: Orlando.')
+            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.weather.location', 'Orlando')
             ->assertJsonPath('data.user.is_early_access', true)
             ->assertJsonPath('data.selected_plan', 'pro');
 
@@ -41,6 +53,8 @@ class AuthAndAccountLifecycleTest extends TestCase
             'email' => 'bean@example.com',
             'name' => 'Bean User',
             'subscription_tier' => 'base',
+            'theme_mode' => 'light',
+            'onboard_complete' => true,
         ]);
         $this->assertDatabaseHas('workspaces', [
             'name' => 'Bean User Personal Workspace',
