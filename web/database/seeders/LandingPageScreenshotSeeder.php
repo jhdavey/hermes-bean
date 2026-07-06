@@ -273,6 +273,8 @@ class LandingPageScreenshotSeeder extends Seeder
             ['Lay out workout clothes', 'Make Wednesday run frictionless.', 'Fitness', '#66B8D8', '2026-07-07 21:15:00', false],
         ]);
 
+        $this->seedPersonalJulyMonth($user, $workspaceId);
+
         $this->seedNotes($user, $workspaceId, [
             ['Family', 'Weekly family command center', true, "This week\n- Jiu-jitsu Monday and Thursday\n- Emma dentist Tuesday\n- Parent-teacher check-in Wednesday\n- Meal prep Sunday\n\nDefault rhythm\n- Pack backpacks after dinner\n- Shoes by the door before bed\n- Workout clothes laid out the night before", '<h2>This week</h2><ul><li>Jiu-jitsu Monday and Thursday</li><li>Emma dentist Tuesday</li><li>Parent-teacher check-in Wednesday</li><li>Meal prep Sunday</li></ul><h2>Default rhythm</h2><ul><li>Pack backpacks after dinner</li><li>Shoes by the door before bed</li><li>Workout clothes laid out the night before</li></ul>'],
             ['Family', 'Kids jiu-jitsu checklist', true, "Gear\n- Emma gi, white belt, mouthguard\n- Owen gi, snack, water\n- Backup hair ties\n\nCoach notes\n- Emma is working on shrimping and breakfalls\n- Owen does better if he eats before class", '<h2>Gear</h2><ul><li>Emma gi, white belt, mouthguard</li><li>Owen gi, snack, water</li><li>Backup hair ties</li></ul><h2>Coach notes</h2><ul><li>Emma is working on shrimping and breakfalls</li><li>Owen does better if he eats before class</li></ul>'],
@@ -335,6 +337,8 @@ class LandingPageScreenshotSeeder extends Seeder
             ['Collect retro themes', 'Ask team for one win and one friction point.', 'Team', '#7BC98C', '2026-07-09 16:30:00', false],
         ]);
 
+        $this->seedWorkJulyMonth($user, $workspaceId);
+
         $this->seedNotes($user, $workspaceId, [
             ['Launch', 'Q3 launch plan', true, "Launch goals\n- Beta walkthrough Tuesday\n- Analytics QA complete by Wednesday\n- Stakeholder readout Thursday\n- Friday retro and rollout note\n\nDecision log\n- Keep onboarding tour highlight scope tight\n- Move nice-to-have reporting to post-beta", '<h2>Launch goals</h2><ul><li>Beta walkthrough Tuesday</li><li>Analytics QA complete by Wednesday</li><li>Stakeholder readout Thursday</li><li>Friday retro and rollout note</li></ul><h2>Decision log</h2><ul><li>Keep onboarding tour highlight scope tight</li><li>Move nice-to-have reporting to post-beta</li></ul>'],
             ['Risk', 'Risk register', true, "Open risks\n- Analytics event mismatch\n- Mobile QA coverage\n- Client sponsor availability\n\nMitigation\n- Daniel validates events\n- Priya signs off on screenshots\n- Sarah sends concise decision memo", '<h2>Open risks</h2><ul><li>Analytics event mismatch</li><li>Mobile QA coverage</li><li>Client sponsor availability</li></ul><h2>Mitigation</h2><ul><li>Daniel validates events</li><li>Priya signs off on screenshots</li><li>Sarah sends concise decision memo</li></ul>'],
@@ -349,6 +353,149 @@ class LandingPageScreenshotSeeder extends Seeder
             ['user', 'Add a reminder to nudge Priya before design handoff.'],
             ['assistant', 'Done. I added the Priya reminder for 1:50 PM before the 2:30 design handoff.'],
         ]);
+    }
+
+    private function seedPersonalJulyMonth(User $user, int $workspaceId): void
+    {
+        $events = [
+            ['Fourth of July neighborhood cookout', 'Potluck, sparklers, and early bedtime buffer.', 'Maple Ridge Pool', 'Family', '#7BC98C', '2026-07-04 16:00:00', '2026-07-04 19:00:00', false],
+            ['Sunday grocery and reset', 'Pickup order, backpacks, uniforms, and family calendar review.', 'Home', 'Home', '#B68BE8', '2026-07-05 15:00:00', '2026-07-05 17:00:00', false],
+            ['Emma camp showcase', 'Bring camera and arrive ten minutes early.', 'Oak Grove School', 'Kids', '#E9A6C9', '2026-07-17 14:00:00', '2026-07-17 15:00:00', true],
+            ['Owen pediatrician checkup', 'Annual wellness visit with updated daycare form.', 'Cedar Pediatrics', 'Kids', '#E9A6C9', '2026-07-21 09:00:00', '2026-07-21 10:00:00', true],
+            ['Jiu-jitsu belt check prep', 'Practice breakfalls, shrimping, and listening drills.', 'Triangle Jiu-Jitsu', 'Kids', '#E9A6C9', '2026-07-25 10:00:00', '2026-07-25 11:15:00', true],
+            ['Family beach day', 'Pack towels, snacks, sunscreen, and spare clothes.', 'Jordan Lake', 'Family', '#7BC98C', '2026-07-26 09:00:00', '2026-07-26 15:00:00', false],
+            ['Back-to-school supply run', 'Check camp bins before buying duplicates.', 'Target', 'School', '#F37F7F', '2026-07-30 18:30:00', '2026-07-30 19:30:00', false],
+        ];
+        $tasks = [
+            ['Review July budget', 'Check childcare, camp, groceries, subscriptions, and jiu-jitsu fees.', 'Money', '#F2B94B', '2026-07-03 12:00:00', false, 'completed'],
+            ['Upload camp medical form', 'Attach Owen updated daycare form and Emma allergy note.', 'School', '#F37F7F', '2026-07-14 13:00:00', true],
+            ['Order birthday party invitations', 'Use ninja obstacle theme and confirm park pavilion.', 'Family', '#7BC98C', '2026-07-16 20:00:00', false],
+            ['Book August haircut appointments', 'Emma trim, Owen cleanup before school photos.', 'Family', '#7BC98C', '2026-07-18 10:30:00', false],
+            ['Compare fall soccer schedule', 'Make sure it does not collide with jiu-jitsu.', 'Kids', '#E9A6C9', '2026-07-20 19:30:00', false],
+            ['Refill sunscreen and bug spray', 'Put one set in car and one by back door.', 'Home', '#B68BE8', '2026-07-22 18:00:00', false],
+            ['Sort kids clothes for donation', 'Emma size 5/6, Owen 3T overflow bin.', 'Home', '#B68BE8', '2026-07-24 19:00:00', false],
+            ['Confirm belt check registration', 'Ask Coach Lena whether both kids are eligible.', 'Kids', '#E9A6C9', '2026-07-25 09:00:00', true],
+            ['Schedule August dentist follow-up', 'Book after camp pickup if possible.', 'Kids', '#E9A6C9', '2026-07-28 12:00:00', false],
+            ['Update family command center for August', 'School dates, childcare gaps, workouts, and project travel.', 'Family', '#7BC98C', '2026-07-31 16:00:00', true],
+        ];
+        $reminders = [
+            ['Set out cookout cooler', 'Pack juice boxes, fruit, and sunscreen.', 'Family', '#7BC98C', '2026-07-04 13:00:00', false],
+            ['Bring Emma showcase shirt', 'Camp asked for the blue shirt.', 'Kids', '#E9A6C9', '2026-07-17 08:00:00', true],
+            ['Call pediatrician if forms missing', 'Owen appointment paperwork.', 'Kids', '#E9A6C9', '2026-07-20 15:30:00', false],
+            ['Put donation bags in trunk', 'Drop off after daycare pickup.', 'Home', '#B68BE8', '2026-07-24 07:30:00', false],
+            ['Pack beach bag tonight', 'Towels, hats, snacks, water shoes, and dry clothes.', 'Family', '#7BC98C', '2026-07-25 20:00:00', false],
+            ['Check school supply list', 'Before Target run.', 'School', '#F37F7F', '2026-07-30 12:00:00', false],
+            ['Month-end family review', 'Review August childcare, workouts, and work travel.', 'Family', '#7BC98C', '2026-07-31 15:30:00', true],
+        ];
+
+        foreach ($this->julyDates() as $day) {
+            $date = $day->toDateString();
+            if ($date >= '2026-07-06' && $date <= '2026-07-12') {
+                continue;
+            }
+
+            $weekday = (int) $day->format('N');
+            if ($weekday <= 5) {
+                $events[] = ['Camp and preschool drop-off', 'Daily morning drop-off for Emma and Owen.', 'Oak Grove School', 'Kids', '#E9A6C9', "{$date} 07:20:00", "{$date} 08:05:00", $weekday === 1];
+                $events[] = ['Afternoon pickup route', 'Pickup window with traffic buffer.', 'Oak Grove School', 'Kids', '#E9A6C9', "{$date} 16:05:00", "{$date} 16:35:00", $weekday === 5];
+                $reminders[] = ['Pack lunchboxes', 'Ice packs, water bottles, and fruit.', 'School', '#F37F7F', "{$date} 06:50:00", false];
+            }
+
+            if ($weekday === 1 || $weekday === 4) {
+                $events[] = ['Kids jiu-jitsu class', 'Emma and Owen evening class.', 'Triangle Jiu-Jitsu', 'Kids', '#E9A6C9', "{$date} 17:00:00", "{$date} 18:00:00", $weekday === 1];
+                $tasks[] = ['Pack jiu-jitsu gear for '.$day->format('M j'), 'Gis, belts, water, snack, and sandals by the door.', 'Kids', '#E9A6C9', "{$date} 15:30:00", $weekday === 1];
+                $reminders[] = ['Leave for jiu-jitsu', 'Traffic buffer plus water bottles.', 'Kids', '#E9A6C9', "{$date} 16:40:00", $weekday === 1];
+            }
+
+            if ($weekday === 1) {
+                $events[] = ['Strength workout', 'Lower body and core before school routine.', 'YMCA Downtown', 'Fitness', '#66B8D8', "{$date} 05:45:00", "{$date} 06:35:00", false];
+            } elseif ($weekday === 3) {
+                $events[] = ['Tempo run', 'Four-mile tempo run before first call.', 'Greenway Trail', 'Fitness', '#66B8D8', "{$date} 06:00:00", "{$date} 06:45:00", false];
+            } elseif ($weekday === 5) {
+                $events[] = ['Upper-body workout', 'Quick gym session before Friday handoffs.', 'YMCA Downtown', 'Fitness', '#66B8D8', "{$date} 06:00:00", "{$date} 06:45:00", false];
+                $events[] = ['Family movie night', 'Low-effort dinner and kid-selected movie.', 'Home', 'Family', '#7BC98C', "{$date} 18:45:00", "{$date} 20:30:00", false];
+            } elseif ($weekday === 6) {
+                $events[] = ['Long run', 'Weekend endurance run before family plans.', 'Greenway Trail', 'Fitness', '#66B8D8', "{$date} 06:30:00", "{$date} 07:45:00", false];
+            } elseif ($weekday === 7) {
+                $events[] = ['Meal prep and weekly reset', 'Lunches, laundry, family calendar, and budget check.', 'Home', 'Home', '#B68BE8', "{$date} 15:00:00", "{$date} 17:00:00", false];
+                $tasks[] = ['Plan meal prep for week of '.$day->copy()->addDay()->format('M j'), 'Choose dinners, prep snack boxes, and update grocery pickup.', 'Home', '#B68BE8', "{$date} 09:00:00", false];
+            }
+        }
+
+        $this->seedCalendarEvents($user, $workspaceId, $events);
+        $this->seedTasks($user, $workspaceId, $tasks);
+        $this->seedReminders($user, $workspaceId, $reminders);
+    }
+
+    private function seedWorkJulyMonth(User $user, int $workspaceId): void
+    {
+        $events = [
+            ['Architecture review', 'Resolve remaining API retry and background queue questions.', 'Zoom', 'Risk', '#F37F7F', '2026-07-14 13:00:00', '2026-07-14 14:00:00', true],
+            ['Client beta checkpoint', 'Review adoption notes and support tickets from week one.', 'Zoom', 'Launch', '#F2B94B', '2026-07-21 11:00:00', '2026-07-21 12:00:00', true],
+            ['July planning closeout', 'Confirm August roadmap, resourcing, and launch retrospective owners.', 'Boardroom', 'Meetings', '#5E9BF2', '2026-07-31 14:00:00', '2026-07-31 15:00:00', true],
+        ];
+        $tasks = [
+            ['Close beta feedback triage', 'Group issues by launch blocker, polish, and post-beta.', 'Launch', '#F2B94B', '2026-07-14 17:00:00', true],
+            ['Update executive launch summary', 'One page: status, risks, usage signal, and support load.', 'Meetings', '#5E9BF2', '2026-07-17 12:00:00', false],
+            ['Confirm onboarding analytics fix', 'Daniel to validate event payloads in production.', 'Launch', '#F2B94B', '2026-07-21 15:00:00', true],
+            ['Collect design QA notes', 'Priya screenshots, mobile spacing, and dark-mode notes.', 'Design', '#B68BE8', '2026-07-23 13:00:00', false],
+            ['Draft August roadmap options', 'Good, better, best scopes with staffing assumptions.', 'Launch', '#F2B94B', '2026-07-27 16:00:00', true],
+            ['Write retro summary', 'Wins, misses, process changes, and owner follow-ups.', 'Team', '#7BC98C', '2026-07-31 11:00:00', false],
+        ];
+        $reminders = [
+            ['Send architecture review pre-read', 'Share retry decision doc before 1 PM review.', 'Risk', '#F37F7F', '2026-07-14 10:30:00', true],
+            ['Ask Marcus for queue metrics', 'Need throughput and failure-rate notes.', 'Risk', '#F37F7F', '2026-07-16 14:00:00', false],
+            ['Nudge client sponsor for beta attendees', 'Confirm Tuesday checkpoint list.', 'Launch', '#F2B94B', '2026-07-20 15:00:00', false],
+            ['Send design QA reminder', 'Priya mobile screenshots by Thursday.', 'Design', '#B68BE8', '2026-07-23 09:00:00', false],
+            ['Finalize August planning agenda', 'Send agenda and decisions before closeout.', 'Meetings', '#5E9BF2', '2026-07-30 16:00:00', true],
+        ];
+
+        foreach ($this->julyDates() as $day) {
+            $date = $day->toDateString();
+            if ($date >= '2026-07-06' && $date <= '2026-07-12') {
+                continue;
+            }
+
+            $weekday = (int) $day->format('N');
+            if ($weekday > 5) {
+                continue;
+            }
+
+            $events[] = ['Daily delivery standup', 'Delivery health, blockers, owner check.', 'Zoom', 'Meetings', '#5E9BF2', "{$date} 09:00:00", "{$date} 09:20:00", $weekday === 1];
+
+            if ($weekday === 1) {
+                $events[] = ['Sprint planning', 'Capacity, launch scope, and dependency review.', 'Zoom', 'Launch', '#F2B94B', "{$date} 10:00:00", "{$date} 11:00:00", true];
+                $tasks[] = ['Publish weekly launch plan for '.$day->format('M j'), 'Milestones, owners, risks, and client-facing notes.', 'Launch', '#F2B94B', "{$date} 16:30:00", true];
+            } elseif ($weekday === 2) {
+                $events[] = ['Beta feedback triage', 'Review support tickets and categorize follow-ups.', 'Zoom', 'Launch', '#F2B94B', "{$date} 11:00:00", "{$date} 11:45:00", false];
+            } elseif ($weekday === 3) {
+                $events[] = ['Risk triage', 'Cross-functional blocker review.', 'Zoom', 'Risk', '#F37F7F', "{$date} 09:30:00", "{$date} 10:00:00", true];
+                $reminders[] = ['Read risk notes before triage', 'Check Marcus and Daniel updates.', 'Risk', '#F37F7F', "{$date} 08:45:00", true];
+            } elseif ($weekday === 4) {
+                $events[] = ['Stakeholder status readout', 'Status, decisions, and next milestone.', 'Boardroom', 'Meetings', '#5E9BF2', "{$date} 15:00:00", "{$date} 15:45:00", false];
+                $tasks[] = ['Send stakeholder follow-up for '.$day->format('M j'), 'Decisions, risks, and next owner check.', 'Meetings', '#5E9BF2', "{$date} 16:30:00", false];
+            } elseif ($weekday === 5) {
+                $events[] = ['Demo and retro', 'Demo new fixes, collect retro notes, confirm next week.', 'Zoom', 'Team', '#7BC98C', "{$date} 10:00:00", "{$date} 11:00:00", false];
+                $reminders[] = ['Collect retro themes', 'Ask team for one win and one friction point.', 'Team', '#7BC98C', "{$date} 08:30:00", false];
+            }
+        }
+
+        $this->seedCalendarEvents($user, $workspaceId, $events);
+        $this->seedTasks($user, $workspaceId, $tasks);
+        $this->seedReminders($user, $workspaceId, $reminders);
+    }
+
+    /**
+     * @return array<int, Carbon>
+     */
+    private function julyDates(): array
+    {
+        $dates = [];
+        for ($day = Carbon::parse('2026-07-01', self::TIMEZONE); $day->lte(Carbon::parse('2026-07-31', self::TIMEZONE)); $day->addDay()) {
+            $dates[] = $day->copy();
+        }
+
+        return $dates;
     }
 
     /**
