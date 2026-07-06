@@ -9718,6 +9718,7 @@ export function mountHeyBeanWebApp(mount) {
         }
         const command = commandAfterWakePhrase(raw);
         const isWakeTurn = command !== null;
+        const deferForVoiceOnlyOutput = realtimeAssistantOutputActive() && kioskRealtimeVoiceOnlyAssistant;
         if (realtimeAssistantOutputActive()) {
             if (realtimeTranscriptRequestsCancel(raw, command, isWakeTurn)) {
                 cancelKioskVoiceCapture();
@@ -9730,7 +9731,9 @@ export function mountHeyBeanWebApp(mount) {
             ) {
                 return;
             }
-            clearRealtimeAssistantOutputGuard();
+            if (!deferForVoiceOnlyOutput) {
+                clearRealtimeAssistantOutputGuard();
+            }
         }
         if (realtimeUserTranscriptLooksLikeEcho(raw)) {
             return;
@@ -9811,7 +9814,11 @@ export function mountHeyBeanWebApp(mount) {
             queueImmediateRealtimeBackgroundWork(content);
             return;
         }
-        scheduleRealtimeResponseCreate({ delayMs: realtimeTurnDebounceForContent(kioskRealtimePendingUser.content) });
+        scheduleRealtimeResponseCreate({
+            delayMs: realtimeTurnDebounceForContent(kioskRealtimePendingUser.content, {
+                afterAssistantOutput: deferForVoiceOnlyOutput,
+            }),
+        });
     }
 
     function showRealtimePendingUserMessage(extraMetadata = {}) {
@@ -9937,7 +9944,10 @@ export function mountHeyBeanWebApp(mount) {
         if (state.kioskVoicePhase !== 'heard') {
             setKioskVoiceStatus('listening', 'listening');
         }
-        const delayMs = Math.max(900, Number(options.delayMs || kioskRealtimeTurnDebounceMs));
+        const afterAssistantOutputDelay = options.afterAssistantOutput
+            ? Math.max(350, kioskRealtimeSuppressInputUntil - Date.now() + 350)
+            : 0;
+        const delayMs = Math.max(900, Number(options.delayMs || kioskRealtimeTurnDebounceMs), afterAssistantOutputDelay);
         kioskRealtimeResponseTimer = window.setTimeout(() => {
             kioskRealtimeResponseTimer = 0;
             if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
@@ -9955,6 +9965,7 @@ export function mountHeyBeanWebApp(mount) {
                 ms_after_turn_started: kioskRealtimePendingUser?.startedAt
                     ? kioskRealtimeResponseCreateSentAt - kioskRealtimePendingUser.startedAt
                     : null,
+                delayed_for_assistant_output: Boolean(options.afterAssistantOutput),
             });
             if (!sendRealtimeResponseCreate()) {
                 kioskRealtimeAwaitingFirstAudio = false;
@@ -10111,6 +10122,30 @@ export function mountHeyBeanWebApp(mount) {
             })),
             background_queue_allowed: backgroundQueueAllowed,
         });
+        if (kioskRealtimeVoiceOnlyAssistant) {
+            if (hasFunctionCall) {
+                logKioskRealtimeVoiceTrace('realtime_voice_tool_calls_skipped', {
+                    summary: 'Skipped realtime tool calls for a voice-only internal response.',
+                    reason: 'voice_only_response',
+                    assistant_text: responseAssistantText,
+                    function_calls: functionCalls.map((item) => ({
+                        name: item?.name || '',
+                        call_id: item?.call_id || '',
+                        arguments: item?.arguments || '',
+                    })),
+                });
+                functionCalls.forEach((item) => {
+                    sendRealtimeFunctionOutput(item.call_id, {
+                        ok: true,
+                        skipped: true,
+                        message: 'This voice-only update should not call tools.',
+                    }, { createResponse: false });
+                });
+            }
+            finishRealtimeVoiceOnlyResponse();
+            finishRealtimeTurnStatus();
+            return;
+        }
         if (kioskRealtimeIgnoreNextFunctionCalls) {
             kioskRealtimeIgnoreNextFunctionCalls = false;
             if (hasFunctionCall) {
@@ -10216,6 +10251,24 @@ export function mountHeyBeanWebApp(mount) {
             kioskRealtimeCurrentUserTurn = null;
         }
         finishRealtimeTurnStatus();
+    }
+
+    function finishRealtimeVoiceOnlyResponse() {
+        const queuedUserContent = String(kioskRealtimePendingUser?.content || '').trim();
+        kioskRealtimeAssistantDraft = null;
+        kioskRealtimeSuppressNextAssistantPersist = false;
+        kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeVoiceOnlyKind = '';
+        kioskRealtimeIgnoreNextFunctionCalls = false;
+        if (!queuedUserContent || kioskRealtimeResponseTimer) return;
+        scheduleRealtimeResponseCreate({
+            delayMs: realtimeTurnDebounceForContent(queuedUserContent, { afterAssistantOutput: true }),
+            afterAssistantOutput: true,
+        });
+        logKioskRealtimeVoiceTrace('realtime_voice_pending_turn_resumed_after_voice_only_response', {
+            summary: 'Resumed a user turn that arrived during a voice-only realtime response.',
+            user_content: queuedUserContent,
+        });
     }
 
     function mergeRealtimeFunctionCalls(calls) {
