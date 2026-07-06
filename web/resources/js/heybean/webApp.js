@@ -1612,7 +1612,6 @@ export function mountHeyBeanWebApp(mount) {
             <div class="hb-app">
                 ${betaBannerMarkup()}
                 <header class="hb-topbar">
-                    <span class="hb-spacer"></span>
                     <div class="hb-topbar-date-line">
                         <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTopbarTime(now))}</time>
                         <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
@@ -1620,6 +1619,7 @@ export function mountHeyBeanWebApp(mount) {
                     </div>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
                     ${topNavMarkup()}
+                    <span class="hb-spacer"></span>
                     ${showAdd ? topCreateMenuMarkup() : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
@@ -3989,7 +3989,7 @@ export function mountHeyBeanWebApp(mount) {
                 kind: 'event',
                 title: event.title || event.name || 'Untitled event',
                 time: allDay ? todayStart : (start < now && end > now ? now : start),
-                timeLabel: eventTime(event),
+                timeLabel: commandCenterEventTime(event),
                 subtitle: eventLocationText(event),
                 hasNotes: Boolean(eventNotesText(event)),
             });
@@ -4009,7 +4009,7 @@ export function mountHeyBeanWebApp(mount) {
                 kind: 'task',
                 title: task.title || task.name || 'Untitled task',
                 time: overdue ? due : (dateOnlyDue ? endOfToday : due),
-                timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatTime(due)),
+                timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatCompactMeridiemTime(due)),
                 subtitle: [overdue ? 'overdue' : '', task.category || ''].filter(Boolean).join(' · '),
             });
         });
@@ -4028,7 +4028,7 @@ export function mountHeyBeanWebApp(mount) {
                 kind: 'reminder',
                 title: reminder.title || reminder.name || 'Untitled reminder',
                 time: overdue ? due : (dateOnlyDue ? endOfToday : due),
-                timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatTime(due)),
+                timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatCompactMeridiemTime(due)),
                 subtitle: [overdue ? 'overdue' : '', reminder.category || ''].filter(Boolean).join(' · '),
             });
         });
@@ -13642,6 +13642,15 @@ export function mountHeyBeanWebApp(mount) {
         return end ? `${startLabel} – ${formatTime(end)}` : startLabel;
     }
 
+    function commandCenterEventTime(event) {
+        if (eventAllDay(event)) return 'All day';
+        const start = event.starts_at || event.startsAt;
+        const end = event.ends_at || event.endsAt;
+        if (!start) return 'All day';
+        const startLabel = formatCompactMeridiemTime(start);
+        return end ? `${startLabel} – ${formatCompactMeridiemTime(end)}` : startLabel;
+    }
+
     function eventStartTime(event) {
         if (eventAllDay(event)) return 'All day';
         const start = event.starts_at || event.startsAt;
@@ -14091,6 +14100,15 @@ export function mountHeyBeanWebApp(mount) {
         if (!value) return '';
         return new Date(value)
             .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+            .replace(/\s/g, '')
+            .toLowerCase();
+    }
+
+    function formatCompactMeridiemTime(value) {
+        if (!value) return '';
+        return new Date(value)
+            .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+            .replace(/:00(?=\s)/, '')
             .replace(/\s/g, '')
             .toLowerCase();
     }

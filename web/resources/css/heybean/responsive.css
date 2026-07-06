@@ -163,11 +163,7 @@
 
 @media (min-width: 1121px) {
     .hb-topbar-date-line {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        z-index: 1;
-        transform: translate(-50%, -50%);
+        flex: 0 0 auto;
     }
 
     .hb-profile-nav-action {
