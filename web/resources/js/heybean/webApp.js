@@ -4711,18 +4711,14 @@ export function mountHeyBeanWebApp(mount) {
     function pushVisibleAssistantMessage(message, content = null) {
         if (!message || assistantMessageShouldStayOutOfChat(message)) return false;
         const visibleContent = content ?? safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
-        const comparableContent = normalizeComparableSpeech(visibleContent);
-        if (!comparableContent) return false;
+        if (!String(visibleContent || '').trim()) return false;
         const assistantId = String(message.id || '');
         if (assistantId && state.messages.some((item) => String(item.id || '') === assistantId)) return false;
-        const duplicateIndex = state.messages.findIndex((item) => {
-            return item?.role === 'assistant'
-                && normalizeComparableSpeech(item.content) === comparableContent;
-        });
-        if (duplicateIndex >= 0) {
-            const duplicate = state.messages[duplicateIndex];
-            if (duplicate?.metadata?.local_realtime_turn || String(duplicate?.id || '').startsWith('rt-assistant-')) {
-                state.messages[duplicateIndex] = {
+        const realtimeItemId = realtimeMessageItemId(message);
+        if (realtimeItemId) {
+            const localIndex = findLocalRealtimeMessageIndex('assistant', realtimeItemId);
+            if (localIndex >= 0) {
+                state.messages[localIndex] = {
                     ...message,
                     content: visibleContent,
                 };
@@ -4734,6 +4730,28 @@ export function mountHeyBeanWebApp(mount) {
             content: visibleContent,
         });
         return true;
+    }
+
+    function realtimeMessageItemId(message) {
+        const metadata = message?.metadata || {};
+        const realtime = metadata.realtime || metadata.realtimeTurn || {};
+        const explicit = realtime.item_id || realtime.itemId || metadata.realtime_item_id || metadata.realtimeItemId || message?.item_id || message?.itemId || '';
+        if (explicit) return String(explicit);
+        const id = String(message?.id || '');
+        if (id.startsWith('rt-user-')) return id.slice('rt-user-'.length);
+        if (id.startsWith('rt-assistant-')) return id.slice('rt-assistant-'.length);
+        if (id.startsWith('rt-voice-')) return id.slice('rt-voice-'.length);
+        return '';
+    }
+
+    function findLocalRealtimeMessageIndex(role, itemId) {
+        const target = String(itemId || '');
+        if (!target) return -1;
+        return state.messages.findIndex((message) => {
+            if (message?.role !== role) return false;
+            if (!message?.metadata?.local_realtime_turn && !String(message?.id || '').startsWith('rt-')) return false;
+            return realtimeMessageItemId(message) === target;
+        });
     }
 
     function structuredMessageJson(content) {
@@ -10143,27 +10161,17 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function upsertRealtimeLocalMessage(message) {
-        const comparableContent = normalizeComparableSpeech(message?.content);
         const index = state.messages.findIndex((item) => String(item.id) === String(message.id));
         if (index >= 0) {
             state.messages[index] = { ...state.messages[index], ...message };
         } else {
-            const duplicateIndex = state.messages.findIndex((item) => {
-                return item?.role === message?.role
-                    && comparableContent
-                    && normalizeComparableSpeech(item.content) === comparableContent;
-            });
-            if (duplicateIndex >= 0) {
-                const duplicate = state.messages[duplicateIndex];
-                const duplicateIsPersisted = !duplicate?.metadata?.local_realtime_turn && !String(duplicate?.id || '').startsWith('rt-');
-                if (!duplicateIsPersisted) {
-                    state.messages[duplicateIndex] = { ...duplicate, ...message };
-                    if (state.phase === 'signedIn') render();
-                    scrollChatToBottom();
-                    return;
-                }
+            const realtimeItemId = realtimeMessageItemId(message);
+            const localIndex = findLocalRealtimeMessageIndex(message?.role, realtimeItemId);
+            if (localIndex >= 0) {
+                state.messages[localIndex] = { ...state.messages[localIndex], ...message };
+            } else {
+                state.messages.push(message);
             }
-            state.messages.push(message);
         }
         if (state.phase === 'signedIn') render();
         scrollChatToBottom();
@@ -12521,20 +12529,27 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function replaceLocalUserMessage(message) {
-        const comparableContent = normalizeComparableSpeech(message?.content);
+        const realtimeItemId = realtimeMessageItemId(message);
+        if (realtimeItemId) {
+            const localRealtimeIndex = findLocalRealtimeMessageIndex('user', realtimeItemId);
+            if (localRealtimeIndex >= 0) {
+                state.messages[localRealtimeIndex] = message;
+                return;
+            }
+        }
         const reversedIndex = [...state.messages].reverse().findIndex((item) => {
             if (item?.role !== 'user') return false;
             const id = String(item.id || '');
-            const local = id.startsWith('local-') || id.startsWith('rt-user-') || item.metadata?.local_realtime_turn;
+            const local = id.startsWith('local-');
             if (!local) return false;
-            return !comparableContent || normalizeComparableSpeech(item.content) === comparableContent;
+            return true;
         });
         if (reversedIndex < 0) {
-            const duplicatePersisted = state.messages.some((item) => {
+            const existingPersistedId = state.messages.some((item) => {
                 return item?.role === 'user'
                     && String(item.id || '') === String(message?.id || '');
             });
-            if (!duplicatePersisted) state.messages.push(message);
+            if (!existingPersistedId) state.messages.push(message);
             return;
         }
         const index = state.messages.length - 1 - reversedIndex;
