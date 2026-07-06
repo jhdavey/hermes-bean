@@ -1812,12 +1812,12 @@ export function mountHeyBeanWebApp(mount) {
         return /\b(skip|no|not now|later)\b/i.test(String(value || ''));
     }
 
-    async function allowGuidedLocation(positionRequest = requestGuidedPosition()) {
+    async function allowGuidedLocation(position) {
         state.busy = true;
         state.guidedSignupError = '';
         render();
         try {
-            const city = await currentGuidedCity(positionRequest);
+            const city = await currentGuidedCityFromPosition(position);
             state.guidedSignupHomeCity = city;
             guidedSignupUser(`Shared city: ${city}`);
             await saveGuidedSignupPreferences();
@@ -1830,6 +1830,37 @@ export function mountHeyBeanWebApp(mount) {
             state.guidedSignupError = error instanceof Error ? error.message : 'I could not read your city. You can skip this and add it later in Settings.';
             render();
         }
+    }
+
+    function requestGuidedLocationFromClick() {
+        state.guidedSignupError = '';
+        if (!window.isSecureContext && window.location?.hostname !== 'localhost' && window.location?.hostname !== '127.0.0.1') {
+            state.guidedSignupError = 'Location permission only works on a secure connection. Open HeyBean over HTTPS, then try Allow location again.';
+            render();
+            return;
+        }
+        if (!navigator.geolocation) {
+            state.guidedSignupError = 'Location is not available in this browser. You can skip this and add a city later in Settings.';
+            render();
+            return;
+        }
+        state.busy = true;
+        render();
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                void allowGuidedLocation(position);
+            },
+            (error) => {
+                state.busy = false;
+                state.guidedSignupError = guidedLocationErrorMessage(error);
+                render();
+            },
+            {
+                enableHighAccuracy: false,
+                timeout: 8000,
+                maximumAge: 300000,
+            },
+        );
     }
 
     async function skipGuidedLocation() {
@@ -1869,39 +1900,21 @@ export function mountHeyBeanWebApp(mount) {
         });
     }
 
-    function requestGuidedPosition() {
-        if (!window.isSecureContext && window.location?.hostname !== 'localhost' && window.location?.hostname !== '127.0.0.1') {
-            return Promise.reject(new Error('Location permission only works on a secure connection. Open HeyBean over HTTPS, then try Allow location again.'));
+    function guidedLocationErrorMessage(error) {
+        if (error instanceof Error) return error.message;
+        if (error?.code === 1) {
+            return 'Location access was blocked. Click Allow in the browser location prompt, or use the location control next to the address bar and allow this site, then try again.';
         }
-        if (!navigator.geolocation) {
-            return Promise.reject(new Error('Location is not available in this browser. You can skip this and add a city later in Settings.'));
+        if (error?.code === 2) {
+            return 'Your browser could not determine your location. Please try Allow location again, or skip this and add a city later in Settings.';
         }
-        return new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: false,
-                timeout: 8000,
-                maximumAge: 300000,
-            });
-        });
+        if (error?.code === 3) {
+            return 'Location lookup timed out. Please try Allow location again, or skip this and add a city later in Settings.';
+        }
+        return 'I could not read your city. Please try Allow location again, or skip this and add it later in Settings.';
     }
 
-    async function currentGuidedCity(positionRequest = requestGuidedPosition()) {
-        if (!navigator.geolocation) {
-            throw new Error('Location is not available in this browser. You can skip this and add a city later in Settings.');
-        }
-        const position = await positionRequest.catch((error) => {
-            if (error instanceof Error) throw error;
-            if (error?.code === 1) {
-                throw new Error('Location is blocked for this site. Click the location control next to the address bar, choose Allow, then tap Allow location again. You can also skip this and add a city later in Settings.');
-            }
-            if (error?.code === 2) {
-                throw new Error('Your browser could not determine your location. Please try Allow location again, or skip this and add a city later in Settings.');
-            }
-            if (error?.code === 3) {
-                throw new Error('Location lookup timed out. Please try Allow location again, or skip this and add a city later in Settings.');
-            }
-            throw new Error('I could not read your city. Please try Allow location again, or skip this and add it later in Settings.');
-        });
+    async function currentGuidedCityFromPosition(position) {
         const latitude = position?.coords?.latitude;
         const longitude = position?.coords?.longitude;
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -2034,7 +2047,11 @@ export function mountHeyBeanWebApp(mount) {
     function guidedOnboardingStatusMarkup() {
         const parts = [];
         if (state.guidedSignupStep === 'location') {
-            parts.push('<div class="hb-guided-onboarding-helper">If your browser shows a location request near the address bar, click Allow to share your city.</div>');
+            parts.push(`<div class="hb-guided-onboarding-helper">${
+                state.busy
+                    ? 'Your browser should be asking for location access now. Click Allow in the prompt, or use the location control next to the address bar.'
+                    : 'When you tap Allow location, your browser should ask for permission. Click Allow to share your city.'
+            }</div>`);
         }
         if (state.guidedSignupError) {
             parts.push(`<div class="hb-guided-onboarding-error">${escapeHtml(state.guidedSignupError)}</div>`);
@@ -6145,7 +6162,7 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelectorAll('[data-guided-location]').forEach((button) => button.addEventListener('click', () => {
             if (guidedSignupInputLocked()) return;
             if (button.dataset.guidedLocation === 'allow') {
-                allowGuidedLocation(requestGuidedPosition());
+                requestGuidedLocationFromClick();
             } else {
                 skipGuidedLocation();
             }
