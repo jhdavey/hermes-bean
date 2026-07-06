@@ -9830,8 +9830,7 @@ export function mountHeyBeanWebApp(mount) {
         const previous = key ? (kioskRealtimeUserTranscriptDrafts.get(key) || '') : '';
         const draft = mergeRealtimeTranscriptDelta(previous, delta);
         if (key) kioskRealtimeUserTranscriptDrafts.set(key, draft);
-        if (realtimeUserTranscriptLooksLikeEcho(delta)) return;
-        if (realtimeAssistantOutputActive()) return;
+        if (realtimeUserTranscriptLooksLikeEcho(draft)) return;
         const hasWakePhrase = commandAfterWakePhrase(delta) !== null;
         if (kioskConversationActive && !hasWakePhrase && !realtimeTranscriptCanContinueWithoutWake(delta)) return;
         if (kioskConversationActive || hasWakePhrase) {
@@ -9852,7 +9851,6 @@ export function mountHeyBeanWebApp(mount) {
             kioskRealtimeUserTranscriptDrafts.set(key, mergeRealtimeTranscriptDelta(previous, text));
         }
         if (realtimeUserTranscriptLooksLikeEcho(text)) return;
-        if (realtimeAssistantOutputActive()) return;
         const hasWakePhrase = commandAfterWakePhrase(text) !== null;
         if (kioskConversationActive && !hasWakePhrase && !realtimeTranscriptCanContinueWithoutWake(text)) return;
         if (kioskConversationActive || hasWakePhrase) {
@@ -9909,7 +9907,7 @@ export function mountHeyBeanWebApp(mount) {
         const command = commandAfterWakePhrase(raw);
         if (!kioskConversationActive && command === null) return;
         if (kioskConversationActive && command === null && !realtimeTranscriptCanContinueWithoutWake(raw)) return;
-        showKioskHeardTranscript(raw, {
+        showKioskHeardTranscript((command ?? raw).trim(), {
             allowArmed: command !== null,
             phase: command !== null || kioskConversationActive ? 'heard' : 'armed',
             force: true,
@@ -10034,9 +10032,28 @@ export function mountHeyBeanWebApp(mount) {
             suppress_persist: kioskRealtimeSuppressNextAssistantPersist,
             ignore_function_calls: kioskRealtimeIgnoreNextFunctionCalls,
         });
-        if (!kioskRealtimeVoiceOnlyAssistant) {
+        if (kioskRealtimeVoiceOnlyAssistant) {
+            upsertRealtimeVisibleVoiceOnlyAssistant(draft, text);
+        } else {
             upsertRealtimeLocalMessage(draft);
         }
+    }
+
+    function upsertRealtimeVisibleVoiceOnlyAssistant(draft, text) {
+        const content = safeAssistantDisplayContent(conversationalMessageContent(text || draft?.content || ''));
+        if (!content) return;
+        upsertRealtimeLocalMessage({
+            ...(draft || {}),
+            id: draft?.id || `rt-voice-${Date.now()}`,
+            role: 'assistant',
+            content,
+            metadata: {
+                ...(draft?.metadata || {}),
+                local_realtime_turn: true,
+                voice_only_assistant: true,
+                suppress_persist: kioskRealtimeSuppressNextAssistantPersist,
+            },
+        });
     }
 
     function recordRealtimeSpokenSegment(text) {
@@ -10138,6 +10155,11 @@ export function mountHeyBeanWebApp(mount) {
             background_queue_allowed: backgroundQueueAllowed,
         });
         if (kioskRealtimeVoiceOnlyAssistant) {
+            if (assistantAnswered) {
+                const draft = kioskRealtimeAssistantDraft || ensureRealtimeAssistantDraft(payload?.response?.id || payload?.response_id || '');
+                draft.content = responseAssistantText;
+                upsertRealtimeVisibleVoiceOnlyAssistant(draft, responseAssistantText);
+            }
             if (hasFunctionCall) {
                 logKioskRealtimeVoiceTrace('realtime_voice_tool_calls_skipped', {
                     summary: 'Skipped realtime tool calls for a voice-only internal response.',
