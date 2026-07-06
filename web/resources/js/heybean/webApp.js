@@ -5055,7 +5055,7 @@ export function mountHeyBeanWebApp(mount) {
         const categories = categoryOptions(current);
         return `
             <label class="hb-label">Category<select class="hb-select" name="category" data-category-select>
-                <option value="" data-category-color="">None</option>
+                <option value="" data-category-color="${escapeAttr(themeAccentColor())}">None</option>
                 ${categories.map((category) => `<option value="${escapeAttr(category.name)}" data-category-color="${escapeAttr(safeColor(category.color))}" ${category.name === current ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
             </select></label>`;
     }
@@ -6718,11 +6718,13 @@ export function mountHeyBeanWebApp(mount) {
             select.innerHTML = categoryOptions(current)
                 .map((category) => `<option value="${escapeAttr(category.name)}" data-category-color="${escapeAttr(safeColor(category.color))}" ${category.name === current ? 'selected' : ''}>${escapeHtml(category.name)}</option>`)
                 .join('');
-            select.insertAdjacentHTML('afterbegin', `<option value="" data-category-color="" ${current ? '' : 'selected'}>None</option>`);
+            select.insertAdjacentHTML('afterbegin', `<option value="" data-category-color="${escapeAttr(themeAccentColor())}" ${current ? '' : 'selected'}>None</option>`);
             select.value = current;
         }
-        if (colorInput && current) {
-            colorInput.value = safeColor(selectedColor || categoryColor(current));
+        if (colorInput) {
+            colorInput.value = current
+                ? safeColor(selectedColor || categoryColor(current))
+                : themeAccentColor();
         }
         const list = panel.querySelector('[data-inline-category-list]');
         if (list) list.innerHTML = inlineCategoryRowsMarkup();
@@ -7587,9 +7589,9 @@ export function mountHeyBeanWebApp(mount) {
 
     function syncSelectedCategoryColor(event) {
         const option = event.currentTarget.selectedOptions?.[0];
-        const color = option?.dataset?.categoryColor;
+        const color = option?.dataset?.categoryColor || themeAccentColor();
         const input = event.currentTarget.closest('form')?.querySelector('input[name="color"]');
-        if (input && color) input.value = safeColor(color);
+        if (input) input.value = safeColor(color);
     }
 
     async function deleteModalItem(event) {
