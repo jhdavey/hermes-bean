@@ -20,13 +20,15 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
     public function test_web_resource_editors_include_workspace_picker_for_tasks_reminders_and_events(): void
     {
         $appJs = $this->appJsSource();
+        $appCss = $this->appCssSource();
 
         $this->assertStringContainsString('workspaceConnectionsMarkup(kind, item, workspaceId, editing)', $appJs);
         $this->assertStringContainsString('sync_to_workspace_ids: syncTo', $appJs);
-        $this->assertStringContainsString('if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);', $appJs);
-        $this->assertStringContainsString('name="syncWorkspaceIds"', $appJs);
-        $this->assertStringContainsString('Also assign to', $appJs);
-        $this->assertStringContainsString('reminderRecipientOptionsMarkup(sourceWorkspaceId, linked, item)', $appJs);
+        $this->assertStringContainsString('selectedPrimaryWorkspaceId(form, item)', $appJs);
+        $this->assertStringContainsString('name="workspaceAssignmentIds"', $appJs);
+        $this->assertStringContainsString('hb-workspace-assignment-list', $appCss);
+        $this->assertStringNotContainsString('Also assign to', $appJs);
+        $this->assertStringContainsString('reminderRecipientOptionsMarkup(selectedWorkspaceIds, item)', $appJs);
         $this->assertStringContainsString('name="notificationRecipients"', $appJs);
         $this->assertStringContainsString('notification_recipients_by_workspace: recipientsByWorkspace', $appJs);
     }

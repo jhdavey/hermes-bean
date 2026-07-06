@@ -1140,6 +1140,22 @@
     gap: 2px;
 }
 
+.hb-workspace-assignment-list {
+    gap: 4px;
+    margin-top: 0;
+}
+
+.hb-workspace-assignment-list .hb-switch-row {
+    min-height: 38px;
+    align-items: center;
+    border-top: 0;
+    padding: 6px 0;
+}
+
+.hb-workspace-assignment-list .hb-switch-row input:disabled {
+    cursor: default;
+}
+
 .hb-reminder-recipient-list {
     gap: 10px;
 }

@@ -5096,49 +5096,44 @@ export function mountHeyBeanWebApp(mount) {
         const linked = new Set(normalizeList(item?.linked_workspace_ids || item?.linkedWorkspaceIds).map(String));
         const sourceWorkspaceId = String(workspaceId || currentWorkspaceId() || '');
         const allWorkspaces = workspaces();
-        const sourceWorkspace = allWorkspaces.find((workspace) => String(workspace.id) === sourceWorkspaceId);
-        const title = kind === 'event' ? 'Connections' : 'Workspaces';
-        const heading = kind === 'event'
-            ? ''
-            : `<div class="hb-form-section-head">
-                    <strong>${title}</strong>
-                    <span>Choose where this item belongs</span>
-                </div>`;
+        const selectedWorkspaceIds = workspaceAssignmentIds(sourceWorkspaceId, linked);
+        const sourceWorkspace = allWorkspaces.find((workspace) => String(workspace.id) === String(selectedWorkspaceIds[0] || sourceWorkspaceId));
         return `
             <section class="hb-form-section hb-event-connections hb-workspace-picker" data-workspace-picker>
-                ${heading}
                 <div class="hb-form-section-body">
-                <label class="hb-label">Primary workspace
-                    <select class="hb-select" name="workspaceId" data-primary-workspace-select ${editing ? 'disabled' : ''}>
-                        ${allWorkspaces.map((workspace) => `<option value="${escapeAttr(workspace.id)}" ${String(workspace.id) === sourceWorkspaceId ? 'selected' : ''}>${escapeHtml(workspace.name || 'Workspace')}</option>`).join('')}
-                    </select>
-                </label>
-                ${editing ? `<input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}"><p class="hb-item-meta">Saved in ${escapeHtml(sourceWorkspace?.name || 'this workspace')}.</p>` : ''}
-                <div data-sync-workspace-options>${workspaceSyncOptionsMarkup(sourceWorkspaceId, linked)}</div>
-                ${kind === 'reminder' ? `<div data-reminder-recipient-options>${reminderRecipientOptionsMarkup(sourceWorkspaceId, linked, item)}</div>` : ''}
+                <input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}">
+                <div class="hb-option-list hb-workspace-assignment-list" aria-label="Workspaces">
+                    ${workspaceAssignmentRowsMarkup(allWorkspaces, selectedWorkspaceIds, sourceWorkspaceId, editing)}
+                </div>
+                ${kind === 'reminder' ? `<div data-reminder-recipient-options>${reminderRecipientOptionsMarkup(selectedWorkspaceIds, item)}</div>` : ''}
                 ${kind === 'event' ? `<div data-google-export-options>${googleEventConnectionMarkup(item, sourceWorkspace)}</div><div data-outlook-export-options>${outlookEventConnectionMarkup(item, sourceWorkspace)}</div>` : ''}
                 </div>
             </section>`;
     }
 
-    function workspaceSyncOptionsMarkup(sourceWorkspaceId, linked = new Set()) {
-        const otherWorkspaces = workspaces().filter((workspace) => String(workspace.id) !== String(sourceWorkspaceId));
-        return otherWorkspaces.length ? `<div class="hb-label">Also assign to
-            <div class="hb-option-list">
-                ${otherWorkspaces.map((workspace) => `<label class="hb-switch-row"><input type="checkbox" name="syncWorkspaceIds" value="${escapeAttr(workspace.id)}" ${linked.has(String(workspace.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(workspace.name || 'Workspace')}</strong><small>${escapeHtml(workspace.type || workspace.kind || 'workspace')}</small></span></label>`).join('')}
-            </div>
-        </div>` : '<p class="hb-item-meta">No other workspaces connected to this account.</p>';
+    function workspaceAssignmentIds(sourceWorkspaceId, linked = new Set()) {
+        return Array.from(new Set([
+            sourceWorkspaceId || currentWorkspaceId(),
+            ...Array.from(linked || []),
+        ].map(String).filter(Boolean)));
     }
 
-    function reminderRecipientOptionsMarkup(sourceWorkspaceId, syncWorkspaceIds = new Set(), item = null, selectedByWorkspace = null) {
-        const workspaceIds = Array.from(new Set([
-            String(sourceWorkspaceId || currentWorkspaceId() || ''),
-            ...Array.from(syncWorkspaceIds || []).map(String),
-        ].filter(Boolean)));
+    function workspaceAssignmentRowsMarkup(allWorkspaces, selectedWorkspaceIds = [], sourceWorkspaceId = '', editing = false) {
+        const selected = new Set(selectedWorkspaceIds.map(String));
+        return allWorkspaces.map((workspace) => {
+            const workspaceId = String(workspace.id || '');
+            const checked = selected.has(workspaceId);
+            const locked = editing && workspaceId === String(sourceWorkspaceId || '');
+            return `<label class="hb-switch-row"><input type="checkbox" name="workspaceAssignmentIds" value="${escapeAttr(workspace.id)}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''}> <span><strong>${escapeHtml(workspace.name || 'Workspace')}</strong></span></label>`;
+        }).join('') || '<p class="hb-item-meta">No workspaces available.</p>';
+    }
+
+    function reminderRecipientOptionsMarkup(workspaceIds = [], item = null, selectedByWorkspace = null) {
+        const assignmentIds = Array.from(new Set(normalizeList(workspaceIds).map(String).filter(Boolean)));
         const savedSelections = selectedByWorkspace || reminderRecipientsByWorkspace(item);
         const hasSavedSelections = Boolean(item && Object.keys(savedSelections).length);
         const currentUserId = String(state.user?.id || '');
-        const groups = workspaceIds.map((workspaceId) => {
+        const groups = assignmentIds.map((workspaceId) => {
             const workspace = findWorkspace(workspaceId);
             const members = workspaceMembers(workspace);
             if (!workspace || !members.length) return '';
@@ -6321,8 +6316,7 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelector('[data-preview-tts-voice]')?.addEventListener('click', previewSelectedTtsVoice);
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventTimeInputs);
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventLocationInput);
-        mount.querySelectorAll('[data-primary-workspace-select]').forEach((select) => select.addEventListener('change', handlePrimaryWorkspaceChange));
-        mount.querySelectorAll('input[name="syncWorkspaceIds"]').forEach((input) => input.addEventListener('change', handleSyncWorkspaceChange));
+        mount.querySelectorAll('input[name="workspaceAssignmentIds"]').forEach((input) => input.addEventListener('change', handleWorkspaceAssignmentChange));
         mount.querySelectorAll('[data-recurrence-select]').forEach((select) => {
             select.addEventListener('change', () => toggleRecurrenceFields(select.closest('form')));
             toggleRecurrenceFields(select.closest('form'));
@@ -6403,26 +6397,30 @@ export function mountHeyBeanWebApp(mount) {
         element.classList.toggle('hb-tts-preview-status-success', tone === 'success');
     }
 
-    function handlePrimaryWorkspaceChange(event) {
-        const select = event.currentTarget;
-        const picker = select.closest('[data-workspace-picker]');
-        if (!picker) return;
-        const sourceWorkspaceId = String(select.value || '');
-        const checkedSyncIds = new Set(Array.from(picker.querySelectorAll('input[name="syncWorkspaceIds"]:checked')).map((input) => String(input.value)).filter((id) => id !== sourceWorkspaceId));
-        const syncContainer = picker.querySelector('[data-sync-workspace-options]');
-        if (syncContainer) syncContainer.innerHTML = workspaceSyncOptionsMarkup(sourceWorkspaceId, checkedSyncIds);
-
-        const workspace = findWorkspace(sourceWorkspaceId);
-        const googleContainer = picker.querySelector('[data-google-export-options]');
-        if (googleContainer) googleContainer.innerHTML = googleEventConnectionMarkup(null, workspace);
-        const outlookContainer = picker.querySelector('[data-outlook-export-options]');
-        if (outlookContainer) outlookContainer.innerHTML = outlookEventConnectionMarkup(null, workspace);
-        refreshReminderRecipientOptions(select.closest('form'));
-        syncContainer?.querySelectorAll('input[name="syncWorkspaceIds"]').forEach((input) => input.addEventListener('change', handleSyncWorkspaceChange));
+    function handleWorkspaceAssignmentChange(event) {
+        const input = event.currentTarget;
+        const form = input.closest('form');
+        ensureWorkspaceAssignmentSelected(form, input);
+        refreshEventWorkspaceOptions(form);
+        refreshReminderRecipientOptions(form);
     }
 
-    function handleSyncWorkspaceChange(event) {
-        refreshReminderRecipientOptions(event.currentTarget.closest('form'));
+    function ensureWorkspaceAssignmentSelected(form, fallbackInput = null) {
+        if (!form) return;
+        const checked = form.querySelectorAll('input[name="workspaceAssignmentIds"]:checked');
+        if (checked.length || !fallbackInput) return;
+        fallbackInput.checked = true;
+    }
+
+    function refreshEventWorkspaceOptions(form) {
+        if (!form || form.dataset.modalForm !== 'event') return;
+        const picker = form.querySelector('[data-workspace-picker]');
+        if (!picker) return;
+        const workspace = findWorkspace(selectedPrimaryWorkspaceId(form, state.modal?.item));
+        const googleContainer = picker.querySelector('[data-google-export-options]');
+        if (googleContainer) googleContainer.innerHTML = googleEventConnectionMarkup(state.modal?.item, workspace);
+        const outlookContainer = picker.querySelector('[data-outlook-export-options]');
+        if (outlookContainer) outlookContainer.innerHTML = outlookEventConnectionMarkup(state.modal?.item, workspace);
     }
 
     function refreshReminderRecipientOptions(form) {
@@ -6430,9 +6428,7 @@ export function mountHeyBeanWebApp(mount) {
         const container = form.querySelector('[data-reminder-recipient-options]');
         const picker = form.querySelector('[data-workspace-picker]');
         if (!container || !picker) return;
-        const sourceWorkspaceId = String(form.querySelector('[data-primary-workspace-select]')?.value || form.elements.workspaceId?.value || currentWorkspaceId() || '');
-        const checkedSyncIds = new Set(Array.from(picker.querySelectorAll('input[name="syncWorkspaceIds"]:checked')).map((input) => String(input.value)).filter((id) => id !== sourceWorkspaceId));
-        container.innerHTML = reminderRecipientOptionsMarkup(sourceWorkspaceId, checkedSyncIds, state.modal?.item, selectedReminderRecipientsByWorkspace(form));
+        container.innerHTML = reminderRecipientOptionsMarkup(selectedWorkspaceAssignmentIds(form), state.modal?.item, selectedReminderRecipientsByWorkspace(form));
     }
 
     function toggleRecurrenceFields(form) {
@@ -7171,7 +7167,8 @@ export function mountHeyBeanWebApp(mount) {
     function itemSaveRequest(kind, item, data, form) {
         const color = data.color || themeAccentColor();
         if (kind === 'task') {
-            const syncTo = selectedSyncWorkspaceIds(form);
+            const workspaceId = selectedPrimaryWorkspaceId(form, item);
+            const syncTo = selectedSyncWorkspaceIds(form, workspaceId);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const parentTaskId = data.parentTaskId || taskParentId(item);
             const recurrence = recurrenceFormData(form, data);
@@ -7190,14 +7187,15 @@ export function mountHeyBeanWebApp(mount) {
                 },
                 sync_to_workspace_ids: syncTo,
             };
-            if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
+            if (!item && workspaceId) body.workspace_id = Number(workspaceId);
             return {
                 body,
                 path: item ? `/tasks/${item.id}` : '/tasks',
                 options: { method: item ? 'PATCH' : 'POST', body },
             };
         } else if (kind === 'reminder') {
-            const syncTo = selectedSyncWorkspaceIds(form);
+            const workspaceId = selectedPrimaryWorkspaceId(form, item);
+            const syncTo = selectedSyncWorkspaceIds(form, workspaceId);
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const recurrence = recurrenceFormData(form, data);
             const recipientsByWorkspace = selectedReminderRecipientsByWorkspace(form);
@@ -7216,14 +7214,15 @@ export function mountHeyBeanWebApp(mount) {
                 },
                 sync_to_workspace_ids: syncTo,
             };
-            if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
+            if (!item && workspaceId) body.workspace_id = Number(workspaceId);
             return {
                 body,
                 path: item ? `/reminders/${item.id}` : '/reminders',
                 options: { method: item ? 'PATCH' : 'POST', body },
             };
         } else if (kind === 'event') {
-            const syncTo = selectedSyncWorkspaceIds(form);
+            const workspaceId = selectedPrimaryWorkspaceId(form, item);
+            const syncTo = selectedSyncWorkspaceIds(form, workspaceId);
             const allDay = form.elements.allDay?.checked || false;
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const generatedOccurrence = eventIsGeneratedOccurrence(item);
@@ -7264,7 +7263,7 @@ export function mountHeyBeanWebApp(mount) {
                 sync_to_workspace_ids: syncTo,
                 metadata,
             };
-            if (!item && data.workspaceId) body.workspace_id = Number(data.workspaceId);
+            if (!item && workspaceId) body.workspace_id = Number(workspaceId);
             return {
                 body,
                 eventReminderMinutesBefore: form.elements.createEventReminder?.checked ? Number(data.eventReminderMinutesBefore || 15) : null,
@@ -7533,10 +7532,24 @@ export function mountHeyBeanWebApp(mount) {
         };
     }
 
-    function selectedSyncWorkspaceIds(form) {
-        return Array.from(form.querySelectorAll('input[name="syncWorkspaceIds"]:checked'))
+    function selectedWorkspaceAssignmentIds(form) {
+        return Array.from(form?.querySelectorAll('input[name="workspaceAssignmentIds"]:checked') || [])
             .map((input) => Number(input.value))
             .filter(Boolean);
+    }
+
+    function selectedPrimaryWorkspaceId(form, item = null) {
+        const selected = selectedWorkspaceAssignmentIds(form).map(String);
+        const savedWorkspaceId = String(item?.workspace_id || item?.workspaceId || '');
+        if (savedWorkspaceId && selected.includes(savedWorkspaceId)) return savedWorkspaceId;
+        const defaultWorkspaceId = String(currentWorkspaceId() || '');
+        if (defaultWorkspaceId && selected.includes(defaultWorkspaceId)) return defaultWorkspaceId;
+        return selected[0] || defaultWorkspaceId || savedWorkspaceId || '';
+    }
+
+    function selectedSyncWorkspaceIds(form, primaryWorkspaceId = selectedPrimaryWorkspaceId(form, state.modal?.item)) {
+        return selectedWorkspaceAssignmentIds(form)
+            .filter((workspaceId) => String(workspaceId) !== String(primaryWorkspaceId || ''));
     }
 
     function selectedReminderRecipientsByWorkspace(form) {
