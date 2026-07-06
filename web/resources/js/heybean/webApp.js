@@ -609,10 +609,13 @@ export function mountHeyBeanWebApp(mount) {
             </div>`;
     }
 
-    async function loadSignedIn() {
+    async function loadSignedIn(options = {}) {
+        const deferInitialRender = options.deferInitialRender === true;
         state.phase = 'loading';
         state.dashboardDataLoading = false;
-        render();
+        if (!deferInitialRender) {
+            render();
+        }
         try {
             const user = await api('/auth/me');
             let refreshError = null;
@@ -640,7 +643,9 @@ export function mountHeyBeanWebApp(mount) {
             if (state.selected === 'admin') {
                 loadAdminUsage();
             }
-            render();
+            if (!deferInitialRender) {
+                render();
+            }
             startDashboardChangeFeed();
             startKioskVoiceMode({ requestPermission: false });
             state.session = null;
@@ -1895,9 +1900,10 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupStep = 'tour';
         state.busy = true;
         state.guidedSignupError = '';
+        state.phase = 'loading';
         render();
         const pendingSubscription = userNeedsSignupPaywall(state.user);
-        await loadSignedIn();
+        await loadSignedIn({ deferInitialRender: true });
         state.busy = false;
         state.onboardingTourPendingSubscription = pendingSubscription;
         activateOnboardingTourStep(0);
@@ -15044,6 +15050,10 @@ export function mountHeyBeanWebApp(mount) {
         window.requestAnimationFrame(() => {
             const thread = mount.querySelector('[data-guided-thread]') || mount.querySelector('.hb-guided-onboarding-thread');
             if (!thread) return;
+            if (state.phase === 'subscription') {
+                thread.scrollTop = 0;
+                return;
+            }
             thread.scrollTop = thread.scrollHeight;
             const input = mount.querySelector('.hb-guided-onboarding-input');
             input?.focus?.({ preventScroll: true });
