@@ -27,6 +27,53 @@ Future<void> openNotesFromBottomNav(WidgetTester tester) async {
 }
 
 void main() {
+  test('shared voice contract matches Flutter realtime helpers', () {
+    final file = File('../shared/voice_contract.json').existsSync()
+        ? File('../shared/voice_contract.json')
+        : File('shared/voice_contract.json');
+    final contract =
+        jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    final wake = contract['wake'] as Map<String, dynamic>;
+    for (final item in wake['accepted'] as List<dynamic>) {
+      final row = item as Map<String, dynamic>;
+      expect(
+        BeanRealtimeConversation.realtimeCommandAfterWakePhraseForTesting(
+          row['transcript'] as String,
+        ),
+        row['command'] as String,
+        reason: row['transcript'] as String,
+      );
+    }
+    for (final transcript in wake['rejected'] as List<dynamic>) {
+      expect(
+        BeanRealtimeConversation.realtimeCommandAfterWakePhraseForTesting(
+          transcript as String,
+        ),
+        isNull,
+        reason: transcript,
+      );
+    }
+
+    for (final item in contract['intent'] as List<dynamic>) {
+      final row = item as Map<String, dynamic>;
+      final transcript = row['transcript'] as String;
+      expect(
+        BeanRealtimeConversation.realtimeVoiceCommandNeedsAgentWorkForTesting(
+          transcript,
+        ),
+        row['needsAgentWork'] as bool,
+        reason: '$transcript needsAgentWork',
+      );
+      expect(
+        BeanRealtimeConversation.realtimeVoiceCommandRequiresBackgroundWorkForTesting(
+          transcript,
+        ),
+        row['requiresBackgroundWork'] as bool,
+        reason: '$transcript requiresBackgroundWork',
+      );
+    }
+  });
+
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     HeyBeanTheme.useTheme('green', brightness: Brightness.light);

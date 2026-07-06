@@ -18,6 +18,7 @@ import {
     themeModes,
     themeModesByKey,
 } from './config.js';
+import { voiceTurnNeedsCompletionWait } from './voiceTurnContract.js';
 
 export function mountHeyBeanWebApp(mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
@@ -184,7 +185,6 @@ export function mountHeyBeanWebApp(mount) {
     let kioskAutoCloseTimer = 0;
     let kioskHeardTimer = 0;
     let kioskConversationTimer = 0;
-    let kioskBridgeTimer = 0;
     let kioskMicrophoneReady = false;
     let kioskPreferredAudioDeviceId = localStorage.getItem('heybean-preferred-audio-input') || '';
     let kioskAudioUnlocked = false;
@@ -2197,13 +2197,12 @@ export function mountHeyBeanWebApp(mount) {
                 ${registry.openai_available === false || registry.openaiAvailable === false ? `<div class="hb-admin-model-note">Using curated model options. ${escapeHtml(registry.error || '')}</div>` : ''}
                 <div class="hb-admin-settings-grid">
                     ${adminModelSelectMarkup('main_model', models.main_model || models.mainModel)}
-                    ${adminModelSelectMarkup('quick_voice_model', models.quick_voice_model || models.quickVoiceModel)}
                     ${adminModelSelectMarkup('realtime_model', models.realtime_model || models.realtimeModel)}
                     ${adminModelSelectMarkup('external_lookup_model', models.external_lookup_model || models.externalLookupModel)}
                 </div>
                 <div class="hb-admin-settings-grid hb-admin-kill-grid">
                     ${adminSwitchMarkup('bean_chat_enabled', 'Bean chat enabled', 'Pause all Bean text/background requests immediately.', settingValue(killSwitches.bean_chat_enabled || killSwitches.beanChatEnabled) !== false)}
-                    ${adminSwitchMarkup('bean_voice_enabled', 'Bean voice enabled', 'Pause realtime voice, quick voice replies, and TTS immediately.', settingValue(killSwitches.bean_voice_enabled || killSwitches.beanVoiceEnabled) !== false)}
+                    ${adminSwitchMarkup('bean_voice_enabled', 'Bean voice enabled', 'Pause realtime voice and TTS immediately.', settingValue(killSwitches.bean_voice_enabled || killSwitches.beanVoiceEnabled) !== false)}
                 </div>
                 <label class="hb-admin-apply-row">
                     <input type="checkbox" name="apply_main_model_to_profiles">
@@ -2424,7 +2423,6 @@ export function mountHeyBeanWebApp(mount) {
     function modelSettingLabel(name) {
         return {
             main_model: 'Main Bean reasoning/chat',
-            quick_voice_model: 'Quick voice response',
             realtime_model: 'Realtime voice',
             external_lookup_model: 'External lookup',
         }[name] || name;
@@ -6945,7 +6943,6 @@ export function mountHeyBeanWebApp(mount) {
                     body: {
                         model_settings: {
                             main_model: value('main_model'),
-                            quick_voice_model: value('quick_voice_model'),
                             realtime_model: value('realtime_model'),
                             external_lookup_model: value('external_lookup_model'),
                         },
@@ -8232,7 +8229,7 @@ export function mountHeyBeanWebApp(mount) {
                 state.activity = normalizeList(result.events).length ? result.events : state.activity;
                 state.chatRunState = 'Ready';
                 await refreshOnly(false);
-                return { result, assistantContent: '' };
+                return { result, assistantContent: '', clientRequestId };
             }
             state.session = result.session || state.session;
             state.activity = normalizeList(result.events).length ? result.events : state.activity;
@@ -8275,7 +8272,7 @@ export function mountHeyBeanWebApp(mount) {
                 if (recovered) {
                     result = recovered.result;
                     assistantContent = recovered.assistantContent || '';
-                    return recovered;
+                    return { ...recovered, clientRequestId };
                 }
                 assistantContent = friendlyError(error, 'send that message');
                 state.error = assistantContent;
@@ -8302,7 +8299,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
             scrollChatToBottom();
         }
-        return { result, assistantContent };
+        return { result, assistantContent, clientRequestId };
     }
 
     async function recoverChatFailureFromServer({ sessionId, clientRequestId, content, requestId }) {
@@ -11212,12 +11209,10 @@ export function mountHeyBeanWebApp(mount) {
         window.clearTimeout(kioskConversationTimer);
         window.clearTimeout(kioskCommandTimer);
         window.clearTimeout(kioskHeardTimer);
-        window.clearTimeout(kioskBridgeTimer);
         window.clearTimeout(kioskRealtimeResponseTimer);
         kioskConversationTimer = 0;
         kioskCommandTimer = 0;
         kioskHeardTimer = 0;
-        kioskBridgeTimer = 0;
         kioskRealtimeResponseTimer = 0;
         clearRealtimeToolFallback();
         kioskConversationActive = false;
@@ -11291,103 +11286,146 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
-        const quickReplyGeneration = ++kioskQuickReplyGeneration;
-        const turnStartedAt = Date.now();
-        const spokenSegments = [];
-        const voiceTurn = { lastSpeech: Promise.resolve(false) };
+        const turnGeneration = ++kioskQuickReplyGeneration;
         const likelyNeedsAgentWork = voiceCommandNeedsAgentWork(content);
         const wantsDetailedChat = voiceCommandWantsDetailedChat(content);
         setKioskVoiceStatus('working', 'thinking');
         logKioskRealtimeVoiceTrace('web_voice_turn_started', {
-            summary: 'Web voice turn started.',
+            summary: 'Web voice turn started from wake transcript.',
             user_content: content,
             likely_needs_agent_work: likelyNeedsAgentWork,
             wants_detailed_chat: wantsDetailedChat,
+            primary_runtime: 'realtime',
         });
-        const localQuickReply = localKioskVoiceQuickReply(content);
-        const quickReplyTask = localQuickReply
-            ? Promise.resolve(localQuickReply)
-            : fetchKioskQuickReply(content, quickReplyGeneration);
-        const quickReply = localQuickReply || (likelyNeedsAgentWork
-            ? await timeoutPromise(quickReplyTask, 450, null)
-            : await quickReplyTask);
-        const quickReplyText = quickReply?.text || fallbackKioskQuickReply(content, likelyNeedsAgentWork);
-        const quickReplySource = quickReply?.local ? 'client_dashboard' : (quickReply?.text ? 'model' : (quickReplyText ? 'client_fallback' : 'none'));
-        const turnContract = kioskVoiceTurnContract(quickReply, quickReplyText, likelyNeedsAgentWork, wantsDetailedChat);
-        const shouldContinueAgent = turnContract.shouldContinueAgent;
-        const allowLateQuickReply = quickReplySource === 'none' && likelyNeedsAgentWork;
-        let finalResponseReady = false;
-        let quickReplySpeech = quickReplyText
-            ? speakKioskVoiceSegment(quickReplyText, quickReplyGeneration, spokenSegments).then((spoken) => {
-                logKioskRealtimeVoiceTrace('web_voice_first_speech', {
-                    summary: 'Web voice first speech finished.',
-                    user_content: content,
-                    speech_source: quickReplySource,
-                    elapsed_ms: Date.now() - turnStartedAt,
-                    spoken,
-                    text: quickReplyText,
-                });
-                return spoken;
-            })
-            : Promise.resolve(false);
-        trackKioskSpeechThenWorking(quickReplySpeech, quickReplyGeneration, () => finalResponseReady);
-        voiceTurn.lastSpeech = quickReplySpeech;
-        if (allowLateQuickReply) {
-            quickReplyTask.then((lateQuickReply) => {
-                const lateQuickReplyText = lateQuickReply?.text || '';
-                if (!lateQuickReplyText || finalResponseReady) return false;
-                quickReplySpeech = speakKioskVoiceSegment(lateQuickReplyText, quickReplyGeneration, spokenSegments);
-                trackKioskSpeechThenWorking(quickReplySpeech, quickReplyGeneration, () => finalResponseReady);
-                voiceTurn.lastSpeech = quickReplySpeech;
-                return quickReplySpeech;
-            });
-        }
 
-        if (!shouldContinueAgent) {
-            startKioskBargeInListening();
-            appendKioskLocalVoiceExchange(content, quickReplyText);
-            try {
-                await quickReplySpeech;
-            } finally {
-                stopKioskBargeInListening();
-            }
-            if (!kioskConversationActive) {
-                restartKioskVoiceListeningSoon(650);
-                return;
-            }
-            setKioskVoiceStatus('listening', 'listening');
-            armKioskConversationTimeout();
-            restartKioskVoiceListeningSoon(1200);
+        if (await submitKioskRealtimeTextCommand(content)) {
             return;
         }
 
-        startKioskBargeInListening();
-        const bridgeReply = runKioskBridgeReplies(
-            content,
-            quickReplyGeneration,
-            spokenSegments,
-            turnStartedAt,
-            () => finalResponseReady,
-            voiceTurn,
-        );
-        try {
-            const response = await sendChatContent(content, {
-                voiceQuickReply: quickReplyText,
-                voiceQuickReplyPending: !quickReplyText,
-                voiceQuickReplyMode: turnContract.quickReplyMode,
-                voiceDetailedChat: wantsDetailedChat,
-                onAgentResult: () => {
-                    finalResponseReady = true;
-                    bridgeReply.cancel();
-                },
+        logKioskRealtimeVoiceTrace('web_voice_realtime_fallback_to_chat', {
+            summary: 'Realtime voice submit failed; routing command through chat without quick reply.',
+            user_content: content,
+        });
+        await fallbackKioskVoiceChatCommand(content, turnGeneration, { wantsDetailedChat });
+    }
+
+    async function submitKioskRealtimeTextCommand(content) {
+        const cleanContent = String(content || '').replace(/\s+/g, ' ').trim();
+        if (!cleanContent || !state.kioskVoiceEnabled) return false;
+        setKioskVoiceStatus('working', 'Bean is waking up');
+        if (!kioskRealtimeConnected()) {
+            const started = await startKioskRealtimeVoiceMode({ requestPermission: false });
+            if (!started) return false;
+        }
+        if (!await waitForKioskRealtimeConnected()) return false;
+        if (!await refreshRealtimeDashboardContext('web_voice_text_submit').catch(() => false)) {
+            logKioskRealtimeVoiceTrace('dashboard_context_pre_response_failure', {
+                summary: 'Realtime dashboard context refresh failed before web voice text submit.',
+                user_content: cleanContent,
             });
-            finalResponseReady = true;
-            bridgeReply.cancel();
-            await quickReplySpeech;
-            await voiceTurn.lastSpeech;
-            await bridgeReply.promise;
-            kioskQuickReplyGeneration += 1;
+        }
+        const dataChannel = kioskRealtime?.dataChannel;
+        if (!kioskRealtimeConnected() || dataChannel?.readyState !== 'open') return false;
+
+        beginKioskConversation();
+        kioskRealtimeAwaitingFollowup = false;
+        window.clearTimeout(kioskConversationTimer);
+        kioskConversationTimer = 0;
+
+        const itemId = `web-voice-${Date.now()}`;
+        kioskRealtimePendingUser = {
+            itemId,
+            content: cleanContent,
+            startedAt: Date.now(),
+            persisted: false,
+        };
+        kioskRealtimeCurrentUserTurn = { ...kioskRealtimePendingUser };
+        kioskRealtimeWakeContinuationUntil = Date.now() + realtimeTurnDebounceForContent(cleanContent) + 500;
+        showKioskHeardTranscript(cleanContent, {
+            allowArmed: true,
+            phase: 'heard',
+            force: true,
+            holdMs: kioskRealtimeTurnDebounceMs + 900,
+        });
+        upsertRealtimeLocalMessage({
+            id: `rt-user-${itemId}`,
+            role: 'user',
+            content: cleanContent,
+            metadata: { local_realtime_turn: true, web_wake_transcript: true },
+        });
+        try {
+            dataChannel.send(JSON.stringify({
+                type: 'conversation.item.create',
+                item: {
+                    id: itemId,
+                    type: 'message',
+                    role: 'user',
+                    content: [{
+                        type: 'input_text',
+                        text: cleanContent,
+                    }],
+                },
+            }));
+        } catch (error) {
+            reportKioskRealtimeIssue('web_voice_text_item_send_failed', {
+                message: error?.message || '',
+                data_channel_state: dataChannel?.readyState || '',
+            });
+            return false;
+        }
+        if (realtimeBackgroundWorkPending() && realtimeTranscriptLooksLikeStatusCheck(cleanContent)) {
+            speakKioskAcknowledgement("I'm still working on that.", {
+                shouldPlay: () => kioskConversationActive && realtimeBackgroundWorkPending(),
+            }).catch(() => {});
+            armKioskConversationTimeout(30000);
+            return true;
+        }
+        if (realtimeCommandShouldQueueImmediately(cleanContent)) {
+            queueImmediateRealtimeBackgroundWork(cleanContent);
+            return true;
+        }
+        scheduleRealtimeResponseCreate({ delayMs: Math.min(1200, realtimeTurnDebounceForContent(cleanContent)) });
+        return true;
+    }
+
+    async function waitForKioskRealtimeConnected(timeoutMs = 9000) {
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < timeoutMs) {
+            if (kioskRealtimeConnected()) return true;
+            await sleep(120);
+        }
+        reportKioskRealtimeIssue('web_voice_realtime_connect_timeout', {
+            timeout_ms: timeoutMs,
+            data_channel_state: kioskRealtime?.dataChannel?.readyState || '',
+            connection_state: kioskRealtime?.peerConnection?.connectionState || '',
+            ice_connection_state: kioskRealtime?.peerConnection?.iceConnectionState || '',
+        });
+        return false;
+    }
+
+    async function fallbackKioskVoiceChatCommand(content, generation, options = {}) {
+        const cleanContent = String(content || '').trim();
+        if (!cleanContent) return;
+        try {
+            let response = await sendChatContent(cleanContent, {
+                voiceQuickReplyPending: true,
+                voiceQuickReplyMode: 'pending_background',
+                voiceDetailedChat: Boolean(options.wantsDetailedChat),
+            });
             if (!kioskConversationActive) return;
+            if (voiceTurnNeedsCompletionWait({
+                quickReplyText: '',
+                assistantContent: response?.assistantContent || '',
+                resultStatus: response?.result?.status || '',
+            })) {
+                const completed = await waitForKioskVoiceAgentResult({
+                    sessionId: response?.result?.session?.id || state.session?.id,
+                    clientRequestId: response?.clientRequestId,
+                    content: cleanContent,
+                    generation,
+                });
+                if (completed) response = completed;
+            }
             const assistantContent = response?.assistantContent || '';
             if (!assistantContent) {
                 if (kioskIntentionalCancelActive) {
@@ -11396,16 +11434,18 @@ export function mountHeyBeanWebApp(mount) {
                     restartKioskVoiceListeningSoon(650);
                     return;
                 }
-                setKioskVoiceStatus('error', 'no response');
-                await sleep(1200);
-            } else {
-                const finalVoice = finalVoiceForTurn(content, quickReplyText, assistantContent, {
-                    wantsDetailedChat,
-                    quickReplyMode: turnContract.quickReplyMode,
+                const stillPending = voiceTurnNeedsCompletionWait({
+                    quickReplyText: '',
+                    assistantContent: '',
+                    resultStatus: response?.result?.status || '',
                 });
-                if (finalVoice.suppressFinal) {
-                    removeLatestAssistantMessageIfDuplicate(assistantContent, quickReplyText);
-                }
+                setKioskVoiceStatus(stillPending ? 'working' : 'error', stillPending ? 'working' : 'no response');
+                await sleep(stillPending ? 600 : 1200);
+            } else {
+                const finalVoice = finalVoiceForTurn(cleanContent, '', assistantContent, {
+                    wantsDetailedChat: Boolean(options.wantsDetailedChat),
+                    quickReplyMode: 'pending_background',
+                });
                 const spoken = finalVoice.text
                     ? await speakKioskResponse(finalVoice.text, finalVoice.handoff ? {} : { pendingMessage: 'working...' })
                     : true;
@@ -11419,12 +11459,8 @@ export function mountHeyBeanWebApp(mount) {
                 }
             }
         } catch (error) {
-            finalResponseReady = true;
-            bridgeReply.cancel();
             setKioskVoiceStatus('error', friendlyError(error, 'send that message'));
             await sleep(1800);
-        } finally {
-            stopKioskBargeInListening();
         }
         if (!kioskConversationActive) {
             restartKioskVoiceListeningSoon(650);
@@ -11433,6 +11469,65 @@ export function mountHeyBeanWebApp(mount) {
         setKioskVoiceStatus('listening', 'listening');
         armKioskConversationTimeout();
         restartKioskVoiceListeningSoon(1200);
+    }
+
+    function kioskVoiceAgentResultStillPending(result) {
+        return ['queued', 'running', 'processing'].includes(String(result?.status || '').toLowerCase());
+    }
+
+    async function waitForKioskVoiceAgentResult({ sessionId, clientRequestId, content, generation }) {
+        const requestKey = String(clientRequestId || '').trim();
+        if (!sessionId || !requestKey) return null;
+        for (let attempt = 0; attempt < 18; attempt += 1) {
+            if (!kioskConversationActive || generation !== kioskQuickReplyGeneration) return null;
+            await sleep(attempt < 4 ? 900 : 1400);
+            if (!kioskConversationActive || generation !== kioskQuickReplyGeneration) return null;
+            try {
+                const lookup = await api(`/assistant/sessions/${sessionId}/runs/lookup?client_request_id=${encodeURIComponent(requestKey)}`);
+                state.session = lookup.session || state.session;
+                state.activity = normalizeList(lookup.events).length ? lookup.events : state.activity;
+                if (lookup.user_message) {
+                    state.activeBeanWorkMessageId = Number(lookup.user_message.id || 0) || state.activeBeanWorkMessageId;
+                    replaceLocalUserMessage(lookup.user_message);
+                }
+                applyBeanWorkEvents(lookup.events);
+                const status = String(lookup.status || '').toLowerCase();
+                if (kioskVoiceAgentResultStillPending(lookup)) {
+                    state.chatRunState = 'Working…';
+                    ensureBeanWorkItemsForContent(content);
+                    setKioskVoiceStatus('working', 'working');
+                    render();
+                    continue;
+                }
+                if (lookup.assistant_message) {
+                    const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(lookup.assistant_message.content || ''));
+                    const assistant = {
+                        ...lookup.assistant_message,
+                        content: assistantContent,
+                    };
+                    if (assistantMessageShouldStayOutOfChat(assistant)) {
+                        state.chatRunState = 'Working…';
+                        ensureBeanWorkItemsForContent(content);
+                        render();
+                        continue;
+                    }
+                    pushVisibleAssistantMessage(assistant, assistantContent);
+                    state.chatRunState = status === 'blocked' ? 'Blocked' : 'Ready';
+                    if (status === 'completed') completeActiveBeanWorkItems('completed');
+                    refreshOnly(false).catch(() => {});
+                    render();
+                    scrollChatToBottom();
+                    return { result: lookup, assistantContent, clientRequestId: requestKey };
+                }
+                if (['failed', 'cancelled', 'blocked'].includes(status)) {
+                    markActiveBeanWorkItems(status === 'cancelled' ? 'cancelled' : 'failed');
+                    return { result: lookup, assistantContent: '', clientRequestId: requestKey };
+                }
+            } catch (error) {
+                if (attempt >= 4) break;
+            }
+        }
+        return null;
     }
 
     function pauseBargeInDuringSpeech() {
@@ -11452,103 +11547,6 @@ export function mountHeyBeanWebApp(mount) {
         } finally {
             resumeBargeIn();
         }
-    }
-
-    function speakKioskVoiceSegment(text, generation, spokenSegments) {
-        const cleanText = String(text || '').trim();
-        if (!cleanText) return Promise.resolve(false);
-        spokenSegments.push(cleanText);
-        return speakWithBargeInPaused(() => speakKioskAcknowledgement(text, {
-            shouldPlay: () => kioskConversationActive && generation === kioskQuickReplyGeneration,
-        }));
-    }
-
-    function appendKioskLocalVoiceExchange(userContent, assistantContent) {
-        if (userContent) {
-            state.messages.push({
-                id: `voice-user-${Date.now()}`,
-                role: 'user',
-                content: userContent,
-                metadata: { local_voice_turn: true },
-            });
-        }
-        if (assistantContent) {
-            state.messages.push({
-                id: `voice-assistant-${Date.now()}`,
-                role: 'assistant',
-                content: assistantContent,
-                metadata: { local_voice_turn: true, quick_reply_only: true },
-            });
-        }
-        if (state.phase === 'signedIn') render();
-        scrollChatToBottom();
-    }
-
-    function kioskVoiceTurnContract(quickReply, quickReplyText, likelyNeedsAgentWork, wantsDetailedChat) {
-        const explicitContract = String(quickReply?.responseContract || '').toLowerCase();
-        const hasQuickReply = String(quickReplyText || '').trim() !== '';
-        if (wantsDetailedChat) {
-            return { shouldContinueAgent: true, quickReplyMode: hasQuickReply ? 'summary_then_detail' : 'pending_detail' };
-        }
-        if (explicitContract === 'complete' || (hasQuickReply && quickReply?.continueAgent === false && !likelyNeedsAgentWork)) {
-            return { shouldContinueAgent: false, quickReplyMode: 'complete' };
-        }
-        if (['acknowledged_background', 'pending_background', 'background'].includes(explicitContract)) {
-            return { shouldContinueAgent: true, quickReplyMode: hasQuickReply ? 'acknowledged_background' : 'pending_background' };
-        }
-        if (likelyNeedsAgentWork) {
-            return { shouldContinueAgent: true, quickReplyMode: hasQuickReply ? 'acknowledged_background' : 'pending_background' };
-        }
-        if (hasQuickReply) {
-            return { shouldContinueAgent: false, quickReplyMode: 'complete' };
-        }
-        return { shouldContinueAgent: true, quickReplyMode: 'direct_answer' };
-    }
-
-    function runKioskBridgeReplies(content, generation, spokenSegments, startedAt, finalReady, voiceTurn) {
-        window.clearTimeout(kioskBridgeTimer);
-        let resolveBridge = () => {};
-        let settled = false;
-        let cancelled = false;
-        const resolveOnce = (value) => {
-            if (settled) return;
-            settled = true;
-            resolveBridge(value);
-        };
-        const promise = new Promise((resolve) => {
-            resolveBridge = resolve;
-            (async () => {
-                let spokeBridge = false;
-                for (let bridgeCount = 0; bridgeCount < 1; bridgeCount += 1) {
-                    await sleep(7000);
-                    if (cancelled) break;
-                    await voiceTurn.lastSpeech;
-                    if (cancelled || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) break;
-                    if (spokenSegments.length === 0) continue;
-                    const bridge = await fetchKioskQuickReply(content, generation, {
-                        stage: 'bridge',
-                        spokenSegments,
-                        elapsedMs: Date.now() - startedAt,
-                    });
-                    const bridgeText = bridge?.text || '';
-                    if (!bridgeText || cancelled || finalReady() || !kioskConversationActive || generation !== kioskQuickReplyGeneration) break;
-                    const speech = speakKioskVoiceSegment(bridgeText, generation, spokenSegments);
-                    trackKioskSpeechThenWorking(speech, generation, finalReady);
-                    voiceTurn.lastSpeech = speech;
-                    spokeBridge = await speech || spokeBridge;
-                }
-                resolveOnce(spokeBridge);
-            })();
-        });
-        return {
-            promise,
-            cancel: () => {
-                cancelled = true;
-                window.clearTimeout(kioskBridgeTimer);
-                kioskBridgeTimer = 0;
-                resolveOnce(false);
-            },
-        };
     }
 
     function clientContextPayload() {
@@ -11691,309 +11689,6 @@ export function mountHeyBeanWebApp(mount) {
         scrollChatToBottom();
     }
 
-    async function fetchKioskQuickReply(content, generation, options = {}) {
-        try {
-            const response = await api('/assistant/voice/quick-reply', {
-                method: 'POST',
-                body: {
-                    content,
-                    workspace_id: currentWorkspaceId() || null,
-                    client_context: clientContextPayload(),
-                    stage: options.stage || 'first',
-                    spoken_segments: options.spokenSegments || [],
-                    elapsed_ms: options.elapsedMs || 0,
-                },
-            });
-            const text = String(response?.text || '').trim();
-            if (!text || !kioskConversationActive || generation !== kioskQuickReplyGeneration) return null;
-            return {
-                text,
-                continueAgent: response?.continue_agent !== false && response?.continueAgent !== false,
-                responseContract: String(response?.response_contract || response?.responseContract || '').trim(),
-            };
-        } catch (_) {
-            return null;
-        }
-    }
-
-    function localKioskVoiceQuickReply(content) {
-        const command = normalizedVoiceCommand(content);
-        if (!command) return null;
-        if (kioskVoiceIsHearingCheck(command)) {
-            return kioskLocalVoiceReply('Yes, I can hear you.');
-        }
-        if (kioskVoiceLooksLikeAppMutation(command) || voiceCommandIsCapabilityQuestion(command)) return null;
-        const dashboardAnswer = kioskDashboardVoiceAnswer(command);
-        return dashboardAnswer ? kioskLocalVoiceReply(dashboardAnswer) : null;
-    }
-
-    function kioskLocalVoiceReply(text) {
-        return {
-            text,
-            continueAgent: false,
-            responseContract: 'complete',
-            local: true,
-        };
-    }
-
-    function kioskVoiceIsHearingCheck(command) {
-        return /^(?:can|could|do)\s+you\s+hear\s+me\b/.test(command)
-            || /^(?:can|could)\s+you\s+hear\s+(?:this|my voice)\b/.test(command)
-            || /^(?:are|were)\s+you\s+(?:listening|hearing me|there)\b/.test(command)
-            || /\b(?:is this thing on|can you hear me now|do you hear me)\b/.test(command);
-    }
-
-    function kioskVoiceLooksLikeAppMutation(command) {
-        return /^(?:please\s+)?(?:add|create|make|put|move|reschedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b/.test(command)
-            || /\b(?:add|create|make|put|move|reschedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember|schedule)\s+(?:a|an|the|this|that|my|me)\b/.test(command);
-    }
-
-    function kioskDashboardVoiceAnswer(command) {
-        if (!kioskVoiceLooksLikeDashboardRead(command)) return '';
-
-        const dayRequest = kioskVoiceRequestedDay(command);
-        const mentionsCalendar = /\b(?:calendar|calendars|event|events|schedule)\b/.test(command);
-        const mentionsTasks = /\b(?:task|tasks|todo|to do|to-do|todos)\b/.test(command);
-        const mentionsReminders = /\b(?:reminder|reminders)\b/.test(command);
-        const mentionsAgenda = /\b(?:agenda|what do i have|what have i got|do i have anything|anything on|what'?s on|whats on)\b/.test(command);
-
-        if (kioskVoiceAsksNext(command)) {
-            if (mentionsCalendar && !mentionsTasks && !mentionsReminders) return kioskVoiceNextCalendarAnswer();
-            if (mentionsTasks && !mentionsCalendar && !mentionsReminders) return kioskVoiceNextTaskAnswer();
-            if (mentionsReminders && !mentionsCalendar && !mentionsTasks) return kioskVoiceNextReminderAnswer();
-            return kioskVoiceNextAgendaAnswer();
-        }
-
-        if (mentionsCalendar && !mentionsTasks && !mentionsReminders && !/\bagenda\b/.test(command)) {
-            return kioskVoiceCalendarAnswer(dayRequest);
-        }
-        if (mentionsTasks && !mentionsCalendar && !mentionsReminders) {
-            return kioskVoiceTasksAnswer(dayRequest);
-        }
-        if (mentionsReminders && !mentionsCalendar && !mentionsTasks) {
-            return kioskVoiceRemindersAnswer(dayRequest);
-        }
-        if (mentionsCalendar || mentionsTasks || mentionsReminders || mentionsAgenda) {
-            return kioskVoiceAgendaAnswer(dayRequest);
-        }
-
-        return '';
-    }
-
-    function kioskVoiceLooksLikeDashboardRead(command) {
-        if (!/\b(?:what|whats|what's|what is|show|tell|list|read|when|anything|agenda|schedule|calendar|calendars|event|events|task|tasks|todo|to do|to-do|todos|reminder|reminders|next up)\b/.test(command)) {
-            return false;
-        }
-        return /\b(?:calendar|calendars|event|events|agenda|schedule|task|tasks|todo|to do|to-do|todos|reminder|reminders|what do i have|what have i got|do i have anything|anything on|what'?s on|whats on|what is on|what'?s next|whats next|what is next|next up)\b/.test(command);
-    }
-
-    function kioskVoiceRequestedDay(command) {
-        if (/\b(?:day after tomorrow|following day)\b/.test(command)) {
-            const date = addDays(new Date(), 2);
-            return { date, phrase: `on ${weekdayShort(date)}`, label: weekdayShort(date) };
-        }
-        if (/\btomorrow\b/.test(command)) {
-            return { date: addDays(new Date(), 1), phrase: 'tomorrow', label: 'Tomorrow' };
-        }
-        return { date: new Date(), phrase: 'today', label: 'Today' };
-    }
-
-    function kioskVoiceAsksNext(command) {
-        return /\b(?:what'?s next|whats next|what is next|next up|up next)\b/.test(command)
-            || /\bwhen\s+(?:is|are)\s+(?:my\s+)?next\b/.test(command)
-            || /\bnext\s+(?:calendar\s+)?(?:event|meeting|appointment|task|todo|to do|reminder)\b/.test(command);
-    }
-
-    function kioskVoiceCalendarAnswer(dayRequest) {
-        const events = eventsForDay(dayRequest.date);
-        if (!events.length) return `You don't have any calendar events ${dayRequest.phrase}.`;
-        return kioskVoiceListAnswer(
-            events,
-            `You have ${events.length} calendar ${events.length === 1 ? 'event' : 'events'} ${dayRequest.phrase}`,
-            (event) => `${eventStartTime(event)}: ${eventTitleText(event)}`,
-        );
-    }
-
-    function kioskVoiceTasksAnswer(dayRequest) {
-        const tasks = kioskVoiceTasksForDay(dayRequest.date);
-        if (!tasks.length) return `You don't have any tasks due ${dayRequest.phrase}.`;
-        return kioskVoiceListAnswer(
-            tasks,
-            `You have ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} due ${dayRequest.phrase}`,
-            (task) => kioskVoiceDatedItemLabel(task, 'task'),
-        );
-    }
-
-    function kioskVoiceRemindersAnswer(dayRequest) {
-        const reminders = kioskVoiceRemindersForDay(dayRequest.date);
-        if (!reminders.length) return `You don't have any reminders ${dayRequest.phrase}.`;
-        return kioskVoiceListAnswer(
-            reminders,
-            `You have ${reminders.length} ${reminders.length === 1 ? 'reminder' : 'reminders'} ${dayRequest.phrase}`,
-            (reminder) => kioskVoiceDatedItemLabel(reminder, 'reminder'),
-        );
-    }
-
-    function kioskVoiceAgendaAnswer(dayRequest) {
-        const items = kioskVoiceAgendaItemsForDay(dayRequest.date);
-        if (!items.length) return `I don't see anything on your Bean agenda ${dayRequest.phrase}.`;
-        return kioskVoiceListAnswer(
-            items,
-            `You have ${items.length} ${items.length === 1 ? 'thing' : 'things'} on your Bean agenda ${dayRequest.phrase}`,
-            kioskVoiceAgendaItemLabel,
-        );
-    }
-
-    function kioskVoiceNextAgendaAnswer() {
-        const items = commandCenterAgendaItems();
-        if (!items.length) return "I don't see anything else on your Bean agenda today.";
-        const first = items[0];
-        const restCount = items.length - 1;
-        return restCount > 0
-            ? `Next up: ${kioskVoiceAgendaItemLabel(first)}. You have ${restCount} more ${restCount === 1 ? 'item' : 'items'} after that today.`
-            : `Next up: ${kioskVoiceAgendaItemLabel(first)}.`;
-    }
-
-    function kioskVoiceNextCalendarAnswer() {
-        const now = new Date();
-        const event = state.calendar
-            .filter((candidate) => {
-                const end = parseLocalDate(candidate.ends_at || candidate.endsAt || candidate.starts_at || candidate.startsAt || '');
-                return !Number.isNaN(end.getTime()) && (eventAllDay(candidate) || end >= now);
-            })
-            .sort((a, b) => parseLocalDate(a.starts_at || a.startsAt || 0) - parseLocalDate(b.starts_at || b.startsAt || 0))[0];
-        return event
-            ? `Your next calendar event is ${eventStartTime(event)}: ${eventTitleText(event)}.`
-            : "I don't see any upcoming calendar events.";
-    }
-
-    function kioskVoiceNextTaskAnswer() {
-        const task = activeTopLevelTasks().sort(compareTasks)[0];
-        return task
-            ? `Your next task is ${kioskVoiceDatedItemLabel(task, 'task')}.`
-            : "I don't see any open tasks.";
-    }
-
-    function kioskVoiceNextReminderAnswer() {
-        const reminder = pendingReminders().sort(compareReminders)[0];
-        return reminder
-            ? `Your next reminder is ${kioskVoiceDatedItemLabel(reminder, 'reminder')}.`
-            : "I don't see any upcoming reminders.";
-    }
-
-    function kioskVoiceAgendaItemsForDay(day) {
-        if (sameDate(parseLocalDate(day), new Date())) return commandCenterAgendaItems();
-        const dayValue = dateOnly(day);
-        const items = eventsForDay(day).map((event) => ({
-            kind: 'event',
-            title: eventTitleText(event),
-            time: parseLocalDate(event.starts_at || event.startsAt || day),
-            timeLabel: eventStartTime(event),
-        }));
-        kioskVoiceTasksForDay(day).forEach((task) => {
-            items.push({
-                kind: 'task',
-                title: task.title || task.name || 'Untitled task',
-                time: kioskVoiceItemDate(task, 'task') || parseLocalDate(dayValue),
-                timeLabel: kioskVoiceDatedItemTimeLabel(task, 'task'),
-            });
-        });
-        kioskVoiceRemindersForDay(day).forEach((reminder) => {
-            items.push({
-                kind: 'reminder',
-                title: reminder.title || reminder.name || 'Untitled reminder',
-                time: kioskVoiceItemDate(reminder, 'reminder') || parseLocalDate(dayValue),
-                timeLabel: kioskVoiceDatedItemTimeLabel(reminder, 'reminder'),
-            });
-        });
-        return items.sort((a, b) => {
-            const timeOrder = a.time - b.time;
-            if (timeOrder !== 0) return timeOrder;
-            return commandCenterKindRank(a.kind) - commandCenterKindRank(b.kind);
-        });
-    }
-
-    function kioskVoiceTasksForDay(day) {
-        const dayValue = dateOnly(day);
-        return activeTopLevelTasks()
-            .filter((task) => itemBoardDateOnly(task, 'task') === dayValue)
-            .sort(compareTasks);
-    }
-
-    function kioskVoiceRemindersForDay(day) {
-        const dayValue = dateOnly(day);
-        return pendingReminders()
-            .filter((reminder) => itemBoardDateOnly(reminder, 'reminder') === dayValue)
-            .sort(compareReminders);
-    }
-
-    function kioskVoiceListAnswer(items, lead, formatter) {
-        const shown = items.slice(0, 4).map(formatter).filter(Boolean);
-        const moreCount = Math.max(0, items.length - shown.length);
-        const suffix = moreCount > 0 ? `, and ${moreCount} more` : '';
-        return `${lead}: ${shown.join('; ')}${suffix}.`;
-    }
-
-    function kioskVoiceAgendaItemLabel(item) {
-        const kind = commandCenterKindLabel(item.kind).toLowerCase();
-        return [item.timeLabel, item.title, kind].filter(Boolean).join(', ');
-    }
-
-    function kioskVoiceDatedItemLabel(item, kind) {
-        const title = item?.title || item?.name || (kind === 'task' ? 'Untitled task' : 'Untitled reminder');
-        const timeLabel = kioskVoiceDatedItemTimeLabel(item, kind);
-        return timeLabel ? `${timeLabel}: ${title}` : title;
-    }
-
-    function kioskVoiceDatedItemTimeLabel(item, kind) {
-        const value = itemDateValue(item, kind);
-        if (!value) return '';
-        if (itemOverdue(item, kind)) return 'Overdue';
-        return wireValueLooksDateOnly(value) ? '' : formatTime(value);
-    }
-
-    function kioskVoiceItemDate(item, kind) {
-        const value = itemDateValue(item, kind);
-        if (!value) return null;
-        const date = parseLocalDate(value);
-        return Number.isNaN(date.getTime()) ? null : date;
-    }
-
-    function fallbackKioskQuickReply(content, likelyNeedsAgentWork) {
-        if (!likelyNeedsAgentWork) return '';
-        const command = normalizedVoiceCommand(content);
-        if (/\b(?:weather|forecast)\b/.test(command)) {
-            const location = fallbackLocationHint(command);
-            return location ? `Sure, I'll check ${location}'s weather now.` : "Sure, I'll check the weather now.";
-        }
-        if (/\b(?:flight|flights|airfare|ticket|tickets)\b/.test(command)) return "Absolutely, I'll check the latest flight info now.";
-        if (/\b(?:hotel|hotels|reservation|booking|bookings)\b/.test(command)) return "Sure, I'll check the current availability now.";
-        if (/\b(?:traffic|delay|delays)\b/.test(command)) return "Yeah, I'll check traffic now.";
-        if (/\b(?:news|stock|stocks|sports|score|scores)\b/.test(command)) return "Sure, I'll check the latest now.";
-        if (/\b(?:calendar|calendars|event|events|agenda|google calendar)\b/.test(command)) return "Absolutely, I'll check your calendar now.";
-        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return "Sure, I'll check your tasks now.";
-        if (/\b(?:reminder|reminders)\b/.test(command)) return "Absolutely, I'll check your reminders now.";
-        return "Sure, I'll check now.";
-    }
-
-    function fallbackLocationHint(command) {
-        const match = command.match(/\b(?:in|for|near)\s+([a-z][a-z\s]+?)(?:\s+(?:right now|now|today|tonight|tomorrow)|$)/);
-        if (!match) return '';
-        return match[1]
-            .replace(/\b(?:florida|fl|usa|united states)\b/g, '')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .replace(/\b\w/g, (letter) => letter.toUpperCase());
-    }
-
-    function timeoutPromise(promise, timeoutMs, fallback) {
-        let timeoutId = 0;
-        const timeout = new Promise((resolve) => {
-            timeoutId = window.setTimeout(() => resolve(fallback), timeoutMs);
-        });
-        return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
-    }
-
     function speakKioskAcknowledgement(text, options = {}) {
         if (!text) return Promise.resolve(false);
         if (profileTtsProvider() === 'openai') {
@@ -12008,14 +11703,6 @@ export function mountHeyBeanWebApp(mount) {
             });
         }
         return allowDebugBrowserVoiceFallback() ? speakBrowserTts(text) : Promise.resolve(false);
-    }
-
-    function trackKioskSpeechThenWorking(speech, generation, finalReady) {
-        Promise.resolve(speech).then(() => {
-            if (!state.busy || finalReady?.()) return;
-            if (!kioskConversationActive || generation !== kioskQuickReplyGeneration) return;
-            setKioskVoiceStatus('working', 'working');
-        }).catch(() => {});
     }
 
     function stopKioskSpeechPlayback() {
@@ -14447,7 +14134,6 @@ export function mountHeyBeanWebApp(mount) {
         const staleFailurePhrases = [
             'bean could not finish',
             'could not finish that request',
-            'quick voice reply failed',
             'realtime voice could not be started',
             'realtime voice could not connect',
             'work failed',

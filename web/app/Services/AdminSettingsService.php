@@ -11,8 +11,6 @@ class AdminSettingsService
 {
     public const MAIN_MODEL = 'models.main';
 
-    public const QUICK_VOICE_MODEL = 'models.quick_voice';
-
     public const REALTIME_MODEL = 'models.realtime';
 
     public const EXTERNAL_LOOKUP_MODEL = 'models.external_lookup';
@@ -40,7 +38,6 @@ class AdminSettingsService
         return [
             'models' => [
                 'main_model' => $this->settingPayload(self::MAIN_MODEL, $this->defaultMainModel()),
-                'quick_voice_model' => $this->settingPayload(self::QUICK_VOICE_MODEL, $this->defaultQuickVoiceModel()),
                 'realtime_model' => $this->settingPayload(self::REALTIME_MODEL, $this->defaultRealtimeModel()),
                 'external_lookup_model' => $this->settingPayload(self::EXTERNAL_LOOKUP_MODEL, $this->defaultExternalLookupModel()),
             ],
@@ -58,7 +55,6 @@ class AdminSettingsService
     {
         foreach ([
             self::MAIN_MODEL => $modelSettings['main_model'] ?? null,
-            self::QUICK_VOICE_MODEL => $modelSettings['quick_voice_model'] ?? null,
             self::REALTIME_MODEL => $modelSettings['realtime_model'] ?? null,
             self::EXTERNAL_LOOKUP_MODEL => $modelSettings['external_lookup_model'] ?? null,
         ] as $key => $value) {
@@ -98,11 +94,6 @@ class AdminSettingsService
     public function mainModelOverride(): ?string
     {
         return $this->storedStringValue(self::MAIN_MODEL);
-    }
-
-    public function quickVoiceModel(): string
-    {
-        return $this->stringValue(self::QUICK_VOICE_MODEL, $this->defaultQuickVoiceModel());
     }
 
     public function realtimeModel(): string
@@ -211,11 +202,6 @@ class AdminSettingsService
     private function defaultMainModel(): string
     {
         return (string) config('services.hermes_runtime.default_model', 'gpt-5.5');
-    }
-
-    private function defaultQuickVoiceModel(): string
-    {
-        return (string) config('services.hermes_runtime.quick_reply_model', 'gpt-5.4-mini');
     }
 
     private function defaultRealtimeModel(): string

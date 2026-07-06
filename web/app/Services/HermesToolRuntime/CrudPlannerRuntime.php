@@ -217,11 +217,10 @@ trait CrudPlannerRuntime
     private function crudPlannerModelRoute(array $baseModelRoute): array
     {
         $configuredModel = trim((string) config('services.hermes_runtime.crud_planner_model', ''));
-        $quickModel = trim((string) config('services.hermes_runtime.quick_reply_model', ''));
         $baseModel = trim((string) ($baseModelRoute['model'] ?? ''));
         $model = $configuredModel !== ''
             ? $configuredModel
-            : ($quickModel !== '' ? $quickModel : $baseModel);
+            : $baseModel;
 
         return array_merge($baseModelRoute, [
             'mode' => 'crud_planner',

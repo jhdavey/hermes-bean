@@ -19,7 +19,6 @@ use App\Http\Controllers\Api\IssueReportController;
 use App\Http\Controllers\Api\OutlookCalendarController;
 use App\Http\Controllers\Api\PlaceController;
 use App\Http\Controllers\Api\PushNotificationDeviceTokenController;
-use App\Http\Controllers\Api\QuickVoiceReplyController;
 use App\Http\Controllers\Api\RealtimeSessionController;
 use App\Http\Controllers\Api\TextToSpeechController;
 use App\Http\Controllers\Api\TodaySummaryController;
@@ -87,7 +86,6 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/assistant/realtime/quality', [RealtimeSessionController::class, 'quality']);
         Route::get('/assistant/realtime/dashboard-context', [RealtimeSessionController::class, 'dashboardContext']);
         Route::post('/ai/realtime/session', [RealtimeSessionController::class, 'store']);
-        Route::post('/assistant/voice/quick-reply', [QuickVoiceReplyController::class, 'store']);
         Route::post('/assistant/tts', [TextToSpeechController::class, 'store']);
 
         Route::get('/today', [TodaySummaryController::class, 'show']);

@@ -1,13 +1,14 @@
-const wakeStarter = '(?:hey|hay)';
+const wakeStarter = '(?:hey|hay|hi|hello|okay|ok|kay)';
 const beanVariant =
-    '(?:bean|beans|been|ben|beam|beem|bien)';
-const compactBeanVariant = 'b(?:ean|eans|een|en|eam|eem|ien)';
+    '(?:bean|beans|been|ben|beam|beem|bein|being|bin|bing|bien|bain|bane|dean|deen)';
+const compactBeanVariant = 'b(?:ean|eans|een|en|eam|eem|ein|eing|in|ing|ien|ain|ane)';
 
 const wakePhrasePattern = new RegExp(
     [
-        `^\\s*${wakeStarter}\\s*,?\\s*${beanVariant}\\b[\\s,.:;!?-]*`,
-        `^\\s*${wakeStarter}\\s*${compactBeanVariant}\\b[\\s,.:;!?-]*`,
-        `^\\s*${wakeStarter}\\s*,?\\s*(?:b|bee)\\b[\\s,.:;!?-]*`,
+        `(?:^|\\s)${wakeStarter}\\s*,?\\s*${beanVariant}\\b[\\s,.:;!?-]*`,
+        `(?:^|\\s)${wakeStarter}\\s*${compactBeanVariant}\\b[\\s,.:;!?-]*`,
+        `(?:^|\\s)${wakeStarter}\\s*,?\\s*(?:b|bee)\\b[\\s,.:;!?-]*`,
+        '^\\s*a\\s+bean\\b[\\s,.:;!?-]*',
     ].join('|'),
     'i',
 );
@@ -17,18 +18,39 @@ export function commandAfterWakePhrase(transcript) {
     if (!text) return null;
     const match = text.match(wakePhrasePattern);
     if (!match) return null;
-    return text.slice(match.index + match[0].length).replace(/\s+/g, ' ').trim();
+    return stripLeadingVoiceFillers(text.slice(match.index + match[0].length)
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim());
 }
 
 export function normalizedVoiceCommand(transcript) {
-    return String(transcript || '')
+    const normalized = String(transcript || '')
         .toLowerCase()
         .replace(/[^a-z0-9\s']/g, ' ')
         .replace(/\s+/g, ' ')
-        .replace(/^(?:hey|hay)\s+(?:bean|beans|been|ben|beam|beem|bien)\s+/, '')
-        .replace(/^(?:hey|hay)b(?:ean|eans|een|en|eam|eem|ien)\s+/, '')
-        .replace(/^bean\s+/, '')
+        .trim();
+
+    return stripLeadingVoiceFillers(stripNormalizedWakePhrase(stripLeadingVoiceFillers(normalized)))
         .replace(/\s+bean$/, '')
+        .trim();
+}
+
+function stripLeadingVoiceFillers(command) {
+    if (!command) return command;
+    if (/^(?:uh huh|mm hmm|mhm)\b/.test(command)) return command;
+    return command
+        .replace(/^(?:(?:uh|um|umm|erm|er|ah|hmm|hm|mm|mhm|well|so)\s+)+/, '')
+        .trim();
+}
+
+function stripNormalizedWakePhrase(command) {
+    if (!command) return command;
+    return command
+        .replace(new RegExp(
+            `^(?:${wakeStarter}\\s+${beanVariant}|${wakeStarter}\\s*${compactBeanVariant}|${wakeStarter}\\s+(?:b|bee)|a\\s+bean|heybean|bean)\\s+`,
+            'i',
+        ), '')
         .trim();
 }
 
@@ -62,7 +84,7 @@ export function voiceCommandNeedsAgentWork(transcript) {
     const command = normalizedVoiceCommand(transcript);
     if (!command) return false;
     if (voiceCommandIsCapabilityQuestion(command)) return false;
-    if (/\b(?:calendar|calendars|event|events|task|tasks|todo|to do|reminder|reminders|agenda|approval|approvals|workspace|workspaces|google calendar)\b/.test(command)) {
+    if (/\b(?:calendar|calendars|event|events|agenda|schedule|schedules|meeting|meetings|appointment|appointments|task|tasks|todo|to do|reminder|reminders|approval|approvals|workspace|workspaces|google calendar)\b/.test(command)) {
         return true;
     }
     if (/\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b/.test(command)) {
@@ -76,7 +98,7 @@ export function voiceCommandNeedsAgentWork(transcript) {
         && /\b(?:when|what|which|supposed|take out|put out|do i|should i)\b/.test(command)) {
         return true;
     }
-    if (/\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b/.test(command)) {
+    if (/\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember|undo|revert|reverse)\b/.test(command)) {
         return true;
     }
     if (/\b(?:plan|organize|prioritize)\b/.test(command)
@@ -94,15 +116,21 @@ export function voiceCommandRequiresBackgroundWork(transcript) {
     if (/\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|price|prices|cheapest|available|availability|weather|forecast|news|traffic|stock|stocks|sports|score|scores)\b/.test(command)) {
         return true;
     }
+    if (/\b(?:calendar|calendars|event|events|agenda|schedule|schedules|meeting|meetings|appointment|appointments|task|tasks|todo|to do|reminder|reminders|approval|approvals|workspace|workspaces|google calendar)\b/.test(command)) {
+        return true;
+    }
     if (/\b(?:today|tonight|tomorrow|current|currently|latest|now|right now|near me|nearby|local)\b/.test(command)
         && /\b(?:open|opens|closed|closes|close|closing|hours|hour|available|availability|price|prices|cost|costs|status|delay|delays)\b/.test(command)) {
         return true;
     }
-    if (/\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember)\b/.test(command)) {
+    if (/\b(?:add|create|put|move|reschedule|schedule|update|change|delete|remove|cancel|complete|finish|mark|remind|remember|undo|revert|reverse)\b/.test(command)) {
         return true;
     }
-    return /\b(?:plan|organize|prioritize)\b/.test(command)
-        && /\b(?:day|today|tomorrow|week|schedule|work|tasks|calendar|morning|afternoon|evening)\b/.test(command);
+    if (/\b(?:plan|organize|prioritize)\b/.test(command)
+        && /\b(?:day|today|tomorrow|week|schedule|work|tasks|calendar|morning|afternoon|evening)\b/.test(command)) {
+        return true;
+    }
+    return /\b(?:what do i have|what have i got|do i have anything|anything on|what'?s next|whats next|what is next|next up)\b/.test(command);
 }
 
 export function realtimeSpokenAnswerAllowsBackgroundQueue(userTranscript, assistantText) {

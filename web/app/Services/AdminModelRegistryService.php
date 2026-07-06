@@ -24,18 +24,6 @@ class AdminModelRegistryService
                 'gpt-4o',
             ],
         ],
-        'quick_voice_model' => [
-            'label' => 'Quick voice response',
-            'description' => 'Used for fast conversational acknowledgements before longer work completes.',
-            'curated' => [
-                'gpt-5-nano',
-                'gpt-5-mini',
-                'gpt-5.4-mini',
-                'gpt-4.1-mini',
-                'gpt-4.1-nano',
-                'gpt-4o-mini',
-            ],
-        ],
         'realtime_model' => [
             'label' => 'Realtime voice',
             'description' => 'Used for low-latency speech-to-speech sessions.',
@@ -149,14 +137,12 @@ class AdminModelRegistryService
     {
         $configValue = match ($key) {
             'main_model' => config('services.hermes_runtime.default_model'),
-            'quick_voice_model' => config('services.hermes_runtime.quick_reply_model'),
             'realtime_model' => config('services.hermes_realtime.model'),
             'external_lookup_model' => config('services.hermes_runtime.external_lookup_model'),
             default => null,
         };
         $settingKey = match ($key) {
             'main_model' => AdminSettingsService::MAIN_MODEL,
-            'quick_voice_model' => AdminSettingsService::QUICK_VOICE_MODEL,
             'realtime_model' => AdminSettingsService::REALTIME_MODEL,
             'external_lookup_model' => AdminSettingsService::EXTERNAL_LOOKUP_MODEL,
             default => null,
@@ -229,7 +215,6 @@ class AdminModelRegistryService
 
         return match ($key) {
             'realtime_model' => str_contains($model, 'realtime'),
-            'quick_voice_model' => ! str_contains($model, 'realtime') && preg_match('/\b(mini|nano)\b/', $model) === 1 && str_starts_with($model, 'gpt-'),
             'external_lookup_model' => ! str_contains($model, 'realtime') && (str_contains($model, 'search') || preg_match('/^gpt-(5|4\.1|4o)(-|$)/', $model) === 1),
             'main_model' => ! str_contains($model, 'realtime') && ! str_contains($model, 'search') && ! str_contains($model, 'mini') && ! str_contains($model, 'nano') && preg_match('/^gpt-(5|4\.1|4o)(-|$)/', $model) === 1,
             default => false,

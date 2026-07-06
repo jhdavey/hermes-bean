@@ -30,7 +30,6 @@ class AdminSettingsTest extends TestCase
 
         $this->withToken($adminToken)->patchJson('/api/admin/settings', $this->settingsPayload([
             'main_model' => 'gpt-5-mini',
-            'quick_voice_model' => 'gpt-5-nano',
             'realtime_model' => 'gpt-realtime-mini',
             'external_lookup_model' => 'gpt-5-mini',
         ], [
@@ -259,7 +258,6 @@ SH);
         return [
             'model_settings' => [
                 'main_model' => $models['main_model'] ?? 'gpt-5-mini',
-                'quick_voice_model' => $models['quick_voice_model'] ?? 'gpt-5-nano',
                 'realtime_model' => $models['realtime_model'] ?? 'gpt-realtime-mini',
                 'external_lookup_model' => $models['external_lookup_model'] ?? 'gpt-5-mini',
             ],

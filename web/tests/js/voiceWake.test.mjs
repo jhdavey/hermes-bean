@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
     commandAfterWakePhrase,
@@ -9,42 +10,22 @@ import {
     voiceCancelRequested,
 } from '../../resources/js/voiceWake.js';
 
-const accepted = new Map([
-    ['Hey Bean plan today', 'plan today'],
-    ['hey been what is next', 'what is next'],
-    ['hay been add a reminder', 'add a reminder'],
-    ['haybean start my day', 'start my day'],
-    ['hey beam move my focus block', 'move my focus block'],
-    ['HeyBean start my day', 'start my day'],
-    ['hey B plan dinner', 'plan dinner'],
-    ['hey bean', ''],
-]);
+const contract = JSON.parse(readFileSync(new URL('../../../shared/voice_contract.json', import.meta.url), 'utf8'));
 
-for (const [transcript, expected] of accepted) {
-    assert.equal(commandAfterWakePhrase(transcript), expected, transcript);
+for (const item of contract.wake.accepted) {
+    assert.equal(commandAfterWakePhrase(item.transcript), item.command, item.transcript);
 }
 
-const rejected = [
-    '',
-    'green beans are on the grocery list',
-    'I have been planning today',
-    'hello there',
-    'hi bean what is next',
-    'okay bean reschedule school pickup',
-    'hey bing open reminders',
-    'hey dean add groceries',
-    'a bean start listening',
-    'noise first hey bean then plan',
-    'bean what is next',
-    'hey',
-    'maybe add groceries',
-    'a green bean recipe',
-    'they have been talking about reminders',
-    'hay bales need moving',
-];
-
-for (const transcript of rejected) {
+for (const transcript of contract.wake.rejected) {
     assert.equal(commandAfterWakePhrase(transcript), null, transcript);
+}
+
+for (const item of contract.intent) {
+    assert.equal(voiceCommandNeedsAgentWork(item.transcript), item.needsAgentWork, `${item.transcript} needsAgentWork`);
+    assert.equal(voiceCommandRequiresBackgroundWork(item.transcript), item.requiresBackgroundWork, `${item.transcript} requiresBackgroundWork`);
+    if (Object.prototype.hasOwnProperty.call(item, 'wantsDetailedChat')) {
+        assert.equal(voiceCommandWantsDetailedChat(item.transcript), item.wantsDetailedChat, `${item.transcript} wantsDetailedChat`);
+    }
 }
 
 assert.equal(voiceCancelRequested('nevermind'), true);
@@ -73,9 +54,9 @@ assert.equal(voiceCommandNeedsAgentWork('can you create a note called groceries'
 assert.equal(voiceCommandNeedsAgentWork('could you schedule an event tomorrow at 9am'), true);
 assert.equal(voiceCommandNeedsAgentWork('when am I supposed to take out the trash'), true);
 assert.equal(voiceCommandNeedsAgentWork('which recycling bin do I put out'), true);
-assert.equal(voiceCommandRequiresBackgroundWork('what is on my calendar today'), false);
-assert.equal(voiceCommandRequiresBackgroundWork('what is on my to-do list today'), false);
-assert.equal(voiceCommandRequiresBackgroundWork('what tasks do I have today'), false);
+assert.equal(voiceCommandRequiresBackgroundWork('what is on my calendar today'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('what is on my to-do list today'), true);
+assert.equal(voiceCommandRequiresBackgroundWork('what tasks do I have today'), true);
 assert.equal(voiceCommandRequiresBackgroundWork('move my task from 7pm to 5pm'), true);
 assert.equal(voiceCommandRequiresBackgroundWork('what is the weather in Orlando Florida right now'), true);
 assert.equal(voiceCommandRequiresBackgroundWork('cheapest flights from MCO to Dublin tomorrow one way'), true);
