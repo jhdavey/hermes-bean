@@ -3294,6 +3294,7 @@ if (mount) {
                 </div>
                 <div class="hb-chat-voice-status ${state.voiceStatusTone === 'error' ? 'hb-chat-voice-status-error' : ''}" data-voice-status ${state.voiceStatus ? '' : 'hidden'}>${escapeHtml(state.voiceStatus)}</div>
                 <div class="hb-chat-input-stack ${workStrip ? 'hb-chat-input-stack-working' : ''}">
+                    ${chatKioskVoiceStatusMarkup()}
                     ${workStrip}
                     <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''} ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat">
                         <textarea name="message" placeholder="${state.voiceListening ? 'Listening' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
@@ -3307,13 +3308,54 @@ if (mount) {
     function chatBeanVoiceButtonMarkup() {
         const model = kioskVoiceStatusTagModel();
         const phaseClass = `hb-chat-voice-button-${model.phase}`;
+        const stateLabel = chatBeanVoiceButtonStateLabel(model);
         return `
             <button class="hb-button hb-chat-voice-button ${phaseClass} ${model.ready ? 'hb-chat-voice-button-on' : ''} ${model.cancelable ? 'hb-chat-voice-button-cancelable' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-pressed="${model.ready ? 'true' : 'false'}" aria-label="${escapeAttr(model.actionLabel)}" title="${escapeAttr(model.actionLabel)}">
-                <span class="hb-chat-voice-button-status" aria-hidden="true"></span>
+                <span class="hb-chat-voice-button-state-label" aria-hidden="true">${escapeHtml(stateLabel)}</span>
                 <span class="hb-chat-voice-button-logo" aria-hidden="true">
                     <img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">
                 </span>
             </button>`;
+    }
+
+    function chatBeanVoiceButtonStateLabel(model) {
+        if (model.phase === 'error') return 'ERR';
+        if (model.cancelable) return 'STOP';
+        if (model.ready) return 'ON';
+        if (state.kioskVoiceEnabled) return '...';
+        return 'OFF';
+    }
+
+    function chatKioskVoiceStatusMarkup() {
+        const model = kioskVoiceStatusTagModel();
+        const enabled = state.kioskVoiceEnabled;
+        const label = chatKioskVoiceStatusLabel(model);
+        const detail = chatKioskVoiceStatusDetail(model);
+        return `
+            <div class="hb-chat-kiosk-status hb-chat-kiosk-status-${escapeAttr(model.phase)} ${enabled ? 'hb-chat-kiosk-status-enabled' : 'hb-chat-kiosk-status-disabled'}" aria-live="polite">
+                <span class="hb-chat-kiosk-status-dot" aria-hidden="true"></span>
+                <span class="hb-chat-kiosk-status-label">${escapeHtml(label)}</span>
+                <span class="hb-chat-kiosk-status-detail">${escapeHtml(detail)}</span>
+            </div>`;
+    }
+
+    function chatKioskVoiceStatusLabel(model) {
+        if (!state.kioskVoiceEnabled) return 'Mic off';
+        if (model.phase === 'error') return 'Mic issue';
+        if (!model.ready) return 'Mic starting';
+        if (model.phase === 'speaking' || model.phase === 'responding') return 'Bean speaking';
+        if (model.phase === 'working') return 'Bean working';
+        if (model.phase === 'heard') return 'Bean heard you';
+        if (model.phase === 'listening') return 'Listening';
+        return 'Mic on';
+    }
+
+    function chatKioskVoiceStatusDetail(model) {
+        if (!state.kioskVoiceEnabled) return 'Tap Bean to turn on';
+        if (model.phase === 'error') return model.label || 'Check microphone access';
+        if (!model.ready) return model.label || 'Connecting';
+        if (model.phase === 'armed') return 'Say "Hey Bean"';
+        return model.label || 'Ready';
     }
 
     function chatDockedWorkStripMarkup() {
