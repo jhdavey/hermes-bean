@@ -1618,8 +1618,8 @@ export function mountHeyBeanWebApp(mount) {
                         <button class="hb-header-pill hb-month-pill" data-calendar-month type="button"><span>${escapeHtml(monthLabel(now))}</span></button>
                     </div>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
-                    ${topNavMarkup()}
                     <span class="hb-spacer"></span>
+                    ${topNavMarkup()}
                     ${showAdd ? topCreateMenuMarkup() : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
                     ${topProfileMenuMarkup()}
