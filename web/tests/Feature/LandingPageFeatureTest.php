@@ -109,7 +109,9 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('href="/register">Sign up here</a> to join the waitlist.', false)
             ->assertSee('data-auth-mode="register"', false);
 
-        $appJs = file_get_contents(resource_path('js/app.js'));
+        $appJs = file_get_contents(resource_path('js/app.js'))."\n"
+            .file_get_contents(resource_path('js/heybean/config.js'))."\n"
+            .file_get_contents(resource_path('js/heybean/webApp.js'));
 
         $this->assertStringContainsString('We are currently onboarding beta users.', $appJs);
         $this->assertStringContainsString("Sign up for early access and we'll let you know as soon as we are ready to onboard you!", $appJs);

@@ -39,8 +39,12 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>HeyBean uses the microphone for voice conversations and hold-to-talk onboarding with Bean.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>HeyBean uses speech recognition to turn your spoken onboarding and voice conversation requests into text so Bean can respond.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>HeyBean uses your city-level location when you choose to share it so Bean can help with weather and planning context.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>HeyBean uses your location when you choose location features so Bean can provide local weather and planning context.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>HeyBean uses the camera only when you choose camera-based features, such as scanning a payment card with Stripe or using a video-capable conversation feature.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
