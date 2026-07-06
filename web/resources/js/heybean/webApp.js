@@ -1778,12 +1778,12 @@ export function mountHeyBeanWebApp(mount) {
         return /\b(skip|no|not now|later)\b/i.test(String(value || ''));
     }
 
-    async function allowGuidedLocation() {
+    async function allowGuidedLocation(positionRequest = requestGuidedPosition()) {
         state.busy = true;
         state.guidedSignupError = '';
         render();
         try {
-            const city = await currentGuidedCity();
+            const city = await currentGuidedCity(positionRequest);
             state.guidedSignupHomeCity = city;
             guidedSignupUser(`Shared city: ${city}`);
             await saveGuidedSignupPreferences();
@@ -1835,18 +1835,38 @@ export function mountHeyBeanWebApp(mount) {
         });
     }
 
-    async function currentGuidedCity() {
-        if (!navigator.geolocation) {
-            throw new Error('Location is not available in this browser. You can skip this and add a city later in Settings.');
+    function requestGuidedPosition() {
+        if (!window.isSecureContext && window.location?.hostname !== 'localhost' && window.location?.hostname !== '127.0.0.1') {
+            return Promise.reject(new Error('Location permission only works on a secure connection. Open HeyBean over HTTPS, then try Allow location again.'));
         }
-        const position = await new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            return Promise.reject(new Error('Location is not available in this browser. You can skip this and add a city later in Settings.'));
+        }
+        return new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject, {
                 enableHighAccuracy: false,
                 timeout: 8000,
                 maximumAge: 300000,
             });
-        }).catch(() => {
-            throw new Error('I could not read your city. You can skip this and add it later in Settings.');
+        });
+    }
+
+    async function currentGuidedCity(positionRequest = requestGuidedPosition()) {
+        if (!navigator.geolocation) {
+            throw new Error('Location is not available in this browser. You can skip this and add a city later in Settings.');
+        }
+        const position = await positionRequest.catch((error) => {
+            if (error instanceof Error) throw error;
+            if (error?.code === 1) {
+                throw new Error('Location access was blocked. Please allow location sharing in the browser prompt, or skip this and add a city later in Settings.');
+            }
+            if (error?.code === 2) {
+                throw new Error('Your browser could not determine your location. Please try Allow location again, or skip this and add a city later in Settings.');
+            }
+            if (error?.code === 3) {
+                throw new Error('Location lookup timed out. Please try Allow location again, or skip this and add a city later in Settings.');
+            }
+            throw new Error('I could not read your city. Please try Allow location again, or skip this and add it later in Settings.');
         });
         const latitude = position?.coords?.latitude;
         const longitude = position?.coords?.longitude;
@@ -6064,7 +6084,7 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelectorAll('[data-guided-location]').forEach((button) => button.addEventListener('click', () => {
             if (state.busy) return;
             if (button.dataset.guidedLocation === 'allow') {
-                allowGuidedLocation();
+                allowGuidedLocation(requestGuidedPosition());
             } else {
                 skipGuidedLocation();
             }

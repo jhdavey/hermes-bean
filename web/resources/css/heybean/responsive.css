@@ -34,7 +34,7 @@
     .hb-guided-onboarding-composer {
         left: 14px;
         right: 14px;
-        bottom: 102px;
+        bottom: 118px;
     }
 
     .hb-guided-onboarding-input-row {
@@ -50,19 +50,19 @@
 
     .hb-guided-onboarding-instruction {
         width: calc(100% - 28px);
-        bottom: 208px;
+        bottom: 224px;
         text-align: center;
     }
 
     .hb-guided-onboarding-bean-dock {
         bottom: 14px;
-        width: 88px;
-        height: 88px;
+        width: 76px;
+        height: 76px;
     }
 
     .hb-guided-onboarding-bean-dock img {
-        width: 44px;
-        height: 44px;
+        width: 34px;
+        height: 34px;
     }
 
     .hb-billing-plan-row {
