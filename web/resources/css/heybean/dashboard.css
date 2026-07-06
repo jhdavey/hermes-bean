@@ -610,6 +610,14 @@
     background: color-mix(in srgb, var(--hb-surface2) 70%, transparent);
 }
 
+.heybean-app-body .hb-command-center-agenda-list .hb-command-center-row,
+.heybean-app-body .hb-command-center-agenda-list .hb-command-center-row:hover,
+.heybean-app-body .hb-command-center-agenda-list .hb-command-center-row:focus,
+.heybean-app-body .hb-command-center-agenda-list .hb-command-center-row:focus-visible,
+.heybean-app-body .hb-command-center-agenda-list .hb-command-center-row:active {
+    border-radius: 0;
+}
+
 .hb-command-center-time {
     min-width: 0;
     overflow: hidden;
