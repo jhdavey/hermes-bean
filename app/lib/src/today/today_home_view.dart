@@ -57,7 +57,6 @@ class _TodayHomeView extends StatelessWidget {
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
-    List<String> googleCalendarIds,
   })
   onTaskSaved;
   final Future<void> Function(
@@ -276,7 +275,6 @@ class _TodayHomeView extends StatelessWidget {
                 : _workspaceValue(user.activeWorkspace!))
           : null,
       googleCalendarStatus: googleCalendarStatus,
-      initialGoogleCalendarIds: task?.googleCalendarIds ?? const [],
       initialSyncWorkspaceIds: task == null
           ? const []
           : _initialSyncWorkspaceIds(
@@ -302,11 +300,6 @@ class _TodayHomeView extends StatelessWidget {
           syncToWorkspaceIds:
               (result['syncToWorkspaceIds'] as List?)
                   ?.whereType<Object>()
-                  .toList() ??
-              const [],
-          googleCalendarIds:
-              (result['googleCalendarIds'] as List?)
-                  ?.map((value) => value.toString())
                   .toList() ??
               const [],
         );
@@ -345,11 +338,6 @@ class _TodayHomeView extends StatelessWidget {
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
-              .toList() ??
-          const [],
-      googleCalendarIds:
-          (result['googleCalendarIds'] as List?)
-              ?.map((value) => value.toString())
               .toList() ??
           const [],
     );

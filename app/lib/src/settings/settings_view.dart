@@ -2488,7 +2488,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       if (!mounted) return;
       setState(() {
         _message =
-            '${_providerLabel(provider)} sync pulled ${result.imported} external event${result.imported == 1 ? '' : 's'} into Bean${result.deleted > 0 ? ' and removed ${result.deleted}' : ''}. Bean events are pushed outward only when that event has a writable external calendar checked.';
+            '${_providerLabel(provider)} sync pulled ${result.imported} external event${result.imported == 1 ? '' : 's'} into Bean${result.deleted > 0 ? ' and removed ${result.deleted}' : ''}. Local Bean events stay local.';
         if (provider == 'outlook') {
           _outlookAuthUrl = null;
         } else {
@@ -2620,7 +2620,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                       ),
                       Text(
                         connected
-                            ? 'Connected calendars pull external events into Bean. Bean events push out only when selected on that event.'
+                            ? 'Connected calendars pull external events into Bean. Local Bean events stay local.'
                             : 'Connect Google Calendar or Microsoft Outlook.',
                         style: TextStyle(color: HeyBeanTheme.muted),
                       ),
@@ -2633,7 +2633,7 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                   title: 'External Calendar Sync',
                   bullets: [
                     'Sync now pulls selected external calendar events into Bean.',
-                    'Writable calendars can also receive local Bean events when you choose them on an item.',
+                    'Local Bean events are not pushed to connected calendars.',
                     'Disconnecting stops future sync. It does not delete your external account or calendar.',
                   ],
                 ),
@@ -2788,7 +2788,7 @@ class _ExternalCalendarProviderTile extends StatelessWidget {
             if (connected) ...[
               const SizedBox(height: 8),
               Text(
-                'Sync now pulls selected external events into Bean. Bean events push outward only when that event has this provider checked.',
+                'Sync now pulls selected external events into Bean. Local Bean events stay local.',
                 style: TextStyle(color: HeyBeanTheme.muted),
               ),
               if ((status?.calendars ?? const <GoogleCalendarInfo>[])

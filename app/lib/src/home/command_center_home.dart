@@ -48,7 +48,6 @@ class _CommandCenterHome extends StatefulWidget {
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
-    List<String> googleCalendarIds,
   })
   onTaskSaved;
   final Future<void> Function(
@@ -66,7 +65,6 @@ class _CommandCenterHome extends StatefulWidget {
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
-    List<String> googleCalendarIds,
   })
   onReminderSaved;
   final Future<void> Function(
@@ -250,7 +248,6 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       onEventCategorySaved: widget.onEventCategorySaved,
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
-      initialGoogleCalendarIds: task.googleCalendarIds,
       initialSyncWorkspaceIds: _initialSyncWorkspaceIds(
         linkedWorkspaceIds: task.linkedWorkspaceIds,
         workspaceId: task.workspaceId,
@@ -273,11 +270,6 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
           syncToWorkspaceIds:
               (result['syncToWorkspaceIds'] as List?)
                   ?.whereType<Object>()
-                  .toList() ??
-              const [],
-          googleCalendarIds:
-              (result['googleCalendarIds'] as List?)
-                  ?.map((value) => value.toString())
                   .toList() ??
               const [],
         );
@@ -320,11 +312,6 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
               ?.whereType<Object>()
               .toList() ??
           const [],
-      googleCalendarIds:
-          (result['googleCalendarIds'] as List?)
-              ?.map((value) => value.toString())
-              .toList() ??
-          const [],
     );
   }
 
@@ -359,7 +346,6 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
           : 'Mark complete',
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
-      initialGoogleCalendarIds: reminder.googleCalendarIds,
       initialSyncWorkspaceIds: _initialSyncWorkspaceIds(
         linkedWorkspaceIds: reminder.linkedWorkspaceIds,
         workspaceId: reminder.workspaceId,
@@ -385,11 +371,6 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
           syncToWorkspaceIds:
               (result['syncToWorkspaceIds'] as List?)
                   ?.whereType<Object>()
-                  .toList() ??
-              const [],
-          googleCalendarIds:
-              (result['googleCalendarIds'] as List?)
-                  ?.map((value) => value.toString())
                   .toList() ??
               const [],
         );
@@ -433,11 +414,6 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
-              .toList() ??
-          const [],
-      googleCalendarIds:
-          (result['googleCalendarIds'] as List?)
-              ?.map((value) => value.toString())
               .toList() ??
           const [],
     );

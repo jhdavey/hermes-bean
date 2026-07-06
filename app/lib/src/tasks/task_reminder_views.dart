@@ -115,7 +115,6 @@ class _TaskListCard extends StatefulWidget {
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
-    List<String> googleCalendarIds,
   })
   onTaskSaved;
   final Future<void> Function(
@@ -321,7 +320,6 @@ class _TaskListCardState extends State<_TaskListCard> {
       initialPrimaryWorkspaceId: task == null
           ? _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId)
           : null,
-      initialGoogleCalendarIds: task?.googleCalendarIds ?? const [],
       initialSyncWorkspaceIds: task == null
           ? const []
           : _initialSyncWorkspaceIds(
@@ -347,11 +345,6 @@ class _TaskListCardState extends State<_TaskListCard> {
           syncToWorkspaceIds:
               (result['syncToWorkspaceIds'] as List?)
                   ?.whereType<Object>()
-                  .toList() ??
-              const [],
-          googleCalendarIds:
-              (result['googleCalendarIds'] as List?)
-                  ?.map((value) => value.toString())
                   .toList() ??
               const [],
         );
@@ -393,11 +386,6 @@ class _TaskListCardState extends State<_TaskListCard> {
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
-              .toList() ??
-          const [],
-      googleCalendarIds:
-          (result['googleCalendarIds'] as List?)
-              ?.map((value) => value.toString())
               .toList() ??
           const [],
     );
@@ -590,7 +578,6 @@ class _ReminderListCard extends StatefulWidget {
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
-    List<String> googleCalendarIds,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;
@@ -792,7 +779,6 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       initialPrimaryWorkspaceId: reminder == null
           ? _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId)
           : null,
-      initialGoogleCalendarIds: reminder?.googleCalendarIds ?? const [],
       initialSyncWorkspaceIds: reminder == null
           ? const []
           : _initialSyncWorkspaceIds(
@@ -822,11 +808,6 @@ class _ReminderListCardState extends State<_ReminderListCard> {
           syncToWorkspaceIds:
               (result['syncToWorkspaceIds'] as List?)
                   ?.whereType<Object>()
-                  .toList() ??
-              const [],
-          googleCalendarIds:
-              (result['googleCalendarIds'] as List?)
-                  ?.map((value) => value.toString())
                   .toList() ??
               const [],
         );
@@ -872,11 +853,6 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       syncToWorkspaceIds:
           (result['syncToWorkspaceIds'] as List?)
               ?.whereType<Object>()
-              .toList() ??
-          const [],
-      googleCalendarIds:
-          (result['googleCalendarIds'] as List?)
-              ?.map((value) => value.toString())
               .toList() ??
           const [],
     );

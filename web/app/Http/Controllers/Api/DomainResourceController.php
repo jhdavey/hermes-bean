@@ -663,13 +663,6 @@ class DomainResourceController extends Controller
         $this->syncTo($request, $event, $syncTo);
         $this->refreshRecurringCalendarEvents($request, $event->refresh());
 
-        $event = $event->refresh();
-        if ($this->shouldSyncExternalCalendarsImmediately($request)) {
-            $event = $this->exportExternalCalendarEvent($event);
-        } else {
-            $this->deferExternalCalendarExport($event);
-        }
-
         return $this->created($event->refresh());
     }
 
@@ -722,13 +715,6 @@ class DomainResourceController extends Controller
             $this->replaceSyncTo($request, $model->refresh(), 'calendar_events', $syncTo);
         }
         $this->refreshRecurringCalendarEvents($request, $model->refresh());
-
-        $model = $model->refresh();
-        if ($this->shouldSyncExternalCalendarsImmediately($request)) {
-            $model = $this->exportExternalCalendarEvent($model);
-        } else {
-            $this->deferExternalCalendarExport($model);
-        }
 
         return response()->json(['data' => $model->refresh()]);
     }
@@ -802,10 +788,6 @@ class DomainResourceController extends Controller
             $this->recurringCalendarEvents->deleteGeneratedOccurrences($eventToDelete);
         }
         $eventIds = $eventsToDelete->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        foreach ($eventsToDelete as $eventToDelete) {
-            $this->googleCalendar->deleteExportedEvent($eventToDelete);
-            $this->outlookCalendar->deleteExportedEvent($eventToDelete);
-        }
         $eventsToDelete->each(fn (CalendarEvent $event): ?bool => $event->delete());
         $this->deleteWorkspaceItemLinksFor('calendar_events', $eventIds);
 
@@ -1203,8 +1185,6 @@ class DomainResourceController extends Controller
             if ($model instanceof CalendarEvent) {
                 $itemsToRemove->each(function (CalendarEvent $event): void {
                     $this->recurringCalendarEvents->deleteGeneratedOccurrences($event);
-                    $this->googleCalendar->deleteExportedEvent($event);
-                    $this->outlookCalendar->deleteExportedEvent($event);
                 });
             }
             $idsToRemove = $itemsToRemove->pluck('id')->map(fn ($id): int => (int) $id)->all();
@@ -1844,38 +1824,6 @@ class DomainResourceController extends Controller
             'years', 'year' => $from->copy()->addYearsNoOverflow($interval),
             default => $from->copy()->addDays($interval),
         };
-    }
-
-    private function shouldSyncExternalCalendarsImmediately(Request $request): bool
-    {
-        return app()->runningUnitTests()
-            || $request->boolean('sync_google_now')
-            || $request->boolean('sync_outlook_now')
-            || $request->boolean('sync_external_calendars_now');
-    }
-
-    private function exportExternalCalendarEvent(CalendarEvent $event): CalendarEvent
-    {
-        $event = $this->googleCalendar->exportEvent($event);
-
-        return $this->outlookCalendar->exportEvent($event->refresh());
-    }
-
-    private function deferExternalCalendarExport(CalendarEvent $event): void
-    {
-        $eventId = (int) $event->id;
-
-        defer(function () use ($eventId): void {
-            try {
-                $event = CalendarEvent::query()->find($eventId);
-                if ($event) {
-                    app(GoogleCalendarSyncService::class)->exportEvent($event);
-                    app(OutlookCalendarSyncService::class)->exportEvent($event->refresh());
-                }
-            } catch (Throwable $error) {
-                report($error);
-            }
-        });
     }
 
     private function enforceNotesAccess(Request $request): ?JsonResponse

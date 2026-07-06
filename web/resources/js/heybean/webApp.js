@@ -4171,7 +4171,7 @@ export function mountHeyBeanWebApp(mount) {
         const outlookConnected = state.outlookStatus?.connected === true;
         return `
             <strong>External Calendar Sync</strong>
-            <p class="hb-item-meta">${googleConnected || outlookConnected ? 'Sync now pulls selected external calendar events into Bean. Bean events push outward only when that event has a writable external calendar checked.' : 'Connect Google Calendar or Microsoft Outlook to import events into HeyBean.'}</p>
+            <p class="hb-item-meta">${googleConnected || outlookConnected ? 'Sync pulls selected external calendar events into Bean. Local Bean events stay local.' : 'Connect Google Calendar or Microsoft Outlook to import events into HeyBean.'}</p>
             ${externalCalendarProviderMarkup('google', 'Google Calendar', state.googleStatus)}
             ${externalCalendarProviderMarkup('outlook', 'Microsoft Outlook', state.outlookStatus)}
             <div class="hb-account-actions">
@@ -5140,7 +5140,6 @@ export function mountHeyBeanWebApp(mount) {
                     ${workspaceAssignmentRowsMarkup(allWorkspaces, selectedWorkspaceIds, sourceWorkspaceId, editing)}
                 </div>
                 ${kind === 'reminder' ? `<div data-reminder-recipient-options>${reminderRecipientOptionsMarkup(selectedWorkspaceIds, item)}</div>` : ''}
-                ${kind === 'event' ? `<div data-google-export-options>${googleEventConnectionMarkup(item, sourceWorkspace)}</div><div data-outlook-export-options>${outlookEventConnectionMarkup(item, sourceWorkspace)}</div>` : ''}
                 </div>
             </section>`;
     }
@@ -5213,68 +5212,6 @@ export function mountHeyBeanWebApp(mount) {
         return normalizeList(workspace?.memberships || workspace?.members || [])
             .filter((member) => String(member.status || 'active').toLowerCase() === 'active')
             .filter((member) => member.user || member.id || member.user_id || member.userId);
-    }
-
-    function googleEventConnectionMarkup(item, workspace) {
-        if (state.googleStatus?.connected !== true) {
-            return '<p class="hb-item-meta">Google Calendar is not connected.</p>';
-        }
-        const calendars = writableGoogleCalendars();
-        if (!calendars.length) {
-            return '<p class="hb-item-meta">No writable Google calendars are available.</p>';
-        }
-        const selected = new Set(defaultGoogleCalendarExportIds(item, workspace));
-        return `
-            <div class="hb-label">Export to Google Calendar
-                <small>Select external calendars for this event. Leave every option unchecked to keep it only in Bean.</small>
-                <div class="hb-option-list">
-                    ${calendars.map((calendar) => `<label class="hb-switch-row"><input type="checkbox" name="googleCalendarIds" value="${escapeAttr(calendar.id)}" ${selected.has(String(calendar.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(calendar.summary || calendar.name || calendar.id)}</strong><small>${escapeHtml(calendar.access_role || calendar.accessRole || 'writer')}</small></span></label>`).join('')}
-                </div>
-            </div>`;
-    }
-
-    function outlookEventConnectionMarkup(item, workspace) {
-        if (state.outlookStatus?.connected !== true) {
-            return '<p class="hb-item-meta">Microsoft Outlook is not connected.</p>';
-        }
-        const calendars = writableOutlookCalendars();
-        if (!calendars.length) {
-            return '<p class="hb-item-meta">No writable Outlook calendars are available.</p>';
-        }
-        const selected = new Set(defaultOutlookCalendarExportIds(item, workspace));
-        return `
-            <div class="hb-label">Export to Microsoft Outlook
-                <small>Select external calendars for this event. Leave every option unchecked to keep it only in Bean.</small>
-                <div class="hb-option-list">
-                    ${calendars.map((calendar) => `<label class="hb-switch-row"><input type="checkbox" name="outlookCalendarIds" value="${escapeAttr(calendar.id)}" ${selected.has(String(calendar.id)) ? 'checked' : ''}> <span><strong>${escapeHtml(calendar.summary || calendar.name || calendar.id)}</strong><small>${escapeHtml(calendar.access_role || calendar.accessRole || 'writer')}</small></span></label>`).join('')}
-                </div>
-            </div>`;
-    }
-
-    function writableGoogleCalendars() {
-        return normalizeList(state.googleStatus?.calendars).filter((calendar) => ['owner', 'writer'].includes(String(calendar.access_role || calendar.accessRole || 'reader')));
-    }
-
-    function writableOutlookCalendars() {
-        return normalizeList(state.outlookStatus?.calendars).filter((calendar) => ['owner', 'writer'].includes(String(calendar.access_role || calendar.accessRole || 'reader')));
-    }
-
-    function defaultGoogleCalendarExportIds(item = null, workspace = null) {
-        const metadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
-        const existingIds = normalizeList(metadata.google_calendar_ids || metadata.googleCalendarIds);
-        if (existingIds.length) return existingIds.map(String);
-        const existingSingle = item?.google_calendar_id || item?.googleCalendarId || metadata.google_calendar_id || metadata.googleCalendarId;
-        if (existingSingle) return [String(existingSingle)];
-        return [];
-    }
-
-    function defaultOutlookCalendarExportIds(item = null, workspace = null) {
-        const metadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
-        const existingIds = normalizeList(metadata.outlook_calendar_ids || metadata.outlookCalendarIds);
-        if (existingIds.length) return existingIds.map(String);
-        const existingSingle = item?.outlook_calendar_id || item?.outlookCalendarId || metadata.outlook_calendar_id || metadata.outlookCalendarId;
-        if (existingSingle) return [String(existingSingle)];
-        return [];
     }
 
     function profileModalMarkup() {
@@ -6448,13 +6385,6 @@ export function mountHeyBeanWebApp(mount) {
 
     function refreshEventWorkspaceOptions(form) {
         if (!form || form.dataset.modalForm !== 'event') return;
-        const picker = form.querySelector('[data-workspace-picker]');
-        if (!picker) return;
-        const workspace = findWorkspace(selectedPrimaryWorkspaceId(form, state.modal?.item));
-        const googleContainer = picker.querySelector('[data-google-export-options]');
-        if (googleContainer) googleContainer.innerHTML = googleEventConnectionMarkup(state.modal?.item, workspace);
-        const outlookContainer = picker.querySelector('[data-outlook-export-options]');
-        if (outlookContainer) outlookContainer.innerHTML = outlookEventConnectionMarkup(state.modal?.item, workspace);
     }
 
     function refreshReminderRecipientOptions(form) {
@@ -7263,16 +7193,10 @@ export function mountHeyBeanWebApp(mount) {
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const generatedOccurrence = eventIsGeneratedOccurrence(item);
             const recurrence = generatedOccurrence ? { value: null, metadata: {} } : recurrenceFormData(form, data);
-            const googleCalendarIds = selectedGoogleCalendarIds(form);
-            const outlookCalendarIds = selectedOutlookCalendarIds(form);
             const metadata = {
                 ...existingMetadata,
                 ...recurrence.metadata,
                 ...eventPlaceMetadataFromFormData(data),
-                google_calendar_ids: googleCalendarIds,
-                google_calendar_id: googleCalendarIds[0] || null,
-                outlook_calendar_ids: outlookCalendarIds,
-                outlook_calendar_id: outlookCalendarIds[0] || null,
                 all_day: allDay,
             };
             if (generatedOccurrence) {
@@ -7303,7 +7227,7 @@ export function mountHeyBeanWebApp(mount) {
             return {
                 body,
                 eventReminderMinutesBefore: form.elements.createEventReminder?.checked ? Number(data.eventReminderMinutesBefore || 15) : null,
-                path: item ? `/calendar-events/${item.id}?sync_external_calendars_now=1` : '/calendar-events?sync_external_calendars_now=1',
+                path: item ? `/calendar-events/${item.id}` : '/calendar-events',
                 options: { method: item ? 'PATCH' : 'POST', body },
             };
         }
@@ -7605,20 +7529,6 @@ export function mountHeyBeanWebApp(mount) {
 
     function uniqueReminderRecipientUserIds(recipientsByWorkspace = {}) {
         return Array.from(new Set(Object.values(recipientsByWorkspace).flat().map(Number).filter(Boolean)));
-    }
-
-    function selectedGoogleCalendarIds(form) {
-        if (state.googleStatus?.connected !== true) return [];
-        return Array.from(form.querySelectorAll('input[name="googleCalendarIds"]:checked'))
-            .map((input) => String(input.value))
-            .filter(Boolean);
-    }
-
-    function selectedOutlookCalendarIds(form) {
-        if (state.outlookStatus?.connected !== true) return [];
-        return Array.from(form.querySelectorAll('input[name="outlookCalendarIds"]:checked'))
-            .map((input) => String(input.value))
-            .filter(Boolean);
     }
 
     function syncSelectedCategoryColor(event) {
@@ -13164,7 +13074,7 @@ export function mountHeyBeanWebApp(mount) {
             } else if (action === 'check' || action === 'sync') {
                 const result = await api(`${basePath}/sync`, { method: 'POST' });
                 state[statusKey] = result.status;
-                state.notice = `${label} sync pulled ${result.imported || 0} external event${(result.imported || 0) === 1 ? '' : 's'} into Bean. Bean events push outward only when that event has a writable external calendar checked.`;
+                state.notice = `${label} sync pulled ${result.imported || 0} external event${(result.imported || 0) === 1 ? '' : 's'} into Bean. Local Bean events stay local.`;
             } else if (action === 'disconnect') {
                 state[statusKey] = await api(basePath, { method: 'DELETE' });
                 state.notice = `${label} sync disconnected.`;

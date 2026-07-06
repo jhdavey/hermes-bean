@@ -4849,15 +4849,12 @@ ${_truncateDiagnostic(stack, 2200)}
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds = const [],
-    List<String> googleCalendarIds = const [],
   }) {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
     final normalizedColor = category == null ? _themeCategoryColorHex() : color;
     final metadata = <String, Object?>{
       ...?task?.metadata,
       ...?recurrenceMetadata,
-      if (googleCalendarIds.isNotEmpty || task != null)
-        'google_calendar_ids': googleCalendarIds,
       if (parentTaskId != null || task?.parentTaskId != null)
         'parent_task_id': parentTaskId ?? task!.parentTaskId,
     };
@@ -5064,11 +5061,6 @@ ${_truncateDiagnostic(stack, 2200)}
                   ?.whereType<Object>()
                   .toList() ??
               const [],
-          googleCalendarIds:
-              (result['googleCalendarIds'] as List?)
-                  ?.map((value) => value.toString())
-                  .toList() ??
-              const [],
         );
       },
     );
@@ -5115,11 +5107,6 @@ ${_truncateDiagnostic(stack, 2200)}
           syncToWorkspaceIds:
               (result['syncToWorkspaceIds'] as List?)
                   ?.whereType<Object>()
-                  .toList() ??
-              const [],
-          googleCalendarIds:
-              (result['googleCalendarIds'] as List?)
-                  ?.map((value) => value.toString())
                   .toList() ??
               const [],
         );
@@ -5200,7 +5187,6 @@ ${_truncateDiagnostic(stack, 2200)}
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds = const [],
-    List<String> googleCalendarIds = const [],
   }) {
     final normalizedRemindAt = _taskReminderInputToWireValue(remindAt);
     if (normalizedRemindAt == null) {
@@ -5211,8 +5197,6 @@ ${_truncateDiagnostic(stack, 2200)}
     final metadata = <String, Object?>{
       ...?reminder?.metadata,
       ...?recurrenceMetadata,
-      if (googleCalendarIds.isNotEmpty || reminder != null)
-        'google_calendar_ids': googleCalendarIds,
     };
     final previousReminders = _reminders;
     final optimisticReminder = reminder == null

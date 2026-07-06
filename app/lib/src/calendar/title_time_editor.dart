@@ -390,7 +390,6 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   bool showPrimaryWorkspaceSelector = false,
   Object? initialPrimaryWorkspaceId,
   GoogleCalendarSyncStatus? googleCalendarStatus,
-  List<String> initialGoogleCalendarIds = const [],
   List<Object> initialSyncWorkspaceIds = const [],
   Future<void> Function(Map<String, Object?> result)? onSave,
 }) async {
@@ -415,9 +414,6 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   );
   final syncWorkspaceIds = <Object>{...initialSyncWorkspaceIds};
   Object? selectedPrimaryWorkspaceId = initialPrimaryWorkspaceId;
-  final googleCalendarIds = <String>{...initialGoogleCalendarIds};
-  final writableGoogleCalendars =
-      googleCalendarStatus?.writableCalendars ?? const <GoogleCalendarInfo>[];
   String? validationError;
   final isReminderEditor = titleLabel.toLowerCase().contains('reminder');
   final resolvedEditorIcon =
@@ -503,7 +499,6 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
       'syncToWorkspaceIds': payloadSyncWorkspaceIds,
       if (showPrimaryWorkspaceSelector)
         'workspaceId': _workspaceValueToInt(payloadPrimaryWorkspaceId),
-      'googleCalendarIds': googleCalendarIds.toList()..sort(),
     };
   }
 
@@ -1099,49 +1094,6 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                               label: Text('Choose date and time'),
                             ),
                           ),
-                          if (writableGoogleCalendars.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            _MobileFormSection(
-                              key: const Key(
-                                'title-time-editor-google-calendar-sync',
-                              ),
-                              title: 'Connected calendars',
-                              subtitle:
-                                  'Create or update this item on selected writable connected calendars.',
-                              icon: Icons.calendar_month_rounded,
-                              children: [
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final calendar
-                                        in writableGoogleCalendars)
-                                      FilterChip(
-                                        key: Key(
-                                          'title-time-editor-google-calendar-${calendar.id}',
-                                        ),
-                                        label: Text(calendar.summary),
-                                        selected: googleCalendarIds.contains(
-                                          calendar.id,
-                                        ),
-                                        onSelected: (selected) =>
-                                            setModalState(() {
-                                              if (selected) {
-                                                googleCalendarIds.add(
-                                                  calendar.id,
-                                                );
-                                              } else {
-                                                googleCalendarIds.remove(
-                                                  calendar.id,
-                                                );
-                                              }
-                                            }),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ],
                           if (showPrimaryWorkspaceSelector &&
                               workspaceChoices.isNotEmpty) ...[
                             const SizedBox(height: 8),

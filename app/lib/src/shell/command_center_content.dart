@@ -132,7 +132,6 @@ class _CommandCenterContent extends StatelessWidget {
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
-    List<String> googleCalendarIds,
   })
   onTaskSaved;
   final Future<void> Function(
@@ -150,7 +149,6 @@ class _CommandCenterContent extends StatelessWidget {
     int? workspaceId,
     Map<String, Object?>? recurrenceMetadata,
     List<Object> syncToWorkspaceIds,
-    List<String> googleCalendarIds,
   })
   onReminderSaved;
   final Future<void> Function(HermesReminder reminder) onReminderCompleted;

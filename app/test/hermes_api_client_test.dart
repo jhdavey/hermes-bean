@@ -1334,10 +1334,7 @@ void main() {
         transport: (request) async {
           requests.add(request);
           expect(request.method, 'POST');
-          expect(
-            request.path,
-            '/calendar-events?sync_external_calendars_now=1',
-          );
+          expect(request.path, '/calendar-events');
           expect(request.headers['Authorization'], 'Bearer token-123');
           expect(request.body, {
             'title': 'Client kickoff',
@@ -2129,9 +2126,7 @@ void main() {
               }),
             );
           }
-          if (request.path ==
-                  '/calendar-events?sync_external_calendars_now=1' &&
-              request.method == 'POST') {
+          if (request.path == '/calendar-events' && request.method == 'POST') {
             expect(request.body, containsPair('workspace_id', 1));
             expect(request.body, containsPair('sync_to_workspace_ids', [2]));
             expect(request.body, containsPair('location', 'Conference Room B'));
@@ -2143,8 +2138,7 @@ void main() {
               }),
             );
           }
-          if (request.path ==
-                  '/calendar-events/3?sync_external_calendars_now=1' &&
+          if (request.path == '/calendar-events/3' &&
               request.method == 'PATCH') {
             expect(request.body, containsPair('sync_to_workspace_ids', [2, 3]));
             expect(request.body, containsPair('location', 'Main Hall'));
@@ -2286,8 +2280,7 @@ void main() {
               }),
             );
           }
-          if (request.path ==
-                  '/calendar-events/3?sync_external_calendars_now=1' &&
+          if (request.path == '/calendar-events/3' &&
               request.method == 'PATCH') {
             return HermesApiResponse(
               200,

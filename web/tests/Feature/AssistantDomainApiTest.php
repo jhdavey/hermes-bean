@@ -422,7 +422,7 @@ class AssistantDomainApiTest extends TestCase
         ]);
     }
 
-    public function test_agent_calendar_update_still_succeeds_when_google_export_fails(): void
+    public function test_agent_calendar_update_does_not_export_to_google_calendar(): void
     {
         Carbon::setTestNow('2026-05-19T19:09:00Z');
         $this->fakeAgentToolCalls([
@@ -430,12 +430,11 @@ class AssistantDomainApiTest extends TestCase
                 'match_title' => 'lunch',
                 'from_date' => '2026-05-20',
                 'starts_at' => '2026-05-25T12:00:00-04:00',
-                'sync_google_now' => true,
             ]),
         ], 'Quick Lunch is moved to next Monday at 12:00 PM.');
 
-        $token = $this->apiToken('google-export-failure@example.com');
-        $user = User::where('email', 'google-export-failure@example.com')->firstOrFail();
+        $token = $this->apiToken('google-export-ignored@example.com');
+        $user = User::where('email', 'google-export-ignored@example.com')->firstOrFail();
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Quick Lunch',
             'starts_at' => '2026-05-20T12:30:00-04:00',
@@ -480,10 +479,9 @@ class AssistantDomainApiTest extends TestCase
             'event_type' => 'assistant.calendar_event.updated',
             'status' => 'succeeded',
         ]);
-        $this->assertDatabaseHas('activity_events', [
+        $this->assertDatabaseMissing('activity_events', [
             'conversation_session_id' => $sessionId,
             'event_type' => 'assistant.google_calendar.export_failed',
-            'status' => 'failed',
         ]);
     }
 

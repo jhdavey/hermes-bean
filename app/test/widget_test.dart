@@ -9026,20 +9026,6 @@ void main() {
       'today at ${_testNaturalTimeLabel(DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day, 17))}',
     );
     await tester.enterText(find.byKey(const Key('event-end-field')), '5:00 PM');
-    await tester.ensureVisible(
-      find.byKey(const Key('event-google-calendar-sports@example.com')),
-    );
-    await tester.tap(
-      find.byKey(const Key('event-google-calendar-sports@example.com')),
-    );
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('event-sync-workspace-1')));
-    await tester.pumpAndSettle();
-    expect(find.text('Personal (current)'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('event-sync-workspace-1')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('event-sync-workspace-2')));
-    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('event-save-action')));
     await tester.pumpAndSettle();
 
@@ -9058,14 +9044,9 @@ void main() {
     ).toUtc().toIso8601String();
     expect(api.createdEvent?.startsAt, typedStart);
     expect(api.createdEvent?.endsAt, typedEnd);
-    expect(api.createdEvent?.metadata?['google_calendar_ids'], [
-      'sports@example.com',
-    ]);
-    expect(
-      api.createdEvent?.metadata?['google_calendar_id'],
-      'sports@example.com',
-    );
-    expect(api.createdEventWorkspaceId, 2);
+    expect(api.createdEvent?.metadata?['google_calendar_ids'], isNull);
+    expect(api.createdEvent?.metadata?['google_calendar_id'], isNull);
+    expect(api.createdEventWorkspaceId, 1);
     expect(api.createdEventSyncWorkspaceIds, isEmpty);
     expect(find.textContaining('Client kickoff'), findsOneWidget);
   });
@@ -9698,9 +9679,9 @@ void main() {
       expect(find.byKey(const Key('event-recurrence-field')), findsOneWidget);
       expect(
         find.byKey(const Key('event-google-calendar-field')),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('External Calendar Sync'), findsOneWidget);
+      expect(find.text('External Calendar Sync'), findsNothing);
       expect(find.text('Personal'), findsWidgets);
       final titleTop = tester
           .getTopLeft(find.byKey(const Key('event-title-field')))
@@ -9799,13 +9780,6 @@ void main() {
           ?.call(true);
       await tester.pumpAndSettle();
       await tester.ensureVisible(
-        find.byKey(const Key('event-google-calendar-sports@example.com')),
-      );
-      await tester.tap(
-        find.byKey(const Key('event-google-calendar-sports@example.com')),
-      );
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(
         find.byKey(const Key('event-create-reminder-toggle')),
       );
       await tester.pumpAndSettle();
@@ -9871,10 +9845,6 @@ void main() {
       expect(api.updatedEvent?.recurrence, 'specific_days');
       expect(api.updatedEvent?.metadata, {
         'recurrence': 'specific_days',
-        'google_calendar_ids': ['sports@example.com'],
-        'google_calendar_id': 'sports@example.com',
-        'outlook_calendar_ids': [],
-        'outlook_calendar_id': null,
         'days': ['thu', 'tue'],
         'interval': 1,
         'unit': 'days',

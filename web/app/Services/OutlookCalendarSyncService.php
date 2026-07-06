@@ -233,120 +233,6 @@ class OutlookCalendarSyncService
         }
     }
 
-    public function exportEvent(CalendarEvent $event): CalendarEvent
-    {
-        $connection = $event->user?->outlookCalendarConnection()->first();
-        if (! $connection || $connection->status !== 'connected') {
-            return $event;
-        }
-        $calendarIds = array_values(array_filter(
-            array_unique($this->eventOutlookCalendarIds($event)),
-            fn (string $calendarId): bool => $this->calendarCanWrite($connection, $calendarId)
-        ));
-        $metadata = $event->metadata ?? [];
-        $exports = is_array($metadata['outlook_event_exports'] ?? null) ? $metadata['outlook_event_exports'] : [];
-        if ($event->outlook_calendar_id && $event->outlook_event_id) {
-            $exports[$event->outlook_calendar_id] ??= ['event_id' => $event->outlook_event_id];
-        }
-        $token = $this->validAccessToken($connection);
-        foreach (array_diff(array_keys($exports), $calendarIds) as $removedCalendarId) {
-            $removedEventId = is_array($exports[$removedCalendarId] ?? null) ? ($exports[$removedCalendarId]['event_id'] ?? null) : null;
-            if ($removedEventId && $this->calendarCanWrite($connection, (string) $removedCalendarId)) {
-                $response = Http::withToken($token)->delete($this->calendarEventsUrl((string) $removedCalendarId).'/'.rawurlencode((string) $removedEventId));
-                if (! $response->successful() && ! in_array($response->status(), [404, 410], true)) {
-                    $this->markFailed($connection, 'Outlook event delete failed.');
-                    throw new RuntimeException('Outlook event delete failed.');
-                }
-            }
-            unset($exports[$removedCalendarId]);
-        }
-
-        if ($calendarIds === []) {
-            $metadata['source'] = $metadata['source'] ?? 'heybean';
-            $metadata['outlook_event_exports'] = $exports;
-            $metadata['outlook_calendar_ids'] = [];
-            unset($metadata['outlook_calendar_id'], $metadata['outlook_calendar_summary'], $metadata['outlook_web_link']);
-            $event->forceFill([
-                'outlook_event_id' => null,
-                'outlook_calendar_id' => null,
-                'outlook_updated_at' => null,
-                'metadata' => $metadata,
-            ])->save();
-
-            return $event->refresh();
-        }
-
-        $payload = $this->eventPayload($event);
-        $primaryOutlookEvent = null;
-        $primaryCalendarId = null;
-        foreach ($calendarIds as $calendarId) {
-            $existingOutlookEventId = $exports[$calendarId]['event_id'] ?? ($calendarId === $event->outlook_calendar_id ? $event->outlook_event_id : null);
-            $response = $existingOutlookEventId
-                ? Http::withToken($token)->patch($this->calendarEventsUrl($calendarId).'/'.rawurlencode($existingOutlookEventId), $payload)
-                : Http::withToken($token)->post($this->calendarEventsUrl($calendarId), $payload);
-            if (! $response->successful()) {
-                $this->markFailed($connection, 'Outlook event export failed.');
-                throw new RuntimeException('Outlook event export failed.');
-            }
-
-            $outlookEvent = $response->json();
-            $exports[$calendarId] = [
-                'event_id' => $outlookEvent['id'] ?? $existingOutlookEventId,
-                'web_link' => $outlookEvent['webLink'] ?? ($exports[$calendarId]['web_link'] ?? null),
-                'updated_at' => $outlookEvent['lastModifiedDateTime'] ?? now()->toIso8601String(),
-            ];
-            $primaryOutlookEvent ??= $outlookEvent;
-            $primaryCalendarId ??= $calendarId;
-        }
-
-        $metadata['source'] = $metadata['source'] ?? 'heybean';
-        $metadata['outlook_event_exports'] = $exports;
-        $metadata['outlook_calendar_ids'] = $calendarIds;
-        $metadata['outlook_web_link'] = $primaryOutlookEvent['webLink'] ?? ($metadata['outlook_web_link'] ?? null);
-        $metadata['outlook_calendar_id'] = $primaryCalendarId;
-        $metadata['outlook_calendar_summary'] = $this->calendarSummary($connection, $primaryCalendarId);
-        $event->forceFill([
-            'outlook_event_id' => $primaryOutlookEvent['id'] ?? $event->outlook_event_id,
-            'outlook_calendar_id' => $primaryCalendarId,
-            'outlook_updated_at' => isset($primaryOutlookEvent['lastModifiedDateTime']) ? Carbon::parse($primaryOutlookEvent['lastModifiedDateTime']) : now(),
-            'metadata' => $metadata,
-        ])->save();
-
-        return $event->refresh();
-    }
-
-    public function deleteExportedEvent(CalendarEvent $event): void
-    {
-        $connection = $event->user?->outlookCalendarConnection()->first();
-        if (! $connection || $connection->status !== 'connected') {
-            return;
-        }
-
-        $metadata = $event->metadata ?? [];
-        $exports = is_array($metadata['outlook_event_exports'] ?? null) ? $metadata['outlook_event_exports'] : [];
-        if ($event->outlook_calendar_id && $event->outlook_event_id) {
-            $exports[$event->outlook_calendar_id] ??= ['event_id' => $event->outlook_event_id];
-        }
-
-        if ($exports === []) {
-            return;
-        }
-
-        $token = $this->validAccessToken($connection);
-        foreach ($exports as $calendarId => $export) {
-            $outlookEventId = is_array($export) ? ($export['event_id'] ?? null) : null;
-            if (! $calendarId || ! $outlookEventId || ! $this->calendarCanWrite($connection, (string) $calendarId)) {
-                continue;
-            }
-
-            $response = Http::withToken($token)->delete($this->calendarEventsUrl((string) $calendarId).'/'.rawurlencode((string) $outlookEventId));
-            if (! $response->successful() && ! in_array($response->status(), [404, 410], true)) {
-                $this->markFailed($connection, 'Outlook event delete failed.');
-                throw new RuntimeException('Outlook event delete failed.');
-            }
-        }
-    }
-
     private function connectedConnection(User $user): OutlookCalendarConnection
     {
         $connection = $user->outlookCalendarConnection()->first();
@@ -473,19 +359,6 @@ class OutlookCalendarSyncService
         return null;
     }
 
-    private function calendarCanWrite(OutlookCalendarConnection $connection, string $calendarId): bool
-    {
-        foreach ($this->storedCalendars($connection) as $calendar) {
-            if (($calendar['id'] ?? null) !== $calendarId) {
-                continue;
-            }
-
-            return in_array($calendar['access_role'] ?? $calendar['accessRole'] ?? 'reader', ['owner', 'writer'], true);
-        }
-
-        return true;
-    }
-
     private function isHeyBeanExportedEvent(CalendarEvent $event): bool
     {
         if (! $event->exists) {
@@ -496,44 +369,6 @@ class OutlookCalendarSyncService
 
         return ($metadata['source'] ?? null) === 'heybean'
             || is_array($metadata['outlook_event_exports'] ?? null);
-    }
-
-    private function eventOutlookCalendarIds(CalendarEvent $event): array
-    {
-        $metadataCalendarIds = $event->metadata['outlook_calendar_ids'] ?? null;
-        if (is_array($metadataCalendarIds)) {
-            return array_values(array_filter(array_map('strval', $metadataCalendarIds)));
-        }
-
-        $metadataCalendarId = $event->metadata['outlook_calendar_id'] ?? null;
-        if (is_string($metadataCalendarId) && trim($metadataCalendarId) !== '') {
-            return [(string) $metadataCalendarId];
-        }
-
-        return [];
-    }
-
-    private function eventPayload(CalendarEvent $event): array
-    {
-        $metadata = $event->metadata ?? [];
-        $allDay = ($metadata['all_day'] ?? $metadata['allDay'] ?? false) === true
-            || in_array(strtolower((string) ($metadata['all_day'] ?? $metadata['allDay'] ?? '')), ['true', '1'], true);
-
-        $start = $event->starts_at->copy()->utc();
-        $end = ($event->ends_at ?: $event->starts_at)->copy()->utc();
-        if ($allDay) {
-            $start = $event->starts_at->copy()->startOfDay()->utc();
-            $end = $this->allDayExclusiveEnd($event);
-        }
-
-        return [
-            'subject' => $event->title,
-            'body' => ['contentType' => 'HTML', 'content' => nl2br(e($event->description ?? ''))],
-            'location' => ['displayName' => $event->location ?? ''],
-            'isAllDay' => $allDay,
-            'start' => ['dateTime' => $start->format('Y-m-d\TH:i:s'), 'timeZone' => 'UTC'],
-            'end' => ['dateTime' => $end->format('Y-m-d\TH:i:s'), 'timeZone' => 'UTC'],
-        ];
     }
 
     private function calendarEventsUrl(string $calendarId): string
@@ -562,22 +397,6 @@ class OutlookCalendarSyncService
         }
 
         return Carbon::parse($dateTime, (string) ($value['timeZone'] ?? 'UTC'))->utc();
-    }
-
-    private function allDayExclusiveEnd(CalendarEvent $event): Carbon
-    {
-        if (! $event->ends_at) {
-            return $event->starts_at->copy()->utc()->addDay()->startOfDay();
-        }
-
-        $end = $event->ends_at->copy()->utc();
-        $start = $event->starts_at->copy()->utc()->startOfDay();
-
-        if ($end->isStartOfDay() && $end->gt($start)) {
-            return $end;
-        }
-
-        return $end->copy()->addDay()->startOfDay();
     }
 
     private function validAccessToken(OutlookCalendarConnection $connection): string

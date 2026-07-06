@@ -163,8 +163,6 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   late List<HermesEventCategory> _categories;
   String _eventIntervalUnit = 'days';
   Object? _primaryWorkspaceId;
-  final Set<String> _googleCalendarIds = <String>{};
-  final Set<String> _outlookCalendarIds = <String>{};
   final Set<Object> _syncWorkspaceIds = <Object>{};
   String? _validationError;
   late bool _isCritical;
@@ -266,14 +264,6 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _eventInterval = TextEditingController(
       text: eventMetadata['interval']?.toString() ?? '1',
     );
-    final writableGoogleCalendars =
-        widget.googleCalendarStatus?.writableCalendars ??
-        const <GoogleCalendarInfo>[];
-    final writableOutlookCalendars =
-        widget.outlookCalendarStatus?.writableCalendars ??
-        const <GoogleCalendarInfo>[];
-    _googleCalendarIds.addAll(event.googleCalendarIds);
-    _outlookCalendarIds.addAll(event.outlookCalendarIds);
     _syncWorkspaceIds.addAll(
       _initialSyncWorkspaceIds(
         linkedWorkspaceIds: event.linkedWorkspaceIds,
@@ -281,20 +271,6 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         activeWorkspaceId: widget.activeWorkspaceId,
       ),
     );
-    if (writableGoogleCalendars.isNotEmpty) {
-      _googleCalendarIds.removeWhere(
-        (calendarId) => !writableGoogleCalendars.any(
-          (calendar) => calendar.id == calendarId,
-        ),
-      );
-    }
-    if (writableOutlookCalendars.isNotEmpty) {
-      _outlookCalendarIds.removeWhere(
-        (calendarId) => !writableOutlookCalendars.any(
-          (calendar) => calendar.id == calendarId,
-        ),
-      );
-    }
     _isCritical = event.isCritical;
     final matchingCategoryColor = _categories
         .where(
@@ -551,8 +527,6 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     }
 
     final eventInterval = int.tryParse(_eventInterval.text.trim()) ?? 1;
-    final sortedGoogleCalendarIds = _googleCalendarIds.toList()..sort();
-    final sortedOutlookCalendarIds = _outlookCalendarIds.toList()..sort();
     final syncToWorkspaceIds = _syncWorkspaceIds.toList();
     Object? primaryWorkspaceId = _primaryWorkspaceId;
     if (widget.event.id == 0 && widget.workspaces.isNotEmpty) {
@@ -574,10 +548,6 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
           (widget.event.metadata?.containsKey('all_day') ?? false) ||
           (widget.event.metadata?.containsKey('allDay') ?? false))
         'all_day': _allDay,
-      'google_calendar_ids': sortedGoogleCalendarIds,
-      'google_calendar_id': sortedGoogleCalendarIds.firstOrNull,
-      'outlook_calendar_ids': sortedOutlookCalendarIds,
-      'outlook_calendar_id': sortedOutlookCalendarIds.firstOrNull,
       if (_recurrence == 'specific_days')
         'days': _eventSpecificDays.toList()..sort(),
       if (_recurrence == 'specific_days' || _recurrence == 'interval')
@@ -1795,108 +1765,6 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           ],
                         ],
                       ),
-                      if ((widget
-                              .googleCalendarStatus
-                              ?.writableCalendars
-                              .isNotEmpty ??
-                          false)) ...[
-                        const SizedBox(height: 14),
-                        _MobileFormSection(
-                          key: const Key('event-google-calendar-field'),
-                          title: 'External Calendar Sync',
-                          subtitle:
-                              'Choose any writable external calendars for this event.',
-                          icon: Icons.calendar_month_rounded,
-                          infoKey: const Key('event-google-calendars-info'),
-                          infoTitle: 'External Calendar Sync',
-                          infoBullets: const [
-                            'Checked external calendars receive a copy of this local Bean event.',
-                            'Only writable connected external calendars are shown here.',
-                            'Leave every calendar unchecked to keep this event only in Bean.',
-                            'Changing this list affects this event, not your whole account.',
-                          ],
-                          children: [
-                            for (final calendar
-                                in widget
-                                    .googleCalendarStatus!
-                                    .writableCalendars)
-                              CheckboxListTile(
-                                key: Key(
-                                  'event-google-calendar-${calendar.id}',
-                                ),
-                                contentPadding: EdgeInsets.zero,
-                                value: _googleCalendarIds.contains(calendar.id),
-                                onChanged: (value) => setState(() {
-                                  if (value ?? false) {
-                                    _googleCalendarIds.add(calendar.id);
-                                  } else {
-                                    _googleCalendarIds.remove(calendar.id);
-                                  }
-                                }),
-                                title: Text(calendar.summary),
-                                subtitle:
-                                    calendar.id ==
-                                        widget
-                                            .googleCalendarStatus!
-                                            .defaultCalendarId
-                                    ? Text('Default external calendar')
-                                    : null,
-                              ),
-                          ],
-                        ),
-                      ],
-                      if ((widget
-                              .outlookCalendarStatus
-                              ?.writableCalendars
-                              .isNotEmpty ??
-                          false)) ...[
-                        const SizedBox(height: 14),
-                        _MobileFormSection(
-                          key: const Key('event-outlook-calendar-field'),
-                          title: 'Microsoft Outlook Sync',
-                          subtitle:
-                              'Choose any writable Outlook calendars for this event.',
-                          icon: Icons.mail_outline_rounded,
-                          infoKey: const Key('event-outlook-calendars-info'),
-                          infoTitle: 'Microsoft Outlook Sync',
-                          infoBullets: const [
-                            'Checked Outlook calendars receive a copy of this local Bean event.',
-                            'Only writable connected Outlook calendars are shown here.',
-                            'Leave every calendar unchecked to keep this event only in Bean.',
-                            'Changing this list affects this event, not your whole account.',
-                          ],
-                          children: [
-                            for (final calendar
-                                in widget
-                                    .outlookCalendarStatus!
-                                    .writableCalendars)
-                              CheckboxListTile(
-                                key: Key(
-                                  'event-outlook-calendar-${calendar.id}',
-                                ),
-                                contentPadding: EdgeInsets.zero,
-                                value: _outlookCalendarIds.contains(
-                                  calendar.id,
-                                ),
-                                onChanged: (value) => setState(() {
-                                  if (value ?? false) {
-                                    _outlookCalendarIds.add(calendar.id);
-                                  } else {
-                                    _outlookCalendarIds.remove(calendar.id);
-                                  }
-                                }),
-                                title: Text(calendar.summary),
-                                subtitle:
-                                    calendar.id ==
-                                        widget
-                                            .outlookCalendarStatus!
-                                            .defaultCalendarId
-                                    ? Text('Default Outlook calendar')
-                                    : null,
-                              ),
-                          ],
-                        ),
-                      ],
                       if (_eventWorkspaceChoices.isNotEmpty) ...[
                         const SizedBox(height: 14),
                         _MobileFormSection(

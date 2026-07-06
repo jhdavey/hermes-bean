@@ -787,10 +787,10 @@ class GoogleCalendarSyncTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/calendars/calendar-primary-alias%40example.com/events'));
     }
 
-    public function test_local_calendar_create_and_update_write_to_selected_google_calendar(): void
+    public function test_local_calendar_create_and_update_do_not_write_to_google_calendar(): void
     {
-        $token = $this->apiToken('calendar-write@example.com');
-        $user = User::where('email', 'calendar-write@example.com')->firstOrFail();
+        $token = $this->apiToken('calendar-local-only@example.com');
+        $user = User::where('email', 'calendar-local-only@example.com')->firstOrFail();
         GoogleCalendarConnection::create([
             'user_id' => $user->id,
             'status' => 'connected',
@@ -808,16 +808,7 @@ class GoogleCalendarSyncTest extends TestCase
         ]);
 
         Http::fake([
-            'https://www.googleapis.com/calendar/v3/calendars/work%40example.com/events' => Http::response([
-                'id' => 'google-created-1',
-                'updated' => '2026-05-15T12:00:00Z',
-                'htmlLink' => 'https://calendar.google.com/event?eid=created',
-            ]),
-            'https://www.googleapis.com/calendar/v3/calendars/work%40example.com/events/google-created-1' => Http::response([
-                'id' => 'google-created-1',
-                'updated' => '2026-05-15T12:30:00Z',
-                'htmlLink' => 'https://calendar.google.com/event?eid=updated',
-            ]),
+            'https://www.googleapis.com/calendar/v3/*' => Http::response(['id' => 'should-not-be-written']),
         ]);
 
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
@@ -825,10 +816,7 @@ class GoogleCalendarSyncTest extends TestCase
             'starts_at' => '2026-05-20T15:00:00Z',
             'ends_at' => '2026-05-20T16:00:00Z',
             'metadata' => ['google_calendar_id' => 'work@example.com'],
-        ])->assertCreated()
-            ->assertJsonPath('data.google_event_id', 'google-created-1')
-            ->assertJsonPath('data.google_calendar_id', 'work@example.com')
-            ->json('data.id');
+        ])->assertCreated()->json('data.id');
 
         $this->withToken($token)->patchJson('/api/calendar-events/'.$eventId, [
             'title' => 'Updated client meeting',
@@ -837,15 +825,13 @@ class GoogleCalendarSyncTest extends TestCase
             'metadata' => ['google_calendar_id' => 'work@example.com'],
         ])->assertOk();
 
-        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
-            && str_contains($request->url(), '/calendars/work%40example.com/events')
-            && $request['summary'] === 'Local client meeting');
-        Http::assertSent(fn ($request): bool => $request->method() === 'PATCH'
-            && str_contains($request->url(), '/calendars/work%40example.com/events/google-created-1')
-            && $request['summary'] === 'Updated client meeting');
+        $event = CalendarEvent::findOrFail($eventId);
+        $this->assertSame('Updated client meeting', $event->title);
+        $this->assertNull($event->google_event_id);
+        Http::assertNothingSent();
     }
 
-    public function test_local_calendar_create_without_external_calendar_selection_does_not_export_to_google(): void
+    public function test_local_calendar_create_without_external_calendar_selection_does_not_write_to_google(): void
     {
         $token = $this->apiToken('calendar-no-external-export@example.com');
         $user = User::where('email', 'calendar-no-external-export@example.com')->firstOrFail();
@@ -883,61 +869,7 @@ class GoogleCalendarSyncTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_local_calendar_create_exports_to_multiple_selected_google_calendars(): void
-    {
-        $token = $this->apiToken('calendar-multi-write@example.com');
-        $user = User::where('email', 'calendar-multi-write@example.com')->firstOrFail();
-        GoogleCalendarConnection::create([
-            'user_id' => $user->id,
-            'status' => 'connected',
-            'calendar_id' => 'primary',
-            'access_token_encrypted' => Crypt::encryptString('access-token'),
-            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
-            'token_expires_at' => now()->addHour(),
-            'metadata' => [
-                'selected_calendar_ids' => ['primary', 'work@example.com'],
-                'calendars' => [
-                    ['id' => 'primary', 'summary' => 'Main calendar', 'accessRole' => 'owner'],
-                    ['id' => 'work@example.com', 'summary' => 'Work', 'accessRole' => 'writer'],
-                ],
-            ],
-        ]);
-
-        Http::fake([
-            'https://www.googleapis.com/calendar/v3/calendars/primary/events' => Http::response([
-                'id' => 'google-primary-1',
-                'updated' => '2026-05-15T12:00:00Z',
-                'htmlLink' => 'https://calendar.google.com/event?eid=primary',
-            ]),
-            'https://www.googleapis.com/calendar/v3/calendars/work%40example.com/events' => Http::response([
-                'id' => 'google-work-1',
-                'updated' => '2026-05-15T12:01:00Z',
-                'htmlLink' => 'https://calendar.google.com/event?eid=work',
-            ]),
-        ]);
-
-        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
-            'title' => 'Multi calendar meeting',
-            'starts_at' => '2026-05-20T15:00:00Z',
-            'ends_at' => '2026-05-20T16:00:00Z',
-            'metadata' => ['google_calendar_ids' => ['primary', 'work@example.com']],
-        ])->assertCreated()
-            ->assertJsonPath('data.google_calendar_id', 'primary')
-            ->json('data.id');
-
-        $event = CalendarEvent::findOrFail($eventId);
-        $this->assertSame(['primary', 'work@example.com'], $event->metadata['google_calendar_ids']);
-        $this->assertSame('google-primary-1', $event->metadata['google_event_exports']['primary']['event_id']);
-        $this->assertSame('google-work-1', $event->metadata['google_event_exports']['work@example.com']['event_id']);
-        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
-            && str_contains($request->url(), '/calendars/primary/events')
-            && $request['summary'] === 'Multi calendar meeting');
-        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
-            && str_contains($request->url(), '/calendars/work%40example.com/events')
-            && $request['summary'] === 'Multi calendar meeting');
-    }
-
-    public function test_deleting_exported_local_event_removes_google_calendar_copies(): void
+    public function test_deleting_local_event_does_not_remove_google_calendar_copies(): void
     {
         $token = $this->apiToken('calendar-delete-export@example.com');
         $user = User::where('email', 'calendar-delete-export@example.com')->firstOrFail();
@@ -958,77 +890,31 @@ class GoogleCalendarSyncTest extends TestCase
         ]);
 
         Http::fake([
-            'https://www.googleapis.com/calendar/v3/calendars/primary/events' => Http::response([
-                'id' => 'google-primary-delete',
-                'updated' => '2026-05-15T12:00:00Z',
-            ]),
-            'https://www.googleapis.com/calendar/v3/calendars/work%40example.com/events' => Http::response([
-                'id' => 'google-work-delete',
-                'updated' => '2026-05-15T12:01:00Z',
-            ]),
-            'https://www.googleapis.com/calendar/v3/calendars/primary/events/google-primary-delete' => Http::response([], 204),
-            'https://www.googleapis.com/calendar/v3/calendars/work%40example.com/events/google-work-delete' => Http::response([], 204),
+            'https://www.googleapis.com/calendar/v3/*' => Http::response([], 204),
         ]);
 
-        $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
+        $event = CalendarEvent::create([
+            'user_id' => $user->id,
+            'created_by_user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
             'title' => 'Delete me externally',
             'starts_at' => '2026-05-20T15:00:00Z',
-            'metadata' => ['google_calendar_ids' => ['primary', 'work@example.com']],
-        ])->assertCreated()->json('data.id');
-
-        $this->withToken($token)->deleteJson('/api/calendar-events/'.$eventId)
-            ->assertNoContent();
-
-        $this->assertDatabaseMissing('calendar_events', ['id' => $eventId]);
-        Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
-            && str_contains($request->url(), '/calendars/primary/events/google-primary-delete'));
-        Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
-            && str_contains($request->url(), '/calendars/work%40example.com/events/google-work-delete'));
-    }
-
-    public function test_all_day_local_calendar_events_export_as_google_date_events(): void
-    {
-        $token = $this->apiToken('calendar-all-day-export@example.com');
-        $user = User::where('email', 'calendar-all-day-export@example.com')->firstOrFail();
-        GoogleCalendarConnection::create([
-            'user_id' => $user->id,
-            'status' => 'connected',
-            'calendar_id' => 'primary',
-            'access_token_encrypted' => Crypt::encryptString('access-token'),
-            'refresh_token_encrypted' => Crypt::encryptString('refresh-token'),
-            'token_expires_at' => now()->addHour(),
+            'google_event_id' => 'google-primary-delete',
+            'google_calendar_id' => 'primary',
             'metadata' => [
-                'selected_calendar_ids' => ['primary'],
-                'calendars' => [
-                    ['id' => 'primary', 'summary' => 'Main calendar', 'primary' => true, 'accessRole' => 'owner'],
+                'source' => 'heybean',
+                'google_event_exports' => [
+                    'primary' => ['event_id' => 'google-primary-delete'],
+                    'work@example.com' => ['event_id' => 'google-work-delete'],
                 ],
             ],
         ]);
 
-        Http::fake([
-            'https://www.googleapis.com/calendar/v3/calendars/primary/events' => Http::response([
-                'id' => 'google-all-day-1',
-                'updated' => '2026-05-15T12:00:00Z',
-            ]),
-        ]);
+        $this->withToken($token)->deleteJson('/api/calendar-events/'.$event->id)
+            ->assertNoContent();
 
-        $this->withToken($token)->postJson('/api/calendar-events', [
-            'title' => 'Field day',
-            'starts_at' => '2026-06-04T00:00:00Z',
-            'ends_at' => '2026-06-04T23:59:00Z',
-            'metadata' => [
-                'all_day' => true,
-                'google_calendar_ids' => ['primary'],
-            ],
-        ])->assertCreated();
-
-        $event = CalendarEvent::where('title', 'Field day')->firstOrFail();
-        $this->assertSame('2026-06-04T23:59:00+00:00', $event->ends_at->utc()->toIso8601String());
-
-        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
-            && str_contains($request->url(), '/calendars/primary/events')
-            && $request['start'] === ['date' => '2026-06-04']
-            && $request['end'] === ['date' => '2026-06-05']);
+        $this->assertDatabaseMissing('calendar_events', ['id' => $event->id]);
+        Http::assertNothingSent();
     }
 
     public function test_google_api_failure_messages_do_not_persist_sensitive_response_bodies(): void

@@ -26,7 +26,6 @@ class StructuredHermesActionService
     private const DEFAULT_CATEGORY_COLOR = '#34C759';
 
     public function __construct(
-        private readonly GoogleCalendarSyncService $googleCalendar,
         private readonly WorkspaceItemSyncService $workspaceItemSync,
         private readonly WorkspaceService $workspaces,
         private readonly PlanLimitService $planLimits,
@@ -637,7 +636,6 @@ class StructuredHermesActionService
             'status' => $this->stringParameter($parameters, 'status', 'scheduled'),
             'metadata' => $metadata,
         ]);
-        $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh(), $parameters);
 
         return $this->recordEvent($session, 'assistant.calendar_event.created', [
             'calendar_event_id' => $calendarEvent->id,
@@ -766,94 +764,8 @@ class StructuredHermesActionService
             );
         }
         $calendarEvent->update($updates);
-        $this->exportCalendarEventBestEffort($session, $calendarEvent->refresh(), $parameters);
 
         return $this->recordEvent($session, 'assistant.calendar_event.updated', ['calendar_event_id' => $calendarEvent->id, 'title' => $calendarEvent->title], 'calendar.update', 'succeeded');
-    }
-
-    private function exportCalendarEventBestEffort(ConversationSession $session, CalendarEvent $calendarEvent, array $parameters): void
-    {
-        if (! $this->shouldExportCalendarEvent($parameters, $calendarEvent)) {
-            return;
-        }
-
-        if (app()->runningUnitTests() || app()->environment('testing')) {
-            $this->exportCalendarEventNow($session, $calendarEvent);
-
-            return;
-        }
-
-        $sessionId = (int) $session->id;
-        $calendarEventId = (int) $calendarEvent->id;
-
-        defer(function () use ($sessionId, $calendarEventId): void {
-            $session = ConversationSession::query()->find($sessionId);
-            $calendarEvent = CalendarEvent::query()->find($calendarEventId);
-            if (! $session || ! $calendarEvent) {
-                return;
-            }
-
-            $this->exportCalendarEventNow($session, $calendarEvent);
-        });
-    }
-
-    private function shouldExportCalendarEvent(array $parameters, CalendarEvent $calendarEvent): bool
-    {
-        if (($parameters['sync_external_calendars_now'] ?? false)
-            || ($parameters['sync_google_now'] ?? false)
-            || ($parameters['sync_outlook_now'] ?? false)) {
-            return true;
-        }
-
-        $metadata = $calendarEvent->metadata ?? [];
-
-        return filled($metadata['google_calendar_id'] ?? null)
-            || filled($metadata['outlook_calendar_id'] ?? null)
-            || (is_array($metadata['google_calendar_ids'] ?? null) && $metadata['google_calendar_ids'] !== [])
-            || (is_array($metadata['outlook_calendar_ids'] ?? null) && $metadata['outlook_calendar_ids'] !== []);
-    }
-
-    private function exportCalendarEventNow(ConversationSession $session, CalendarEvent $calendarEvent): void
-    {
-        try {
-            $calendarEvent = $this->withDefaultGoogleExportCalendar($calendarEvent);
-            $this->googleCalendar->exportEvent($calendarEvent);
-        } catch (\Throwable $exception) {
-            $this->recordEvent($session, 'assistant.google_calendar.export_failed', [
-                'calendar_event_id' => $calendarEvent->id,
-                'title' => $calendarEvent->title,
-                'reason' => 'Google Calendar export failed after the local calendar update succeeded.',
-                'exception' => $exception->getMessage(),
-            ], 'google_calendar.export', 'failed');
-        }
-    }
-
-    private function withDefaultGoogleExportCalendar(CalendarEvent $calendarEvent): CalendarEvent
-    {
-        $metadata = $calendarEvent->metadata ?? [];
-        if (is_array($metadata['google_calendar_ids'] ?? null) || filled($metadata['google_calendar_id'] ?? null)) {
-            return $calendarEvent;
-        }
-
-        $connection = $calendarEvent->user?->googleCalendarConnection()->where('status', 'connected')->first();
-        if (! $connection) {
-            return $calendarEvent;
-        }
-
-        $selectedCalendarIds = $connection->metadata['selected_calendar_ids'] ?? [];
-        if (! is_array($selectedCalendarIds) || $selectedCalendarIds === []) {
-            $selectedCalendarIds = [$connection->calendar_id ?: 'primary'];
-        }
-
-        $calendarIds = array_values(array_filter(array_map('strval', $selectedCalendarIds)));
-        if ($calendarIds === []) {
-            return $calendarEvent;
-        }
-
-        $metadata['google_calendar_ids'] = $calendarIds;
-        $calendarEvent->forceFill(['metadata' => $metadata])->save();
-
-        return $calendarEvent->refresh();
     }
 
     private function createNote(ConversationSession $session, array $parameters): ActivityEvent

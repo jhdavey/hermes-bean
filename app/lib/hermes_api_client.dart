@@ -884,7 +884,7 @@ class HermesApiClient {
   }) async {
     final data = await _sendJson(
       'POST',
-      '/calendar-events?sync_external_calendars_now=1',
+      '/calendar-events',
       body: {
         'title': title,
         'starts_at': startsAt,
@@ -1060,7 +1060,7 @@ class HermesApiClient {
   }) async {
     final data = await _sendJson(
       'PATCH',
-      '/calendar-events/$eventId?sync_external_calendars_now=1',
+      '/calendar-events/$eventId',
       body: {
         'title': title,
         'starts_at': startsAt,
