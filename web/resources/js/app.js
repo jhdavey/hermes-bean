@@ -3543,7 +3543,7 @@ if (mount) {
     }
 
     function kioskVoicePillIsCancelable(phase = state.kioskVoicePhase) {
-        if (!state.kioskVoiceEnabled || !kioskRealtimeConnected()) return false;
+        if (!state.kioskVoiceEnabled) return false;
         if (realtimeBackgroundWorkPending() || realtimeAssistantOutputActive() || kioskRealtimeResponseTimer) return true;
         return kioskConversationActive && ['heard', 'listening', 'working', 'responding', 'speaking'].includes(phase);
     }
@@ -10825,17 +10825,10 @@ if (mount) {
 
     async function startKioskVoiceMode(options = {}) {
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return;
-        if (!shouldUseRealtimeKioskVoice()) {
-            const reason = kioskRealtimeSupportFailureReason();
-            reportKioskRealtimeIssue(reason || 'unsupported_browser_realtime', {
-                secure_context: window.isSecureContext,
-                has_peer_connection: Boolean(window.RTCPeerConnection),
-                has_get_user_media: Boolean(navigator.mediaDevices?.getUserMedia),
-            });
-            setKioskVoiceStatus('error', 'Bean needs a moment');
-            return;
+        if (kioskRealtime || kioskRealtimeStarting) {
+            stopKioskRealtimeVoiceMode({ preserveStatus: true });
         }
-        await startKioskRealtimeVoiceMode(options);
+        await startKioskWakeWordListening(options);
     }
 
     async function requestKioskMicrophoneAccess(requestPermission = false) {
@@ -10936,7 +10929,7 @@ if (mount) {
     }
 
     function kioskVoiceReady() {
-        return state.kioskVoiceEnabled && kioskRealtimeConnected();
+        return state.kioskVoiceEnabled && (kioskRecognitionActive || Boolean(kioskRecognition) || kioskRealtimeConnected());
     }
 
     async function microphonePermissionState() {
@@ -10967,6 +10960,103 @@ if (mount) {
             try { recognition.stop(); } catch (_) {}
         }
         kioskRecognitionActive = false;
+    }
+
+    async function startKioskWakeWordListening(options = {}) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return false;
+        if (!window.isSecureContext) {
+            setKioskVoiceStatus('error', 'Voice needs HTTPS');
+            return false;
+        }
+        if (!SpeechRecognition) {
+            setKioskVoiceStatus('error', 'Voice unavailable');
+            return false;
+        }
+        if (kioskRecognition || kioskRecognitionActive) {
+            setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'Listening' : 'Say hey bean');
+            return true;
+        }
+        if (!await requestKioskMicrophoneAccess(Boolean(options.requestPermission))) {
+            return false;
+        }
+        if (!state.kioskVoiceEnabled) return false;
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 4;
+        recognition.lang = 'en-US';
+        kioskRecognition = recognition;
+        kioskRecognitionShouldRestart = true;
+        recognition.onstart = () => {
+            kioskRecognitionActive = true;
+            setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'armed', kioskConversationActive ? 'Listening' : 'Say hey bean');
+        };
+        recognition.onresult = (event) => handleKioskWakeRecognitionResult(event);
+        recognition.onend = () => {
+            kioskRecognition = null;
+            kioskRecognitionActive = false;
+            if (kioskRecognitionShouldRestart && state.kioskVoiceEnabled && !state.voiceListening) {
+                restartKioskVoiceListeningSoon(450);
+            }
+        };
+        recognition.onerror = (event) => {
+            kioskRecognition = null;
+            kioskRecognitionActive = false;
+            if (!state.kioskVoiceEnabled) return;
+            if (['aborted', 'no-speech'].includes(event?.error || '')) {
+                restartKioskVoiceListeningSoon(650);
+                return;
+            }
+            setKioskVoiceStatus('error', kioskVoiceErrorMessage(event?.error || ''));
+            restartKioskVoiceListeningSoon(1200);
+        };
+        try {
+            recognition.start();
+        } catch (error) {
+            kioskRecognition = null;
+            kioskRecognitionActive = false;
+            setKioskVoiceStatus('error', 'Voice is already active');
+            restartKioskVoiceListeningSoon(900);
+            return false;
+        }
+        return true;
+    }
+
+    function handleKioskWakeRecognitionResult(event) {
+        if (!state.kioskVoiceEnabled) return;
+        const candidates = [
+            ...speechTranscriptCandidates(event, { fromResultIndex: true }),
+            ...speechTranscriptCandidates(event, { fromResultIndex: false }),
+        ];
+        const wakeCandidate = candidates.find((candidate) => commandAfterWakePhrase(candidate) !== null);
+
+        if (!kioskConversationActive) {
+            if (!wakeCandidate) {
+                setKioskVoiceStatus('armed', 'Say hey bean');
+                return;
+            }
+            beginKioskConversation();
+            const command = commandAfterWakePhrase(wakeCandidate) || '';
+            kioskCommandText = command;
+            if (command) {
+                setKioskVoiceStatus('heard', 'Heard');
+                armKioskCommandSubmit();
+            } else {
+                setKioskVoiceStatus('listening', 'Go ahead');
+                armKioskConversationTimeout(kioskRealtimeWakeContinuationMs);
+            }
+            return;
+        }
+
+        const transcript = speechTranscript(event, { fromResultIndex: true }) || speechTranscript(event, { fromResultIndex: false });
+        const command = wakeCandidate ? commandAfterWakePhrase(wakeCandidate) : transcript;
+        const content = String(command || '').replace(/\s+/g, ' ').trim();
+        if (!content || realtimeTranscriptLooksSynthetic(content)) return;
+        kioskCommandText = content;
+        setKioskVoiceStatus('heard', 'Heard');
+        armKioskCommandSubmit();
     }
 
     function startKioskBargeInListening() {
@@ -11056,10 +11146,10 @@ if (mount) {
     function restartKioskVoiceListeningSoon(delay = 900) {
         window.clearTimeout(kioskRestartTimer);
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn') return;
-        if (kioskRealtimeConnected() || kioskRealtimeStarting) return;
+        if (kioskRecognition || kioskRecognitionActive || kioskRealtimeStarting) return;
         kioskRestartTimer = window.setTimeout(() => {
             kioskRestartTimer = 0;
-            startKioskRealtimeVoiceMode({ requestPermission: false });
+            startKioskVoiceMode({ requestPermission: false });
         }, delay);
     }
 
@@ -12079,7 +12169,7 @@ if (mount) {
     }
 
     async function toggleKioskVoiceMode() {
-        if (state.kioskVoiceEnabled && kioskRealtimeConnected() && kioskVoicePillIsCancelable()) {
+        if (state.kioskVoiceEnabled && kioskVoicePillIsCancelable()) {
             cancelKioskVoiceCapture();
             return;
         }

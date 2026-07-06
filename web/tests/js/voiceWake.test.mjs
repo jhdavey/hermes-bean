@@ -11,7 +11,9 @@ import {
 
 const accepted = new Map([
     ['Hey Bean plan today', 'plan today'],
+    ['hey been what is next', 'what is next'],
     ['hay been add a reminder', 'add a reminder'],
+    ['haybean start my day', 'start my day'],
     ['hey beam move my focus block', 'move my focus block'],
     ['HeyBean start my day', 'start my day'],
     ['hey B plan dinner', 'plan dinner'],
@@ -37,6 +39,8 @@ const rejected = [
     'hey',
     'maybe add groceries',
     'a green bean recipe',
+    'they have been talking about reminders',
+    'hay bales need moving',
 ];
 
 for (const transcript of rejected) {
