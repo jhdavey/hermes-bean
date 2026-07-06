@@ -148,11 +148,16 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       reminders: widget.reminders,
       calendar: widget.calendar,
     );
+    final glanceDays = _commandCenterGlanceDays(widget.calendar);
 
     return LayoutBuilder(
       key: const Key('command-center-home'),
       builder: (context, constraints) {
-        final maxChatHeight = math.max(0.0, constraints.maxHeight - 150.0);
+        final glanceHeight = constraints.maxHeight < 520 ? 116.0 : 138.0;
+        final maxChatHeight = math.max(
+          0.0,
+          constraints.maxHeight - 150.0 - glanceHeight,
+        );
         final minChatHeight = math.min(72.0, maxChatHeight);
         final fallbackChatHeight = math.min(
           math.max(128.0, constraints.maxHeight * .22),
@@ -175,6 +180,14 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
                 ),
               ),
             ),
+            SizedBox(
+              height: glanceHeight,
+              child: _CommandCenterGlanceList(
+                days: glanceDays,
+                loading: widget.loading,
+                onEventTap: _openCalendarEvent,
+              ),
+            ),
             _CommandCenterSplitDivider(
               collapsed: widget.chatCollapsed,
               onToggle: () => _toggleChatCollapsed(fallbackChatHeight),
@@ -186,11 +199,14 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
             ),
             if (!widget.chatCollapsed)
               SizedBox(
-                key:
-                    widget.chatPanelKey ??
-                    const Key('command-center-chat-panel'),
+                key: const Key('command-center-chat-panel'),
                 height: chatHeight,
-                child: widget.chat,
+                child: widget.chatPanelKey == null
+                    ? widget.chat
+                    : KeyedSubtree(
+                        key: widget.chatPanelKey,
+                        child: widget.chat,
+                      ),
               )
             else
               const SizedBox(
@@ -208,19 +224,7 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       case _CommandCenterAgendaKind.event:
         final event = item.event;
         if (event == null) return;
-        await _showCalendarEventDetails(
-          context,
-          event,
-          eventCategories: widget.eventCategories,
-          googleCalendarStatus: widget.googleCalendarStatus,
-          outlookCalendarStatus: widget.outlookCalendarStatus,
-          workspaces: widget.workspaces,
-          activeWorkspaceId: widget.activeWorkspaceId,
-          onSave: widget.onCalendarEventEdited,
-          onDelete: widget.onCalendarEventDeleted,
-          onEventCategorySaved: widget.onEventCategorySaved,
-          onEventCategoryDeleted: widget.onEventCategoryDeleted,
-        );
+        await _openCalendarEvent(event);
       case _CommandCenterAgendaKind.task:
         final task = item.task;
         if (task == null) return;
@@ -230,6 +234,22 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
         if (reminder == null) return;
         await _showReminderEditor(reminder);
     }
+  }
+
+  Future<void> _openCalendarEvent(HermesCalendarEvent event) async {
+    await _showCalendarEventDetails(
+      context,
+      event,
+      eventCategories: widget.eventCategories,
+      googleCalendarStatus: widget.googleCalendarStatus,
+      outlookCalendarStatus: widget.outlookCalendarStatus,
+      workspaces: widget.workspaces,
+      activeWorkspaceId: widget.activeWorkspaceId,
+      onSave: widget.onCalendarEventEdited,
+      onDelete: widget.onCalendarEventDeleted,
+      onEventCategorySaved: widget.onEventCategorySaved,
+      onEventCategoryDeleted: widget.onEventCategoryDeleted,
+    );
   }
 
   Future<void> _showTaskEditor(HermesTask task) async {
@@ -425,6 +445,177 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
               ?.whereType<Object>()
               .toList() ??
           const [],
+    );
+  }
+}
+
+class _CommandCenterGlanceList extends StatelessWidget {
+  const _CommandCenterGlanceList({
+    required this.days,
+    required this.loading,
+    required this.onEventTap,
+  });
+
+  final List<_CommandCenterGlanceDay> days;
+  final bool loading;
+  final ValueChanged<HermesCalendarEvent> onEventTap;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    key: const Key('command-center-glance-list'),
+    children: [
+      ListView.separated(
+        padding: const EdgeInsets.fromLTRB(0, 4, 0, 6),
+        itemCount: days.length,
+        separatorBuilder: (context, index) => const SizedBox(height: 4),
+        itemBuilder: (context, index) => _CommandCenterGlanceDayTile(
+          day: days[index],
+          onEventTap: onEventTap,
+        ),
+      ),
+      if (loading)
+        Positioned(
+          key: const Key('command-center-glance-refreshing'),
+          top: 6,
+          right: 4,
+          child: _InlineLoadingBadge(label: 'Updating'),
+        ),
+    ],
+  );
+}
+
+class _CommandCenterGlanceDayTile extends StatelessWidget {
+  const _CommandCenterGlanceDayTile({
+    required this.day,
+    required this.onEventTap,
+  });
+
+  final _CommandCenterGlanceDay day;
+  final ValueChanged<HermesCalendarEvent> onEventTap;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: Key('command-center-glance-day-${_calendarDateKey(day.date)}'),
+    padding: const EdgeInsets.fromLTRB(7, 7, 7, 6),
+    decoration: BoxDecoration(
+      border: Border(bottom: BorderSide(color: _quietBorderColor(alpha: .46))),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          _commandCenterGlanceDayLabel(day.date),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: HeyBeanTheme.text,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 5),
+        if (day.events.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            child: Text(
+              'No events',
+              style: TextStyle(
+                color: HeyBeanTheme.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          )
+        else
+          Column(
+            children: [
+              for (final event in day.events)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: _CommandCenterGlanceEventPill(
+                    event: event,
+                    onTap: () => onEventTap(event),
+                  ),
+                ),
+            ],
+          ),
+      ],
+    ),
+  );
+}
+
+class _CommandCenterGlanceEventPill extends StatelessWidget {
+  const _CommandCenterGlanceEventPill({
+    required this.event,
+    required this.onTap,
+  });
+
+  final HermesCalendarEvent event;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _calendarEventColor(event);
+    final hasLocation = (event.location ?? '').trim().isNotEmpty;
+    final hasNotes = _eventHasNotes(event);
+    return Material(
+      key: Key('command-center-glance-event-${event.id}'),
+      color: color.withValues(alpha: HeyBeanTheme.isDark ? .18 : .11),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 32),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: .30)),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 48,
+                child: Text(
+                  _commandCenterGlanceEventTime(event),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: HeyBeanTheme.muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  event.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (hasLocation) ...[
+                const SizedBox(width: 5),
+                Icon(
+                  Icons.location_on_outlined,
+                  size: 13,
+                  color: HeyBeanTheme.muted,
+                ),
+              ],
+              if (hasNotes) ...[
+                const SizedBox(width: 5),
+                Icon(Icons.notes_rounded, size: 13, color: HeyBeanTheme.muted),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -723,4 +914,11 @@ class _CommandCenterAgendaItem {
   final HermesCalendarEvent? event;
   final HermesTask? task;
   final HermesReminder? reminder;
+}
+
+class _CommandCenterGlanceDay {
+  const _CommandCenterGlanceDay({required this.date, required this.events});
+
+  final DateTime date;
+  final List<HermesCalendarEvent> events;
 }

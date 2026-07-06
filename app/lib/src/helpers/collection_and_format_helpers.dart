@@ -600,5 +600,63 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
   return items;
 }
 
+List<_CommandCenterGlanceDay> _commandCenterGlanceDays(
+  List<HermesCalendarEvent> calendar,
+) {
+  final today = _dateOnly(DateTime.now());
+  final days = <DateTime>[
+    today.add(const Duration(days: 1)),
+    today.add(const Duration(days: 2)),
+  ];
+  return days
+      .map(
+        (day) => _CommandCenterGlanceDay(
+          date: day,
+          events: _commandCenterEventsForGlanceDay(calendar, day),
+        ),
+      )
+      .toList(growable: false);
+}
+
+List<HermesCalendarEvent> _commandCenterEventsForGlanceDay(
+  List<HermesCalendarEvent> calendar,
+  DateTime day,
+) {
+  final events = calendar
+      .where((event) => _eventFallsOnDay(event, day))
+      .toList(growable: false);
+  events.sort((a, b) {
+    final aAllDay = _eventIsAllDay(a);
+    final bAllDay = _eventIsAllDay(b);
+    if (aAllDay != bAllDay) return aAllDay ? -1 : 1;
+    final aStart = _commandCenterGlanceSortTime(a, day);
+    final bStart = _commandCenterGlanceSortTime(b, day);
+    final timeCompare = aStart.compareTo(bStart);
+    if (timeCompare != 0) return timeCompare;
+    return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+  });
+  return events;
+}
+
+DateTime _commandCenterGlanceSortTime(HermesCalendarEvent event, DateTime day) {
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  if (start == null || start.isBefore(day)) return day;
+  return start;
+}
+
+String _commandCenterGlanceDayLabel(DateTime day) {
+  final today = _dateOnly(DateTime.now());
+  if (_sameCalendarDay(day, today.add(const Duration(days: 1)))) {
+    return 'Tomorrow ${_shortMonthName(day.month)} ${day.day}';
+  }
+  return '${_shortWeekdayName(day.weekday)} ${_shortMonthName(day.month)} ${day.day}';
+}
+
+String _commandCenterGlanceEventTime(HermesCalendarEvent event) {
+  if (_eventIsAllDay(event)) return 'All day';
+  final time = _eventTimeRangeShort(event);
+  return time.isEmpty ? 'Timed' : time;
+}
+
 bool _wireValueLooksDateOnly(String? value) =>
     value != null && RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value.trim());

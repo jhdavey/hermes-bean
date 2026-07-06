@@ -5119,6 +5119,26 @@ void main() {
       tester.getTopLeft(event).dy,
       lessThan(tester.getTopLeft(reminder).dy),
     );
+    expect(find.byKey(const Key('command-center-glance-list')), findsOneWidget);
+    expect(
+      find.byKey(const Key('command-center-glance-event-504')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('command-center-glance-event-505')),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(
+      find.byKey(const Key('command-center-glance-event-504')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('command-center-glance-event-504')));
+    await tester.pumpAndSettle();
+    expect(find.text('Event Details'), findsOneWidget);
+    expect(find.text('Planning sync'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('event-detail-back-action')));
+    await tester.pumpAndSettle();
 
     await tester.tap(task);
     await tester.pumpAndSettle();
@@ -11084,12 +11104,44 @@ class _CommandCenterAgendaFakeHermesApiClient
     bool skipExternalSync = false,
   }) async {
     final start = _todayFutureTime(40);
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final tomorrowStart = DateTime(
+      tomorrow.year,
+      tomorrow.month,
+      tomorrow.day,
+      10,
+    );
+    final following = DateTime.now().add(const Duration(days: 2));
+    final followingStart = DateTime(
+      following.year,
+      following.month,
+      following.day,
+      14,
+    );
     return [
       HermesCalendarEvent(
         id: 503,
         title: 'Design review',
         startsAt: start.toIso8601String(),
         endsAt: start.add(const Duration(minutes: 30)).toIso8601String(),
+      ),
+      HermesCalendarEvent(
+        id: 504,
+        title: 'Planning sync',
+        startsAt: tomorrowStart.toIso8601String(),
+        endsAt: tomorrowStart
+            .add(const Duration(minutes: 45))
+            .toIso8601String(),
+        location: 'Studio',
+        notes: 'Bring launch notes',
+      ),
+      HermesCalendarEvent(
+        id: 505,
+        title: 'Partner kickoff',
+        startsAt: followingStart.toIso8601String(),
+        endsAt: followingStart
+            .add(const Duration(minutes: 30))
+            .toIso8601String(),
       ),
     ];
   }
