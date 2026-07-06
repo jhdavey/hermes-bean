@@ -287,6 +287,7 @@ if (mount) {
     let kioskLastTtsError = '';
     let kioskRealtime = null;
     let kioskRealtimeStarting = false;
+    let kioskRealtimeStartGeneration = 0;
     let kioskRealtimeUnavailable = false;
     let kioskRealtimePendingUser = null;
     let kioskRealtimeCurrentUserTurn = null;
@@ -8723,6 +8724,15 @@ if (mount) {
         kioskRealtimeReconnectTimer = 0;
     }
 
+    function abortKioskRealtimeStartup(stream = null, peerConnection = null) {
+        if (peerConnection && kioskRealtime?.peerConnection === peerConnection) {
+            kioskRealtime = null;
+        }
+        try { peerConnection?.close(); } catch (_) {}
+        stream?.getTracks?.().forEach((track) => track.stop());
+        stopKioskRealtimeInputActivityMonitor();
+    }
+
     function scheduleKioskRealtimeReconnect(reason, details = {}, delay = null) {
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token) return;
         clearKioskRealtimeReconnect();
@@ -8756,6 +8766,7 @@ if (mount) {
     async function startKioskRealtimeVoiceMode(options = {}) {
         if (kioskRealtimeConnected() || kioskRealtimeStarting) return true;
         if (!state.kioskVoiceEnabled || state.phase !== 'signedIn' || !state.token || state.voiceListening) return false;
+        const startGeneration = kioskRealtimeStartGeneration;
         kioskRealtimeStarting = true;
         setKioskVoiceStatus('working', 'Bean is waking up');
         let stream = null;
@@ -8774,11 +8785,20 @@ if (mount) {
             if (!await requestKioskMicrophoneAccess(Boolean(options.requestPermission))) {
                 return false;
             }
+            if (!state.kioskVoiceEnabled || startGeneration !== kioskRealtimeStartGeneration) return false;
             stream = await navigator.mediaDevices.getUserMedia({ audio: await kioskAudioConstraints() });
+            if (!state.kioskVoiceEnabled || startGeneration !== kioskRealtimeStartGeneration) {
+                abortKioskRealtimeStartup(stream);
+                return false;
+            }
             await rememberKioskMicrophoneFromStream(stream);
             kioskMicrophoneReady = true;
             startKioskRealtimeInputActivityMonitor(stream);
             await ensureRealtimeChatSession();
+            if (!state.kioskVoiceEnabled || startGeneration !== kioskRealtimeStartGeneration) {
+                abortKioskRealtimeStartup(stream);
+                return false;
+            }
 
             peerConnection = new RTCPeerConnection();
             const remoteAudio = new Audio();
@@ -8926,6 +8946,10 @@ if (mount) {
 
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
+            if (!state.kioskVoiceEnabled || startGeneration !== kioskRealtimeStartGeneration) {
+                abortKioskRealtimeStartup(stream, peerConnection);
+                return false;
+            }
             const sdpResponse = await fetchWithTimeout('/api/assistant/realtime/calls', {
                 method: 'POST',
                 headers: {
@@ -8961,6 +8985,10 @@ if (mount) {
                 throw error;
             }
             await peerConnection.setRemoteDescription({ type: 'answer', sdp: sdpBody });
+            if (!state.kioskVoiceEnabled || startGeneration !== kioskRealtimeStartGeneration) {
+                abortKioskRealtimeStartup(stream, peerConnection);
+                return false;
+            }
             return true;
         } catch (error) {
             stopKioskRealtimeVoiceMode({ preserveStatus: true, preserveReconnect: true });
@@ -9137,6 +9165,7 @@ if (mount) {
         if (!kioskRealtimeConnected()) return;
         if (realtimeAssistantOutputActive() || realtimeAssistantRecentlyOutput()) return;
         if (realtimeBackgroundWorkPending() && !kioskConversationActive) return;
+        if (!kioskConversationActive) return;
         if (!['idle', 'armed', 'listening'].includes(state.kioskVoicePhase)) return;
         setKioskVoiceStatus('listening', 'listening');
     }
@@ -9170,7 +9199,7 @@ if (mount) {
                 kioskConversationTimer = 0;
             }
             if (realtimeAssistantRecentlyOutput()) return;
-            if (kioskConversationActive || ['idle', 'armed'].includes(state.kioskVoicePhase)) {
+            if (kioskConversationActive) {
                 setKioskVoiceStatus('listening', 'listening');
             }
             return;
@@ -11007,6 +11036,7 @@ if (mount) {
     }
 
     function stopKioskVoiceMode() {
+        kioskRealtimeStartGeneration += 1;
         stopKioskRealtimeVoiceMode();
         pauseKioskVoiceListening();
         stopKioskBargeInListening();
@@ -12053,30 +12083,24 @@ if (mount) {
             cancelKioskVoiceCapture();
             return;
         }
-        if (state.kioskVoiceEnabled && !kioskRealtimeConnected()) {
-            clearKioskRealtimeReconnect();
-            kioskRealtimeReconnectAttempts = 0;
-            setKioskVoiceStatus('working', 'Bean is waking up');
-            render();
-            await unlockKioskAudio();
-            startKioskVoiceMode({ requestPermission: true });
-            return;
-        }
-        state.kioskVoiceEnabled = !state.kioskVoiceEnabled;
         if (state.kioskVoiceEnabled) {
-            kioskRealtimeUnavailable = false;
-            localStorage.setItem(kioskVoiceKey, 'true');
-            kioskConversationActive = false;
-            state.kioskVoicePhase = 'working';
-            state.kioskVoiceMessage = 'Connecting';
+            state.kioskVoiceEnabled = false;
+            localStorage.removeItem(kioskVoiceKey);
+            stopKioskVoiceMode();
             render();
-            await unlockKioskAudio();
-            startKioskVoiceMode({ requestPermission: true });
             return;
         }
-        localStorage.removeItem(kioskVoiceKey);
-        stopKioskVoiceMode();
+
+        state.kioskVoiceEnabled = true;
+        kioskRealtimeStartGeneration += 1;
+        kioskRealtimeUnavailable = false;
+        localStorage.setItem(kioskVoiceKey, 'true');
+        kioskConversationActive = false;
+        state.kioskVoicePhase = 'working';
+        state.kioskVoiceMessage = 'Connecting';
         render();
+        await unlockKioskAudio();
+        startKioskVoiceMode({ requestPermission: true });
     }
 
     function kioskMicrophoneAccessMessage(error) {
