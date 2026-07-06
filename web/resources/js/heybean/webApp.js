@@ -4710,11 +4710,29 @@ export function mountHeyBeanWebApp(mount) {
 
     function pushVisibleAssistantMessage(message, content = null) {
         if (!message || assistantMessageShouldStayOutOfChat(message)) return false;
+        const visibleContent = content ?? safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
+        const comparableContent = normalizeComparableSpeech(visibleContent);
+        if (!comparableContent) return false;
         const assistantId = String(message.id || '');
         if (assistantId && state.messages.some((item) => String(item.id || '') === assistantId)) return false;
+        const duplicateIndex = state.messages.findIndex((item) => {
+            return item?.role === 'assistant'
+                && normalizeComparableSpeech(item.content) === comparableContent;
+        });
+        if (duplicateIndex >= 0) {
+            const duplicate = state.messages[duplicateIndex];
+            if (duplicate?.metadata?.local_realtime_turn || String(duplicate?.id || '').startsWith('rt-assistant-')) {
+                state.messages[duplicateIndex] = {
+                    ...message,
+                    content: visibleContent,
+                };
+                return true;
+            }
+            return false;
+        }
         state.messages.push({
             ...message,
-            content: content ?? safeAssistantDisplayContent(conversationalMessageContent(message.content || '')),
+            content: visibleContent,
         });
         return true;
     }
@@ -9186,6 +9204,7 @@ export function mountHeyBeanWebApp(mount) {
                 window.clearTimeout(kioskConversationTimer);
                 kioskConversationTimer = 0;
             }
+            interruptRealtimeVoiceOnlyOutputForUserSpeech();
             deferRealtimePendingResponseBySpeech('speech_started');
             clearRealtimePendingResponseRecovery();
             if (realtimeAssistantRecentlyOutput()) return;
@@ -9278,6 +9297,30 @@ export function mountHeyBeanWebApp(mount) {
             const message = beanRealtimeUserStatusMessage(payload?.error?.message || 'Bean needs a moment');
             setKioskVoiceStatus(message.phase, message.text);
         }
+    }
+
+    function interruptRealtimeVoiceOnlyOutputForUserSpeech() {
+        if (!kioskRealtimeVoiceOnlyAssistant) return false;
+        if (!kioskConversationActive && !realtimeBackgroundWorkPending()) return false;
+        const dataChannel = kioskRealtime?.dataChannel;
+        if (dataChannel?.readyState === 'open') {
+            try { dataChannel.send(JSON.stringify({ type: 'response.cancel' })); } catch (_) {}
+            try { dataChannel.send(JSON.stringify({ type: 'output_audio_buffer.clear' })); } catch (_) {}
+        }
+        logKioskRealtimeVoiceTrace('realtime_voice_only_output_interrupted_by_user', {
+            summary: 'Cancelled a voice-only background update because the user started a new turn.',
+            pending_user_present: Boolean(kioskRealtimePendingUser?.content),
+            voice_only_kind: kioskRealtimeVoiceOnlyKind || '',
+        });
+        kioskRealtimeResponseCreateInFlight = false;
+        kioskRealtimeAwaitingFirstAudio = false;
+        kioskRealtimeAssistantDraft = null;
+        kioskRealtimeSuppressNextAssistantPersist = false;
+        kioskRealtimeVoiceOnlyAssistant = false;
+        kioskRealtimeVoiceOnlyKind = '';
+        kioskRealtimeIgnoreNextFunctionCalls = false;
+        clearRealtimeAssistantOutputGuard();
+        return true;
     }
 
     function beanRealtimeUserStatusMessage(message) {
@@ -9530,7 +9573,21 @@ export function mountHeyBeanWebApp(mount) {
         if (/\b(?:actually|instead|change that|make that|correction|i meant|not .* but|wrong)\b/.test(normalized)) return 'correction';
         if (/^(?:also|and|plus|then|next|after that)\b/.test(normalized)) return 'continuation';
         if (/\b(?:that|it|this|those|them|the above|same|tomorrow|later|before|after)\b/.test(normalized)) return 'reference';
+        if (realtimeTranscriptLooksLikeShortContextualAnswer(normalized)) return 'answer';
         return realtimeTranscriptLooksLikeFollowup(normalized) ? 'continuation' : '';
+    }
+
+    function realtimeTranscriptLooksLikeShortContextualAnswer(transcript) {
+        const normalized = normalizedRealtimeTranscript(transcript);
+        if (!normalized) return false;
+        if (realtimeTranscriptMentionsBean(normalized)) return false;
+        if (realtimeTranscriptLooksLikeAppWorkRequest(normalized)) return false;
+        if (realtimeTranscriptLooksLikeStatusCheck(normalized)) return false;
+        if (/^(?:thanks|thank you|ok|okay|yes|yeah|no|nope|cancel|stop|never mind|nevermind)\b/.test(normalized)) return false;
+        if (/\b(?:can|could|would|what|when|where|why|how|tell|show|check|create|add|schedule|move|delete|remove|update|remind)\b/.test(normalized)) return false;
+        const words = normalized.split(/\s+/).filter(Boolean);
+        if (words.length < 1 || words.length > 5) return false;
+        return words.every((word) => /^[a-z][a-z.'-]{1,}$/.test(word));
     }
 
     function realtimeTranscriptLooksLikeAppWorkRequest(transcript) {
@@ -9630,6 +9687,11 @@ export function mountHeyBeanWebApp(mount) {
         if (realtimeTranscriptMentionsBean(transcript)) return true;
         if (kioskRealtimeAwaitingFollowup) return true;
         if (realtimeWakeContinuationActive()) return true;
+        if (
+            kioskConversationActive
+            && realtimeAssistantAwaitingFollowup(kioskRealtimeLastAssistantText || kioskRealtimeAssistantDraft?.content || '')
+            && realtimeTranscriptLooksLikeShortContextualAnswer(normalized)
+        ) return true;
         if (kioskConversationActive && realtimeTranscriptLooksLikeFollowup(normalized)) return true;
         if (kioskConversationActive && !realtimeAssistantRecentlyOutput(1200)) return true;
         if (kioskRealtimeResponseTimer && kioskRealtimePendingUser && !kioskRealtimePendingUser.persisted) return true;
@@ -10082,10 +10144,25 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function upsertRealtimeLocalMessage(message) {
+        const comparableContent = normalizeComparableSpeech(message?.content);
         const index = state.messages.findIndex((item) => String(item.id) === String(message.id));
         if (index >= 0) {
             state.messages[index] = { ...state.messages[index], ...message };
         } else {
+            const duplicateIndex = state.messages.findIndex((item) => {
+                return item?.role === message?.role
+                    && comparableContent
+                    && normalizeComparableSpeech(item.content) === comparableContent;
+            });
+            if (duplicateIndex >= 0) {
+                const duplicate = state.messages[duplicateIndex];
+                const duplicateIsPersisted = !duplicate?.metadata?.local_realtime_turn && !String(duplicate?.id || '').startsWith('rt-');
+                if (duplicateIsPersisted) return;
+                state.messages[duplicateIndex] = { ...duplicate, ...message };
+                if (state.phase === 'signedIn') render();
+                scrollChatToBottom();
+                return;
+            }
             state.messages.push(message);
         }
         if (state.phase === 'signedIn') render();
@@ -10941,8 +11018,10 @@ export function mountHeyBeanWebApp(mount) {
     function realtimeBackgroundResultDeliveryBusy() {
         return realtimeAssistantOutputActive()
             || Boolean(kioskRealtimePendingUser?.content)
+            || Boolean(kioskRealtimeCurrentUserTurn?.content)
             || Boolean(kioskRealtimeResponseTimer)
-            || kioskRealtimeResponseCreateInFlight;
+            || kioskRealtimeResponseCreateInFlight
+            || kioskRealtimeAwaitingFirstAudio;
     }
 
     async function refreshRealtimeDashboardContext(reason = 'dashboard_context_refresh') {
@@ -11553,7 +11632,7 @@ export function mountHeyBeanWebApp(mount) {
         kioskCommandTimer = 0;
         kioskCommandText = '';
         pauseKioskVoiceListening();
-        if (!content || state.busy) {
+        if (!content || (state.busy && !kioskRealtimeConnected())) {
             setKioskVoiceStatus(kioskConversationActive ? 'listening' : 'idle', kioskConversationActive ? 'listening' : '');
             restartKioskVoiceListeningSoon(900);
             return;
@@ -12437,12 +12516,23 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function replaceLocalUserMessage(message) {
-        const lastLocal = [...state.messages].reverse().find((item) => String(item.id).startsWith('local-') && item.role === 'user');
-        if (!lastLocal) {
-            state.messages.push(message);
+        const comparableContent = normalizeComparableSpeech(message?.content);
+        const reversedIndex = [...state.messages].reverse().findIndex((item) => {
+            if (item?.role !== 'user') return false;
+            const id = String(item.id || '');
+            const local = id.startsWith('local-') || id.startsWith('rt-user-') || item.metadata?.local_realtime_turn;
+            if (!local) return false;
+            return !comparableContent || normalizeComparableSpeech(item.content) === comparableContent;
+        });
+        if (reversedIndex < 0) {
+            const duplicatePersisted = state.messages.some((item) => {
+                return item?.role === 'user'
+                    && String(item.id || '') === String(message?.id || '');
+            });
+            if (!duplicatePersisted) state.messages.push(message);
             return;
         }
-        const index = state.messages.indexOf(lastLocal);
+        const index = state.messages.length - 1 - reversedIndex;
         state.messages[index] = message;
     }
 
