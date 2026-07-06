@@ -2786,12 +2786,17 @@ export function mountHeyBeanWebApp(mount) {
     function refreshBeanStatusTag() {
         if (state.phase !== 'signedIn') return;
         updateKioskVoicePillsInPlace();
+        refreshChatWorkStripInPlace();
     }
 
     function ensureRealtimeRequestWorkItem(content, status = 'running', options = {}) {
         if (options.freshRequest) prepareBeanWorkForFreshRequest();
         const labels = beanWorkLabelsForRequest(content);
-        const label = labels[0] || beanWorkLabelForClause(normalizedVoiceCommand(content)) || 'Working on request';
+        const clauseLabel = beanWorkLabelForClause(normalizedVoiceCommand(content));
+        const label = labels[0]
+            || beanBackgroundWorkLabelForRequest(content)
+            || (clauseLabel && !isGenericBeanWorkLabel(clauseLabel) ? clauseLabel : '')
+            || 'Checking request';
         if (!label || isGenericBeanWorkLabel(label)) return;
         upsertBeanWorkItem('realtime-request', label, status, { source: 'local' });
         logKioskRealtimeVoiceTrace('realtime_voice_work_item_seeded', {
@@ -2861,6 +2866,40 @@ export function mountHeyBeanWebApp(mount) {
 
     function isGenericBeanWorkLabel(label) {
         return /^(?:finish|finished|background work|finish background work|bean started working|read request|follow up on voice request|working on request)$/i.test(String(label || '').trim());
+    }
+
+    function beanBackgroundWorkLabelForRequest(content) {
+        const command = normalizedVoiceCommand(content);
+        if (!command || voiceCommandIsCapabilityQuestion(command)) return '';
+        const subject = beanBackgroundWorkSubject(command);
+        const withSubject = (base) => subject ? `${base}: ${subject}` : base;
+        if (/\b(?:weather|forecast)\b/.test(command)) return withSubject('Checking weather');
+        if (/\b(?:traffic|drive|commute)\b/.test(command)) return withSubject('Checking traffic');
+        if (/\b(?:news|headline|headlines)\b/.test(command)) return withSubject('Checking news');
+        if (/\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|available|availability|cheapest|price|prices)\b/.test(command)) return withSubject('Checking travel');
+        if (/\b(?:stock|stocks|market|markets)\b/.test(command)) return withSubject('Checking markets');
+        if (/\b(?:sports|score|scores|game|games)\b/.test(command)) return withSubject('Checking scores');
+        if (/\b(?:calendar|calendars|agenda|schedule|schedules|event|events|meeting|meetings|appointment|appointments)\b/.test(command)) return withSubject('Checking calendar');
+        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return withSubject('Checking tasks');
+        if (/\b(?:reminder|reminders)\b/.test(command)) return withSubject('Checking reminders');
+        if (/\b(?:approval|approvals)\b/.test(command)) return withSubject('Checking approvals');
+        if (/\b(?:workspace|workspaces)\b/.test(command)) return withSubject('Checking workspace');
+        if (/\b(?:plan|organize|prioritize)\b/.test(command)) return withSubject('Planning request');
+        if (voiceCommandRequiresBackgroundWork(command) || voiceCommandNeedsAgentWork(command)) return withSubject('Checking request');
+        return '';
+    }
+
+    function beanBackgroundWorkSubject(command) {
+        let text = String(command || '')
+            .replace(/\b(?:can you|could you|would you|please|tell me|show me|give me|get me|find me|check|look up|pull up|what is|what's|whats|what are|what's on|whats on|how is|how's|hows|do i have|anything on|any updates on)\b/g, ' ')
+            .replace(/\b(?:the|my|a|an|latest|current|currently|right now|now|today|tonight)\b/g, ' ')
+            .replace(/\b(?:weather|forecast|traffic|news|headlines?|stocks?|markets?|sports|scores?|flights?|airfares?|tickets?|hotels?|rental cars?|rentals?|reservations?|bookings?|calendar|calendars|agenda|schedule|schedules|events?|meetings?|appointments?|tasks?|todo|to do|reminders?|approvals?|workspaces?)\b/g, ' ')
+            .replace(/\b(?:for|about|in|on|at|near|nearby)\b/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!text || text.length < 3 || /^(?:me|it|that|this|there|anything|something)$/.test(text)) return '';
+        text = text.length > 42 ? `${text.slice(0, 42).trim()}...` : text;
+        return text.charAt(0).toUpperCase() + text.slice(1);
     }
 
     function beanWorkLabelsForTurn(content) {
@@ -3249,6 +3288,27 @@ export function mountHeyBeanWebApp(mount) {
                 </div>
                 ${beanWorkListMarkup(items, 'hb-bean-work-list hb-chat-work-list')}
             </section>`;
+    }
+
+    function refreshChatWorkStripInPlace() {
+        const stacks = mount.querySelectorAll('.hb-chat-input-stack');
+        if (!stacks.length) return;
+        const markup = chatDockedWorkStripMarkup();
+        stacks.forEach((stack) => {
+            const existing = stack.querySelector('.hb-chat-work-strip');
+            if (markup) {
+                if (existing) {
+                    existing.outerHTML = markup;
+                } else {
+                    stack.insertAdjacentHTML('afterbegin', markup);
+                }
+            } else if (existing) {
+                existing.remove();
+            }
+            stack.classList.toggle('hb-chat-input-stack-working', Boolean(markup));
+            const dock = stack.querySelector('.hb-chat-dock');
+            if (dock) dock.classList.toggle('hb-chat-dock-with-work', Boolean(markup));
+        });
     }
 
     function chatHistoryMarkup() {

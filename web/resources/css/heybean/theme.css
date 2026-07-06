@@ -414,7 +414,8 @@
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button .hb-send-bean-logo {
-    filter: none;
+    filter: brightness(0) invert(1);
+    opacity: .94;
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button {

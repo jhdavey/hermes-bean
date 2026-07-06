@@ -137,7 +137,11 @@ export function realtimeSpokenAnswerAllowsBackgroundQueue(userTranscript, assist
     const spoken = normalizedVoiceCommand(assistantText);
     if (!spoken) return true;
     if (spoken.length > 180) return false;
-    if (/\b(?:i(?:'|’)?ll let you know|i will let you know|when it(?:'|’)?s done|when it is done|once it(?:'|’)?s done|once it is done|i(?:'|’)?ll confirm|i will confirm|i(?:'|’)?ll update you|i will update you)\b/.test(spoken)) {
+    if (/\b(?:i(?:'|’)?ll let you know|i will let you know|i(?:'|’)?ll get back to you|i will get back to you|when it(?:'|’)?s done|when it is done|once it(?:'|’)?s done|once it is done|i(?:'|’)?ll confirm|i will confirm|i(?:'|’)?ll update you|i will update you)\b/.test(spoken)) {
+        return true;
+    }
+    if (voiceCommandRequestsFutureOrSpecificWindow(userTranscript)
+        && /\b(?:still checking|keep checking|let me check|let me get|i(?:'|’)?ll check|i will check|i(?:'|’)?ll get|i will get|checking|pulling|gathering|looking|working|finding)\b/.test(spoken)) {
         return true;
     }
     if (spokenContainsConcreteAnswer(spoken, assistantText)) return false;
@@ -155,6 +159,14 @@ export function realtimeSpokenAnswerAllowsBackgroundQueue(userTranscript, assist
     const spokenWords = comparableVoiceWords(spoken);
     const novelWords = spokenWords.filter((word) => !userWords.has(word));
     return novelWords.length <= 2 && spokenWords.length <= 10;
+}
+
+function voiceCommandRequestsFutureOrSpecificWindow(transcript) {
+    const command = normalizedVoiceCommand(transcript);
+    if (!command) return false;
+    if (/\b(?:tonight|tomorrow|later|this evening|this afternoon|this morning|evening|afternoon|morning|weekend|next week|next month)\b/.test(command)) return true;
+    if (/\b(?:after|before|around|by|at)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/.test(command)) return true;
+    return /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(command);
 }
 
 function spokenContainsConcreteAnswer(spoken, originalText) {

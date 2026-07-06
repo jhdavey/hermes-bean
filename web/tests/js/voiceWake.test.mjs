@@ -123,6 +123,13 @@ assert.equal(
 );
 assert.equal(
     realtimeSpokenAnswerAllowsBackgroundQueue(
+        'what is the weather for this evening',
+        "Right now in Orlando, it's 85 degrees with clear skies. I'll check this evening's forecast and get back to you.",
+    ),
+    true,
+);
+assert.equal(
+    realtimeSpokenAnswerAllowsBackgroundQueue(
         "and what's the weather like in Orlando right now",
         "I don't have the current weather for Orlando right now. Let me check that for you.",
     ),

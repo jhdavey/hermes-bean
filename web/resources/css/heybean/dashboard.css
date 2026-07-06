@@ -806,8 +806,8 @@
 }
 
 .hb-command-center-chat .hb-chat-voice-button {
-    width: 52px;
-    min-width: 52px;
+    width: 40px;
+    min-width: 40px;
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-card,
