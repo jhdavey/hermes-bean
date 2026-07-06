@@ -21,7 +21,6 @@ class _SettingsView extends StatelessWidget {
     required this.onCommandCenterLabelChanged,
     required this.onPreferredMapAppChanged,
     required this.onEditAgentOnboarding,
-    required this.onOpenBeanKnowledge,
     required this.onWorkspacesChanged,
     this.error,
     this.onErrorDismissed,
@@ -47,10 +46,15 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
   final VoidCallback onEditAgentOnboarding;
-  final VoidCallback onOpenBeanKnowledge;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
   final VoidCallback? onErrorDismissed;
+
+  Future<void> _editEmail(BuildContext context) async {
+    final nextEmail = await _showEmailEditor(context, initialEmail: user.email);
+    if (nextEmail == null || nextEmail.trim() == user.email) return;
+    await onAccountEmailChanged(nextEmail);
+  }
 
   @override
   Widget build(BuildContext context) => Column(
@@ -72,6 +76,11 @@ class _SettingsView extends StatelessWidget {
                 'Account controls, legal links, and sign out live at the bottom of Settings.',
               ],
             ),
+            const SizedBox(height: 10),
+            _SettingsEmailRow(
+              email: user.email,
+              onEdit: () => _editEmail(context),
+            ),
             const SizedBox(height: 12),
             if (error != null) ...[
               _InlinePlanLimitError(
@@ -82,11 +91,6 @@ class _SettingsView extends StatelessWidget {
               const SizedBox(height: 12),
             ],
             _CompactItemTile(
-              icon: Icons.person_outline_rounded,
-              title: user.name,
-              subtitle: user.email,
-            ),
-            _CompactItemTile(
               icon: Icons.tune_rounded,
               title: 'Bean',
               subtitle: _agentPreferencesSummary(user.currentAgentProfile),
@@ -94,17 +98,6 @@ class _SettingsView extends StatelessWidget {
                 key: const Key('open-bean-preferences'),
                 onPressed: onEditAgentOnboarding,
                 child: Text('Update'),
-              ),
-            ),
-            _CompactItemTile(
-              icon: Icons.psychology_alt_rounded,
-              title: "Bean's Knowledge",
-              subtitle:
-                  'Durable facts, preferences, and routines Bean remembers.',
-              trailing: TextButton(
-                key: const Key('open-bean-knowledge'),
-                onPressed: onOpenBeanKnowledge,
-                child: Text('View'),
               ),
             ),
             _ThemePreferencesCard(
@@ -146,8 +139,6 @@ class _SettingsView extends StatelessWidget {
       ),
       const SizedBox(height: 16),
       _AccountCard(
-        user: user,
-        onEmailChanged: onAccountEmailChanged,
         onDeleteAccount: onDeleteAccount,
         onSignOut: onSignOut,
         launchExternalUrl: launchExternalUrl,
@@ -162,6 +153,43 @@ class _SettingsView extends StatelessWidget {
       const SizedBox(height: 10),
       _SettingsLegalLinksRow(launchExternalUrl: launchExternalUrl),
     ],
+  );
+}
+
+class _SettingsEmailRow extends StatelessWidget {
+  const _SettingsEmailRow({required this.email, required this.onEdit});
+
+  final String email;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(0, 10, 0, 12),
+    decoration: _sectionDividerDecoration(alpha: .22),
+    child: Row(
+      children: [
+        Icon(Icons.email_outlined, color: HeyBeanTheme.muted, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            email,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: HeyBeanTheme.muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        TextButton(
+          key: const Key('settings-edit-email-action'),
+          onPressed: onEdit,
+          child: Text('Edit'),
+        ),
+      ],
+    ),
   );
 }
 

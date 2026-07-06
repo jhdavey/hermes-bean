@@ -4169,7 +4169,7 @@ void main() {
       await openSettingsFromBottomNav(tester);
       expect(find.byKey(const Key('open-bean-preferences')), findsOneWidget);
       expect(find.text('Bean'), findsOneWidget);
-      expect(find.byKey(const Key('open-bean-knowledge')), findsOneWidget);
+      expect(find.byKey(const Key('open-bean-knowledge')), findsNothing);
       expect(find.byKey(const Key('delete-account-action')), findsOneWidget);
       await tester.ensureVisible(
         find.byKey(const Key('delete-account-action')),
@@ -5090,6 +5090,41 @@ void main() {
     expect(find.text('Gray'), findsOneWidget);
   });
 
+  testWidgets('create menu plus follows selected accent color', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    api.updatedTheme = 'teal';
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    Color plusColor() {
+      final icon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(const Key('create-item-menu-button')),
+          matching: find.byIcon(Icons.add_rounded),
+        ),
+      );
+      return icon.color!;
+    }
+
+    expect(plusColor(), heyBeanColorThemeForKey('teal').accentStrong);
+
+    await openSettingsFromBottomNav(tester);
+    await tester.ensureVisible(find.byKey(const Key('theme-preferences-card')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('theme-preferences-toggle')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Gold'));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedTheme, 'gold');
+    expect(plusColor(), heyBeanColorThemeForKey('gold').accentStrong);
+  });
+
   testWidgets('Bean opens to command center with chronological agenda', (
     WidgetTester tester,
   ) async {
@@ -5690,12 +5725,9 @@ void main() {
 
       await tester.tap(find.text('Settings').last);
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('open-bean-knowledge')), findsOneWidget);
-      await tester.ensureVisible(find.byKey(const Key('open-bean-knowledge')));
-      await tester.tap(find.byKey(const Key('open-bean-knowledge')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('memory-view')), findsOneWidget);
-      expect(find.text("Bean's Knowledge"), findsOneWidget);
+      expect(find.byKey(const Key('open-bean-knowledge')), findsNothing);
+      expect(find.byKey(const Key('memory-view')), findsNothing);
+      expect(find.text("Bean's Knowledge"), findsNothing);
     },
   );
 
@@ -7400,7 +7432,7 @@ void main() {
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
       expect(find.text('Settings'), findsWidgets);
       expect(find.text('Bean'), findsOneWidget);
-      expect(find.byKey(const Key('open-bean-knowledge')), findsOneWidget);
+      expect(find.byKey(const Key('open-bean-knowledge')), findsNothing);
       expect(find.text('Calendar preferences'), findsOneWidget);
       expect(find.text('Start hour'), findsOneWidget);
       expect(find.text('End hour'), findsOneWidget);

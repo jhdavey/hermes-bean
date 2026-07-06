@@ -16,60 +16,73 @@ class _CreateItemMenu extends StatelessWidget {
   final Future<void> Function() onCreateNote;
 
   @override
-  Widget build(BuildContext context) => PopupMenuButton<_CreateItemAction>(
-    key: const Key('create-item-menu'),
-    tooltip: 'Create',
-    position: PopupMenuPosition.under,
-    offset: const Offset(0, 8),
-    onSelected: (action) {
-      switch (action) {
-        case _CreateItemAction.event:
-          unawaited(onCreateEvent());
-          return;
-        case _CreateItemAction.task:
-          unawaited(onCreateTask());
-          return;
-        case _CreateItemAction.reminder:
-          unawaited(onCreateReminder());
-          return;
-        case _CreateItemAction.note:
-          unawaited(onCreateNote());
-          return;
-      }
-    },
-    itemBuilder: (context) => [
-      const PopupMenuItem<_CreateItemAction>(
-        key: Key('create-event-action'),
-        value: _CreateItemAction.event,
-        child: _CreateItemMenuRow(icon: Icons.event_rounded, label: 'Event'),
-      ),
-      const PopupMenuItem<_CreateItemAction>(
-        key: Key('create-task-action'),
-        value: _CreateItemAction.task,
-        child: _CreateItemMenuRow(icon: Icons.task_alt_rounded, label: 'Task'),
-      ),
-      const PopupMenuItem<_CreateItemAction>(
-        key: Key('create-reminder-action'),
-        value: _CreateItemAction.reminder,
-        child: _CreateItemMenuRow(
-          icon: Icons.notifications_active_rounded,
-          label: 'Reminder',
-        ),
-      ),
-      PopupMenuItem<_CreateItemAction>(
-        key: const Key('create-note-action'),
-        value: _CreateItemAction.note,
-        child: _CreateItemMenuRow(
-          iconWidget: _BeanNotesIcon(
-            size: 18,
-            color: HeyBeanTheme.accentStrong,
+  Widget build(BuildContext context) {
+    final accentStrong = Theme.of(context).colorScheme.secondary;
+    return PopupMenuButton<_CreateItemAction>(
+      key: const Key('create-item-menu'),
+      tooltip: 'Create',
+      position: PopupMenuPosition.under,
+      offset: const Offset(0, 8),
+      onSelected: (action) {
+        switch (action) {
+          case _CreateItemAction.event:
+            unawaited(onCreateEvent());
+            return;
+          case _CreateItemAction.task:
+            unawaited(onCreateTask());
+            return;
+          case _CreateItemAction.reminder:
+            unawaited(onCreateReminder());
+            return;
+          case _CreateItemAction.note:
+            unawaited(onCreateNote());
+            return;
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem<_CreateItemAction>(
+          key: const Key('create-event-action'),
+          value: _CreateItemAction.event,
+          child: _CreateItemMenuRow(
+            icon: Icons.event_rounded,
+            label: 'Event',
+            color: accentStrong,
           ),
-          label: 'Note',
         ),
+        PopupMenuItem<_CreateItemAction>(
+          key: const Key('create-task-action'),
+          value: _CreateItemAction.task,
+          child: _CreateItemMenuRow(
+            icon: Icons.task_alt_rounded,
+            label: 'Task',
+            color: accentStrong,
+          ),
+        ),
+        PopupMenuItem<_CreateItemAction>(
+          key: const Key('create-reminder-action'),
+          value: _CreateItemAction.reminder,
+          child: _CreateItemMenuRow(
+            icon: Icons.notifications_active_rounded,
+            label: 'Reminder',
+            color: accentStrong,
+          ),
+        ),
+        PopupMenuItem<_CreateItemAction>(
+          key: const Key('create-note-action'),
+          value: _CreateItemAction.note,
+          child: _CreateItemMenuRow(
+            iconWidget: _BeanNotesIcon(size: 18, color: accentStrong),
+            label: 'Note',
+            color: accentStrong,
+          ),
+        ),
+      ],
+      child: _ThemedPlusButtonChrome(
+        key: const Key('create-item-menu-button'),
+        color: accentStrong,
       ),
-    ],
-    child: const _ThemedPlusButtonChrome(key: Key('create-item-menu-button')),
-  );
+    );
+  }
 }
 
 class _ThemedPlusButton extends StatelessWidget {
@@ -107,29 +120,37 @@ class _ThemedPlusButton extends StatelessWidget {
 }
 
 class _ThemedPlusButtonChrome extends StatelessWidget {
-  const _ThemedPlusButtonChrome({super.key});
+  const _ThemedPlusButtonChrome({super.key, required this.color});
+
+  final Color color;
 
   @override
   Widget build(BuildContext context) => Container(
     width: 40,
     height: 40,
     alignment: Alignment.center,
-    child: Icon(Icons.add_rounded, color: HeyBeanTheme.accentStrong, size: 30),
+    child: Icon(Icons.add_rounded, color: color, size: 30),
   );
 }
 
 class _CreateItemMenuRow extends StatelessWidget {
-  const _CreateItemMenuRow({this.icon, this.iconWidget, required this.label});
+  const _CreateItemMenuRow({
+    this.icon,
+    this.iconWidget,
+    required this.label,
+    required this.color,
+  });
 
   final IconData? icon;
   final Widget? iconWidget;
   final String label;
+  final Color color;
 
   @override
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      iconWidget ?? Icon(icon, size: 18, color: HeyBeanTheme.accentStrong),
+      iconWidget ?? Icon(icon, size: 18, color: color),
       const SizedBox(width: 10),
       Text(label, style: TextStyle(fontWeight: FontWeight.w700)),
     ],

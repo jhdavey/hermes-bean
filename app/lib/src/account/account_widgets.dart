@@ -63,8 +63,6 @@ class _DeleteAccountConfirmationDialogState
 
 class _AccountCard extends StatelessWidget {
   const _AccountCard({
-    required this.user,
-    required this.onEmailChanged,
     required this.onDeleteAccount,
     required this.onSignOut,
     required this.launchExternalUrl,
@@ -72,19 +70,11 @@ class _AccountCard extends StatelessWidget {
     this.beforeAccountActions,
   });
 
-  final HermesUser user;
-  final Future<void> Function(String email) onEmailChanged;
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
   final ExternalUrlLauncher launchExternalUrl;
   final bool showLegalLinks;
   final Widget? beforeAccountActions;
-
-  Future<void> _editEmail(BuildContext context) async {
-    final nextEmail = await _showEmailEditor(context, initialEmail: user.email);
-    if (nextEmail == null || nextEmail.trim() == user.email) return;
-    await onEmailChanged(nextEmail);
-  }
 
   Future<bool> _confirmDeleteAccount(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -105,30 +95,6 @@ class _AccountCard extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle(
-          icon: Icons.settings_rounded,
-          title: 'Profile',
-          subtitle: 'Account and app settings',
-          infoKey: Key('profile-info'),
-          infoTitle: 'Profile and account',
-          infoBullets: [
-            'Edit your email here if your sign-in address changes.',
-            'Privacy Policy, Terms of Use, and Support links open the hosted HeyBean pages.',
-            'Delete account permanently removes your HeyBean account and data after confirmation.',
-          ],
-        ),
-        const SizedBox(height: 10),
-        _CompactItemTile(
-          icon: Icons.email_outlined,
-          title: 'Email',
-          subtitle: user.email,
-          trailing: TextButton(
-            key: const Key('settings-edit-email-action'),
-            onPressed: () => _editEmail(context),
-            child: Text('Edit'),
-          ),
-        ),
-        const SizedBox(height: 10),
         if (beforeAccountActions != null) ...[
           beforeAccountActions!,
           const SizedBox(height: 10),
@@ -143,9 +109,15 @@ class _AccountCard extends StatelessWidget {
               icon: Icon(Icons.logout_rounded),
               label: Text('Sign out'),
             ),
-            FilledButton.icon(
+            TextButton.icon(
               key: const Key('delete-account-action'),
-              style: _destructiveFilledButtonStyle(),
+              style: TextButton.styleFrom(
+                foregroundColor: HeyBeanTheme.destructive,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
               onPressed: () => _requestDeleteAccount(context),
               icon: Icon(Icons.delete_outline_rounded),
               label: Text('Delete account'),

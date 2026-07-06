@@ -340,9 +340,11 @@ class _CommandCenterContent extends StatelessWidget {
             loading: dashboardDataLoading,
             chat: beanPanel,
             agendaPanelKey:
-                onboardingTourTargetKeys[_OnboardingTourTarget.commandCenterAgenda],
+                onboardingTourTargetKeys[_OnboardingTourTarget
+                    .commandCenterAgenda],
             chatPanelKey:
-                onboardingTourTargetKeys[_OnboardingTourTarget.commandCenterChat],
+                onboardingTourTargetKeys[_OnboardingTourTarget
+                    .commandCenterChat],
             chatCollapsed: beanChatCollapsed,
             onChatCollapsedChanged: onBeanChatCollapsedChanged,
             eventCategories: eventCategories,
@@ -360,8 +362,7 @@ class _CommandCenterContent extends StatelessWidget {
             onEventCategoryDeleted: onEventCategoryDeleted,
           ),
           _HomeDestination.reminders => KeyedSubtree(
-            key:
-                onboardingTourTargetKeys[_OnboardingTourTarget.remindersView],
+            key: onboardingTourTargetKeys[_OnboardingTourTarget.remindersView],
             child: _ReminderListCard(
               reminders: reminders,
               loading: dashboardDataLoading,
@@ -377,7 +378,9 @@ class _CommandCenterContent extends StatelessWidget {
           _HomeDestination.notes =>
             notesEnabled
                 ? KeyedSubtree(
-                    key: onboardingTourTargetKeys[_OnboardingTourTarget.notesView],
+                    key:
+                        onboardingTourTargetKeys[_OnboardingTourTarget
+                            .notesView],
                     child: _NotesView(
                       folders: noteFolders,
                       notes: notes,
@@ -424,8 +427,6 @@ class _CommandCenterContent extends StatelessWidget {
             onCommandCenterLabelChanged: onCommandCenterLabelChanged,
             onPreferredMapAppChanged: onPreferredMapAppChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
-            onOpenBeanKnowledge: () =>
-                onSelectDestination(_HomeDestination.memory),
             onWorkspacesChanged: onWorkspacesChanged,
             error: error,
             onErrorDismissed: onErrorDismissed,
@@ -479,8 +480,6 @@ class _CommandCenterContent extends StatelessWidget {
         final right = Column(
           children: [
             _AccountCard(
-              user: user,
-              onEmailChanged: onAccountEmailChanged,
               onDeleteAccount: onDeleteAccount,
               onSignOut: onSignOut,
               launchExternalUrl: launchExternalUrl,

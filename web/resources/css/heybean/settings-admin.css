@@ -1295,11 +1295,77 @@
     font-weight: 600;
 }
 
+.hb-settings-email-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0 12px;
+    border-top: 1px solid color-mix(in srgb, var(--hb-border) 22%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 22%, transparent);
+}
+
+.hb-settings-email-icon {
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--hb-muted);
+}
+
+.hb-settings-email-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.hb-settings-email-text {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    color: var(--hb-muted);
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hb-settings-email-action {
+    min-height: 34px;
+    padding: 8px 10px;
+}
+
 .hb-account-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 12px;
+}
+
+.hb-button-danger-text {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 0;
+    border-radius: 8px;
+    padding: 6px 4px;
+    background: transparent;
+    color: var(--hb-destructive);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .16s ease, opacity .16s ease;
+}
+
+.hb-button-danger-text:hover {
+    background: color-mix(in srgb, var(--hb-destructive) 7%, transparent);
+}
+
+.hb-button-danger-text:disabled {
+    cursor: not-allowed;
+    opacity: .58;
 }
 
 .hb-topbar-month-cluster .hb-month-current {

@@ -370,16 +370,23 @@
 .hb-onboarding-tour-scrim {
     position: fixed;
     z-index: 80;
-    background: rgba(15, 23, 42, .52);
+    background: rgba(15, 23, 42, .50);
 }
 
 .hb-onboarding-tour-highlight {
     position: fixed;
     z-index: 81;
     pointer-events: none;
-    border: 2px solid rgba(255, 255, 255, .92);
+    border: 1px solid rgba(255, 255, 255, .72);
+    outline: 1px solid rgba(var(--hb-accent-rgb), .42);
+    outline-offset: 2px;
     border-radius: 20px;
-    box-shadow: 0 10px 22px rgba(2, 6, 23, .14), 0 0 0 4px rgba(var(--hb-accent-rgb), .14);
+    background: rgba(255, 255, 255, .035);
+    box-shadow:
+        0 12px 28px rgba(2, 6, 23, .16),
+        0 0 0 5px rgba(var(--hb-accent-rgb), .10),
+        inset 0 0 0 1px rgba(255, 255, 255, .18);
+    transition: left .18s ease, top .18s ease, width .18s ease, height .18s ease, border-radius .18s ease;
 }
 
 .hb-onboarding-tour-card {

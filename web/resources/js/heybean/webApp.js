@@ -4017,46 +4017,46 @@ export function mountHeyBeanWebApp(mount) {
             title: 'Command center',
             caption: "This is your command center. I'm always here to help, just tell me what you need.",
             view: 'today',
-            selector: '[data-tour-target="command-center-chat"]',
+            selectors: ['[data-tour-target="command-center-chat"]'],
         },
         {
             key: 'command-center-agenda',
             title: 'Today at a glance',
             caption: "Above the chat, you'll see today's events, tasks, and reminders in one running list.",
             view: 'today',
-            selector: '[data-tour-target="command-center-agenda"]',
+            selectors: ['[data-tour-target="command-center-agenda"]'],
         },
         {
             key: 'create-menu',
             title: 'Create items',
             caption: 'Use the plus button to create new events, tasks, reminders, or notes from anywhere in the app.',
             view: 'today',
-            selector: '[data-tour-target="create-menu"]',
+            selectors: ['[data-tour-target="create-menu"] > summary'],
         },
         {
             key: 'calendar-controls',
             title: 'Calendar views',
             caption: 'Calendar buttons at the top help you move between today, day view, and month view without losing your place.',
             view: 'today',
-            selector: '[data-tour-target="calendar-controls"]',
+            selectors: ['[data-tour-target="calendar-controls"]'],
         },
         {
             title: 'Tasks',
             caption: 'Tasks are for things you need to complete. Bean can create them from a sentence, and you can check them off when done.',
             view: 'tasks',
-            selector: '[data-tour-target="tasks-view"]',
+            selectors: ['[data-tour-target="tasks-view"]'],
         },
         {
             title: 'Reminders',
             caption: 'Reminders are lightweight nudges. Use them for quick time-based follow-up without cluttering your task list.',
             view: 'reminders',
-            selector: '[data-tour-target="reminders-view"]',
+            selectors: ['[data-tour-target="reminders-view"]'],
         },
         {
             title: 'Notes',
             caption: 'Notes hold plans, lists, and longer writing. Folders keep them organized, and formatting helps structure what matters.',
             view: 'notes',
-            selector: '[data-tour-target="notes-view"]',
+            selectors: ['[data-tour-target="notes-view"]'],
         },
     ];
 
@@ -4221,16 +4221,16 @@ export function mountHeyBeanWebApp(mount) {
         return `
             <section class="hb-card hb-card-pad hb-settings-grid">
                 ${sectionTitle(icons.settings, 'Settings', 'Focused Hermes Bean preferences')}
+                <div class="hb-settings-email-row">
+                    <span class="hb-settings-email-icon" aria-hidden="true">${icons.mail}</span>
+                    <span class="hb-settings-email-text">${escapeHtml(user.email || '')}</span>
+                    <button class="hb-button-ghost hb-settings-email-action" type="button" data-open-profile>Edit</button>
+                </div>
                 ${errorMarkup(state.error)}
                 ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
                 <div class="hb-compact-item">
-                    <span class="hb-compact-icon">${icons.user}</span>
-                    <div><strong>${escapeHtml(user.name || 'Account')}</strong><small>${escapeHtml(user.email || '')}</small></div>
-                    <button class="hb-button-ghost" type="button" data-open-profile>Email</button>
-                </div>
-                <div class="hb-compact-item">
                     <span class="hb-compact-icon">${icons.tune}</span>
-                    <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')} • knowledge context${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
+                    <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')}${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
                     <button class="hb-button-ghost" type="button" data-open-agent>Update</button>
                 </div>
                 <form class="hb-surface-soft hb-card-pad hb-settings-section hb-home-city-settings" data-home-city-form>
@@ -4293,7 +4293,7 @@ export function mountHeyBeanWebApp(mount) {
                     <div class="hb-account-actions">
                         <button class="hb-button-secondary" type="button" data-export-account>Export data</button>
                         <button class="hb-button-secondary" type="button" data-logout>Sign out</button>
-                        <button class="hb-button-danger" type="button" data-delete-account>Delete account</button>
+                        <button class="hb-button-danger-text" type="button" data-delete-account>Delete account</button>
                     </div>
                 </div>
                 <div class="hb-settings-legal-row">
@@ -15107,6 +15107,60 @@ export function mountHeyBeanWebApp(mount) {
         onboardingTourLayoutFrame = window.requestAnimationFrame(updateOnboardingTourLayout);
     }
 
+    function onboardingTourStepTargets(step = onboardingTourStep()) {
+        const selectors = step.selectors || (step.selector ? [step.selector] : []);
+        return selectors.flatMap((selector) => Array.from(mount.querySelectorAll(selector)))
+            .filter((element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                    && rect.height > 0
+                    && style.visibility !== 'hidden'
+                    && style.display !== 'none';
+            });
+    }
+
+    function onboardingTourTargetMetrics(step = onboardingTourStep()) {
+        const targets = onboardingTourStepTargets(step);
+        if (!targets.length) return null;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const union = targets.reduce((rect, target) => {
+            const next = target.getBoundingClientRect();
+            if (!rect) return {
+                left: next.left,
+                top: next.top,
+                right: next.right,
+                bottom: next.bottom,
+            };
+            return {
+                left: Math.min(rect.left, next.left),
+                top: Math.min(rect.top, next.top),
+                right: Math.max(rect.right, next.right),
+                bottom: Math.max(rect.bottom, next.bottom),
+            };
+        }, null);
+        if (!union) return null;
+        const rawWidth = Math.max(0, union.right - union.left);
+        const rawHeight = Math.max(0, union.bottom - union.top);
+        if (!rawWidth || !rawHeight) return null;
+        const minDimension = Math.min(rawWidth, rawHeight);
+        const maxDimension = Math.max(rawWidth, rawHeight);
+        const padding = minDimension <= 56 ? 8 : minDimension <= 120 ? 10 : 12;
+        const left = Math.max(8, union.left - padding);
+        const top = Math.max(8, union.top - padding);
+        const right = Math.min(viewportWidth - 8, union.right + padding);
+        const bottom = Math.min(viewportHeight - 8, union.bottom + padding);
+        const width = Math.max(0, right - left);
+        const height = Math.max(0, bottom - top);
+        if (!width || !height) return null;
+        const radius = Math.max(
+            minDimension <= 64 ? 14 : 16,
+            Math.min(maxDimension >= 360 ? 22 : 24, minDimension * 0.28),
+        );
+        return { left, top, right, bottom, width, height, radius };
+    }
+
     function scrollGuidedOnboardingThread() {
         window.requestAnimationFrame(() => {
             const thread = mount.querySelector('[data-guided-thread]') || mount.querySelector('.hb-guided-onboarding-thread');
@@ -15131,14 +15185,8 @@ export function mountHeyBeanWebApp(mount) {
         const leftScrim = overlay.querySelector('[data-tour-scrim="left"]');
         const rightScrim = overlay.querySelector('[data-tour-scrim="right"]');
         const bottomScrim = overlay.querySelector('[data-tour-scrim="bottom"]');
-        const target = mount.querySelector(onboardingTourStep().selector);
-        if (!highlight || !card || !topScrim || !leftScrim || !rightScrim || !bottomScrim || !target) {
-            overlay.classList.add('hb-onboarding-tour-no-target');
-            return;
-        }
-
-        const rect = target.getBoundingClientRect();
-        if (!rect.width || !rect.height) {
+        const metrics = onboardingTourTargetMetrics();
+        if (!highlight || !card || !topScrim || !leftScrim || !rightScrim || !bottomScrim || !metrics) {
             overlay.classList.add('hb-onboarding-tour-no-target');
             return;
         }
@@ -15146,15 +15194,7 @@ export function mountHeyBeanWebApp(mount) {
         overlay.classList.remove('hb-onboarding-tour-no-target');
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
-        const minDimension = Math.min(rect.width, rect.height);
-        const padding = minDimension <= 56 ? 8 : minDimension <= 120 ? 10 : 12;
-        const radius = Math.max(16, Math.min(24, minDimension * 0.28));
-        const left = Math.max(8, rect.left - padding);
-        const top = Math.max(8, rect.top - padding);
-        const right = Math.min(viewportWidth - 8, rect.right + padding);
-        const bottom = Math.min(viewportHeight - 8, rect.bottom + padding);
-        const width = Math.max(0, right - left);
-        const height = Math.max(0, bottom - top);
+        const { left, top, right, bottom, width, height, radius } = metrics;
 
         highlight.style.left = `${left}px`;
         highlight.style.top = `${top}px`;
