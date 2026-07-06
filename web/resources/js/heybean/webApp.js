@@ -4252,7 +4252,7 @@ export function mountHeyBeanWebApp(mount) {
                 </div>
                 <div class="hb-surface-soft hb-card-pad hb-settings-section">
                     <div class="hb-settings-header-with-action">
-                        ${settingsSectionHeader(icons.spaces, 'Workspaces', 'Switch the space Bean uses for calendar, tasks, and reminders.')}
+                        ${settingsSectionHeader(icons.spaces, 'Workspaces', 'Personal and shared spaces with their own Bean, calendar, tasks, reminders, and settings.')}
                         <button class="hb-workspace-create-action" type="button" data-create-workspace aria-label="Create workspace" title="Create workspace">${icons.add}</button>
                     </div>
                     ${workspaceSwitcherMarkup(workspaceItems, activeWorkspaceId)}

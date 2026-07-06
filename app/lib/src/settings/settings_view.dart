@@ -1845,7 +1845,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
                       Text(
-                        'Personal and household spaces with their own Bean, calendar, tasks, reminders, and settings.',
+                        'Personal and shared spaces with their own Bean, calendar, tasks, reminders, and settings.',
                         style: TextStyle(color: HeyBeanTheme.muted),
                       ),
                     ],
@@ -1916,18 +1916,6 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                 margin: EdgeInsets.only(
                   top: workspace.id == workspaces.first.id ? 0 : 10,
                 ),
-                padding: EdgeInsets.only(
-                  top: workspace.id == workspaces.first.id ? 0 : 10,
-                ),
-                decoration: workspace.id == workspaces.first.id
-                    ? null
-                    : BoxDecoration(
-                        border: Border(
-                          top: BorderSide(
-                            color: _sectionDividerColor(alpha: .18),
-                          ),
-                        ),
-                      ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

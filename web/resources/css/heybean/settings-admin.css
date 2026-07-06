@@ -972,6 +972,10 @@
     gap: 8px;
 }
 
+.hb-workspace-list .hb-workspace-block > .hb-compact-item {
+    border-top: 0;
+}
+
 .hb-workspace-list .hb-workspace-block:first-child > .hb-compact-item {
     padding-top: 0;
     border-top: 0;
