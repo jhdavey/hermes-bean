@@ -390,7 +390,7 @@
     min-width: 0;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
+    align-items: start;
     gap: 4px;
     border: 1px solid var(--hb-border);
     border-radius: 8px;
@@ -411,6 +411,7 @@
     font-size: 10px;
     font-weight: 500;
     line-height: 1.1;
+    padding-top: 1px;
     white-space: nowrap;
 }
 
@@ -488,6 +489,28 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.hb-month-event-title {
+    align-items: flex-start;
+    width: 100%;
+    max-width: 100%;
+    white-space: normal;
+}
+
+.hb-month-event-title .hb-event-title-inner {
+    display: -webkit-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+}
+
+.hb-month-event-title .hb-event-pill-icons {
+    padding-top: 1px;
 }
 
 .hb-event-pill-icons {
