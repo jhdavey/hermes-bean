@@ -993,6 +993,13 @@
     border-color: color-mix(in srgb, var(--hb-accent) 36%, var(--hb-border));
 }
 
+.hb-guided-choice-chip:disabled,
+.hb-guided-personality-card:disabled {
+    cursor: default;
+    opacity: .7;
+    transform: none;
+}
+
 .hb-guided-personality-card span {
     color: var(--hb-text);
     display: block;
@@ -1136,6 +1143,54 @@
     color: var(--hb-muted);
     font-size: 14px;
     font-weight: 800;
+}
+
+.hb-guided-message-thinking {
+    width: min(220px, 100%);
+}
+
+.hb-guided-thinking-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--hb-muted);
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.hb-guided-thinking-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.hb-guided-thinking-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--hb-accent-strong) 95%, transparent);
+    opacity: .3;
+    animation: hb-guided-thinking-dot 900ms ease-in-out infinite;
+}
+
+.hb-guided-thinking-dots span:nth-child(2) {
+    animation-delay: 120ms;
+}
+
+.hb-guided-thinking-dots span:nth-child(3) {
+    animation-delay: 240ms;
+}
+
+@keyframes hb-guided-thinking-dot {
+    0%, 100% {
+        opacity: .3;
+        transform: scale(.84);
+    }
+
+    35% {
+        opacity: .95;
+        transform: scale(1);
+    }
 }
 
 .hb-guided-plan-panel {
