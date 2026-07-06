@@ -713,11 +713,10 @@ class _CommandCenterAgendaList extends StatelessWidget {
     return Stack(
       key: const Key('command-center-agenda-stack'),
       children: [
-        ListView.separated(
+        ListView.builder(
           key: const Key('command-center-agenda-list'),
           padding: EdgeInsets.zero,
           itemCount: items.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 2),
           itemBuilder: (context, index) =>
               _CommandCenterAgendaRow(item: items[index], onTap: onItemTap),
         ),
@@ -759,7 +758,6 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       key: Key('command-center-agenda-${item.key}'),
       child: InkWell(
         onTap: () => onTap(item),
-        borderRadius: BorderRadius.circular(8),
         child: Container(
           height: 42,
           padding: const EdgeInsets.symmetric(horizontal: 6),
