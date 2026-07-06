@@ -4728,7 +4728,6 @@ export function mountHeyBeanWebApp(mount) {
                 };
                 return true;
             }
-            return false;
         }
         state.messages.push({
             ...message,
@@ -10157,11 +10156,12 @@ export function mountHeyBeanWebApp(mount) {
             if (duplicateIndex >= 0) {
                 const duplicate = state.messages[duplicateIndex];
                 const duplicateIsPersisted = !duplicate?.metadata?.local_realtime_turn && !String(duplicate?.id || '').startsWith('rt-');
-                if (duplicateIsPersisted) return;
-                state.messages[duplicateIndex] = { ...duplicate, ...message };
-                if (state.phase === 'signedIn') render();
-                scrollChatToBottom();
-                return;
+                if (!duplicateIsPersisted) {
+                    state.messages[duplicateIndex] = { ...duplicate, ...message };
+                    if (state.phase === 'signedIn') render();
+                    scrollChatToBottom();
+                    return;
+                }
             }
             state.messages.push(message);
         }
@@ -10196,6 +10196,11 @@ export function mountHeyBeanWebApp(mount) {
         if (assistantAnswered) {
             kioskRealtimeLastAssistantText = responseAssistantText;
             recordRealtimeSpokenSegment(responseAssistantText);
+            if (!kioskRealtimeVoiceOnlyAssistant) {
+                const draft = ensureRealtimeAssistantDraft(payload?.response?.id || payload?.response_id || '');
+                draft.content = responseAssistantText;
+                upsertRealtimeLocalMessage(draft);
+            }
         }
         const activeUserTurn = kioskRealtimePendingUser || kioskRealtimeCurrentUserTurn;
         const pendingUserContent = String(activeUserTurn?.content || '').trim();
