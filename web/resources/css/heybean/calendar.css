@@ -246,12 +246,12 @@
     min-height: 0;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
-    gap: 7px;
+    gap: 5px;
     border: 1px solid var(--hb-border);
     border-radius: 4px;
     background: rgba(255, 255, 255, .72);
     color: var(--hb-text);
-    padding: 8px;
+    padding: 6px 5px;
     text-align: left;
     overflow: hidden;
 }
@@ -289,7 +289,7 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 6px;
+    gap: 4px;
 }
 
 .hb-month-date {
@@ -373,7 +373,7 @@
     min-height: 0;
     display: grid;
     align-content: start;
-    gap: 4px;
+    gap: 3px;
     overflow: auto;
     scrollbar-width: thin;
 }
@@ -391,12 +391,12 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     border: 1px solid var(--hb-border);
     border-radius: 8px;
     background: rgba(var(--hb-accent-rgb), .10);
     color: var(--hb-text);
-    padding: 4px 6px;
+    padding: 3px 5px;
     text-align: left;
     cursor: pointer;
 }
@@ -409,7 +409,7 @@
 .hb-month-event-time {
     color: var(--hb-muted);
     font-size: 10px;
-    font-weight: 900;
+    font-weight: 500;
     line-height: 1.1;
     white-space: nowrap;
 }
@@ -418,7 +418,7 @@
     min-width: 0;
     color: var(--hb-text);
     font-size: 11px;
-    font-weight: 850;
+    font-weight: 400;
     line-height: 1.15;
 }
 

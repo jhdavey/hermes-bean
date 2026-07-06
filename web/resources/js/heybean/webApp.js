@@ -4874,9 +4874,10 @@ export function mountHeyBeanWebApp(mount) {
         return event.title || event.name || 'Untitled';
     }
 
-    function eventPillIndicatorsMarkup(event = {}) {
+    function eventPillIndicatorsMarkup(event = {}, options = {}) {
+        const showLocation = options.showLocation !== false;
         const indicators = [];
-        if (eventLocationText(event)) {
+        if (showLocation && eventLocationText(event)) {
             indicators.push(`<span class="hb-event-pill-icon" title="Has location" aria-label="Has location">${icons.pin}</span>`);
         }
         if (eventNotesText(event)) {
@@ -4885,8 +4886,8 @@ export function mountHeyBeanWebApp(mount) {
         return indicators.length ? `<span class="hb-event-pill-icons">${indicators.join('')}</span>` : '';
     }
 
-    function eventPillTitleMarkup(event = {}, className = 'hb-event-title') {
-        return `<span class="${className}"><span class="hb-event-title-inner">${criticalStarMarkup(event)}${escapeHtml(eventTitleText(event))}</span>${eventPillIndicatorsMarkup(event)}</span>`;
+    function eventPillTitleMarkup(event = {}, className = 'hb-event-title', options = {}) {
+        return `<span class="${className}"><span class="hb-event-title-inner">${criticalStarMarkup(event)}${escapeHtml(eventTitleText(event))}</span>${eventPillIndicatorsMarkup(event, options)}</span>`;
     }
 
     function glanceEventMarkup(event) {
@@ -5157,17 +5158,17 @@ export function mountHeyBeanWebApp(mount) {
         const color = itemColor(event);
         return `
             <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                ${eventPillTitleMarkup(event, 'hb-month-event-title')}
+                ${eventPillTitleMarkup(event, 'hb-month-event-title', { showLocation: false })}
             </button>`;
     }
 
     function monthMultiDayEventMarkup(event, day) {
         const color = itemColor(event);
-        const time = multiDayEventDayTime(event, day, { showEndTime: false });
+        const time = multiDayEventDayTime(event, day, { compact: true, showEndTime: false });
         return `
             <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 ${time ? `<span class="hb-month-event-time">${escapeHtml(time)}</span>` : ''}
-                ${eventPillTitleMarkup(event, 'hb-month-event-title')}
+                ${eventPillTitleMarkup(event, 'hb-month-event-title', { showLocation: false })}
             </button>`;
     }
 
@@ -5175,8 +5176,8 @@ export function mountHeyBeanWebApp(mount) {
         const color = itemColor(event);
         return `
             <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <span class="hb-month-event-time">${escapeHtml(eventStartTime(event))}</span>
-                ${eventPillTitleMarkup(event, 'hb-month-event-title')}
+                <span class="hb-month-event-time">${escapeHtml(monthEventStartTime(event))}</span>
+                ${eventPillTitleMarkup(event, 'hb-month-event-title', { showLocation: false })}
             </button>`;
     }
 
@@ -14630,10 +14631,22 @@ export function mountHeyBeanWebApp(mount) {
         return start ? formatTime(start) : 'All day';
     }
 
+    function monthEventStartTime(event) {
+        if (eventAllDay(event)) return 'All day';
+        const start = event.starts_at || event.startsAt;
+        return start ? formatCompactMeridiemTime(start) : 'All day';
+    }
+
     function eventEndTime(event) {
         if (eventAllDay(event)) return 'All day';
         const end = event.ends_at || event.endsAt;
         return end ? formatTime(end) : '';
+    }
+
+    function monthEventEndTime(event) {
+        if (eventAllDay(event)) return 'All day';
+        const end = event.ends_at || event.endsAt;
+        return end ? formatCompactMeridiemTime(end) : '';
     }
 
     function eventMultiDayTimed(event) {
@@ -14649,9 +14662,12 @@ export function mountHeyBeanWebApp(mount) {
 
     function multiDayEventDayTime(event, day, options = {}) {
         const dayValue = dateOnly(day);
-        if (dateOnly(event.starts_at || event.startsAt) === dayValue) return eventStartTime(event);
+        if (dateOnly(event.starts_at || event.startsAt) === dayValue) {
+            return options.compact ? monthEventStartTime(event) : eventStartTime(event);
+        }
         if (dateOnly(event.ends_at || event.endsAt) === dayValue) {
-            return options.showEndTime === false ? '' : eventEndTime(event);
+            if (options.showEndTime === false) return '';
+            return options.compact ? monthEventEndTime(event) : eventEndTime(event);
         }
         return '';
     }
