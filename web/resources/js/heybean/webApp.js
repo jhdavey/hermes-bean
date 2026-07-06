@@ -5063,7 +5063,7 @@ export function mountHeyBeanWebApp(mount) {
     function categoryManagerToggleMarkup() {
         return `
             <div class="hb-inline-category-shell">
-                <button class="hb-button-ghost hb-inline-action" type="button" data-open-categories aria-expanded="false">Manage categories</button>
+                <button class="hb-category-manager-trigger" type="button" data-open-categories aria-expanded="false">Manage categories</button>
                 <div class="hb-inline-category-manager" data-category-manager hidden>
                     <div class="hb-inline-category-head">
                         <strong>Categories</strong>
