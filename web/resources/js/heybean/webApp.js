@@ -303,6 +303,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanWorkStatusMinUntil = 0;
     let beanWorkEventFloorId = 0;
     const beanWorkAppliedEventIds = new Set();
+    const beanDashboardRefreshEventIds = new Set();
     const cancelledChatRequestIds = new Set();
 
     boot();
@@ -3281,6 +3282,7 @@ export function mountHeyBeanWebApp(mount) {
         stopBeanWorkEventPolling();
         beanWorkEventFloorId = maxActivityEventId(state.activity);
         beanWorkAppliedEventIds.clear();
+        beanDashboardRefreshEventIds.clear();
         const normalizedLabels = normalizeList(Array.isArray(labels) ? labels : (labels ? [labels] : []))
             .map((label) => String(label || '').trim())
             .filter((label) => label && !isGenericBeanWorkLabel(label))
@@ -3417,6 +3419,7 @@ export function mountHeyBeanWebApp(mount) {
         beanWorkStatusMinUntil = 0;
         beanWorkEventFloorId = maxActivityEventId(state.activity);
         beanWorkAppliedEventIds.clear();
+        beanDashboardRefreshEventIds.clear();
         state.activeBeanWorkMessageId = null;
         state.beanWorkItems = [];
         refreshBeanStatusTag();
@@ -3751,13 +3754,14 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function applyBeanWorkEvents(events = []) {
+        const mutationEvents = [];
         normalizeList(events).sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0)).forEach((event) => {
             const eventId = Number(event?.id || 0);
             if (Number.isFinite(eventId) && eventId <= beanWorkEventFloorId) return;
             if (Number.isFinite(eventId) && beanWorkAppliedEventIds.has(eventId)) return;
-            if (!beanWorkEventBelongsToActiveRequest(event)) return;
             const item = beanWorkItemFromEvent(event);
             if (!item) return;
+            if (!beanWorkEventBelongsToActiveRequest(event, item)) return;
             if (Number.isFinite(eventId)) {
                 beanWorkAppliedEventIds.add(eventId);
                 beanWorkEventFloorId = Math.max(beanWorkEventFloorId, eventId);
@@ -3767,10 +3771,12 @@ export function mountHeyBeanWebApp(mount) {
                 resolvedByEvent: true,
                 order: item.order,
             });
+            if (beanActivityEventMutatesDashboard(event)) mutationEvents.push(event);
         });
+        refreshDashboardAfterBeanMutationEvents(mutationEvents);
     }
 
-    function beanWorkEventBelongsToActiveRequest(event) {
+    function beanWorkEventBelongsToActiveRequest(event, item = null) {
         const activeMessageId = Number(state.activeBeanWorkMessageId || 0);
         if (!activeMessageId) return true;
         const payload = event?.payload || {};
@@ -3778,7 +3784,39 @@ export function mountHeyBeanWebApp(mount) {
         if (eventMessageId) return eventMessageId === activeMessageId;
         const type = String(event?.event_type || event?.eventType || '');
         if (['runtime.run_queued', 'runtime.run_started', 'runtime.run_completed', 'runtime.run_stale_failed', 'runtime.run_failed'].includes(type)) return true;
-        return !type.startsWith('assistant.');
+        if (!type.startsWith('assistant.')) return true;
+        if (type === 'assistant.work_item.planned' && state.beanWorkItems.length) return true;
+        if (!item) return false;
+        return state.beanWorkItems.some((existing) => existing.id === item.id)
+            || beanWorkPlaceholderIndex(item.label) >= 0;
+    }
+
+    function beanActivityEventMutatesDashboard(event) {
+        const type = String(event?.event_type || event?.eventType || '');
+        if (!type.startsWith('assistant.')) return false;
+        if (!beanWorkItemDone({ status: beanWorkEventStatus(String(event?.status || '')) })) return false;
+        return /\.(?:task|reminder|calendar_event|note|note_folder|memory|approval|blocker)\.(?:created|updated|deleted)$/.test(type);
+    }
+
+    function beanActivityEventsIncludeFreshDashboardMutation(events = []) {
+        let shouldRefresh = false;
+        normalizeList(events).forEach((event) => {
+            const eventId = Number(event?.id || 0);
+            const key = Number.isFinite(eventId) && eventId > 0
+                ? String(eventId)
+                : `${event?.event_type || event?.eventType || ''}:${JSON.stringify(event?.payload || {}).slice(0, 160)}`;
+            if (beanDashboardRefreshEventIds.has(key)) return;
+            if (!beanActivityEventMutatesDashboard(event)) return;
+            beanDashboardRefreshEventIds.add(key);
+            shouldRefresh = true;
+        });
+        return shouldRefresh;
+    }
+
+    function refreshDashboardAfterBeanMutationEvents(events = []) {
+        if (!beanActivityEventsIncludeFreshDashboardMutation(events)) return;
+        refreshOnly(true, { skipCalendarSync: true, deferRender: false }).catch(() => {});
+        refreshRealtimeDashboardContext('bean_mutation_event').catch(() => {});
     }
 
     function beanWorkItemFromEvent(event) {
@@ -11656,27 +11694,29 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function handleRealtimeAssistantRunCompleted(run, context = {}) {
-        scheduleDashboardRealtimeRefresh([{ type: 'realtime_run_completed' }]);
+        scheduleDashboardRealtimeRefresh([{ type: 'realtime_run_completed' }], { immediate: true, forceRender: true });
         refreshRealtimeDashboardContext('realtime_run_completed').catch(() => {});
         const assistantMessage = run?.assistant_message || run?.assistantMessage || null;
         const content = safeAssistantDisplayContent(String(assistantMessage?.content || '').trim()).trim();
         if (assistantMessageShouldStayOutOfChat({ ...assistantMessage, content })) {
             setRealtimeBackgroundWorkActive(false);
-            state.chatRunState = 'Working…';
-            ensureBeanWorkItemsForContent(context.userContent || '');
-            render();
+            const fallback = realtimeCompletionFallbackText(context.userContent || '', run);
+            appendLocalBeanConfirmation(fallback, run?.id);
+            deliverRealtimeBackgroundResult(fallback, run?.id);
             return;
         }
         if (!content) {
             setRealtimeBackgroundWorkActive(false);
+            const fallback = realtimeCompletionFallbackText(context.userContent || '', run);
+            appendLocalBeanConfirmation(fallback, run?.id);
             logKioskRealtimeVoiceTrace('realtime_background_completed', {
                 summary: 'Realtime background work completed without assistant content.',
                 user_content: context.userContent || '',
                 run_id: run?.id || null,
-                spoken_text: 'I finished that request.',
-                spoken_character_count: 'I finished that request.'.length,
+                spoken_text: fallback,
+                spoken_character_count: fallback.length,
             });
-            deliverRealtimeBackgroundResult('I finished that request.', run?.id);
+            deliverRealtimeBackgroundResult(fallback, run?.id);
             return;
         }
         const finalVoice = finalVoiceForTurn(context.userContent || '', context.quickReplyText || '', content, {});
@@ -11709,6 +11749,38 @@ export function mountHeyBeanWebApp(mount) {
             deliverRealtimeBackgroundResult(finalVoice.text || content, run?.id);
             return;
         }
+    }
+
+    function realtimeCompletionFallbackText(userContent = '', run = null) {
+        const command = normalizedVoiceCommand(userContent);
+        const latestWork = [...state.beanWorkItems].reverse().find((item) => item?.label) || null;
+        const label = String(latestWork?.label || '').toLowerCase();
+        if (/\b(?:move|moved|reschedule|rescheduled)\b/.test(command) || /\b(?:update|updating|updated)\b/.test(label)) {
+            return /\b(?:event|calendar|movie|meeting|appointment)\b/.test(command) || /\bevent\b/.test(label)
+                ? 'Done. I moved that event.'
+                : 'Done. I updated that item.';
+        }
+        if (/\b(?:delete|remove|cancel)\b/.test(command) || /\b(?:delete|deleting|deleted)\b/.test(label)) return 'Done. I deleted that item.';
+        if (/\b(?:add|create|schedule)\b/.test(command) || /\b(?:create|creating|created)\b/.test(label)) return 'Done. I added that.';
+        if (run?.status === 'failed') return 'I could not finish that request.';
+        return 'Done. I finished that request.';
+    }
+
+    function appendLocalBeanConfirmation(content, runId = null) {
+        const text = safeAssistantDisplayContent(speechTextFromAssistant(content)).trim();
+        if (!text) return false;
+        state.chatRunState = 'Ready';
+        upsertRealtimeLocalMessage({
+            id: `bean-confirmation-${runId || Date.now()}`,
+            role: 'assistant',
+            content: text,
+            metadata: {
+                local_realtime_turn: true,
+                background_result: true,
+                local_confirmation: true,
+            },
+        });
+        return true;
     }
 
     function appendPersistedAssistantMessage(message) {
@@ -13522,13 +13594,18 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
-    function scheduleDashboardRealtimeRefresh(changes = []) {
+    function scheduleDashboardRealtimeRefresh(changes = [], options = {}) {
         window.clearTimeout(dashboardRefreshTimer);
+        const delay = options.immediate ? 0 : (changes.length ? 350 : 100);
         dashboardRefreshTimer = window.setTimeout(() => {
             dashboardRefreshTimer = 0;
             if (state.phase !== 'signedIn') return;
+            if (options.forceRender) {
+                refreshOnly(true, { skipCalendarSync: true, deferRender: false }).catch(() => {});
+                return;
+            }
             refreshOnlyInBackground({ skipCalendarSync: true });
-        }, changes.length ? 350 : 100);
+        }, delay);
     }
 
     function sleep(ms) {
