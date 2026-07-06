@@ -4975,7 +4975,7 @@ export function mountHeyBeanWebApp(mount) {
         const placeLng = metadata.place_lng ?? metadata.placeLng ?? metadata.longitude ?? '';
         const googleMapsUri = metadata.google_maps_uri || metadata.googleMapsUri || '';
         return `
-            <div class="hb-field-row">
+            <div class="hb-field-row hb-event-detail-grid">
                 <div class="hb-location-field" data-event-location-field>
                     ${labelInput('Location', 'location', 'text', item?.location || '', 'autocomplete="off" data-event-location-input')}
                     <input type="hidden" name="placeId" value="${escapeAttr(placeId)}" data-event-place-id>
@@ -4993,7 +4993,7 @@ export function mountHeyBeanWebApp(mount) {
                         </div>
                     </div>
                 </div>
-                <label class="hb-label">Status<select class="hb-select" name="status">
+                <label class="hb-label hb-event-status-label">Status<select class="hb-select" name="status">
                     ${['confirmed', 'tentative', 'cancelled'].map((status) => `<option value="${status}" ${String(item?.status || 'confirmed') === status ? 'selected' : ''}>${capitalize(status)}</option>`).join('')}
                 </select></label>
             </div>
@@ -6545,8 +6545,9 @@ export function mountHeyBeanWebApp(mount) {
         if (!map || !image) return;
         if (addressNode) addressNode.textContent = address;
         map.hidden = false;
-        image.classList.add('hb-location-map-loading');
-        image.textContent = '';
+        image.style.backgroundImage = '';
+        image.replaceChildren();
+        renderLocationMapEmbed(image, lat, lng, address);
         try {
             const response = await fetchWithTimeout(`/api/places/static-map?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&theme=${resolvedThemeMode()}`, {
                 headers: {
@@ -6557,13 +6558,36 @@ export function mountHeyBeanWebApp(mount) {
             if (!response.ok) throw new Error('Map preview failed.');
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
+            await waitForImageLoad(url);
+            image.replaceChildren();
             image.style.backgroundImage = `url("${url}")`;
         } catch (_) {
-            image.style.backgroundImage = '';
-            image.textContent = 'Map preview unavailable';
-        } finally {
-            image.classList.remove('hb-location-map-loading');
+            if (!image.querySelector('.hb-location-map-frame')) {
+                image.style.backgroundImage = '';
+                renderLocationMapEmbed(image, lat, lng, address);
+            }
         }
+    }
+
+    function waitForImageLoad(url) {
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(true);
+            image.onerror = () => reject(new Error('Map image failed to load.'));
+            image.src = url;
+        });
+    }
+
+    function renderLocationMapEmbed(container, lat, lng, address = '') {
+        if (!container) return;
+        const query = address || `${lat},${lng}`;
+        const iframe = document.createElement('iframe');
+        iframe.className = 'hb-location-map-frame';
+        iframe.loading = 'lazy';
+        iframe.referrerPolicy = 'no-referrer-when-downgrade';
+        iframe.title = address ? `Map preview for ${address}` : 'Map preview';
+        iframe.src = `https://maps.google.com/maps?q=${encodeURIComponent(query)}&z=15&output=embed`;
+        container.replaceChildren(iframe);
     }
 
     function clearEventPlaceFields(field) {

@@ -951,6 +951,19 @@
     gap: 10px;
 }
 
+.hb-event-detail-grid {
+    align-items: start;
+}
+
+.hb-event-status-label {
+    align-self: start;
+}
+
+.hb-event-status-label .hb-select {
+    height: 48px;
+    align-self: start;
+}
+
 .hb-location-field {
     min-width: 0;
     display: grid;
@@ -1008,6 +1021,7 @@
 }
 
 .hb-location-map-image {
+    overflow: hidden;
     min-height: 128px;
     display: grid;
     place-items: center;
@@ -1017,6 +1031,13 @@
     color: var(--hb-muted);
     font-size: 12px;
     font-weight: 750;
+}
+
+.hb-location-map-frame {
+    display: block;
+    width: 100%;
+    height: 128px;
+    border: 0;
 }
 
 .hb-location-map-loading::after {
