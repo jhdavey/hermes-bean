@@ -1,0 +1,870 @@
+part of '../../main.dart';
+
+typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
+typedef AppIconBadgeUpdater = Future<void> Function(int count);
+
+abstract class StripePaymentHandler {
+  Future<void> preparePaymentSheet(
+    HermesPaymentSheetSetup setup, {
+    required HermesUser user,
+    required String primaryButtonLabel,
+  });
+  Future<void> presentPaymentSheet();
+}
+
+class DefaultStripePaymentHandler implements StripePaymentHandler {
+  @override
+  Future<void> preparePaymentSheet(
+    HermesPaymentSheetSetup setup, {
+    required HermesUser user,
+    required String primaryButtonLabel,
+  }) async {
+    stripe.Stripe.publishableKey = setup.publishableKey;
+    await stripe.Stripe.instance.applySettings();
+    await stripe.Stripe.instance.initPaymentSheet(
+      paymentSheetParameters: stripe.SetupPaymentSheetParameters(
+        setupIntentClientSecret: setup.setupIntentClientSecret,
+        customerId: setup.customerId,
+        customerEphemeralKeySecret: setup.customerEphemeralKeySecret,
+        merchantDisplayName: 'HeyBean',
+        primaryButtonLabel: primaryButtonLabel,
+        allowsDelayedPaymentMethods: true,
+        style: ThemeMode.system,
+        billingDetails: stripe.BillingDetails(
+          name: user.name,
+          email: user.email,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<void> presentPaymentSheet() async {
+    await stripe.Stripe.instance.presentPaymentSheet();
+  }
+}
+
+const MethodChannel _heyBeanPlatformChannel = MethodChannel('heybean/platform');
+final Uri _privacyPolicyUrl = Uri.parse('https://heybean.org/privacy');
+final Uri _termsOfServiceUrl = Uri.parse('https://heybean.org/terms');
+final Uri _supportUrl = Uri.parse('https://heybean.org/support');
+final Uri _pricingUrl = Uri.parse('https://heybean.org/pricing?source=flutter');
+final Uri _enterpriseContactUrl = Uri.parse(
+  'mailto:support@heybean.org?subject=HeyBean%20Enterprise',
+);
+const String _beanGreenCategoryColor = '#34C759';
+const double _beanChatComposerReservedHeight = 66;
+const double _beanChatComposerMaxHeight = 134;
+const double _beanBottomMenuSurfaceInset = 22;
+
+class _HeyBeanRuntimeServices {
+  static HermesApiClient? apiClient;
+  static ExternalUrlLauncher launchExternalUrl = _defaultLaunchExternalUrl;
+  static String preferredMapApp = 'google';
+}
+
+Color _sectionDividerColor({double? alpha}) => HeyBeanTheme.border.withValues(
+  alpha: alpha ?? (HeyBeanTheme.isDark ? .52 : .72),
+);
+
+BoxDecoration _sectionDividerDecoration({double? alpha}) => BoxDecoration(
+  border: Border(
+    top: BorderSide(color: _sectionDividerColor(alpha: alpha)),
+  ),
+);
+
+Color _quietBorderColor({double alpha = .58}) =>
+    HeyBeanTheme.border.withValues(alpha: HeyBeanTheme.isDark ? alpha : alpha);
+
+Color _quietSurfaceColor({double alpha = 1}) => HeyBeanTheme.surface.withValues(
+  alpha: HeyBeanTheme.isDark ? math.min(alpha, .92) : alpha,
+);
+
+Color _quietMutedSurfaceColor({double alpha = .68}) => HeyBeanTheme.surface2
+    .withValues(alpha: HeyBeanTheme.isDark ? math.min(alpha, .62) : alpha);
+
+BoxDecoration _quietSurfaceDecoration({
+  double radius = 14,
+  double borderAlpha = .54,
+  Color? color,
+}) => BoxDecoration(
+  color: color ?? _quietSurfaceColor(),
+  borderRadius: BorderRadius.circular(radius),
+  border: Border.all(color: _quietBorderColor(alpha: borderAlpha)),
+);
+
+class _BeanNotesIcon extends StatelessWidget {
+  const _BeanNotesIcon({this.size, this.color});
+
+  final double? size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconTheme = IconTheme.of(context);
+    final resolvedSize = size ?? iconTheme.size ?? 24;
+    final resolvedColor = color ?? iconTheme.color ?? HeyBeanTheme.text;
+
+    return SizedBox.square(
+      dimension: resolvedSize,
+      child: CustomPaint(painter: _BeanNotesIconPainter(color: resolvedColor)),
+    );
+  }
+}
+
+class _BeanNotesIconPainter extends CustomPainter {
+  const _BeanNotesIconPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scale = math.min(size.width, size.height) / 24;
+    final offset = Offset(
+      (size.width - (24 * scale)) / 2,
+      (size.height - (24 * scale)) / 2,
+    );
+    canvas
+      ..save()
+      ..translate(offset.dx, offset.dy)
+      ..scale(scale);
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.1
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final cover = Path()
+      ..moveTo(7, 4)
+      ..lineTo(17, 4)
+      ..cubicTo(18.1046, 4, 19, 4.8954, 19, 6)
+      ..lineTo(19, 20)
+      ..lineTo(7, 20)
+      ..cubicTo(5.8954, 20, 5, 19.1046, 5, 18)
+      ..lineTo(5, 6)
+      ..cubicTo(5, 4.8954, 5.8954, 4, 7, 4)
+      ..close();
+    canvas.drawPath(cover, paint);
+
+    final lines = Path()
+      ..moveTo(9, 4)
+      ..lineTo(9, 20)
+      ..moveTo(12, 8)
+      ..lineTo(16, 8)
+      ..moveTo(12, 12)
+      ..lineTo(16, 12)
+      ..moveTo(12, 16)
+      ..lineTo(15, 16);
+    canvas.drawPath(lines, paint);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _BeanNotesIconPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+class _BeanWorkItem {
+  const _BeanWorkItem({
+    required this.id,
+    required this.label,
+    this.status = 'running',
+    this.resolvedByEvent = false,
+  });
+
+  final String id;
+  final String label;
+  final String status;
+  final bool resolvedByEvent;
+
+  bool get done => const {
+    'completed',
+    'succeeded',
+    'recorded',
+    'cancelled',
+    'failed',
+    'skipped',
+  }.contains(status.toLowerCase());
+
+  _BeanWorkItem copyWith({
+    String? label,
+    String? status,
+    bool? resolvedByEvent,
+  }) => _BeanWorkItem(
+    id: id,
+    label: label ?? this.label,
+    status: status ?? this.status,
+    resolvedByEvent: resolvedByEvent ?? this.resolvedByEvent,
+  );
+}
+
+double _beanWorkDockStripHeight(List<_BeanWorkItem> items, bool active) {
+  if (!active) return 0;
+  final count = math.min(
+    items.where((item) => item.label.trim().isNotEmpty).length,
+    6,
+  );
+  if (count == 0) return 0;
+  return math.min(196, 48 + (count * 24));
+}
+
+class _BeanResponsePreview {
+  const _BeanResponsePreview({
+    required this.key,
+    required this.text,
+    required this.wordCount,
+  });
+
+  final String key;
+  final String text;
+  final int wordCount;
+}
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (!HeyBeanFirebaseOptions.configured) return;
+  try {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: HeyBeanFirebaseOptions.currentPlatform,
+      );
+    }
+  } catch (_) {
+    // Background push handling must not crash the process if Firebase config is absent.
+  }
+}
+
+class _ReminderNotificationService {
+  final FlutterLocalNotificationsPlugin _plugin =
+      FlutterLocalNotificationsPlugin();
+  bool _initialized = false;
+
+  Future<void> initialize() async {
+    if (_initialized) return;
+    const initializationSettings = InitializationSettings(
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      ),
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    );
+    try {
+      await _plugin.initialize(initializationSettings);
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
+      _initialized = true;
+    } on MissingPluginException {
+      _initialized = false;
+    } on PlatformException {
+      _initialized = false;
+    } catch (_) {
+      _initialized = false;
+    }
+  }
+
+  Future<void> showReminder(HermesReminder reminder) async {
+    await initialize();
+    if (!_initialized) return;
+    try {
+      await _plugin.show(
+        reminder.id,
+        'Reminder: ${reminder.title}',
+        'Open HeyBean to dismiss or mark it complete.',
+        const NotificationDetails(
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+          android: AndroidNotificationDetails(
+            'heybean_reminders',
+            'Reminders',
+            channelDescription: 'HeyBean reminder alerts',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
+        payload: 'reminder:${reminder.id}',
+      );
+    } on MissingPluginException {
+      // Widget tests and stale native shells can run without plugin registration.
+    } on PlatformException {
+      // Notification permissions may be denied; the in-app banner still appears.
+    } catch (_) {
+      // If the notification platform is not available, keep the app usable.
+    }
+  }
+}
+
+class _PushNotificationRegistrationService {
+  bool _initialized = false;
+  String? _registeredToken;
+  StreamSubscription<String>? _tokenRefreshSubscription;
+
+  Future<void> registerForUser(HermesApiClient apiClient) async {
+    if (!HeyBeanFirebaseOptions.configured || apiClient.bearerToken == null) {
+      return;
+    }
+
+    try {
+      await _initializeFirebase();
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission(alert: true, badge: true, sound: true);
+      await messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      final token = await messaging.getToken();
+      if (token != null && token.isNotEmpty) {
+        await _sendToken(apiClient, token);
+      }
+      _tokenRefreshSubscription ??= messaging.onTokenRefresh.listen((token) {
+        unawaited(_sendToken(apiClient, token));
+      });
+    } on MissingPluginException {
+      // Firebase plugins are unavailable in widget tests and stale native shells.
+    } on PlatformException {
+      // Push permission/config can fail independently of the signed-in app.
+    } catch (_) {
+      // Keep the app usable; the server will still send email reminders.
+    }
+  }
+
+  Future<void> unregister(HermesApiClient apiClient) async {
+    final token = _registeredToken;
+    _registeredToken = null;
+    await _tokenRefreshSubscription?.cancel();
+    _tokenRefreshSubscription = null;
+    if (token == null || apiClient.bearerToken == null) return;
+    try {
+      await apiClient.unregisterPushNotificationToken(token);
+    } catch (_) {
+      // Logout should not be blocked by best-effort device-token cleanup.
+    }
+  }
+
+  Future<void> dispose() async {
+    await _tokenRefreshSubscription?.cancel();
+    _tokenRefreshSubscription = null;
+  }
+
+  Future<void> _initializeFirebase() async {
+    if (_initialized) return;
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: HeyBeanFirebaseOptions.currentPlatform,
+      );
+    }
+    _initialized = true;
+  }
+
+  Future<void> _sendToken(HermesApiClient apiClient, String token) async {
+    if (apiClient.bearerToken == null || token.isEmpty) return;
+    await apiClient.registerPushNotificationToken(
+      token: token,
+      platform: _pushPlatformName(),
+    );
+    _registeredToken = token;
+  }
+
+  String? _pushPlatformName() {
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    if (Platform.isMacOS) return 'macos';
+    return null;
+  }
+}
+
+bool _isAllowedExternalUrl(Uri url) {
+  if (url.scheme == 'mailto') {
+    return url.path.toLowerCase() == 'support@heybean.org';
+  }
+  if (url.scheme != 'https') return false;
+  final host = url.host.toLowerCase();
+  return host == 'heybean.org' ||
+      host == 'accounts.google.com' ||
+      host == 'oauth2.googleapis.com' ||
+      host == 'calendar.google.com' ||
+      host == 'maps.apple.com' ||
+      host == 'google.com' ||
+      host == 'www.google.com' ||
+      host == 'www.googleapis.com';
+}
+
+Future<bool> _defaultLaunchExternalUrl(Uri url) async {
+  if (!_isAllowedExternalUrl(url)) return false;
+
+  for (final mode in [
+    LaunchMode.platformDefault,
+    LaunchMode.externalApplication,
+    LaunchMode.inAppBrowserView,
+  ]) {
+    try {
+      final launched = await launchUrl(url, mode: mode);
+      if (launched) return true;
+    } on PlatformException {
+      // Some iOS builds can fail to attach the url_launcher_ios pigeon channel
+      // after the plugin is added. Fall through to the next launch path instead
+      // of surfacing a copy-link fallback to the user.
+    } on MissingPluginException {
+      // Same fallback path for stale/native shells that have not registered the
+      // url_launcher plugin yet.
+    } on ArgumentError {
+      // A launch mode may be unavailable on a platform; try the next one.
+    }
+  }
+
+  return _launchExternalUrlWithNativeFallback(url);
+}
+
+Future<bool> _launchExternalUrlWithNativeFallback(Uri url) async {
+  if (!_isAllowedExternalUrl(url)) return false;
+
+  try {
+    return await _heyBeanPlatformChannel.invokeMethod<bool>('openUrl', {
+          'url': url.toString(),
+        }) ??
+        false;
+  } on PlatformException {
+    return false;
+  } on MissingPluginException {
+    return false;
+  }
+}
+
+Future<void> _defaultUpdateAppIconBadge(int count) async {
+  final normalizedCount = math.max(0, count);
+  try {
+    await _heyBeanPlatformChannel.invokeMethod<void>('setAppBadge', {
+      'count': normalizedCount,
+    });
+  } on PlatformException {
+    // Badge support is platform/native-shell dependent. Keep the app usable if
+    // the native channel cannot update the icon badge.
+  } on MissingPluginException {
+    // Widget tests, web/desktop, and stale native shells may not expose this.
+  }
+}
+
+Map<String, Object?> _clientTemporalContext() {
+  final now = DateTime.now();
+  final offset = now.timeZoneOffset;
+  final offsetMinutes = offset.inMinutes;
+  final sign = offsetMinutes < 0 ? '-' : '+';
+  final absoluteMinutes = offsetMinutes.abs();
+  final offsetLabel =
+      '$sign${(absoluteMinutes ~/ 60).toString().padLeft(2, '0')}:${(absoluteMinutes % 60).toString().padLeft(2, '0')}';
+  return {
+    'current_local_time': now.toIso8601String(),
+    'current_utc_time': now.toUtc().toIso8601String(),
+    'timezone_name': now.timeZoneName,
+    'timezone_offset': offsetLabel,
+    'timezone_offset_minutes': offsetMinutes,
+  };
+}
+
+String _themeCategoryColorHex() {
+  final value = HeyBeanTheme.accent.toARGB32() & 0xFFFFFF;
+  return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+}
+
+Map<String, Object?> _flutterChatMetadata({
+  Map<String, Object?> additional = const {},
+}) => {
+  'source': 'flutter',
+  'client_context': _clientTemporalContext(),
+  ...additional,
+};
+
+String _normalizedVoiceCommand(String transcript) {
+  final normalized = transcript
+      .toLowerCase()
+      .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  return _stripLeadingVoiceFillers(
+    _stripNormalizedWakePhrase(_stripLeadingVoiceFillers(normalized)),
+  ).trim();
+}
+
+String _stripLeadingVoiceFillers(String command) {
+  if (command.isEmpty) return command;
+  if (RegExp(r'^(?:uh huh|mm hmm|mhm)\b').hasMatch(command)) {
+    return command;
+  }
+  return command
+      .replaceFirst(
+        RegExp(r"^(?:(?:uh|um|umm|erm|er|ah|hmm|hm|mm|mhm|well|so)\s+)+"),
+        '',
+      )
+      .trim();
+}
+
+String _stripNormalizedWakePhrase(String command) {
+  if (command.isEmpty) return command;
+  final wakeStarter = r'(?:hey|hay|hi|hello|okay|ok|kay)';
+  final beanVariant =
+      r'(?:bean|beans|been|ben|beam|beem|bein|being|bin|bing|bien|bain|bane|dean|deen)';
+  final compactBeanVariant =
+      r'b(?:ean|eans|een|en|eam|eem|ein|eing|in|ing|ien|ain|ane)';
+
+  return command
+      .replaceFirst(
+        RegExp(
+          '^(?:'
+          '$wakeStarter\\s+$beanVariant|'
+          '$wakeStarter\\s*$compactBeanVariant|'
+          '$wakeStarter\\s+(?:b|bee)|'
+          r'a\s+bean|'
+          r'heybean|'
+          r'bean'
+          r')\s+',
+        ),
+        '',
+      )
+      .trim();
+}
+
+bool _voiceCommandIsCancel(String command) {
+  final directCommand = command.replaceFirst(RegExp(r'\s+bean$'), '').trim();
+  if (RegExp(
+    r"^(?:stop|stop it|stop talking|stop right there|stop for now|pause|pause it|pause for now|pause for a second|hold up|hold on|hold that thought|hang on|hang on a second|wait|wait stop|wait a second|one second|just a second|one sec|give me a second|give me one second|give me a moment|stop for a second|let me stop you|be quiet|quiet|cancel|cancel it|cancel that|cancel this|cancel response|cancel request|cancel the request|cancel my request|never\s*mind|nevermind|forget it|forget that|forget this|scratch that|that's all|that is all|stop listening|we'?re done|we are done)$",
+  ).hasMatch(directCommand)) {
+    return true;
+  }
+  return RegExp(
+    r"\b(?:stop talking|stop right there|stop for now|pause for now|pause for a second|hold up|hold on|hold that thought|hang on|hang on a second|wait stop|wait a second|one second|just a second|one sec|give me (?:a|one) second|give me a moment|stop for a second|let me stop you|be quiet|cancel (?:it|that|this|the request|my request)|never\s*mind|nevermind|forget (?:it|that|this)|scratch that|stop listening)\b",
+  ).hasMatch(command);
+}
+
+@visibleForTesting
+bool realtimeVoiceCancelForTesting(String transcript) =>
+    _voiceCommandIsCancel(_normalizedVoiceCommand(transcript));
+
+String beanFriendlyErrorMessage(Object error, {String? action}) {
+  final subscriptionLimitMessage = _subscriptionLimitMessageFromError(error);
+  if (subscriptionLimitMessage != null) {
+    return subscriptionLimitMessage;
+  }
+  final prefix = action == null || action.trim().isEmpty
+      ? 'Bean is checking the latest app state.'
+      : 'Bean is checking the latest app state while trying to ${action.trim()}.';
+  final guidance = _beanErrorGuidance(error);
+  return '$prefix $guidance';
+}
+
+String beanFriendlyChatFailureMessage(Object error) {
+  final guidance = _beanErrorGuidance(error);
+  if (guidance.toLowerCase().contains('plan limit') ||
+      guidance.toLowerCase().contains('upgrade')) {
+    return guidance;
+  }
+  return 'I’m checking the latest app state now. If I need one more detail, I’ll ask.';
+}
+
+bool beanShouldRecoverQueuedRequest(Object error) {
+  if (error is HermesApiException) {
+    return error.statusCode == 408 ||
+        error.statusCode == 500 ||
+        error.statusCode == 502 ||
+        error.statusCode == 503 ||
+        error.statusCode == 504;
+  }
+  return error is SocketException || error is TimeoutException;
+}
+
+String beanSafeAssistantDisplayContent(String content) {
+  final trimmed = content.trim();
+  if (trimmed.isEmpty) return content;
+  final normalized = trimmed.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  final staleFailurePhrases = [
+    'bean could not finish',
+    'could not finish that request',
+    'bean could not complete',
+    'could not complete the requested change',
+    'i could not complete',
+    'bean hit a snag',
+    'hermesapiexception',
+    'statuscode:',
+    'status code',
+    'bad gateway',
+    'server error',
+    'gateway timeout',
+    'too many attempts',
+    'i tried to check that live information',
+    'lookup did not return',
+    'lookup didn’t return',
+    "lookup didn't return",
+    'did not return a usable result',
+    'no usable result',
+    'could not get that live lookup back quickly enough',
+    'couldn’t get that live lookup back quickly enough',
+    "couldn't get that live lookup back quickly enough",
+    'live lookup back quickly enough',
+    'i’m still checking',
+    "i'm still checking",
+    'still checking live sources',
+    'still checking live weather',
+    'response did not come through',
+    'something unexpected happened',
+  ];
+  if (staleFailurePhrases.any(normalized.contains)) {
+    return 'I’m checking the latest app state now. If I need one more detail, I’ll ask.';
+  }
+
+  return content;
+}
+
+@visibleForTesting
+bool beanAssistantMessageShouldStayOutOfChat(HermesMessage message) {
+  if (message.role != 'assistant') return false;
+
+  final runtime = message.metadata['runtime']?.toString();
+  if (runtime == 'missing_run_bridge' ||
+      runtime == 'direct_queue_bridge' ||
+      runtime == 'async_queue_bridge' ||
+      runtime == 'failed_run_bridge') {
+    return true;
+  }
+
+  final normalized = (message.content ?? '')
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  return normalized ==
+          'i’m checking the latest app state now. if i need one more detail, i’ll ask.' ||
+      normalized ==
+          "i'm checking the latest app state now. if i need one more detail, i'll ask." ||
+      normalized ==
+          'i didn’t receive that request cleanly. please send it once more and i’ll take it from there.' ||
+      normalized ==
+          "i didn't receive that request cleanly. please send it once more and i'll take it from there." ||
+      normalized ==
+          'i’m on it. i’m syncing against the latest app state now, and i’ll ask for one detail if i need it.' ||
+      normalized ==
+          "i'm on it. i'm syncing against the latest app state now, and i'll ask for one detail if i need it.";
+}
+
+String _beanErrorGuidance(Object error) {
+  if (error is HermesApiException) {
+    final subscriptionLimitMessage = _subscriptionLimitMessageFromApiBody(
+      error.body,
+    );
+    if (subscriptionLimitMessage != null) return subscriptionLimitMessage;
+    final validationMessage = error.statusCode == 400 || error.statusCode == 422
+        ? _validationHintFromApiBody(error.body)
+        : null;
+    if (validationMessage != null) return validationMessage;
+    return switch (error.statusCode) {
+      400 =>
+        'Something in the request did not look quite right. Please review what you entered and try again.',
+      401 =>
+        'Your session looks like it expired. Please sign in again and Bean will get right back to work.',
+      403 =>
+        'Bean does not have permission to do that yet. Please check the account or workspace access and try again.',
+      404 =>
+        'I can’t find that item anymore. It may have been moved or deleted, so try refreshing the app.',
+      408 =>
+        'The connection took longer than expected, so Bean is checking whether the request reached the server.',
+      409 =>
+        'That change bumped into something that was already updated. Please refresh and try once more.',
+      422 =>
+        'One of the details needs a quick fix. Please check the highlighted fields and try again.',
+      423 =>
+        'That action is temporarily blocked while Bean waits on a required connection or approval. Please check Settings and try again.',
+      429 =>
+        'Bean is handling a lot of requests right now and will keep checking the latest state.',
+      >= 500 && < 600 =>
+        'Bean’s service is reconnecting on our side and will keep checking the latest state.',
+      _ => 'Bean will keep checking the latest state.',
+    };
+  }
+  if (error is SocketException) {
+    return 'Bean cannot reach the internet right now, so it will keep checking once the connection is back.';
+  }
+  if (error is TimeoutException) {
+    return 'The connection took longer than expected, so Bean is checking whether the request reached the server.';
+  }
+  if (error is FormatException || error is TypeError) {
+    return 'Bean received something it couldn’t read correctly. Please refresh and try again.';
+  }
+  if (error is PlatformException || error is MissingPluginException) {
+    return 'I can’t open that on this device. Please update the app or try again.';
+  }
+  return 'Bean will keep checking the latest state.';
+}
+
+String? _subscriptionLimitMessageFromError(Object error) {
+  if (error is HermesApiException) {
+    return _subscriptionLimitMessageFromApiBody(error.body);
+  }
+  return null;
+}
+
+String? _subscriptionLimitMessageFromApiBody(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, Object?>) {
+      final error = decoded['error'];
+      final code = error is Map ? error['code']?.toString() : null;
+      final message =
+          (error is Map ? error['message'] : null) ?? decoded['message'];
+      if (code == 'subscription_limit_reached' && message is String) {
+        return _safeValidationSentence(message);
+      }
+      if (_isBeanUsageLimitCode(code) && message is String) {
+        return _safeValidationSentence(message);
+      }
+      final topCode = decoded['code']?.toString();
+      if (_isBeanUsageLimitCode(topCode) && message is String) {
+        return _safeValidationSentence(message);
+      }
+    }
+  } catch (_) {
+    // Raw error bodies are intentionally never shown to users.
+  }
+  return null;
+}
+
+bool _isBeanUsageLimitCode(String? code) => const {
+  'bean_usage_limit',
+  'bean_voice_usage_limit',
+  'bean_voice_paused',
+}.contains(code);
+
+bool _isPlanLimitMessage(String? message) {
+  final normalized = (message ?? '').toLowerCase();
+  return normalized.contains('current plan includes') ||
+      normalized.contains('current plan has limited') ||
+      normalized.contains('available on premium') ||
+      normalized.contains('ai usage limit') ||
+      normalized.contains('external lookup usage limit');
+}
+
+String? _validationHintFromApiBody(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, Object?>) {
+      final errors = decoded['errors'];
+      if (errors is Map && errors.isNotEmpty) {
+        final first = errors.values.first;
+        if (first is List && first.isNotEmpty && first.first is String) {
+          final clean = _safeValidationSentence(first.first as String);
+          if (clean != null) return '$clean Please adjust it and try again.';
+        }
+      }
+      final message = decoded['message'];
+      if (message is String) {
+        final clean = _safeValidationSentence(message);
+        if (clean != null) return '$clean Please adjust it and try again.';
+      }
+    }
+  } catch (_) {
+    // Raw error bodies are intentionally never shown to users.
+  }
+  return null;
+}
+
+String? _safeValidationSentence(String message) {
+  final trimmed = message.trim();
+  if (trimmed.isEmpty) return null;
+  final lower = trimmed.toLowerCase();
+  if (lower.contains('exception') ||
+      lower.contains('sql') ||
+      lower.contains('stack') ||
+      lower.contains('trace') ||
+      lower.contains('token') ||
+      lower.contains('bearer') ||
+      lower.contains('html') ||
+      lower.contains('{') ||
+      lower.contains('}')) {
+    return null;
+  }
+  final sentence =
+      trimmed.endsWith('.') || trimmed.endsWith('!') || trimmed.endsWith('?')
+      ? trimmed
+      : '$trimmed.';
+  return sentence;
+}
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (HeyBeanFirebaseOptions.configured) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
+  runApp(HermesBeanApp());
+}
+
+abstract class AuthTokenStore {
+  Future<String?> loadToken();
+  Future<bool> loadRememberMe();
+  Future<void> saveToken(String token);
+  Future<void> saveRememberMe(bool rememberMe);
+  Future<void> clearToken();
+}
+
+class SharedPreferencesAuthTokenStore implements AuthTokenStore {
+  const SharedPreferencesAuthTokenStore();
+
+  static const String _tokenKey = 'auth_token';
+  static const String _rememberMeKey = 'remember_me';
+  static const String _tokenSavedAtKey = 'auth_token_saved_at';
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
+  @override
+  Future<String?> loadToken() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (preferences.getBool(_rememberMeKey) != true) return null;
+    final secureToken = await _secureStorage.read(key: _tokenKey);
+    if (secureToken != null && secureToken.isNotEmpty) return secureToken;
+    final legacyToken = preferences.getString(_tokenKey);
+    if (legacyToken != null && legacyToken.isNotEmpty) {
+      await _secureStorage.write(key: _tokenKey, value: legacyToken);
+      await preferences.remove(_tokenKey);
+      return legacyToken;
+    }
+    return null;
+  }
+
+  @override
+  Future<bool> loadRememberMe() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getBool(_rememberMeKey) ?? false;
+  }
+
+  @override
+  Future<void> saveToken(String token) async {
+    final preferences = await SharedPreferences.getInstance();
+    await _secureStorage.write(key: _tokenKey, value: token);
+    await preferences.remove(_tokenKey);
+    await preferences.setString(
+      _tokenSavedAtKey,
+      DateTime.now().toUtc().toIso8601String(),
+    );
+  }
+
+  @override
+  Future<void> saveRememberMe(bool rememberMe) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_rememberMeKey, rememberMe);
+  }
+
+  @override
+  Future<void> clearToken() async {
+    final preferences = await SharedPreferences.getInstance();
+    await _secureStorage.delete(key: _tokenKey);
+    await preferences.remove(_tokenKey);
+    await preferences.remove(_tokenSavedAtKey);
+  }
+}
