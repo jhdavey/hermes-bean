@@ -532,7 +532,7 @@
     height: 100%;
     min-height: 0;
     overflow: auto;
-    padding: 3px;
+    padding: 0 3px;
 }
 
 .hb-command-center-glance {
@@ -564,15 +564,19 @@
 }
 
 .hb-command-center-glance .hb-glance-events {
-    gap: 4px;
+    gap: 0;
 }
 
 .hb-command-center-glance .hb-glance-event {
     grid-template-columns: 48px minmax(0, 1fr);
     gap: 6px;
     min-height: 32px;
-    border-radius: 8px;
-    padding: 5px 6px;
+    border: 0 !important;
+    border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 56%, transparent) !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none;
+    padding: 5px 0;
 }
 
 .hb-command-center-glance .hb-glance-empty {
@@ -582,6 +586,7 @@
 }
 
 .hb-command-center-row {
+    appearance: none;
     width: 100%;
     min-width: 0;
     height: 42px;
@@ -593,6 +598,7 @@
     border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 62%, transparent);
     border-radius: 0;
     background: transparent;
+    box-shadow: none;
     color: var(--hb-text);
     padding: 0 6px;
     text-align: left;
@@ -600,6 +606,7 @@
 }
 
 .hb-command-center-row:hover {
+    border-radius: 0;
     background: color-mix(in srgb, var(--hb-surface2) 70%, transparent);
 }
 
