@@ -120,19 +120,9 @@
 
             <div class="feature-row reverse">
                 <div class="feature-media">
-                    <div class="mock-card schedule-board product-window" aria-label="HeyBean scheduling preview">
-                        <div class="mock-header">
-                            <span>Scheduling</span>
-                            <strong>Jun 18</strong>
-                        </div>
-                        <div class="calendar-grid" aria-hidden="true">
-                            <span>Mon</span><span>Tue</span><span>Wed</span><span class="is-today">Thu</span><span>Fri</span>
-                            <b>15</b><b>16</b><b>17</b><b class="is-today">18</b><b>19</b>
-                        </div>
-                        <div class="schedule-card"><span class="schedule-dot"></span><div><b>School drop-off</b><span>Today, 8:15 AM - household</span></div><strong>Ready</strong></div>
-                        <div class="schedule-card"><span class="schedule-dot blue"></span><div><b>Team check-in</b><span>Today, 11:30 AM - work</span></div><strong>Synced</strong></div>
-                        <div class="schedule-card"><span class="schedule-dot"></span><div><b>Dinner with Lauren</b><span>Friday at 7:00 PM</span></div><strong>Set</strong></div>
-                    </div>
+                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean scheduling screenshot">
+                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-scheduling.png') }}?v={{ filemtime(public_path('images/heybean-landing-scheduling.png')) }}" width="614" height="558" loading="lazy" alt="HeyBean scheduling screen showing a full calendar for Sarah's July schedule">
+                    </figure>
                 </div>
                 <div class="feature-copy">
                     <span class="section-kicker" style="text-align:left">SCHEDULING</span>
@@ -148,24 +138,9 @@
 
             <div class="feature-row">
                 <div class="feature-media">
-                    <div class="mock-card task-board product-window" aria-label="HeyBean task management preview">
-                        <div class="mock-header">
-                            <span>Tasks</span>
-                            <strong>12 open</strong>
-                        </div>
-                        <div class="task-lanes">
-                            <div>
-                                <span class="lane-label">Today</span>
-                                <div class="task-card"><b>Send field trip form</b><span>Household - due 3 PM</span></div>
-                                <div class="task-card"><b>Review proposal edits</b><span>Work - waiting on Sam</span></div>
-                            </div>
-                            <div>
-                                <span class="lane-label">Next</span>
-                                <div class="task-card"><b>Renew parking pass</b><span>Reminder tomorrow</span></div>
-                                <div class="task-card done"><b>Order birthday gift</b><span>Completed by Bean</span></div>
-                            </div>
-                        </div>
-                    </div>
+                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean task management screenshot">
+                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-task-management.png') }}?v={{ filemtime(public_path('images/heybean-landing-task-management.png')) }}" width="762" height="434" loading="lazy" alt="HeyBean task management screen showing Sarah's tasks and follow-ups">
+                    </figure>
                 </div>
                 <div class="feature-copy">
                     <span class="section-kicker" style="text-align:left">TASK MANAGEMENT</span>
@@ -181,20 +156,9 @@
 
             <div class="feature-row reverse">
                 <div class="feature-media">
-                    <div class="mock-card daily-board product-window" aria-label="HeyBean daily control preview">
-                        <div class="mock-header">
-                            <span>Daily Control</span>
-                            <strong>Ready</strong>
-                        </div>
-                        <div class="daily-summary">
-                            <b>4 events</b>
-                            <b>7 tasks</b>
-                            <b>3 reminders</b>
-                        </div>
-                        <div class="schedule-card"><span class="schedule-dot"></span><div><b>Morning plan</b><span>Bean grouped the day by time and workspace</span></div><strong>Done</strong></div>
-                        <div class="schedule-card"><span class="schedule-dot blue"></span><div><b>Needs approval</b><span>Move dentist reminder to Monday?</span></div><strong>Review</strong></div>
-                        <div class="daily-note">One calm view for the calendar items, tasks, reminders, and approvals that need your attention.</div>
-                    </div>
+                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean daily control screenshot">
+                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-daily-control.png') }}?v={{ filemtime(public_path('images/heybean-landing-daily-control.png')) }}" width="598" height="702" loading="lazy" alt="HeyBean daily control screen showing Sarah's events, tasks, reminders, and notes">
+                    </figure>
                 </div>
                 <div class="feature-copy">
                     <span class="section-kicker" style="text-align:left">DAILY CONTROL</span>
