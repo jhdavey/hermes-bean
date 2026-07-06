@@ -1858,7 +1858,7 @@ export function mountHeyBeanWebApp(mount) {
         const position = await positionRequest.catch((error) => {
             if (error instanceof Error) throw error;
             if (error?.code === 1) {
-                throw new Error('Location access was blocked. Please allow location sharing in the browser prompt, or skip this and add a city later in Settings.');
+                throw new Error('Location is blocked for this site. Click the location control next to the address bar, choose Allow, then tap Allow location again. You can also skip this and add a city later in Settings.');
             }
             if (error?.code === 2) {
                 throw new Error('Your browser could not determine your location. Please try Allow location again, or skip this and add a city later in Settings.');
@@ -1935,6 +1935,7 @@ export function mountHeyBeanWebApp(mount) {
                             ${step === 'personality' ? guidedPersonalityPanelMarkup() : ''}
                             ${step === 'location' ? guidedLocationPanelMarkup() : ''}
                             ${step === 'tourChoice' ? guidedTourChoicePanelMarkup() : ''}
+                            ${guidedOnboardingStatusMarkup()}
                             ${step === 'tour' ? '<div class="hb-guided-onboarding-thinking"><span class="hb-spinner hb-spinner-tiny" aria-hidden="true"></span><span>Preparing your dashboard tour...</span></div>' : ''}
                         </div>
                     </section>
@@ -1966,7 +1967,6 @@ export function mountHeyBeanWebApp(mount) {
         };
         return `
             <form class="hb-guided-onboarding-composer" data-action="guided-onboarding">
-                ${state.guidedSignupError ? `<div class="hb-guided-onboarding-error">${escapeHtml(state.guidedSignupError)}</div>` : ''}
                 <div class="hb-guided-onboarding-input-row">
                     <input
                         class="hb-input hb-guided-onboarding-input"
@@ -1979,6 +1979,17 @@ export function mountHeyBeanWebApp(mount) {
                     <button class="hb-button hb-guided-onboarding-send" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send">↑</button>
                 </div>
             </form>`;
+    }
+
+    function guidedOnboardingStatusMarkup() {
+        const parts = [];
+        if (state.guidedSignupStep === 'location') {
+            parts.push('<div class="hb-guided-onboarding-helper">If your browser shows a location request near the address bar, click Allow to share your city.</div>');
+        }
+        if (state.guidedSignupError) {
+            parts.push(`<div class="hb-guided-onboarding-error">${escapeHtml(state.guidedSignupError)}</div>`);
+        }
+        return parts.join('');
     }
 
     function guidedThemeModePanelMarkup() {
