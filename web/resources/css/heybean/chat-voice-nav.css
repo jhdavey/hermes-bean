@@ -572,58 +572,6 @@
     min-width: 0;
 }
 
-.hb-chat-kiosk-status {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin-bottom: 6px;
-    padding: 0 4px;
-    color: var(--hb-muted);
-    font-size: 11px;
-    font-weight: 650;
-    line-height: 1.25;
-}
-
-.hb-chat-kiosk-status-dot {
-    width: 9px;
-    height: 9px;
-    flex: 0 0 auto;
-    border-radius: 999px;
-    background: var(--hb-muted);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hb-muted) 14%, transparent);
-}
-
-.hb-chat-kiosk-status-label {
-    color: var(--hb-text);
-    white-space: nowrap;
-}
-
-.hb-chat-kiosk-status-detail {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.hb-chat-kiosk-status-enabled .hb-chat-kiosk-status-dot {
-    background: var(--hb-accent-strong);
-    box-shadow: 0 0 0 3px rgba(var(--hb-accent-rgb), .16);
-}
-
-.hb-chat-kiosk-status-enabled .hb-chat-kiosk-status-label {
-    color: var(--hb-accent-strong);
-}
-
-.hb-chat-kiosk-status-error .hb-chat-kiosk-status-dot {
-    background: var(--hb-destructive);
-    box-shadow: 0 0 0 3px rgba(220, 38, 38, .14);
-}
-
-.hb-chat-kiosk-status-error .hb-chat-kiosk-status-label {
-    color: var(--hb-destructive);
-}
-
 .hb-chat-work-strip {
     display: grid;
     gap: 7px;
@@ -691,31 +639,26 @@
     }
 }
 
-.hb-chat-dock-listening {
+.hb-chat-dock-listening,
+.hb-chat-dock-kiosk-listening,
+.hb-chat-dock-kiosk-heard {
     border-color: var(--hb-accent-strong);
     box-shadow: 0 6px 16px rgba(var(--hb-accent-rgb), .14);
 }
 
-.hb-chat-voice-status {
-    min-height: 28px;
-    align-content: center;
-    border: 1px solid rgba(var(--hb-accent-rgb), .18);
-    border-radius: 12px;
-    background: rgba(var(--hb-accent-rgb), .08);
-    color: var(--hb-accent-strong);
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 850;
+.hb-chat-dock-kiosk-on {
+    border-color: rgba(var(--hb-accent-rgb), .24);
 }
 
-.hb-chat-voice-status[hidden] {
-    display: none;
+.hb-chat-dock-kiosk-working,
+.hb-chat-dock-kiosk-responding,
+.hb-chat-dock-kiosk-speaking {
+    border-color: rgba(var(--hb-accent-rgb), .30);
+    box-shadow: 0 6px 16px rgba(var(--hb-accent-rgb), .10);
 }
 
-.hb-chat-voice-status-error {
-    border-color: rgba(220, 38, 38, .20);
-    background: rgba(220, 38, 38, .08);
-    color: var(--hb-destructive);
+.hb-chat-dock-has-kiosk-draft textarea {
+    color: var(--hb-text);
 }
 
 .hb-chat-text-send-button {
@@ -741,34 +684,69 @@
     position: relative;
     display: grid;
     place-items: center;
-    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, .74);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--hb-surface) 94%, transparent);
+    color: var(--hb-text);
+    box-shadow: none;
+    overflow: visible;
     touch-action: none;
     user-select: none;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
+    transition: border-color .18s ease, box-shadow .18s ease, background .18s ease, transform .18s ease;
+}
+
+.hb-chat-voice-button::before {
+    content: "";
+    position: absolute;
+    inset: -7px;
+    z-index: -1;
+    border-radius: inherit;
+    background: radial-gradient(circle, rgba(var(--hb-accent-rgb), .34), rgba(var(--hb-accent-rgb), .12) 48%, transparent 72%);
+    filter: blur(5px);
+    opacity: 0;
+    transform: scale(.9);
+    transition: opacity .18s ease, transform .18s ease;
 }
 
 .hb-chat-voice-button-disabled {
-    border-color: rgba(148, 163, 184, .24);
-    background: color-mix(in srgb, var(--hb-surface) 88%, var(--hb-muted));
-    color: var(--hb-muted);
+    border-color: rgba(255, 255, 255, .74);
+    background: color-mix(in srgb, var(--hb-surface) 94%, transparent);
+    color: var(--hb-text);
     box-shadow: none;
 }
 
-.hb-chat-voice-button-on {
-    border-color: rgba(var(--hb-accent-rgb), .46);
-    background: rgba(var(--hb-accent-rgb), .18);
+.hb-chat-voice-button-on,
+.hb-chat-voice-button-armed,
+.hb-chat-voice-button-listening,
+.hb-chat-voice-button-heard {
+    border-color: var(--hb-accent-strong);
+    background: color-mix(in srgb, var(--hb-surface) 90%, var(--hb-accent));
     color: var(--hb-accent-strong);
-    box-shadow: 0 0 0 2px rgba(var(--hb-accent-rgb), .16), 0 6px 14px rgba(var(--hb-accent-rgb), .10);
+    box-shadow: 0 0 0 2px rgba(var(--hb-accent-rgb), .16), 0 8px 18px rgba(var(--hb-accent-rgb), .14);
 }
 
 .hb-chat-voice-button-working,
 .hb-chat-voice-button-speaking,
 .hb-chat-voice-button-responding,
 .hb-chat-voice-button-cancelable {
-    border-color: rgba(var(--hb-accent-strong-rgb), .34);
-    background: var(--hb-accent);
-    color: var(--hb-accent-ink);
+    border-color: var(--hb-accent-strong);
+    background: color-mix(in srgb, var(--hb-surface) 88%, var(--hb-accent));
+    color: var(--hb-accent-strong);
+    box-shadow: 0 0 0 2px rgba(var(--hb-accent-rgb), .16), 0 8px 18px rgba(var(--hb-accent-rgb), .14);
+}
+
+.hb-chat-voice-button-on::before,
+.hb-chat-voice-button-armed::before,
+.hb-chat-voice-button-listening::before,
+.hb-chat-voice-button-heard::before,
+.hb-chat-voice-button-working::before,
+.hb-chat-voice-button-speaking::before,
+.hb-chat-voice-button-responding::before,
+.hb-chat-voice-button-cancelable::before {
+    opacity: .92;
+    transform: scale(1);
 }
 
 .hb-chat-voice-button-error {
@@ -777,44 +755,10 @@
     color: var(--hb-destructive);
 }
 
-.hb-chat-voice-button-state-label {
-    position: absolute;
-    right: 3px;
-    bottom: 3px;
-    min-width: 24px;
-    padding: 2px 4px;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, .76);
-    color: #fff;
-    font-size: 8px;
-    font-weight: 850;
-    line-height: 1;
-    letter-spacing: 0;
-    text-align: center;
-}
-
 .hb-chat-voice-button-logo {
     display: inline-grid;
     place-items: center;
-    transform: translateY(-3px);
-}
-
-.hb-chat-voice-button-disabled .hb-chat-voice-button-state-label {
-    background: rgba(100, 116, 139, .18);
-    color: var(--hb-muted);
-}
-
-.hb-chat-voice-button-on .hb-chat-voice-button-state-label,
-.hb-chat-voice-button-armed .hb-chat-voice-button-state-label,
-.hb-chat-voice-button-listening .hb-chat-voice-button-state-label,
-.hb-chat-voice-button-heard .hb-chat-voice-button-state-label {
-    background: var(--hb-accent-strong);
-    color: var(--hb-accent-ink);
-}
-
-.hb-chat-voice-button-error .hb-chat-voice-button-state-label {
-    background: var(--hb-destructive);
-    color: #fff;
+    transform: none;
 }
 
 .hb-chat-dock-listening .hb-chat-voice-button {
@@ -822,16 +766,17 @@
 }
 
 .hb-send-bean-logo {
-    width: 24px;
-    height: 24px;
+    width: 27px;
+    height: 27px;
     object-fit: contain;
-    filter: brightness(0) invert(1);
+    filter: none;
+    opacity: .88;
     pointer-events: none;
 }
 
 .hb-chat-voice-button-disabled .hb-send-bean-logo {
-    filter: grayscale(1) saturate(.15);
-    opacity: .48;
+    filter: none;
+    opacity: .76;
 }
 
 .hb-chat-voice-button-on .hb-send-bean-logo {

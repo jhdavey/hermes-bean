@@ -749,8 +749,7 @@
     height: auto;
 }
 
-.hb-command-center-chat-collapsed .hb-chat-messages,
-.hb-command-center-chat-collapsed .hb-chat-voice-status {
+.hb-command-center-chat-collapsed .hb-chat-messages {
     display: none;
 }
 

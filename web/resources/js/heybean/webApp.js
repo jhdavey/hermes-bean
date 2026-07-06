@@ -117,6 +117,7 @@ export function mountHeyBeanWebApp(mount) {
         kioskVoiceEnabled: kioskVoiceRequested(),
         kioskVoicePhase: 'idle',
         kioskVoiceMessage: '',
+        kioskVoiceDraft: '',
         onboardingJustCompleted: false,
         onboardingTourActive: false,
         onboardingTourStep: 0,
@@ -3189,6 +3190,10 @@ export function mountHeyBeanWebApp(mount) {
         ]).filter((message) => !assistantMessageShouldStayOutOfChat(message));
         const workStrip = chatDockedWorkStripMarkup();
         const messageListId = options.messageListId || 'hb-chat-messages';
+        const inputValue = chatInputValue();
+        const kioskModel = kioskVoiceStatusTagModel();
+        const kioskPhaseClass = `hb-chat-dock-kiosk-${kioskModel.phase}`;
+        const kioskEnabledClass = state.kioskVoiceEnabled ? 'hb-chat-dock-kiosk-on' : 'hb-chat-dock-kiosk-off';
         return `
             <section class="hb-chat ${options.compact ? 'hb-chat-compact' : ''}">
                 ${errorMarkup(state.error)}
@@ -3198,12 +3203,10 @@ export function mountHeyBeanWebApp(mount) {
                     ${working ? '' : pendingApprovalChatMarkup()}
                     ${working ? '' : onboardingCompletionMarkup()}
                 </div>
-                <div class="hb-chat-voice-status ${state.voiceStatusTone === 'error' ? 'hb-chat-voice-status-error' : ''}" data-voice-status ${state.voiceStatus ? '' : 'hidden'}>${escapeHtml(state.voiceStatus)}</div>
                 <div class="hb-chat-input-stack ${workStrip ? 'hb-chat-input-stack-working' : ''}">
-                    ${chatKioskVoiceStatusMarkup()}
                     ${workStrip}
-                    <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''} ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat">
-                        <textarea name="message" placeholder="${state.voiceListening ? 'Listening' : 'Message Bean…'}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(state.voiceDraft)}</textarea>
+                    <form class="hb-chat-dock ${state.voiceListening ? 'hb-chat-dock-listening' : ''} ${state.kioskVoiceDraft ? 'hb-chat-dock-has-kiosk-draft' : ''} ${kioskEnabledClass} ${kioskPhaseClass} ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat">
+                        <textarea name="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(inputValue)}</textarea>
                         <button class="hb-button-secondary hb-chat-text-send-button" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send message">${icons.send}</button>
                         ${chatBeanVoiceButtonMarkup()}
                     </form>
@@ -3211,57 +3214,24 @@ export function mountHeyBeanWebApp(mount) {
             </section>`;
     }
 
+    function chatInputValue() {
+        return state.voiceDraft || state.kioskVoiceDraft || '';
+    }
+
+    function chatInputPlaceholder() {
+        if (state.voiceListening) return 'Listening... release to send';
+        return state.kioskVoiceEnabled ? 'Say "Hey Bean ..."' : 'Message Bean...';
+    }
+
     function chatBeanVoiceButtonMarkup() {
         const model = kioskVoiceStatusTagModel();
         const phaseClass = `hb-chat-voice-button-${model.phase}`;
-        const stateLabel = chatBeanVoiceButtonStateLabel(model);
         return `
             <button class="hb-button hb-chat-voice-button ${phaseClass} ${model.ready ? 'hb-chat-voice-button-on' : ''} ${model.cancelable ? 'hb-chat-voice-button-cancelable' : ''}" type="button" data-toggle-kiosk-voice aria-live="polite" aria-pressed="${model.ready ? 'true' : 'false'}" aria-label="${escapeAttr(model.actionLabel)}" title="${escapeAttr(model.actionLabel)}">
-                <span class="hb-chat-voice-button-state-label" aria-hidden="true">${escapeHtml(stateLabel)}</span>
                 <span class="hb-chat-voice-button-logo" aria-hidden="true">
                     <img class="hb-send-bean-logo" src="${escapeAttr(logoUrl)}" alt="">
                 </span>
             </button>`;
-    }
-
-    function chatBeanVoiceButtonStateLabel(model) {
-        if (model.phase === 'error') return 'ERR';
-        if (model.cancelable) return 'STOP';
-        if (model.ready) return 'ON';
-        if (state.kioskVoiceEnabled) return '...';
-        return 'OFF';
-    }
-
-    function chatKioskVoiceStatusMarkup() {
-        const model = kioskVoiceStatusTagModel();
-        const enabled = state.kioskVoiceEnabled;
-        const label = chatKioskVoiceStatusLabel(model);
-        const detail = chatKioskVoiceStatusDetail(model);
-        return `
-            <div class="hb-chat-kiosk-status hb-chat-kiosk-status-${escapeAttr(model.phase)} ${enabled ? 'hb-chat-kiosk-status-enabled' : 'hb-chat-kiosk-status-disabled'}" aria-live="polite">
-                <span class="hb-chat-kiosk-status-dot" aria-hidden="true"></span>
-                <span class="hb-chat-kiosk-status-label">${escapeHtml(label)}</span>
-                <span class="hb-chat-kiosk-status-detail">${escapeHtml(detail)}</span>
-            </div>`;
-    }
-
-    function chatKioskVoiceStatusLabel(model) {
-        if (!state.kioskVoiceEnabled) return 'Mic off';
-        if (model.phase === 'error') return 'Mic issue';
-        if (!model.ready) return 'Mic starting';
-        if (model.phase === 'speaking' || model.phase === 'responding') return 'Bean speaking';
-        if (model.phase === 'working') return 'Bean working';
-        if (model.phase === 'heard') return 'Bean heard you';
-        if (model.phase === 'listening') return 'Listening';
-        return 'Mic on';
-    }
-
-    function chatKioskVoiceStatusDetail(model) {
-        if (!state.kioskVoiceEnabled) return 'Tap Bean to turn on';
-        if (model.phase === 'error') return model.label || 'Check microphone access';
-        if (!model.ready) return model.label || 'Connecting';
-        if (model.phase === 'armed') return 'Say "Hey Bean"';
-        return model.label || 'Ready';
     }
 
     function chatDockedWorkStripMarkup() {
@@ -7918,6 +7888,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function handleChatInput(event) {
         state.voiceDraft = event.currentTarget.value;
+        state.kioskVoiceDraft = '';
         resizeChatInput(event.currentTarget);
     }
 
@@ -8148,6 +8119,7 @@ export function mountHeyBeanWebApp(mount) {
         state.beanWorkItems = [];
         state.voiceStatus = '';
         state.voiceStatusTone = '';
+        state.kioskVoiceDraft = '';
         kioskConversationActive = false;
         kioskCommandText = '';
         kioskRealtimePendingUser = null;
@@ -8227,6 +8199,7 @@ export function mountHeyBeanWebApp(mount) {
         state.messages.push({ id: `local-${Date.now()}`, role: 'user', content });
         state.busy = true;
         state.voiceDraft = '';
+        state.kioskVoiceDraft = '';
         state.editingChatMessageId = '';
         state.voiceStatus = '';
         state.voiceStatusTone = '';
@@ -8625,21 +8598,19 @@ export function mountHeyBeanWebApp(mount) {
 
     function clearVoiceDraft() {
         state.voiceDraft = '';
+        state.kioskVoiceDraft = '';
         const textarea = mount.querySelector('textarea[name="message"]');
         if (textarea) {
             textarea.value = '';
+            textarea.placeholder = chatInputPlaceholder();
             resizeChatInput(textarea);
         }
+        updateChatVoiceControlsInPlace();
     }
 
     function setVoiceStatus(message, tone = '') {
         state.voiceStatus = message;
         state.voiceStatusTone = tone;
-        mount.querySelectorAll('[data-voice-status]').forEach((element) => {
-            element.hidden = !message;
-            element.textContent = message;
-            element.classList.toggle('hb-chat-voice-status-error', tone === 'error');
-        });
     }
 
     function voiceErrorMessage(error) {
@@ -9617,6 +9588,7 @@ export function mountHeyBeanWebApp(mount) {
         if (kioskRealtimeAwaitingFollowup) return true;
         if (realtimeWakeContinuationActive()) return true;
         if (kioskConversationActive && realtimeTranscriptLooksLikeFollowup(normalized)) return true;
+        if (kioskConversationActive && !realtimeAssistantRecentlyOutput(1200)) return true;
         if (kioskRealtimeResponseTimer && kioskRealtimePendingUser && !kioskRealtimePendingUser.persisted) return true;
         if (realtimeBackgroundWorkPending() && realtimeTranscriptLooksLikeStatusCheck(normalized)) return true;
         return false;
@@ -9740,7 +9712,7 @@ export function mountHeyBeanWebApp(mount) {
         kioskRealtimeAwaitingFollowup = false;
         showKioskHeardTranscript(content, {
             allowArmed: true,
-            phase: 'heard',
+            phase: 'listening',
             force: true,
             holdMs: kioskRealtimeTurnDebounceMs + 900,
         });
@@ -9762,13 +9734,8 @@ export function mountHeyBeanWebApp(mount) {
         }
         kioskRealtimeWakeContinuationUntil = Date.now() + realtimeTurnDebounceForContent(kioskRealtimePendingUser.content) + 500;
         kioskRealtimeCurrentUserTurn = { ...kioskRealtimePendingUser };
-        upsertRealtimeLocalMessage({
-            id: `rt-user-${kioskRealtimePendingUser.itemId}`,
-            role: 'user',
-            content: kioskRealtimePendingUser.content,
-            metadata: { local_realtime_turn: true },
-        });
         if (realtimeBackgroundWorkPending() && realtimeTranscriptLooksLikeStatusCheck(content)) {
+            showRealtimePendingUserMessage();
             logKioskRealtimeVoiceTrace('realtime_voice_status_check_while_background_active', {
                 summary: 'Answered status check locally while background work is active.',
                 user_content: content,
@@ -9780,10 +9747,22 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         if (realtimeCommandShouldQueueImmediately(content)) {
+            showRealtimePendingUserMessage();
             queueImmediateRealtimeBackgroundWork(content);
             return;
         }
         scheduleRealtimeResponseCreate({ delayMs: realtimeTurnDebounceForContent(kioskRealtimePendingUser.content) });
+    }
+
+    function showRealtimePendingUserMessage(extraMetadata = {}) {
+        if (!kioskRealtimePendingUser?.content) return;
+        upsertRealtimeLocalMessage({
+            id: `rt-user-${kioskRealtimePendingUser.itemId}`,
+            role: 'user',
+            content: kioskRealtimePendingUser.content,
+            metadata: { local_realtime_turn: true, ...extraMetadata },
+        });
+        clearKioskVoiceDraft();
     }
 
     function handleRealtimeUserTranscriptDelta(payload) {
@@ -9905,6 +9884,7 @@ export function mountHeyBeanWebApp(mount) {
             const content = String(kioskRealtimePendingUser?.content || '').trim();
             if (!content) return;
             kioskRealtimeWakeContinuationUntil = 0;
+            showRealtimePendingUserMessage();
             armRealtimeToolFallback(content);
             setKioskVoiceStatus('working', 'thinking');
             kioskRealtimeResponseCreateSentAt = Date.now();
@@ -11076,7 +11056,11 @@ export function mountHeyBeanWebApp(mount) {
             const command = commandAfterWakePhrase(wakeCandidate) || '';
             kioskCommandText = command;
             if (command) {
-                setKioskVoiceStatus('heard', 'Heard');
+                showKioskHeardTranscript(command, {
+                    allowArmed: true,
+                    phase: 'listening',
+                    force: true,
+                });
                 armKioskCommandSubmit();
             } else {
                 setKioskVoiceStatus('listening', 'Go ahead');
@@ -11090,7 +11074,11 @@ export function mountHeyBeanWebApp(mount) {
         const content = String(command || '').replace(/\s+/g, ' ').trim();
         if (!content || realtimeTranscriptLooksSynthetic(content)) return;
         kioskCommandText = content;
-        setKioskVoiceStatus('heard', 'Heard');
+        showKioskHeardTranscript(content, {
+            allowArmed: true,
+            phase: 'listening',
+            force: true,
+        });
         armKioskCommandSubmit();
     }
 
@@ -11175,6 +11163,7 @@ export function mountHeyBeanWebApp(mount) {
         kioskConversationActive = false;
         state.kioskVoicePhase = 'idle';
         state.kioskVoiceMessage = '';
+        clearKioskVoiceDraft();
         stopKioskSpeechPlayback();
     }
 
@@ -11280,6 +11269,7 @@ export function mountHeyBeanWebApp(mount) {
         kioskRealtimeUserTranscriptDrafts.clear();
         kioskQuickReplyGeneration += 1;
         kioskCommandText = '';
+        clearKioskVoiceDraft();
         setKioskVoiceStatus('armed', message || 'Say hey bean');
     }
 
@@ -11312,6 +11302,48 @@ export function mountHeyBeanWebApp(mount) {
     function showKioskHeardTranscript(transcript, options = {}) {
         window.clearTimeout(kioskHeardTimer);
         kioskHeardTimer = 0;
+        const clean = String(transcript || '').replace(/\s+/g, ' ').trim();
+        if (!clean) return;
+        const phase = options.phase || 'listening';
+        state.kioskVoiceDraft = clean;
+        if (phase) {
+            setKioskVoiceStatus(phase, phase === 'heard' ? 'Heard' : 'Listening');
+        }
+        updateKioskVoiceDraftInPlace(clean, { force: options.force === true });
+        if (Number(options.holdMs || 0) > 0) {
+            kioskHeardTimer = window.setTimeout(() => {
+                kioskHeardTimer = 0;
+                if (!state.kioskVoiceDraft || state.kioskVoiceDraft !== clean) return;
+                if (state.kioskVoicePhase === 'working' || state.kioskVoicePhase === 'responding' || state.busy) return;
+                clearKioskVoiceDraft();
+            }, Number(options.holdMs));
+        }
+    }
+
+    function updateKioskVoiceDraftInPlace(value, options = {}) {
+        const textarea = mount.querySelector('form[data-action="chat"] textarea[name="message"]');
+        if (!textarea) return;
+        const shouldUpdate = options.force
+            || !state.voiceDraft
+            || textarea.value === ''
+            || textarea.value === state.kioskVoiceDraft;
+        if (!shouldUpdate) return;
+        textarea.value = value;
+        textarea.placeholder = chatInputPlaceholder();
+        textarea.closest('.hb-chat-dock')?.classList.add('hb-chat-dock-has-kiosk-draft');
+        resizeChatInput(textarea);
+        updateChatVoiceControlsInPlace();
+    }
+
+    function clearKioskVoiceDraft() {
+        state.kioskVoiceDraft = '';
+        const textarea = mount.querySelector('form[data-action="chat"] textarea[name="message"]');
+        if (textarea && !state.voiceDraft) {
+            textarea.value = '';
+            textarea.placeholder = chatInputPlaceholder();
+            resizeChatInput(textarea);
+        }
+        updateChatVoiceControlsInPlace();
     }
 
     function armKioskCommandSubmit() {
@@ -11388,7 +11420,7 @@ export function mountHeyBeanWebApp(mount) {
         kioskRealtimeWakeContinuationUntil = Date.now() + realtimeTurnDebounceForContent(cleanContent) + 500;
         showKioskHeardTranscript(cleanContent, {
             allowArmed: true,
-            phase: 'heard',
+            phase: 'working',
             force: true,
             holdMs: kioskRealtimeTurnDebounceMs + 900,
         });
@@ -11398,6 +11430,7 @@ export function mountHeyBeanWebApp(mount) {
             content: cleanContent,
             metadata: { local_realtime_turn: true, web_wake_transcript: true },
         });
+        clearKioskVoiceDraft();
         try {
             dataChannel.send(JSON.stringify({
                 type: 'conversation.item.create',
@@ -11641,9 +11674,45 @@ export function mountHeyBeanWebApp(mount) {
         const normalized = normalizeKioskVoiceStatus(phase, message);
         state.kioskVoicePhase = normalized.phase;
         state.kioskVoiceMessage = normalized.message;
-        if (state.phase === 'signedIn' && !updateKioskVoicePillsInPlace()) {
+        const updatedPills = updateKioskVoicePillsInPlace();
+        const updatedDock = updateChatVoiceControlsInPlace();
+        if (state.phase === 'signedIn' && !updatedPills && !updatedDock) {
             render();
         }
+    }
+
+    function updateChatVoiceControlsInPlace() {
+        const form = mount.querySelector('form[data-action="chat"]');
+        if (!form) return false;
+        const model = kioskVoiceStatusTagModel();
+        const textarea = form.querySelector('textarea[name="message"]');
+        if (textarea) {
+            textarea.placeholder = chatInputPlaceholder();
+            if (!state.voiceDraft && state.kioskVoiceDraft && textarea.value !== state.kioskVoiceDraft) {
+                textarea.value = state.kioskVoiceDraft;
+                resizeChatInput(textarea);
+            }
+        }
+        form.classList.toggle('hb-chat-dock-kiosk-on', state.kioskVoiceEnabled);
+        form.classList.toggle('hb-chat-dock-kiosk-off', !state.kioskVoiceEnabled);
+        form.classList.toggle('hb-chat-dock-has-kiosk-draft', Boolean(state.kioskVoiceDraft));
+        Array.from(form.classList)
+            .filter((className) => className.startsWith('hb-chat-dock-kiosk-') && !['hb-chat-dock-kiosk-on', 'hb-chat-dock-kiosk-off'].includes(className))
+            .forEach((className) => form.classList.remove(className));
+        form.classList.add(`hb-chat-dock-kiosk-${model.phase}`);
+
+        const button = form.querySelector('[data-toggle-kiosk-voice]');
+        if (!button) return true;
+        Array.from(button.classList)
+            .filter((className) => className.startsWith('hb-chat-voice-button-') && !['hb-chat-voice-button-cancelable', 'hb-chat-voice-button-on'].includes(className))
+            .forEach((className) => button.classList.remove(className));
+        button.classList.add(`hb-chat-voice-button-${model.phase}`);
+        button.classList.toggle('hb-chat-voice-button-on', model.ready);
+        button.classList.toggle('hb-chat-voice-button-cancelable', model.cancelable);
+        button.setAttribute('aria-label', model.actionLabel);
+        button.setAttribute('title', model.actionLabel);
+        button.setAttribute('aria-pressed', model.ready ? 'true' : 'false');
+        return true;
     }
 
     function updateKioskVoicePillsInPlace() {
