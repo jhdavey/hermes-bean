@@ -647,6 +647,39 @@ void main() {
     ]);
   });
 
+  test('parses bank account billing payment methods', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'register-token',
+      transport: (request) async {
+        requests.add(request);
+        expect(request.method, 'GET');
+        expect(request.path, '/billing/payment-method');
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'payment_method': {
+                'id': 'pm_bank_123',
+                'type': 'us_bank_account',
+                'bank_name': 'Chase',
+                'last4': '6789',
+              },
+            },
+          }),
+        );
+      },
+    );
+
+    final method = await client.getBillingPaymentMethod();
+
+    expect(method?.id, 'pm_bank_123');
+    expect(method?.type, 'us_bank_account');
+    expect(method?.displayLine, 'Chase ending 6789');
+    expect(requests, hasLength(1));
+  });
+
   test(
     'loads updates cancels and resumes billing payment method state',
     () async {

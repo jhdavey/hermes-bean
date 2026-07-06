@@ -1723,7 +1723,11 @@ class HermesBillingPaymentMethod {
   final int? expYear;
 
   String get displayBrand {
-    final normalized = (brand ?? type).replaceAll('_', ' ').trim();
+    final rawBrand = brand?.trim();
+    final source = rawBrand == null || rawBrand.isEmpty
+        ? (type == 'us_bank_account' ? 'Bank account' : type)
+        : rawBrand;
+    final normalized = source.replaceAll('_', ' ').trim();
     if (normalized.isEmpty) return 'Card';
     return normalized
         .split(RegExp(r'\s+'))
@@ -1747,7 +1751,8 @@ class HermesBillingPaymentMethod {
       HermesBillingPaymentMethod(
         id: json['id']?.toString(),
         type: _readStringOrDefault(json['type'], 'card'),
-        brand: json['brand']?.toString(),
+        brand: (json['brand'] ?? json['bank_name'] ?? json['bankName'])
+            ?.toString(),
         last4: json['last4']?.toString(),
         expMonth: _readIntOrNull(json['exp_month'] ?? json['expMonth']),
         expYear: _readIntOrNull(json['exp_year'] ?? json['expYear']),

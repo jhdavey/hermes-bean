@@ -357,6 +357,61 @@ class BillingInfrastructureTest extends TestCase
             ->assertJsonPath('data.payment_method.last4', '4242');
     }
 
+    public function test_payment_method_summary_falls_back_to_attached_bank_account(): void
+    {
+        $this->configureStripe();
+        $token = $this->apiToken('bank-payment-method@example.com');
+        $user = User::where('email', 'bank-payment-method@example.com')->firstOrFail();
+        $user->forceFill([
+            'stripe_customer_id' => 'cus_bank_pm_123',
+            'stripe_subscription_id' => 'sub_bank_pm_123',
+        ])->save();
+
+        Http::fake(function (HttpRequest $request) {
+            if ($request->url() === 'https://api.stripe.com/v1/subscriptions/sub_bank_pm_123') {
+                return Http::response(['id' => 'sub_bank_pm_123', 'default_payment_method' => null], 200);
+            }
+
+            if ($request->url() === 'https://api.stripe.com/v1/customers/cus_bank_pm_123') {
+                return Http::response(['id' => 'cus_bank_pm_123', 'invoice_settings' => []], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.stripe.com/v1/payment_methods')) {
+                $data = $request->data();
+                $this->assertSame('cus_bank_pm_123', $data['customer']);
+                $this->assertSame(10, $data['limit']);
+
+                if (($data['type'] ?? null) === 'us_bank_account') {
+                    return Http::response([
+                        'data' => [[
+                            'id' => 'pm_bank_123',
+                            'customer' => 'cus_bank_pm_123',
+                            'type' => 'us_bank_account',
+                            'created' => 1783200000,
+                            'us_bank_account' => [
+                                'bank_name' => 'Chase',
+                                'last4' => '6789',
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                if (($data['type'] ?? null) === 'card') {
+                    return Http::response(['data' => []], 200);
+                }
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->withToken($token)->getJson('/api/billing/payment-method')
+            ->assertOk()
+            ->assertJsonPath('data.payment_method.id', 'pm_bank_123')
+            ->assertJsonPath('data.payment_method.type', 'us_bank_account')
+            ->assertJsonPath('data.payment_method.brand', 'Chase')
+            ->assertJsonPath('data.payment_method.last4', '6789');
+    }
+
     public function test_user_can_create_hosted_payment_method_checkout_session(): void
     {
         $this->configureStripe();

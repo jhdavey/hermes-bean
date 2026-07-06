@@ -53,12 +53,15 @@ class StripeBillingService
 
         $paymentMethodId = $this->defaultPaymentMethodId($user);
         if (! $paymentMethodId) {
-            return ['payment_method' => null];
+            return ['payment_method' => $this->attachedPaymentMethodDisplay($user)];
         }
 
         $paymentMethod = $this->stripeGet('/payment_methods/'.$paymentMethodId)->json();
 
-        return ['payment_method' => $this->paymentMethodDisplay($paymentMethod, $user)];
+        return [
+            'payment_method' => $this->paymentMethodDisplay($paymentMethod, $user)
+                ?? $this->attachedPaymentMethodDisplay($user),
+        ];
     }
 
     public function createCheckoutSession(User $user, string $plan, string $billingInterval = 'monthly', ?string $source = null): array
@@ -833,6 +836,48 @@ class StripeBillingService
         }
 
         return null;
+    }
+
+    private function attachedPaymentMethodDisplay(User $user): ?array
+    {
+        $candidates = [];
+
+        foreach (['us_bank_account', 'card'] as $type) {
+            $paymentMethods = $this->stripeGet('/payment_methods', [
+                'customer' => $user->stripe_customer_id,
+                'type' => $type,
+                'limit' => 10,
+            ])->json();
+
+            foreach (($paymentMethods['data'] ?? []) as $paymentMethod) {
+                if (! is_array($paymentMethod)) {
+                    continue;
+                }
+
+                $display = $this->paymentMethodDisplay($paymentMethod, $user);
+                if (! $display) {
+                    continue;
+                }
+
+                $candidates[] = [
+                    'created' => (int) ($paymentMethod['created'] ?? 0),
+                    'index' => count($candidates),
+                    'display' => $display,
+                ];
+            }
+        }
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        usort($candidates, function (array $left, array $right): int {
+            $createdComparison = $right['created'] <=> $left['created'];
+
+            return $createdComparison !== 0 ? $createdComparison : $left['index'] <=> $right['index'];
+        });
+
+        return $candidates[0]['display'];
     }
 
     private function stripeGet(string $path, array $payload = []): Response
