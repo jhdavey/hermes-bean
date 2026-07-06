@@ -215,6 +215,9 @@ export function mountHeyBeanWebApp(mount) {
     let kioskRealtimeLastSpeechStoppedAt = 0;
     const kioskRealtimeUserTranscriptDrafts = new Map();
     let kioskRealtimeResponseTimer = 0;
+    let kioskRealtimeResponseCreateInFlight = false;
+    let kioskRealtimePendingResponseInterruptedBySpeech = false;
+    let kioskRealtimePendingResponseRecoveryTimer = 0;
     let kioskRealtimeToolFallbackTimer = 0;
     let kioskRealtimeToolFallbackContent = '';
     let kioskRealtimeReconnectTimer = 0;
@@ -234,6 +237,7 @@ export function mountHeyBeanWebApp(mount) {
     let kioskRealtimeWakeContinuationUntil = 0;
     let kioskRealtimeResponseCreateSentAt = 0;
     let kioskRealtimeAwaitingFirstAudio = false;
+    let kioskRealtimeSessionUpdateAck = null;
     const kioskRealtimeBackgroundProgressTimers = new Set();
     const kioskRealtimeSpokenSegments = [];
     const kioskRealtimeMaxReconnectAttempts = 5;
@@ -8196,6 +8200,10 @@ export function mountHeyBeanWebApp(mount) {
         kioskRealtimeWakeContinuationUntil = 0;
         kioskRealtimeResponseCreateSentAt = 0;
         kioskRealtimeAwaitingFirstAudio = false;
+        kioskRealtimeResponseCreateInFlight = false;
+        kioskRealtimePendingResponseInterruptedBySpeech = false;
+        clearRealtimePendingResponseRecovery();
+        completeRealtimeSessionUpdateAck(false);
         kioskRealtimeSpokenSegments.length = 0;
         clearRealtimeAssistantOutputGuard();
         kioskRealtimePendingBackgroundResult = null;
@@ -9123,6 +9131,10 @@ export function mountHeyBeanWebApp(mount) {
         kioskRealtimeSpokenSegments.length = 0;
         kioskRealtimeResponseCreateSentAt = 0;
         kioskRealtimeAwaitingFirstAudio = false;
+        kioskRealtimeResponseCreateInFlight = false;
+        kioskRealtimePendingResponseInterruptedBySpeech = false;
+        clearRealtimePendingResponseRecovery();
+        completeRealtimeSessionUpdateAck(false);
         clearRealtimeAssistantOutputGuard();
         kioskRealtimeUserTranscriptDrafts.clear();
         window.clearTimeout(kioskRealtimeResponseTimer);
@@ -9264,6 +9276,8 @@ export function mountHeyBeanWebApp(mount) {
                 window.clearTimeout(kioskConversationTimer);
                 kioskConversationTimer = 0;
             }
+            deferRealtimePendingResponseBySpeech('speech_started');
+            clearRealtimePendingResponseRecovery();
             if (realtimeAssistantRecentlyOutput()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('listening', 'listening');
@@ -9272,11 +9286,16 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (type === 'input_audio_buffer.speech_stopped') {
             kioskRealtimeLastSpeechStoppedAt = Date.now();
+            scheduleRealtimePendingResponseRecovery();
             if (realtimeAssistantRecentlyOutput()) return;
             if (kioskConversationActive) {
                 setKioskVoiceStatus('listening', 'listening');
                 armKioskConversationTimeout(kioskRealtimeAwaitingFollowup ? 30000 : undefined);
             }
+            return;
+        }
+        if (type === 'session.updated') {
+            completeRealtimeSessionUpdateAck(true);
             return;
         }
         if (type === 'conversation.item.input_audio_transcription.delta') {
@@ -9293,6 +9312,7 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (type === 'response.created') {
             clearRealtimeToolFallback();
+            kioskRealtimeResponseCreateInFlight = false;
             markRealtimeAssistantOutputActive(5000, { started: true });
             setKioskVoiceStatus('responding', 'Bean is answering');
             return;
@@ -9329,6 +9349,7 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         if (type === 'response.done') {
+            kioskRealtimeResponseCreateInFlight = false;
             if (kioskRealtimeAwaitingFirstAudio) {
                 kioskRealtimeAwaitingFirstAudio = false;
                 logKioskRealtimeVoiceTrace('realtime_voice_response_done_without_audio_delta', {
@@ -9343,6 +9364,7 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         if (type === 'error') {
+            kioskRealtimeResponseCreateInFlight = false;
             const message = beanRealtimeUserStatusMessage(payload?.error?.message || 'Bean needs a moment');
             setKioskVoiceStatus(message.phase, message.text);
         }
@@ -9641,6 +9663,57 @@ export function mountHeyBeanWebApp(mount) {
         scheduleRealtimeResponseCreate({ delayMs: realtimeTurnDebounceForContent(combined, { partial: true }) });
     }
 
+    function deferRealtimePendingResponseBySpeech(source = 'speech_started') {
+        const content = String(kioskRealtimePendingUser?.content || '').trim();
+        if (!content || kioskRealtimeVoiceOnlyAssistant) return false;
+        if (!kioskRealtimeResponseTimer && !kioskRealtimeResponseCreateInFlight) return false;
+        const wasResponseCreateInFlight = kioskRealtimeResponseCreateInFlight;
+        window.clearTimeout(kioskRealtimeResponseTimer);
+        kioskRealtimeResponseTimer = 0;
+        if (kioskRealtimeResponseCreateInFlight && kioskRealtime?.dataChannel?.readyState === 'open') {
+            try { kioskRealtime.dataChannel.send(JSON.stringify({ type: 'response.cancel' })); } catch (_) {}
+            try { kioskRealtime.dataChannel.send(JSON.stringify({ type: 'output_audio_buffer.clear' })); } catch (_) {}
+        }
+        kioskRealtimeResponseCreateInFlight = false;
+        kioskRealtimeAwaitingFirstAudio = false;
+        kioskRealtimePendingResponseInterruptedBySpeech = true;
+        logKioskRealtimeVoiceTrace('realtime_voice_pending_response_deferred_by_speech', {
+            summary: 'Deferred a pending realtime response because user speech started.',
+            user_content: content,
+            source,
+            response_create_in_flight: wasResponseCreateInFlight,
+        });
+        return true;
+    }
+
+    function recoverRealtimePendingResponseAfterNonActionableTranscript(transcript = '') {
+        const content = String(kioskRealtimePendingUser?.content || '').trim();
+        if (!kioskRealtimePendingResponseInterruptedBySpeech || !content || kioskRealtimeResponseTimer || kioskRealtimeResponseCreateInFlight) return false;
+        kioskRealtimePendingResponseInterruptedBySpeech = false;
+        clearRealtimePendingResponseRecovery();
+        logKioskRealtimeVoiceTrace('realtime_voice_pending_response_recovered_after_non_actionable_speech', {
+            summary: 'Recovered a deferred realtime response after non-actionable speech.',
+            user_content: content,
+            transcript,
+        });
+        scheduleRealtimeResponseCreate({ delayMs: realtimeTurnDebounceForContent(content) });
+        return true;
+    }
+
+    function scheduleRealtimePendingResponseRecovery() {
+        clearRealtimePendingResponseRecovery();
+        if (!kioskRealtimePendingResponseInterruptedBySpeech || !String(kioskRealtimePendingUser?.content || '').trim()) return;
+        kioskRealtimePendingResponseRecoveryTimer = window.setTimeout(() => {
+            kioskRealtimePendingResponseRecoveryTimer = 0;
+            recoverRealtimePendingResponseAfterNonActionableTranscript('');
+        }, 420);
+    }
+
+    function clearRealtimePendingResponseRecovery() {
+        window.clearTimeout(kioskRealtimePendingResponseRecoveryTimer);
+        kioskRealtimePendingResponseRecoveryTimer = 0;
+    }
+
     function realtimeTranscriptCanContinueWithoutWake(transcript) {
         const normalized = normalizedRealtimeTranscript(transcript);
         if (!normalized) return false;
@@ -9712,6 +9785,7 @@ export function mountHeyBeanWebApp(mount) {
         if (!raw) return;
         if (key) kioskRealtimeUserTranscriptDrafts.delete(key);
         if (realtimeTranscriptLooksSynthetic(raw)) {
+            recoverRealtimePendingResponseAfterNonActionableTranscript(raw);
             if (realtimeAssistantOutputActive()) return;
             setKioskVoiceStatus('armed', 'Say hey bean');
             return;
@@ -9729,6 +9803,9 @@ export function mountHeyBeanWebApp(mount) {
                 || realtimeUserTranscriptLooksLikeEcho(raw)
                 || (!isWakeTurn && !realtimeTranscriptCanContinueWithoutWake(raw))
             ) {
+                if (!isWakeTurn && !realtimeTranscriptCanContinueWithoutWake(raw)) {
+                    recoverRealtimePendingResponseAfterNonActionableTranscript(raw);
+                }
                 return;
             }
             if (!deferForVoiceOnlyOutput) {
@@ -9749,10 +9826,12 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         if (!isWakeTurn && !kioskConversationActive) {
+            recoverRealtimePendingResponseAfterNonActionableTranscript(raw);
             setKioskVoiceStatus('armed', 'Say hey bean');
             return;
         }
         if (!isWakeTurn && kioskConversationActive && !realtimeTranscriptCanContinueWithoutWake(raw)) {
+            recoverRealtimePendingResponseAfterNonActionableTranscript(raw);
             armKioskConversationTimeout(kioskRealtimeAwaitingFollowup ? 30000 : undefined);
             return;
         }
@@ -9773,6 +9852,8 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         kioskRealtimeAwaitingFollowup = false;
+        kioskRealtimePendingResponseInterruptedBySpeech = false;
+        clearRealtimePendingResponseRecovery();
         showKioskHeardTranscript(content, {
             allowArmed: true,
             phase: 'listening',
@@ -9948,7 +10029,7 @@ export function mountHeyBeanWebApp(mount) {
             ? Math.max(350, kioskRealtimeSuppressInputUntil - Date.now() + 350)
             : 0;
         const delayMs = Math.max(900, Number(options.delayMs || kioskRealtimeTurnDebounceMs), afterAssistantOutputDelay);
-        kioskRealtimeResponseTimer = window.setTimeout(() => {
+        kioskRealtimeResponseTimer = window.setTimeout(async () => {
             kioskRealtimeResponseTimer = 0;
             if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
             const content = String(kioskRealtimePendingUser?.content || '').trim();
@@ -9957,6 +10038,10 @@ export function mountHeyBeanWebApp(mount) {
             showRealtimePendingUserMessage();
             armRealtimeToolFallback(content);
             setKioskVoiceStatus('working', 'thinking');
+            await refreshRealtimeDashboardContextBeforeResponse(content);
+            if (!state.kioskVoiceEnabled || !kioskRealtimeConnected() || !kioskConversationActive) return;
+            if (String(kioskRealtimePendingUser?.content || '').trim() !== content) return;
+            if (kioskRealtimePendingResponseInterruptedBySpeech || kioskRealtimeResponseTimer) return;
             kioskRealtimeResponseCreateSentAt = Date.now();
             kioskRealtimeAwaitingFirstAudio = true;
             logKioskRealtimeVoiceTrace('realtime_voice_response_create_sent', {
@@ -9972,6 +10057,26 @@ export function mountHeyBeanWebApp(mount) {
                 recoverKioskRealtimeAfterSendFailure('response_create_unavailable');
             }
         }, delayMs);
+    }
+
+    async function refreshRealtimeDashboardContextBeforeResponse(content) {
+        if (!voiceCommandNeedsAgentWork(content)) return false;
+        let completed = false;
+        try {
+            completed = await Promise.race([
+                refreshRealtimeDashboardContext('dashboard_context_pre_response'),
+                sleep(240).then(() => false),
+            ]);
+        } catch (error) {
+            completed = false;
+        }
+        logKioskRealtimeVoiceTrace(completed ? 'dashboard_context_pre_response_success' : 'dashboard_context_pre_response_unavailable', {
+            summary: completed
+                ? 'Refreshed realtime dashboard context before response.'
+                : 'Realtime dashboard context was not confirmed before response.',
+            user_content: content,
+        });
+        return completed;
     }
 
     function appendRealtimeAssistantDelta(payload) {
@@ -10655,9 +10760,11 @@ export function mountHeyBeanWebApp(mount) {
         const dataChannel = kioskRealtime?.dataChannel;
         if (!kioskRealtimeConnected() || dataChannel?.readyState !== 'open') return false;
         try {
+            kioskRealtimeResponseCreateInFlight = true;
             dataChannel.send(JSON.stringify({ type: 'response.create', ...options }));
             return true;
         } catch (error) {
+            kioskRealtimeResponseCreateInFlight = false;
             reportKioskRealtimeIssue('response_create_send_failed', {
                 message: error?.message || '',
                 data_channel_state: dataChannel?.readyState || '',
@@ -10806,7 +10913,7 @@ export function mountHeyBeanWebApp(mount) {
         const text = speechTextFromAssistant(content);
         if (!text) return;
         if (!kioskConversationActive) return;
-        if (realtimeAssistantOutputActive()) {
+        if (realtimeBackgroundResultDeliveryBusy()) {
             scheduleRealtimeBackgroundResultDelivery(text, runId);
             return;
         }
@@ -10883,7 +10990,13 @@ export function mountHeyBeanWebApp(mount) {
     function scheduleRealtimeBackgroundResultDelivery(content, runId = null) {
         kioskRealtimePendingBackgroundResult = { content, runId };
         window.clearTimeout(kioskRealtimeBackgroundDeliveryTimer);
-        const wait = Math.max(350, kioskRealtimeSuppressInputUntil - Date.now() + 350);
+        const wait = Math.max(
+            350,
+            kioskRealtimeSuppressInputUntil - Date.now() + 350,
+            kioskRealtimeResponseTimer ? 650 : 0,
+            kioskRealtimeResponseCreateInFlight ? 650 : 0,
+            kioskRealtimePendingUser?.content ? 650 : 0,
+        );
         kioskRealtimeBackgroundDeliveryTimer = window.setTimeout(() => {
             kioskRealtimeBackgroundDeliveryTimer = 0;
             const pending = kioskRealtimePendingBackgroundResult;
@@ -10893,6 +11006,13 @@ export function mountHeyBeanWebApp(mount) {
         }, wait);
     }
 
+    function realtimeBackgroundResultDeliveryBusy() {
+        return realtimeAssistantOutputActive()
+            || Boolean(kioskRealtimePendingUser?.content)
+            || Boolean(kioskRealtimeResponseTimer)
+            || kioskRealtimeResponseCreateInFlight;
+    }
+
     async function refreshRealtimeDashboardContext(reason = 'dashboard_context_refresh') {
         const dataChannel = kioskRealtime?.dataChannel;
         const sessionId = kioskRealtime?.sessionId || state.session?.id;
@@ -10900,6 +11020,7 @@ export function mountHeyBeanWebApp(mount) {
         const context = await api(`/assistant/realtime/dashboard-context?session_id=${encodeURIComponent(sessionId)}`);
         const instructions = String(context?.instructions || '').trim();
         if (!instructions) return false;
+        const ack = waitForRealtimeSessionUpdateAck(240);
         dataChannel.send(JSON.stringify({
             type: 'session.update',
             session: {
@@ -10907,7 +11028,37 @@ export function mountHeyBeanWebApp(mount) {
                 instructions,
             },
         }));
-        return true;
+        const acked = await ack;
+        if (!acked) {
+            logKioskRealtimeVoiceTrace('dashboard_context_session_update_ack_timeout', {
+                summary: 'Realtime dashboard context update was sent but not acknowledged in time.',
+                reason,
+            });
+        }
+        return acked;
+    }
+
+    function waitForRealtimeSessionUpdateAck(timeoutMs = 240) {
+        completeRealtimeSessionUpdateAck(false);
+        return new Promise((resolve) => {
+            const timer = window.setTimeout(() => {
+                kioskRealtimeSessionUpdateAck = null;
+                resolve(false);
+            }, timeoutMs);
+            kioskRealtimeSessionUpdateAck = {
+                resolve: (value) => {
+                    window.clearTimeout(timer);
+                    resolve(Boolean(value));
+                },
+            };
+        });
+    }
+
+    function completeRealtimeSessionUpdateAck(value) {
+        const pending = kioskRealtimeSessionUpdateAck;
+        kioskRealtimeSessionUpdateAck = null;
+        if (!pending) return;
+        pending.resolve(value);
     }
 
     async function persistRealtimeConversationTurn() {
