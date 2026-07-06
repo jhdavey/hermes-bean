@@ -14,6 +14,7 @@ import {
     appThemesByKey,
     icons,
     subscriptionPlans,
+    systemDarkScheme,
     themeModes,
     themeModesByKey,
 } from './config.js';

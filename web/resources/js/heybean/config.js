@@ -17,7 +17,7 @@ export const themeModes = [
         { key: 'dark', label: 'Dark', detail: 'Always dark' },
     ];
 export const themeModesByKey = new Map(themeModes.map((mode) => [mode.key, mode]));
-    const systemDarkScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+export const systemDarkScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
 export const subscriptionPlans = {
         base: {
             label: 'Base',
