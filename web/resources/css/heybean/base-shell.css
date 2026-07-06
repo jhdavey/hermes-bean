@@ -171,6 +171,10 @@
     min-height: calc(100vh - 34px);
 }
 
+.heybean-app-body:has(.public-beta-banner) .hb-guided-onboarding-shell {
+    min-height: calc(100vh - 34px);
+}
+
 .hb-beta-banner:hover,
 .hb-beta-banner:focus-visible {
     background: rgba(var(--hb-accent-rgb), .86);
@@ -832,6 +836,305 @@
 
 .hb-auth-card .hb-input {
     font-size: 16px;
+}
+
+.hb-guided-onboarding-shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    justify-items: center;
+    padding: 12px 20px 220px;
+}
+
+.hb-guided-onboarding-shell-subscribe {
+    padding-bottom: 168px;
+}
+
+.hb-guided-onboarding-topbar {
+    width: min(760px, 100%);
+    display: flex;
+    justify-content: flex-start;
+    margin-bottom: 6px;
+}
+
+.hb-guided-onboarding-stage {
+    width: min(760px, 100%);
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+}
+
+.hb-guided-onboarding-thread {
+    width: min(100%, 720px);
+    max-height: calc(100vh - 260px);
+    overflow-y: auto;
+    padding: 48px 12px 24px;
+    display: grid;
+    align-content: start;
+    gap: 0;
+    scrollbar-width: none;
+}
+
+.hb-guided-onboarding-thread::-webkit-scrollbar {
+    display: none;
+}
+
+.hb-guided-message {
+    width: min(340px, 100%);
+    display: grid;
+    gap: 4px;
+    margin-bottom: 12px;
+    padding: 14px 16px;
+    border-radius: 22px;
+    border: 1px solid var(--hb-border);
+    background: var(--hb-surface2);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .02);
+}
+
+.hb-guided-message-bean {
+    justify-self: start;
+}
+
+.hb-guided-message-user {
+    justify-self: end;
+    background: color-mix(in srgb, var(--hb-accent) 12%, var(--hb-surface));
+    border-color: color-mix(in srgb, var(--hb-accent) 28%, var(--hb-border));
+}
+
+.hb-guided-message strong {
+    color: var(--hb-accent-strong);
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.hb-guided-message-user strong {
+    color: var(--hb-accent);
+}
+
+.hb-guided-message p {
+    margin: 0;
+    color: var(--hb-text);
+    font-size: 16px;
+    line-height: 1.34;
+    font-weight: 650;
+}
+
+.hb-guided-choice-panel {
+    width: min(460px, 100%);
+    display: grid;
+    gap: 10px;
+    margin: 0 0 14px;
+    padding: 14px;
+    border: 1px solid var(--hb-border);
+    border-radius: 20px;
+    background: var(--hb-surface2);
+    justify-self: start;
+}
+
+.hb-guided-choice-panel-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+}
+
+.hb-guided-choice-chip {
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--hb-border);
+    border-radius: 999px;
+    background: var(--hb-surface);
+    color: var(--hb-text);
+    font-size: 14px;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.hb-guided-choice-panel:not(.hb-guided-personality-panel):not(.hb-guided-choice-panel-row):not(.hb-guided-plan-panel) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hb-guided-choice-chip-active {
+    border-color: color-mix(in srgb, var(--hb-accent) 52%, var(--hb-border));
+    background: color-mix(in srgb, var(--hb-accent) 14%, var(--hb-surface));
+    color: var(--hb-accent-strong);
+}
+
+.hb-guided-personality-panel {
+    width: min(520px, 100%);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.hb-guided-personality-card {
+    min-height: 92px;
+    display: grid;
+    gap: 4px;
+    padding: 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    background: var(--hb-surface);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.hb-guided-personality-card:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--hb-accent) 36%, var(--hb-border));
+}
+
+.hb-guided-personality-card span {
+    color: var(--hb-text);
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.hb-guided-personality-card small {
+    color: var(--hb-muted);
+    font-size: 12px;
+    line-height: 1.3;
+    font-weight: 650;
+}
+
+.hb-guided-personality-card-active {
+    border-color: color-mix(in srgb, var(--hb-accent) 58%, var(--hb-border));
+    background: color-mix(in srgb, var(--hb-accent) 12%, var(--hb-surface));
+}
+
+.hb-guided-onboarding-composer {
+    position: fixed;
+    left: 24px;
+    right: 24px;
+    bottom: 118px;
+    z-index: 20;
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+}
+
+.hb-guided-onboarding-error {
+    max-width: 560px;
+    padding: 10px 14px;
+    border: 1px solid rgba(220, 38, 38, .26);
+    border-radius: 999px;
+    background: rgba(220, 38, 38, .10);
+    color: #b91c1c;
+    font-size: 13px;
+    font-weight: 800;
+    text-align: center;
+}
+
+.hb-guided-onboarding-input-row {
+    width: min(840px, 100%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 6px 6px 18px;
+    border: 1px solid var(--hb-border);
+    border-radius: 999px;
+    background: var(--hb-surface);
+    box-shadow: 0 18px 42px rgba(15, 23, 42, .10);
+}
+
+.hb-guided-onboarding-input {
+    min-height: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+    width: 100%;
+    font-size: 16px;
+    font-weight: 550;
+}
+
+.hb-guided-onboarding-input:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+.hb-guided-onboarding-send {
+    width: 56px;
+    min-width: 56px;
+    height: 56px;
+    min-height: 56px;
+    padding: 0;
+    border-radius: 999px;
+    font-size: 24px;
+    font-weight: 500;
+}
+
+.hb-guided-onboarding-bean-dock {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    z-index: 18;
+    width: 104px;
+    height: 104px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    transform: translateX(-50%);
+    border: 3px solid color-mix(in srgb, var(--hb-accent) 70%, #fff);
+    background: var(--hb-surface);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, .10);
+}
+
+.hb-guided-onboarding-bean-dock img {
+    width: 52px;
+    height: 52px;
+}
+
+.hb-guided-onboarding-instruction {
+    position: fixed;
+    left: 50%;
+    bottom: 238px;
+    z-index: 19;
+    transform: translateX(-50%);
+    padding: 12px 16px;
+    border: 1px solid rgba(var(--hb-accent-rgb), .30);
+    border-radius: 18px;
+    background: var(--hb-surface);
+    color: var(--hb-text);
+    font-size: 14px;
+    font-weight: 900;
+    box-shadow: 0 16px 36px rgba(15, 23, 42, .10);
+}
+
+.hb-guided-onboarding-thinking {
+    width: min(280px, 100%);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--hb-border);
+    border-radius: 22px;
+    background: var(--hb-surface2);
+    color: var(--hb-muted);
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.hb-guided-plan-panel {
+    width: min(100%, 960px);
+}
+
+.hb-guided-plan-header {
+    display: grid;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.hb-guided-plan-header strong {
+    color: var(--hb-text);
+    font-size: 16px;
+    font-weight: 900;
+}
+
+.hb-guided-plan-header span {
+    color: var(--hb-muted);
+    font-size: 13px;
+    line-height: 1.45;
+    font-weight: 650;
 }
 
 .hb-auth-card .hb-link-row {

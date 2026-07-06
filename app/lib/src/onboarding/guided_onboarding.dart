@@ -59,6 +59,7 @@ class _GuidedBeanOnboardingScreen extends StatefulWidget {
     required this.checkoutError,
     required this.onCreateAccount,
     required this.onSavePreferences,
+    required this.onLaunchLiveTour,
     required this.onSelectPlan,
     required this.onContactEnterprise,
     required this.onBackToLogin,
@@ -71,6 +72,7 @@ class _GuidedBeanOnboardingScreen extends StatefulWidget {
   final String? checkoutError;
   final _GuidedCreateAccount onCreateAccount;
   final _GuidedSavePreferences onSavePreferences;
+  final Future<void> Function() onLaunchLiveTour;
   final Future<void> Function(String plan, String billingInterval) onSelectPlan;
   final VoidCallback onContactEnterprise;
   final VoidCallback onBackToLogin;
@@ -110,7 +112,6 @@ class _GuidedBeanOnboardingScreenState
   bool _beanThinking = false;
   String? _error;
   String _billingInterval = 'monthly';
-  int _tourIndex = 0;
   int _responseVariationIndex = 0;
 
   bool get _inputLocked =>
@@ -559,19 +560,14 @@ class _GuidedBeanOnboardingScreenState
   Future<void> _startTour() async {
     setState(() {
       _step = _GuidedOnboardingStep.tour;
-      _tourIndex = 0;
+      _busy = true;
+      _error = null;
     });
-    _scrollGuidedConversationToBottom(
-      duration: const Duration(milliseconds: 220),
-    );
-  }
-
-  Future<void> _nextTour() async {
-    if (_tourIndex >= _guidedTourSteps.length - 1) {
-      await _goToPlan();
-      return;
+    try {
+      await widget.onLaunchLiveTour();
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    setState(() => _tourIndex += 1);
   }
 
   Future<void> _goToPlan({bool skipTour = false}) async {
@@ -862,12 +858,18 @@ class _GuidedBeanOnboardingScreenState
                           onSkip: () => unawaited(_goToPlan(skipTour: true)),
                         ),
                       if (_step == _GuidedOnboardingStep.tour)
-                        _GuidedTourPanel(
-                          step: _guidedTourSteps[_tourIndex],
-                          index: _tourIndex,
-                          total: _guidedTourSteps.length,
-                          enabled: !_inputLocked,
-                          onNext: () => unawaited(_nextTour()),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Center(
+                            child: SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 3,
+                                color: HeyBeanTheme.accentStrong,
+                              ),
+                            ),
+                          ),
                         ),
                       if (_step == _GuidedOnboardingStep.plan)
                         _GuidedPlanPicker(

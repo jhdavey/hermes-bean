@@ -1,4 +1,70 @@
 @media (max-width: 640px) {
+    .hb-guided-onboarding-shell,
+    .hb-guided-onboarding-shell-subscribe {
+        padding: 8px 14px 200px;
+    }
+
+    .hb-guided-onboarding-topbar,
+    .hb-guided-onboarding-stage,
+    .hb-guided-onboarding-thread {
+        width: 100%;
+    }
+
+    .hb-guided-onboarding-thread {
+        max-height: calc(100vh - 236px);
+        padding: 24px 0 16px;
+    }
+
+    .hb-guided-message,
+    .hb-guided-choice-panel,
+    .hb-guided-onboarding-thinking {
+        width: min(100%, 100%);
+    }
+
+    .hb-guided-message {
+        max-width: calc(100% - 28px);
+    }
+
+    .hb-guided-choice-panel:not(.hb-guided-personality-panel):not(.hb-guided-choice-panel-row):not(.hb-guided-plan-panel),
+    .hb-guided-personality-panel,
+    .hb-guided-choice-panel-row {
+        grid-template-columns: 1fr;
+    }
+
+    .hb-guided-onboarding-composer {
+        left: 14px;
+        right: 14px;
+        bottom: 102px;
+    }
+
+    .hb-guided-onboarding-input-row {
+        padding-left: 16px;
+    }
+
+    .hb-guided-onboarding-send {
+        width: 52px;
+        min-width: 52px;
+        height: 52px;
+        min-height: 52px;
+    }
+
+    .hb-guided-onboarding-instruction {
+        width: calc(100% - 28px);
+        bottom: 208px;
+        text-align: center;
+    }
+
+    .hb-guided-onboarding-bean-dock {
+        bottom: 14px;
+        width: 88px;
+        height: 88px;
+    }
+
+    .hb-guided-onboarding-bean-dock img {
+        width: 44px;
+        height: 44px;
+    }
+
     .hb-billing-plan-row {
         grid-template-columns: 1fr;
     }

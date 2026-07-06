@@ -7,6 +7,8 @@ class _CommandCenterHome extends StatefulWidget {
     required this.calendar,
     required this.loading,
     required this.chat,
+    this.agendaPanelKey,
+    this.chatPanelKey,
     required this.chatCollapsed,
     required this.onChatCollapsedChanged,
     required this.eventCategories,
@@ -29,6 +31,8 @@ class _CommandCenterHome extends StatefulWidget {
   final List<HermesCalendarEvent> calendar;
   final bool loading;
   final Widget chat;
+  final Key? agendaPanelKey;
+  final Key? chatPanelKey;
   final bool chatCollapsed;
   final ValueChanged<bool> onChatCollapsedChanged;
   final List<HermesEventCategory> eventCategories;
@@ -162,10 +166,13 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: _CommandCenterAgendaList(
-                items: items,
-                loading: widget.loading,
-                onItemTap: _openAgendaItem,
+              child: KeyedSubtree(
+                key: widget.agendaPanelKey,
+                child: _CommandCenterAgendaList(
+                  items: items,
+                  loading: widget.loading,
+                  onItemTap: _openAgendaItem,
+                ),
               ),
             ),
             _CommandCenterSplitDivider(
@@ -179,7 +186,9 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
             ),
             if (!widget.chatCollapsed)
               SizedBox(
-                key: const Key('command-center-chat-panel'),
+                key:
+                    widget.chatPanelKey ??
+                    const Key('command-center-chat-panel'),
                 height: chatHeight,
                 child: widget.chat,
               )

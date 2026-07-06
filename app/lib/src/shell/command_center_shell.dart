@@ -89,6 +89,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _editingAgentPreferences = false;
   bool _onboardingTourVisible = false;
   int _onboardingTourStep = 0;
+  bool _onboardingTourPendingPlanSelection = false;
+  final Map<_OnboardingTourTarget, GlobalKey> _onboardingTourTargetKeys = {
+    for (final target in _OnboardingTourTarget.values) target: GlobalKey(),
+  };
   final TextEditingController _chatInputController = TextEditingController();
   final FocusNode _chatInputFocusNode = FocusNode();
   bool _beanChatCollapsed = false;
@@ -133,7 +137,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final user = _user;
     final noteLimit = user?.planLimits.noteLimit;
     return user != null &&
-        (user.isAdmin ||
+        (_onboardingTourVisible ||
+            user.isAdmin ||
             user.planLimits.notesEnabled ||
             noteLimit == null ||
             noteLimit > 0);
@@ -190,6 +195,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _dashboardDataLoading = false;
     _onboardingTourVisible = false;
     _onboardingTourStep = 0;
+    _onboardingTourPendingPlanSelection = false;
   }
 
   void _rememberPendingTaskWrite(HermesTask task, int mutationVersion) {
@@ -2100,6 +2106,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     HermesUser? knownUser,
     bool launchedFromRememberedToken = false,
     String? loadingStatusText,
+    bool deferSignupPaywall = false,
   }) async {
     _stopDashboardChangePolling();
     final authGeneration = ++_authGeneration;
@@ -2138,7 +2145,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final user = knownUser ?? await widget.apiClient.me();
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _applyUserTheme(user);
-      if (_userNeedsSignupPaywall(user)) {
+      if (!deferSignupPaywall && _userNeedsSignupPaywall(user)) {
         setState(() {
           _user = user;
           _session = null;
@@ -2553,6 +2560,19 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return user;
   }
 
+  Future<void> _launchGuidedLiveTour() async {
+    final user = _user;
+    if (user == null) return;
+    final pendingPlanSelection = _userNeedsSignupPaywall(user);
+    await _loadSignedIn(
+      knownUser: user,
+      loadingStatusText: 'Preparing your dashboard...',
+      deferSignupPaywall: pendingPlanSelection,
+    );
+    if (!mounted || _phase != _AuthPhase.signedIn) return;
+    _showOnboardingTour(pendingPlanSelection: pendingPlanSelection);
+  }
+
   Future<void> _completeAgentOnboarding({
     required String agentPersonality,
     required List<String> onboardingPriorities,
@@ -2666,16 +2686,55 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_onboardingTourSeenPreferenceKey(user)) == true) return;
     if (!mounted || _phase != _AuthPhase.signedIn) return;
+    _showOnboardingTour();
+  }
+
+  void _showOnboardingTour({bool pendingPlanSelection = false}) {
+    _activateOnboardingTourStep(
+      0,
+      pendingPlanSelection: pendingPlanSelection,
+    );
+    if (_phase == _AuthPhase.signedIn) {
+      unawaited(
+        _loadSecondarySignedInData(
+          authGeneration: _authGeneration,
+          sessionId: _session?.id,
+        ),
+      );
+    }
+  }
+
+  void _activateOnboardingTourStep(
+    int index, {
+    bool? pendingPlanSelection,
+  }) {
+    final boundedIndex = index.clamp(0, _appOnboardingTourSteps.length - 1);
+    final step = _appOnboardingTourSteps[boundedIndex];
     setState(() {
-      _onboardingTourStep = 0;
       _onboardingTourVisible = true;
+      _onboardingTourStep = boundedIndex;
+      if (pendingPlanSelection != null) {
+        _onboardingTourPendingPlanSelection = pendingPlanSelection;
+      }
+      _selectedDestination = step.destination;
+      _clearPlanLimitError();
+      if (step.destination == _HomeDestination.bean) {
+        _beanChatCollapsed = false;
+      }
+      if (step.destination == _HomeDestination.today) {
+        _selectedCalendarDay = _dateOnly(DateTime.now());
+        _showCalendarMonth = false;
+      }
     });
   }
 
   void _advanceOnboardingTour() {
-    setState(() {
-      _onboardingTourStep = math.min(_onboardingTourStep + 1, 3);
-    });
+    final nextIndex = _onboardingTourStep + 1;
+    if (nextIndex >= _appOnboardingTourSteps.length) {
+      unawaited(_markOnboardingTourSeenAndClose());
+      return;
+    }
+    _activateOnboardingTourStep(nextIndex);
   }
 
   void _dismissOnboardingTour() {
@@ -2684,15 +2743,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _markOnboardingTourSeenAndClose() async {
     final user = _user;
+    final showPlanSelection = _onboardingTourPendingPlanSelection;
+    if (mounted) {
+      setState(() {
+        _onboardingTourVisible = false;
+        _onboardingTourStep = 0;
+        _onboardingTourPendingPlanSelection = false;
+        if (showPlanSelection) {
+          _phase = _AuthPhase.planSelection;
+          _selectedDestination = _HomeDestination.bean;
+          _beanChatCollapsed = false;
+        }
+      });
+    }
     if (user != null) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_onboardingTourSeenPreferenceKey(user), true);
     }
-    if (!mounted) return;
-    setState(() {
-      _onboardingTourVisible = false;
-      _onboardingTourStep = 0;
-    });
   }
 
   Future<HermesSessionDetails?> _loadDailySessionForUser(
@@ -6714,37 +6781,42 @@ ${_truncateDiagnostic(stack, 2200)}
               appBar: AppBar(
                 titleSpacing: 12,
                 title: _phase == _AuthPhase.signedIn
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _CalendarHeaderButton(
-                            key: const Key('calendar-today-button'),
-                            label: _calendarHeaderDayLabel(DateTime.now()),
-                            icon: null,
-                            horizontalPadding: 10,
-                            verticalPadding: 7,
-                            labelStyle: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                            ),
-                            onTap: _returnToToday,
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: _CalendarHeaderButton(
-                              key: const Key('calendar-month-chevron'),
-                              label: _calendarHeaderMonthLabel(DateTime.now()),
-                              icon: Icons.calendar_month_rounded,
+                    ? KeyedSubtree(
+                        key: _onboardingTourTargetKeys[
+                            _OnboardingTourTarget.calendarControls
+                        ],
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _CalendarHeaderButton(
+                              key: const Key('calendar-today-button'),
+                              label: _calendarHeaderDayLabel(DateTime.now()),
+                              icon: null,
                               horizontalPadding: 10,
                               verticalPadding: 7,
                               labelStyle: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
                               ),
-                              onTap: _openCurrentCalendarMonth,
+                              onTap: _returnToToday,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: _CalendarHeaderButton(
+                                key: const Key('calendar-month-chevron'),
+                                label: _calendarHeaderMonthLabel(DateTime.now()),
+                                icon: Icons.calendar_month_rounded,
+                                horizontalPadding: 10,
+                                verticalPadding: 7,
+                                labelStyle: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                                onTap: _openCurrentCalendarMonth,
+                              ),
+                            ),
+                          ],
+                        ),
                       )
                     : null,
                 actions: [
@@ -6755,11 +6827,16 @@ ${_truncateDiagnostic(stack, 2200)}
                       events: _criticalEventsForToday(_calendar),
                     ),
                     const SizedBox(width: 8),
-                    _CreateItemMenu(
-                      onCreateEvent: _showNewCalendarEventEditor,
-                      onCreateTask: _showNewTaskEditor,
-                      onCreateReminder: _showNewReminderEditor,
-                      onCreateNote: _createNoteFromTopMenu,
+                    KeyedSubtree(
+                      key: _onboardingTourTargetKeys[
+                          _OnboardingTourTarget.createMenu
+                      ],
+                      child: _CreateItemMenu(
+                        onCreateEvent: _showNewCalendarEventEditor,
+                        onCreateTask: _showNewTaskEditor,
+                        onCreateReminder: _showNewReminderEditor,
+                        onCreateNote: _createNoteFromTopMenu,
+                      ),
                     ),
                   ],
                   const SizedBox(width: 16),
@@ -6825,7 +6902,15 @@ ${_truncateDiagnostic(stack, 2200)}
               ),
             if (_onboardingTourVisible)
               _OnboardingTourOverlay(
-                step: _onboardingTourStep,
+                stepIndex: _onboardingTourStep,
+                step: _appOnboardingTourSteps[_onboardingTourStep],
+                targetKeys: _onboardingTourTargetKeys,
+                primaryLabel:
+                    _onboardingTourStep >= _appOnboardingTourSteps.length - 1
+                    ? (_onboardingTourPendingPlanSelection
+                          ? 'Plan setup'
+                          : 'Finish')
+                    : 'Next',
                 onNext: _advanceOnboardingTour,
                 onSkip: _dismissOnboardingTour,
                 onFinish: _dismissOnboardingTour,
@@ -6879,6 +6964,7 @@ ${_truncateDiagnostic(stack, 2200)}
         checkoutError: _checkoutError,
         onCreateAccount: _registerFromGuidedOnboarding,
         onSavePreferences: _saveGuidedOnboardingPreferences,
+        onLaunchLiveTour: _launchGuidedLiveTour,
         onSelectPlan: _startTrialCheckoutForInterval,
         onContactEnterprise: () {
           widget.launchExternalUrl(_enterpriseContactUrl);
@@ -7052,6 +7138,8 @@ ${_truncateDiagnostic(stack, 2200)}
     onCalendarStartHourChanged: _setCalendarStartHour,
     onCalendarEndHourChanged: _setCalendarEndHour,
     onSelectDestination: _selectDestination,
+    onboardingTourTargetKeys: _onboardingTourTargetKeys,
+    allowNotesPreview: _onboardingTourVisible,
     onTaskCompleted: _toggleTaskCompletion,
     pendingTaskIds: const <int>{},
     onTaskSaved: _createOrUpdateTask,

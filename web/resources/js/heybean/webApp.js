@@ -38,6 +38,16 @@ export function mountHeyBeanWebApp(mount) {
         authMode: initialMode,
         selectedPlan: initialSelectedPlan,
         selectedBillingInterval: initialBillingInterval,
+        guidedSignupStep: 'name',
+        guidedSignupMessages: [],
+        guidedSignupName: '',
+        guidedSignupEmail: '',
+        guidedSignupPassword: '',
+        guidedSignupThemeMode: 'light',
+        guidedSignupPersonality: '',
+        guidedSignupHomeCity: '',
+        guidedSignupError: '',
+        onboardingTourPendingSubscription: false,
         subscriptionSummary: null,
         subscriptionCheckoutStatus: new URLSearchParams(window.location.search).get('checkout') || '',
         billingCheckoutStatus: initialBillingStatus,
@@ -193,6 +203,7 @@ export function mountHeyBeanWebApp(mount) {
     let commandCenterResizeDrag = null;
     let timelineDrag = null;
     let timelineSuppressClick = false;
+    let onboardingTourLayoutFrame = 0;
     let dashboardChangeAbort = null;
     let dashboardChangeLoopActive = false;
     let dashboardRefreshTimer = 0;
@@ -296,6 +307,7 @@ export function mountHeyBeanWebApp(mount) {
     bindResponsiveCalendar();
     bindCurrentTimeTicker();
     bindDashboardRealtimeFallbacks();
+    bindOnboardingTourViewport();
     bindDeferredDashboardRenderFlush();
 
     async function boot() {
@@ -306,7 +318,8 @@ export function mountHeyBeanWebApp(mount) {
         if (state.token) {
             await loadSignedIn();
         } else {
-            state.phase = 'signedOut';
+            state.phase = initialMode === 'register' ? 'guidedOnboarding' : 'signedOut';
+            if (state.phase === 'guidedOnboarding') resetGuidedSignupState();
             render();
         }
     }
@@ -316,10 +329,11 @@ export function mountHeyBeanWebApp(mount) {
         state.error = '';
         render();
         if (!state.token) {
-            state.phase = 'signedOut';
+            state.phase = 'guidedOnboarding';
             state.authMode = 'register';
             state.notice = '';
             state.error = '';
+            resetGuidedSignupState();
             render();
             return;
         }
@@ -352,8 +366,16 @@ export function mountHeyBeanWebApp(mount) {
                 if (state.phase === 'signedIn' && state.selected === 'today' && !state.showMonth) {
                     render();
                 }
+                scheduleOnboardingTourLayout();
             }, 120);
         });
+    }
+
+    function bindOnboardingTourViewport() {
+        window.addEventListener('scroll', () => {
+            if (!state.onboardingTourActive) return;
+            scheduleOnboardingTourLayout();
+        }, true);
     }
 
     function bindCurrentTimeTicker() {
@@ -511,6 +533,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function currentThemeKey() {
+        if (state.phase === 'guidedOnboarding') return 'green';
         if (state.phase !== 'signedIn' && state.phase !== 'subscription') return 'green';
         return normalizeThemeKey(state.user?.theme);
     }
@@ -521,6 +544,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function currentThemeModeKey() {
+        if (state.phase === 'guidedOnboarding') return normalizeThemeModeKey(state.guidedSignupThemeMode);
         if (state.phase !== 'signedIn' && state.phase !== 'subscription') return 'auto';
         return normalizeThemeModeKey(state.user?.theme_mode || state.user?.themeMode);
     }
@@ -1039,6 +1063,68 @@ export function mountHeyBeanWebApp(mount) {
         return Array.isArray(value) ? value : [];
     }
 
+    function userNeedsSignupPaywall(user = state.user, subscription = state.subscriptionSummary) {
+        if (!user) return false;
+        if (user.is_admin === true || user.isAdmin === true) return false;
+        const tier = String(user.subscription_tier || user.subscriptionTier || '').trim().toLowerCase();
+        if (tier === 'enterprise') return false;
+        const status = String(
+            subscription?.status
+            || user.subscription_status
+            || user.subscriptionStatus
+            || ''
+        ).trim().toLowerCase();
+        return status !== 'active' && status !== 'trialing';
+    }
+
+    function resetGuidedSignupState(options = {}) {
+        state.guidedSignupStep = options.step || 'name';
+        state.guidedSignupMessages = normalizeList(options.messages).length
+            ? normalizeList(options.messages)
+            : [{ id: `bean-${Date.now()}`, bean: true, text: 'Hello, please enter your name below.' }];
+        state.guidedSignupName = options.name || '';
+        state.guidedSignupEmail = options.email || '';
+        state.guidedSignupPassword = '';
+        state.guidedSignupThemeMode = options.themeMode || 'light';
+        state.guidedSignupPersonality = options.personality || '';
+        state.guidedSignupHomeCity = options.homeCity || '';
+        state.guidedSignupError = options.error || '';
+        state.busy = false;
+        state.notice = options.notice || '';
+    }
+
+    function pushGuidedSignupMessage(bean, text, options = {}) {
+        state.guidedSignupMessages = [
+            ...normalizeList(state.guidedSignupMessages),
+            {
+                id: options.id || `${bean ? 'bean' : 'user'}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+                bean,
+                text,
+                masked: Boolean(options.masked),
+            },
+        ];
+    }
+
+    function guidedSignupBean(text, options = {}) {
+        pushGuidedSignupMessage(true, text, options);
+    }
+
+    function guidedSignupUser(text, options = {}) {
+        pushGuidedSignupMessage(false, text, options);
+    }
+
+    function startGuidedSignup() {
+        state.authMode = 'register';
+        state.phase = 'guidedOnboarding';
+        state.error = '';
+        state.notice = '';
+        resetGuidedSignupState({
+            themeMode: state.guidedSignupThemeMode || 'light',
+        });
+        history.pushState({}, '', '/register');
+        render();
+    }
+
     function normalizeNoteFolders(value) {
         return normalizeList(value).map((folder) => ({
             ...folder,
@@ -1305,12 +1391,18 @@ export function mountHeyBeanWebApp(mount) {
 
         mount.innerHTML = state.phase === 'signedIn'
             ? signedInMarkup()
+            : state.phase === 'guidedOnboarding'
+                ? guidedOnboardingMarkup()
             : state.phase === 'subscription'
                 ? subscriptionSignupMarkup()
                 : signedOutMarkup();
         bindCommonActions();
         if (state.phase === 'subscription') bindSubscriptionActions();
         if (state.phase === 'signedIn') bindSignedInActions();
+        if (state.phase === 'guidedOnboarding' || state.phase === 'subscription') {
+            scrollGuidedOnboardingThread();
+        }
+        scheduleOnboardingTourLayout();
         if (state.modal) {
             if (preservedModal) {
                 mount.appendChild(preservedModal);
@@ -1428,23 +1520,20 @@ export function mountHeyBeanWebApp(mount) {
         if (state.phase === 'loading') {
             return `<div class="hb-loading-screen"><div class="hb-spinner"></div><p>Loading HeyBean…</p></div>`;
         }
-        const register = state.authMode === 'register';
         const forgot = state.authMode === 'forgot';
         return `
             <div class="hb-app">
-                <main class="hb-auth-wrap ${register ? 'hb-auth-wrap-register' : ''}">
-                    ${register ? `<img class="hb-auth-register-logo" src="${escapeAttr(logoUrl)}" alt="HeyBean logo">` : ''}
-                    <section class="hb-card hb-auth-card ${register ? 'hb-auth-card-register' : ''}">
+                <main class="hb-auth-wrap">
+                    <section class="hb-card hb-auth-card">
                         <div class="hb-auth-title">
-                            ${register ? '' : `<img src="${escapeAttr(logoUrl)}" alt="">`}
+                            <img src="${escapeAttr(logoUrl)}" alt="">
                             <div>
-                                <h1>${forgot ? 'Reset password' : register ? 'Bean setup' : 'Login'}</h1>
-                                ${register ? '<p class="hb-register-intro">Create your account, choose your appearance, and set Bean preferences before plan setup.</p>' : ''}
+                                <h1>${forgot ? 'Reset password' : 'Login'}</h1>
                             </div>
                         </div>
                         ${errorMarkup(state.error)}
                         ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
-                        ${forgot ? forgotFormMarkup() : authFormMarkup(register)}
+                        ${forgot ? forgotFormMarkup() : authFormMarkup()}
                         <div class="hb-auth-links">
                             <a class="hb-button-ghost" href="/privacy">Privacy</a>
                             <a class="hb-button-ghost" href="/terms">Terms</a>
@@ -1455,9 +1544,7 @@ export function mountHeyBeanWebApp(mount) {
             </div>`;
     }
 
-    function authFormMarkup(register) {
-        if (register) return guidedSignupFormMarkup();
-
+    function authFormMarkup() {
         return `
             <form class="hb-form" data-action="login">
                 ${labelInput('Email', 'email', 'email', '', 'required autocomplete="email"')}
@@ -1466,67 +1553,6 @@ export function mountHeyBeanWebApp(mount) {
                 <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Signing in…' : 'Sign in'}</button>
                 <div class="hb-link-row">
                     <button class="hb-button-ghost" type="button" data-auth-mode="register">Create an account</button>
-                    <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
-                </div>
-            </form>`;
-    }
-
-    function guidedSignupFormMarkup() {
-        const selectedPlan = state.selectedPlan && subscriptionPlans[state.selectedPlan]
-            ? state.selectedPlan
-            : '';
-        return `
-            <form class="hb-form hb-guided-signup-form" data-action="register">
-                <div class="hb-guided-signup-progress" aria-label="Signup progress">
-                    ${['Name', 'Appearance', 'Account', 'Personality', 'Plan'].map((step, index) => `<span><strong>${index + 1}</strong>${escapeHtml(step)}</span>`).join('')}
-                </div>
-                <section class="hb-guided-signup-section">
-                    <strong>Hello, please enter your name below.</strong>
-                    ${labelInput('Name', 'name', 'text', '', 'required autocomplete="name"')}
-                </section>
-                <section class="hb-guided-signup-section">
-                    <strong>Do you prefer light or dark mode?</strong>
-                    <p>You can also choose Auto, and you can change this anytime in Appearance settings.</p>
-                    <div class="hb-theme-mode-group hb-guided-theme-mode-group" role="radiogroup" aria-label="Theme mode">
-                        ${['light', 'dark', 'auto'].map((key) => {
-                            const mode = themeModesByKey.get(key);
-                            return `
-                                <label class="hb-theme-mode-option">
-                                    <input type="radio" name="theme_mode" value="${escapeAttr(key)}" ${key === 'light' ? 'checked' : ''}>
-                                    <span>${escapeHtml(mode.label)}</span>
-                                    <small>${escapeHtml(key === 'light' ? 'Keep light mode' : mode.detail)}</small>
-                                </label>`;
-                        }).join('')}
-                    </div>
-                </section>
-                <section class="hb-guided-signup-section">
-                    <strong>What email address should I use for your account?</strong>
-                    ${labelInput('Email', 'email', 'email', '', 'required autocomplete="email"')}
-                    ${labelInput('Password', 'password', 'password', '', 'required autocomplete="new-password" minlength="12"')}
-                    ${labelInput('Confirm password', 'password_confirmation', 'password', '', 'required autocomplete="new-password" minlength="12"')}
-                    <p>Your account will be created now. Check your email to verify after signup.</p>
-                </section>
-                <section class="hb-guided-signup-section">
-                    <strong>Next, what personality type would you like me to have?</strong>
-                    <div class="hb-guided-personality-list" role="radiogroup" aria-label="Bean personality">
-                        ${guidedSignupPersonalities.map((option, index) => `
-                            <label class="hb-guided-personality-option">
-                                <input type="radio" name="agent_personality" value="${escapeAttr(option.key)}" ${index === 0 ? 'checked' : ''}>
-                                <span>${escapeHtml(option.label)}</span>
-                                <small>${escapeHtml(option.description)}</small>
-                            </label>`).join('')}
-                    </div>
-                </section>
-                <section class="hb-guided-signup-section">
-                    <strong>Optional city context</strong>
-                    <p>This helps Bean with weather related questions and local planning. You can skip it and add it later.</p>
-                    ${labelInput('City', 'home_city', 'text', '', 'autocomplete="address-level2"')}
-                </section>
-                ${selectedPlan ? `<input type="hidden" name="plan" value="${escapeAttr(selectedPlan)}">` : ''}
-                <input type="hidden" name="billing_interval" value="${escapeAttr(normalizedBillingInterval(state.selectedBillingInterval))}">
-                <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Creating account…' : 'Create account'}</button>
-                <div class="hb-link-row">
-                    <button class="hb-button-ghost hb-auth-switch-action" type="button" data-auth-mode="login"><span class="hb-auth-link-prompt">Already have an account?</span><span class="hb-auth-link-action">Sign In</span></button>
                     <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
                 </div>
             </form>`;
@@ -1545,6 +1571,434 @@ export function mountHeyBeanWebApp(mount) {
             </form>`;
     }
 
+    async function submitGuidedOnboarding(event) {
+        event.preventDefault();
+        if (state.busy) return;
+        const input = event.currentTarget.querySelector('[name="message"]');
+        const value = String(input?.value || '').trim();
+        if (!value) return;
+        if (input) input.value = '';
+        state.guidedSignupError = '';
+        render();
+        const step = state.guidedSignupStep;
+        if (step === 'name') {
+            await handleGuidedSignupName(value);
+            return;
+        }
+        if (step === 'themeMode') {
+            const key = guidedThemeModeKeyFromText(value);
+            if (!key) {
+                state.guidedSignupError = 'Choose Light, Dark, or Auto.';
+                render();
+                return;
+            }
+            selectGuidedThemeMode(key);
+            return;
+        }
+        if (step === 'email') {
+            await handleGuidedSignupEmail(value);
+            return;
+        }
+        if (step === 'password') {
+            await handleGuidedSignupPassword(value);
+            return;
+        }
+        if (step === 'personality') {
+            const personality = guidedPersonalityKeyFromText(value);
+            if (!personality) {
+                state.guidedSignupError = 'Pick one of the personality options, or type the one you want.';
+                render();
+                return;
+            }
+            selectGuidedPersonality(personality);
+            return;
+        }
+        if (step === 'location') {
+            if (guidedSignupValueIsSkip(value)) {
+                await skipGuidedLocation();
+                return;
+            }
+            state.guidedSignupError = 'Tap Allow location or Skip so Bean handles this cleanly.';
+            render();
+            return;
+        }
+        if (step === 'tourChoice') {
+            const normalized = value.toLowerCase();
+            if (/\b(yes|yeah|yep|sure|show|tour)\b/.test(normalized)) {
+                guidedSignupUser(value);
+                render();
+                await launchGuidedOnboardingTour();
+                return;
+            }
+            if (/\b(no|skip|straight|dashboard|plan)\b/.test(normalized)) {
+                guidedSignupUser(value);
+                render();
+                await goToGuidedPlan(true);
+                return;
+            }
+            state.guidedSignupError = 'Please answer yes for a quick tour, or no to go straight to plan setup.';
+            render();
+        }
+    }
+
+    async function handleGuidedSignupName(value) {
+        const name = value.trim();
+        if (name.length < 2) {
+            state.guidedSignupError = 'Please enter the name you want Bean to use.';
+            render();
+            return;
+        }
+        state.guidedSignupName = name;
+        guidedSignupUser(name);
+        guidedSignupBean(`Nice to meet you, ${name}. Do you prefer light or dark mode? You can also choose Auto, and you can change this anytime in Appearance settings.`);
+        state.guidedSignupStep = 'themeMode';
+        render();
+    }
+
+    function guidedThemeModeKeyFromText(value) {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (!normalized) return '';
+        if (['system', 'device', 'automatic'].includes(normalized)) return 'auto';
+        return ['light', 'dark', 'auto'].find((key) => key === normalized) || '';
+    }
+
+    function selectGuidedThemeMode(key) {
+        const themeMode = guidedThemeModeKeyFromText(key);
+        if (!themeMode) return;
+        state.guidedSignupThemeMode = themeMode;
+        state.guidedSignupError = '';
+        const mode = themeModesByKey.get(themeMode);
+        guidedSignupUser(mode?.label || themeMode);
+        if (themeMode === 'light') {
+            guidedSignupBean('Ok, I\'ll keep it in Light mode. What email address should I use for your account? Please text it here.');
+        } else if (themeMode === 'dark') {
+            guidedSignupBean('Dark mode it is. What email address should I use for your account? Please text it here.');
+        } else {
+            guidedSignupBean('Auto mode it is. What email address should I use for your account? Please text it here.');
+        }
+        state.guidedSignupStep = 'email';
+        render();
+    }
+
+    async function handleGuidedSignupEmail(value) {
+        const email = value.trim().toLowerCase();
+        guidedSignupUser(email);
+        if (!looksLikeGuidedSignupEmail(email)) {
+            guidedSignupBean('That email format does not look right. Please send it like name@example.com, without extra punctuation.');
+            render();
+            return;
+        }
+        state.busy = true;
+        render();
+        try {
+            const availability = await api('/auth/email-availability', { method: 'POST', body: { email } });
+            state.busy = false;
+            if (!availability.available) {
+                guidedSignupBean('That email is already taken. Please send a different email address for this account.');
+                render();
+                return;
+            }
+            state.guidedSignupEmail = availability.email;
+            guidedSignupBean('Thanks. Now text the password you would like for this account. I will mask it here.');
+            state.guidedSignupStep = 'password';
+            render();
+        } catch (_) {
+            state.busy = false;
+            guidedSignupBean('I could not check that email right now. Please try the email again in a moment.');
+            render();
+        }
+    }
+
+    function looksLikeGuidedSignupEmail(value) {
+        if (String(value || '').length > 254) return false;
+        return /^[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(String(value || ''));
+    }
+
+    async function handleGuidedSignupPassword(value) {
+        if (value.length < 12) {
+            state.guidedSignupError = 'Use at least 12 characters so your account is protected.';
+            render();
+            return;
+        }
+        state.guidedSignupPassword = value;
+        guidedSignupUser('Password saved', { masked: true });
+        state.busy = true;
+        render();
+        try {
+            const result = await api('/auth/register', {
+                method: 'POST',
+                body: {
+                    name: state.guidedSignupName,
+                    email: state.guidedSignupEmail,
+                    password: value,
+                    password_confirmation: value,
+                    theme_mode: state.guidedSignupThemeMode,
+                    ...(state.selectedPlan ? { plan: state.selectedPlan } : {}),
+                    billing_interval: normalizedBillingInterval(state.selectedBillingInterval),
+                },
+            });
+            persistToken(result.token, true);
+            state.user = result.user || null;
+            state.subscriptionSummary = null;
+            state.busy = false;
+            guidedSignupBean('Your account has been created. Check your email to verify. Next, what personality type would you like me to have?');
+            state.guidedSignupStep = 'personality';
+            render();
+        } catch (error) {
+            state.busy = false;
+            state.guidedSignupError = friendlyError(error, 'create your account');
+            render();
+        }
+    }
+
+    function guidedPersonalityKeyFromText(value) {
+        const normalized = String(value || '').toLowerCase();
+        const direct = guidedSignupPersonalities.find((option) => normalized.includes(option.key) || normalized.includes(option.label.toLowerCase().split(' ')[0]));
+        if (direct) return direct.key;
+        if (normalized.includes('balanced')) return 'balanced';
+        if (normalized.includes('coach') || normalized.includes('motivat')) return 'coach';
+        if (normalized.includes('organizer') || normalized.includes('detail')) return 'organizer';
+        if (normalized.includes('creative')) return 'creative';
+        if (normalized.includes('direct') || normalized.includes('operator')) return 'direct';
+        if (normalized.includes('gentle') || normalized.includes('companion')) return 'gentle';
+        return '';
+    }
+
+    function selectGuidedPersonality(key) {
+        const option = guidedSignupPersonalities.find((item) => item.key === key) || guidedSignupPersonalities[0];
+        state.guidedSignupPersonality = option.key;
+        guidedSignupUser(option.label);
+        guidedSignupBean('Perfect. You can also select different voices in the settings menu later. Next, can I access your location so I can see what city we are in? This helps with weather related questions and planning.');
+        state.guidedSignupStep = 'location';
+        state.guidedSignupError = '';
+        render();
+    }
+
+    function guidedSignupValueIsSkip(value) {
+        return /\b(skip|no|not now|later)\b/i.test(String(value || ''));
+    }
+
+    async function allowGuidedLocation() {
+        state.busy = true;
+        state.guidedSignupError = '';
+        render();
+        try {
+            const city = await currentGuidedCity();
+            state.guidedSignupHomeCity = city;
+            guidedSignupUser(`Shared city: ${city}`);
+            await saveGuidedSignupPreferences();
+            state.busy = false;
+            guidedSignupBean(`Thanks. I will remember ${city} for weather and local planning. Want a quick dashboard tour, or should we go straight to plan setup?`);
+            state.guidedSignupStep = 'tourChoice';
+            render();
+        } catch (error) {
+            state.busy = false;
+            state.guidedSignupError = error instanceof Error ? error.message : 'I could not read your city. You can skip this and add it later in Settings.';
+            render();
+        }
+    }
+
+    async function skipGuidedLocation() {
+        guidedSignupUser('Skip location');
+        state.guidedSignupHomeCity = '';
+        state.busy = true;
+        state.guidedSignupError = '';
+        render();
+        try {
+            await saveGuidedSignupPreferences();
+            state.busy = false;
+            guidedSignupBean('No worries. We can skip that for now. Would you like a quick tour before plan setup?');
+            state.guidedSignupStep = 'tourChoice';
+            render();
+        } catch (error) {
+            state.busy = false;
+            state.guidedSignupError = friendlyError(error, 'save your Bean preferences');
+            render();
+        }
+    }
+
+    async function saveGuidedSignupPreferences() {
+        const personality = state.guidedSignupPersonality || 'balanced';
+        const context = [
+            'Completed guided Bean signup onboarding.',
+            `Preferred Bean personality: ${signupPersonalityBaseLabel(personality)}.`,
+            state.guidedSignupHomeCity ? `City-level location: ${state.guidedSignupHomeCity}.` : '',
+        ].filter(Boolean).join(' ');
+        state.user = await api('/auth/me', {
+            method: 'PATCH',
+            body: {
+                agent_personality: personality,
+                onboarding_priorities: ['Planning', 'Reminders', 'Focus'],
+                onboarding_context: context,
+                ...(state.guidedSignupHomeCity ? { home_city: state.guidedSignupHomeCity } : {}),
+            },
+        });
+    }
+
+    async function currentGuidedCity() {
+        if (!navigator.geolocation) {
+            throw new Error('Location is not available in this browser. You can skip this and add a city later in Settings.');
+        }
+        const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: false,
+                timeout: 8000,
+                maximumAge: 300000,
+            });
+        }).catch(() => {
+            throw new Error('I could not read your city. You can skip this and add it later in Settings.');
+        });
+        const latitude = position?.coords?.latitude;
+        const longitude = position?.coords?.longitude;
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            throw new Error('I could not read your city. You can skip this and add it later in Settings.');
+        }
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`, {
+            headers: { Accept: 'application/json' },
+        }).catch(() => null);
+        const payload = response && response.ok ? await response.json().catch(() => null) : null;
+        const address = payload?.address || {};
+        const city = [address.city || address.town || address.village || address.county, address.state]
+            .filter(Boolean)
+            .map((part) => String(part).trim())
+            .filter(Boolean)
+            .slice(0, 2)
+            .join(', ');
+        if (!city) {
+            throw new Error('I could not identify your city from this location. You can skip this and add it later in Settings.');
+        }
+        return city;
+    }
+
+    async function launchGuidedOnboardingTour() {
+        if (!state.user) return;
+        state.guidedSignupStep = 'tour';
+        state.busy = true;
+        state.guidedSignupError = '';
+        render();
+        const pendingSubscription = userNeedsSignupPaywall(state.user);
+        await loadSignedIn();
+        state.busy = false;
+        state.onboardingTourPendingSubscription = pendingSubscription;
+        activateOnboardingTourStep(0);
+        render();
+    }
+
+    async function goToGuidedPlan(skipTour = false) {
+        guidedSignupBean(
+            skipTour
+                ? 'Sounds good. We will skip the tour and finish setup with your plan. Pick whichever option fits your needs.'
+                : 'That is the quick tour. Last step: choose your plan so your free trial is ready.',
+        );
+        state.phase = 'subscription';
+        state.busy = false;
+        state.guidedSignupStep = 'plan';
+        state.error = '';
+        history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
+        render();
+    }
+
+    function guidedOnboardingMarkup() {
+        const step = state.guidedSignupStep;
+        const showComposer = step !== 'tour';
+        const showInstruction = step === 'name' && normalizeList(state.guidedSignupMessages).length === 1;
+        return `
+            <div class="hb-app">
+                <main class="hb-guided-onboarding-shell">
+                    <div class="hb-guided-onboarding-topbar">
+                        <button class="hb-button-ghost" type="button" data-auth-mode="login">Login</button>
+                    </div>
+                    <section class="hb-guided-onboarding-stage">
+                        <div class="hb-guided-onboarding-thread" data-guided-thread>
+                            ${normalizeList(state.guidedSignupMessages).map((message) => guidedOnboardingMessageMarkup(message)).join('')}
+                            ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
+                            ${step === 'personality' ? guidedPersonalityPanelMarkup() : ''}
+                            ${step === 'location' ? guidedLocationPanelMarkup() : ''}
+                            ${step === 'tourChoice' ? guidedTourChoicePanelMarkup() : ''}
+                            ${step === 'tour' ? '<div class="hb-guided-onboarding-thinking"><span class="hb-spinner hb-spinner-tiny" aria-hidden="true"></span><span>Preparing your dashboard tour...</span></div>' : ''}
+                        </div>
+                    </section>
+                </main>
+                ${showInstruction ? '<div class="hb-guided-onboarding-instruction">Please hold to talk, or tap to text</div>' : ''}
+                ${showComposer ? guidedOnboardingComposerMarkup() : ''}
+                <div class="hb-guided-onboarding-bean-dock" aria-hidden="true"><img src="${escapeAttr(logoUrl)}" alt=""></div>
+            </div>`;
+    }
+
+    function guidedOnboardingMessageMarkup(message) {
+        return `
+            <article class="hb-guided-message ${message.bean ? 'hb-guided-message-bean' : 'hb-guided-message-user'}">
+                <strong>${message.bean ? 'Bean' : 'You'}</strong>
+                <p>${escapeHtml(message.masked ? '************' : message.text)}</p>
+            </article>`;
+    }
+
+    function guidedOnboardingComposerMarkup() {
+        const step = state.guidedSignupStep;
+        const hintMap = {
+            name: 'Name',
+            themeMode: 'Choose Light, Dark, or Auto...',
+            email: 'Text your email address...',
+            password: 'Text your password...',
+            personality: 'Type a personality choice...',
+            location: 'Type skip, or tap Allow location...',
+            tourChoice: 'Yes for tour, no for plan setup...',
+        };
+        return `
+            <form class="hb-guided-onboarding-composer" data-action="guided-onboarding">
+                ${state.guidedSignupError ? `<div class="hb-guided-onboarding-error">${escapeHtml(state.guidedSignupError)}</div>` : ''}
+                <div class="hb-guided-onboarding-input-row">
+                    <input
+                        class="hb-input hb-guided-onboarding-input"
+                        name="message"
+                        type="${step === 'password' ? 'password' : 'text'}"
+                        placeholder="${escapeAttr(hintMap[step] || 'Message Bean...')}"
+                        ${state.busy ? 'disabled' : ''}
+                        autocomplete="off"
+                    >
+                    <button class="hb-button hb-guided-onboarding-send" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send">↑</button>
+                </div>
+            </form>`;
+    }
+
+    function guidedThemeModePanelMarkup() {
+        return `
+            <section class="hb-guided-choice-panel" aria-label="Theme mode">
+                ${['light', 'dark', 'auto'].map((key) => {
+                    const mode = themeModesByKey.get(key);
+                    return `<button class="hb-guided-choice-chip ${state.guidedSignupThemeMode === key ? 'hb-guided-choice-chip-active' : ''}" type="button" data-guided-theme-mode="${escapeAttr(key)}">${escapeHtml(mode.label)}</button>`;
+                }).join('')}
+            </section>`;
+    }
+
+    function guidedPersonalityPanelMarkup() {
+        return `
+            <section class="hb-guided-choice-panel hb-guided-personality-panel" aria-label="Bean personality">
+                ${guidedSignupPersonalities.map((option) => `
+                    <button class="hb-guided-personality-card ${state.guidedSignupPersonality === option.key ? 'hb-guided-personality-card-active' : ''}" type="button" data-guided-personality="${escapeAttr(option.key)}">
+                        <span>${escapeHtml(option.label)}</span>
+                        <small>${escapeHtml(option.description)}</small>
+                    </button>
+                `).join('')}
+            </section>`;
+    }
+
+    function guidedLocationPanelMarkup() {
+        return `
+            <section class="hb-guided-choice-panel hb-guided-choice-panel-row">
+                <button class="hb-button" type="button" data-guided-location="allow" ${state.busy ? 'disabled' : ''}>Allow location</button>
+                <button class="hb-button-secondary" type="button" data-guided-location="skip" ${state.busy ? 'disabled' : ''}>Skip</button>
+            </section>`;
+    }
+
+    function guidedTourChoicePanelMarkup() {
+        return `
+            <section class="hb-guided-choice-panel hb-guided-choice-panel-row">
+                <button class="hb-button" type="button" data-guided-tour-choice="tour" ${state.busy ? 'disabled' : ''}>Show me</button>
+                <button class="hb-button-secondary" type="button" data-guided-tour-choice="skip" ${state.busy ? 'disabled' : ''}>Skip tour</button>
+            </section>`;
+    }
+
     function subscriptionSignupMarkup() {
         if (state.phase === 'loading') {
             return `<div class="hb-loading-screen"><div class="hb-spinner"></div><p>Loading subscription setup…</p></div>`;
@@ -1556,26 +2010,31 @@ export function mountHeyBeanWebApp(mount) {
         const subscription = state.subscriptionSummary || {};
         const status = String(subscription.status || state.user?.subscription_status || state.user?.subscriptionStatus || '').toLowerCase();
         const liveConfirmed = ['active', 'trialing'].includes(status);
+        const introMessage = confirmed
+            ? subscriptionConfirmationCopy(liveConfirmed, selectedPlan)
+            : 'Your account has been created. Check your email to verify. Next, choose the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.';
         return `
             <div class="hb-app">
-                <main class="hb-subscribe-wrap">
-                    <section class="hb-subscribe-shell">
-                        <div class="hb-subscribe-hero hb-card">
-                            <div class="hb-subscribe-brand">
-                                <img src="${escapeAttr(logoUrl)}" alt="">
-                                <span>HeyBean</span>
-                            </div>
-                            <div class="hb-subscribe-kicker">14-day free trial</div>
-                            <h1>${confirmed ? 'Your subscription is ready' : 'Choose your Bean subscription'}</h1>
-                            <p>${confirmed ? subscriptionConfirmationCopy(liveConfirmed, selectedPlan) : 'Your account has been created. Check your email to verify. Next, choose the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.'}</p>
-                            ${subscriptionProgressMarkup(confirmed ? 4 : 2)}
-                            ${errorMarkup(state.error)}
+                <main class="hb-guided-onboarding-shell hb-guided-onboarding-shell-subscribe">
+                    <div class="hb-guided-onboarding-topbar">
+                        <button class="hb-button-ghost" type="button" data-subscribe-logout>Use a different account</button>
+                    </div>
+                    <section class="hb-guided-onboarding-stage">
+                        <div class="hb-guided-onboarding-thread">
+                            <article class="hb-guided-message hb-guided-message-bean">
+                                <strong>Bean</strong>
+                                <p>${escapeHtml(introMessage)}</p>
+                            </article>
                             ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
                             ${canceled ? '<div class="hb-error"><strong>Checkout was canceled</strong><span>No charge was made. Choose a plan when you are ready to continue.</span></div>' : ''}
-                            ${confirmed ? subscriptionConfirmationMarkup(selectedPlan, subscription, liveConfirmed) : subscriptionPlanSelectionMarkup(selectedPlan)}
+                            ${errorMarkup(state.error)}
+                            <section class="hb-guided-choice-panel hb-guided-plan-panel">
+                                ${confirmed ? subscriptionConfirmationMarkup(selectedPlan, subscription, liveConfirmed) : subscriptionPlanSelectionMarkup(selectedPlan)}
+                            </section>
                         </div>
                     </section>
                 </main>
+                <div class="hb-guided-onboarding-bean-dock" aria-hidden="true"><img src="${escapeAttr(logoUrl)}" alt=""></div>
             </div>`;
     }
 
@@ -1602,13 +2061,16 @@ export function mountHeyBeanWebApp(mount) {
     function subscriptionPlanSelectionMarkup(selectedPlan) {
         const billingInterval = normalizedBillingInterval(state.selectedBillingInterval);
         return `
+            <div class="hb-guided-plan-header">
+                <strong>14-day free trial</strong>
+                <span>Billing begins after the trial and renews ${billingInterval === 'yearly' ? 'yearly' : 'monthly'} until canceled.</span>
+            </div>
             ${billingIntervalToggleMarkup(billingInterval, 'subscribe-billing-interval')}
             <div class="hb-subscribe-grid">
                 ${Object.entries(subscriptionPlans).map(([key, plan]) => subscriptionPlanCardMarkup(key, plan, key === selectedPlan)).join('')}
             </div>
             <div class="hb-subscribe-footer">
-                <p>Payment is handled securely through Stripe. Your 14-day free trial starts today, then renews ${billingInterval === 'yearly' ? 'yearly' : 'monthly'} until canceled.</p>
-                <button class="hb-button-ghost" type="button" data-subscribe-logout>Use a different account</button>
+                <p>Payment is handled securely through Stripe.</p>
             </div>`;
     }
 
@@ -1705,7 +2167,7 @@ export function mountHeyBeanWebApp(mount) {
             <div class="hb-app">
                 ${betaBannerMarkup()}
                 <header class="hb-topbar">
-                    <div class="hb-topbar-date-line">
+                    <div class="hb-topbar-date-line" data-tour-target="calendar-controls">
                         <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTopbarTime(now))}</time>
                         <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
                         <button class="hb-header-pill hb-month-pill" data-calendar-month type="button"><span>${escapeHtml(monthLabel(now))}</span></button>
@@ -1795,7 +2257,7 @@ export function mountHeyBeanWebApp(mount) {
             ? state.tasks.filter((task) => taskCompleted(task))
             : activeTopLevelTasks();
         return `
-            <section class="hb-card hb-card-pad hb-board-card">
+            <section class="hb-card hb-card-pad hb-board-card" data-tour-target="tasks-view">
                 ${sectionTitle(icons.tasks, 'Tasks', completed ? 'Completed tasks' : 'Active tasks')}
                 <div class="hb-tabs">
                     <button class="hb-chip" type="button" data-task-filter="active" aria-pressed="${!completed}">Active</button>
@@ -1809,7 +2271,7 @@ export function mountHeyBeanWebApp(mount) {
         const completed = state.reminderFilter === 'completed';
         const items = state.reminders.filter((reminder) => reminderCompleted(reminder) === completed);
         return `
-            <section class="hb-card hb-card-pad hb-board-card">
+            <section class="hb-card hb-card-pad hb-board-card" data-tour-target="reminders-view">
                 ${sectionTitle(icons.reminders, 'Reminders', completed ? 'Completed reminders' : 'Pending reminders')}
                 <div class="hb-tabs">
                     <button class="hb-chip" type="button" data-reminder-filter="pending" aria-pressed="${!completed}">Pending</button>
@@ -1838,7 +2300,7 @@ export function mountHeyBeanWebApp(mount) {
         const sections = noteListSections(notes);
         const detailOpen = state.notesDetailOpen && selected;
         return `
-            <section class="hb-notes-app ${detailOpen ? 'hb-notes-detail-open' : ''}" aria-label="Notes">
+            <section class="hb-notes-app ${detailOpen ? 'hb-notes-detail-open' : ''}" aria-label="Notes" data-tour-target="notes-view">
                 <aside class="hb-notes-folders">
                     <div class="hb-notes-sidebar-title">
                         <strong>Folders</strong>
@@ -3453,31 +3915,56 @@ export function mountHeyBeanWebApp(mount) {
 
     const onboardingTourSteps = [
         {
-            target: 'bean',
+            key: 'command-center-chat',
             title: 'Command center',
-            caption: "This is your command center. I'm always here to help, just tell me what you need, and above, you'll see today's events, tasks, and reminders.",
+            caption: "This is your command center. I'm always here to help, just tell me what you need.",
+            view: 'today',
+            selector: '[data-tour-target="command-center-chat"]',
         },
         {
-            target: 'date-month',
+            key: 'command-center-agenda',
+            title: 'Today at a glance',
+            caption: "Above the chat, you'll see today's events, tasks, and reminders in one running list.",
+            view: 'today',
+            selector: '[data-tour-target="command-center-agenda"]',
+        },
+        {
+            key: 'create-menu',
+            title: 'Create items',
+            caption: 'Use the plus button to create new events, tasks, reminders, or notes from anywhere in the app.',
+            view: 'today',
+            selector: '[data-tour-target="create-menu"]',
+        },
+        {
+            key: 'calendar-controls',
             title: 'Calendar views',
             caption: 'Calendar buttons at the top help you move between today, day view, and month view without losing your place.',
+            view: 'today',
+            selector: '[data-tour-target="calendar-controls"]',
         },
         {
-            target: 'create',
             title: 'Tasks',
             caption: 'Tasks are for things you need to complete. Bean can create them from a sentence, and you can check them off when done.',
+            view: 'tasks',
+            selector: '[data-tour-target="tasks-view"]',
         },
         {
-            target: 'critical',
             title: 'Reminders',
             caption: 'Reminders are lightweight nudges. Use them for quick time-based follow-up without cluttering your task list.',
+            view: 'reminders',
+            selector: '[data-tour-target="reminders-view"]',
         },
         {
-            target: 'notes',
             title: 'Notes',
             caption: 'Notes hold plans, lists, and longer writing. Folders keep them organized, and formatting helps structure what matters.',
+            view: 'notes',
+            selector: '[data-tour-target="notes-view"]',
         },
     ];
+
+    function onboardingTourStep(index = state.onboardingTourStep) {
+        return onboardingTourSteps[Math.min(Math.max(Number(index) || 0, 0), onboardingTourSteps.length - 1)];
+    }
 
     function onboardingTourStorageKey(user = state.user) {
         return `heybean.onboarding_tour_seen.${user?.id || 'anonymous'}`;
@@ -3501,23 +3988,52 @@ export function mountHeyBeanWebApp(mount) {
 
     function startOnboardingTourIfNeeded() {
         if (needsBeanOnboarding() || onboardingTourSeen()) return;
-        state.onboardingTourStep = 0;
-        state.onboardingTourActive = true;
+        activateOnboardingTourStep(0);
     }
 
     function closeOnboardingTour() {
         markOnboardingTourSeen();
         state.onboardingTourActive = false;
         state.onboardingTourStep = 0;
+        if (state.onboardingTourPendingSubscription) {
+            state.onboardingTourPendingSubscription = false;
+            state.phase = 'subscription';
+            state.selected = 'today';
+            history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
+        }
+        window.cancelAnimationFrame(onboardingTourLayoutFrame);
+        onboardingTourLayoutFrame = 0;
+    }
+
+    function activateOnboardingTourStep(index) {
+        const stepIndex = Math.min(Math.max(Number(index) || 0, 0), onboardingTourSteps.length - 1);
+        const step = onboardingTourStep(stepIndex);
+        state.onboardingTourStep = stepIndex;
+        state.onboardingTourActive = true;
+        state.selected = step.view;
+        clearPlanLimitError();
+        if (step.view === 'today') {
+            const now = new Date();
+            state.selectedDay = dateOnly(now);
+            resetCalendarWindow(now);
+            state.showMonth = false;
+        }
+        if (step.view === 'notes') {
+            state.notesDetailOpen = false;
+        }
     }
 
     function onboardingTourMarkup() {
         if (!state.onboardingTourActive) return '';
-        const step = onboardingTourSteps[Math.min(state.onboardingTourStep, onboardingTourSteps.length - 1)];
+        const step = onboardingTourStep();
         const isLast = state.onboardingTourStep >= onboardingTourSteps.length - 1;
         return `
-            <section class="hb-onboarding-tour hb-onboarding-tour-${escapeAttr(step.target)}" role="dialog" aria-modal="true" aria-live="polite" aria-label="HeyBean tour">
-                <div class="hb-onboarding-tour-highlight" data-tour-highlight="${escapeAttr(step.target)}" aria-hidden="true"></div>
+            <section class="hb-onboarding-tour" data-onboarding-tour-overlay role="dialog" aria-modal="true" aria-live="polite" aria-label="HeyBean tour">
+                <div class="hb-onboarding-tour-scrim" data-tour-scrim="top" aria-hidden="true"></div>
+                <div class="hb-onboarding-tour-scrim" data-tour-scrim="left" aria-hidden="true"></div>
+                <div class="hb-onboarding-tour-scrim" data-tour-scrim="right" aria-hidden="true"></div>
+                <div class="hb-onboarding-tour-scrim" data-tour-scrim="bottom" aria-hidden="true"></div>
+                <div class="hb-onboarding-tour-highlight" data-tour-highlight aria-hidden="true"></div>
                 <article class="hb-onboarding-tour-card">
                     <div class="hb-onboarding-tour-card-head">
                         <strong>${escapeHtml(step.title)}</strong>
@@ -3843,7 +4359,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function topCreateMenuMarkup() {
         return `
-            <details class="hb-create-menu" data-create-menu>
+            <details class="hb-create-menu" data-create-menu data-tour-target="create-menu">
                 <summary class="hb-icon-button hb-topbar-action hb-create-trigger" aria-label="Create new item" title="Create">${icons.add}</summary>
                 <div class="hb-create-popover">
                     <button class="hb-overflow-action" type="button" data-open-create="event">${icons.calendar}<span>New event</span></button>
@@ -3887,7 +4403,7 @@ export function mountHeyBeanWebApp(mount) {
         const chatPercent = commandCenterChatPercent();
         return `
             <section class="hb-card hb-command-center-card ${state.commandCenterChatCollapsed ? 'hb-command-center-card-collapsed' : ''}" aria-label="Bean command center" data-command-center-shell style="--hb-command-center-agenda-size:${agendaPercent}%;--hb-command-center-chat-size:${chatPercent}%">
-                <div class="hb-command-center-agenda">
+                <div class="hb-command-center-agenda" data-tour-target="command-center-agenda">
                     ${loading ? dashboardLoadingMarkup('Loading today...') : commandCenterAgendaMarkup(items)}
                 </div>
                 <div class="hb-command-center-divider hb-command-center-divider-quiet" role="separator" aria-orientation="horizontal" aria-valuemin="18" aria-valuemax="64" aria-valuenow="${Math.round(agendaPercent)}" aria-label="Resize today's list" tabindex="0" data-command-center-resizer="agenda">
@@ -3900,7 +4416,7 @@ export function mountHeyBeanWebApp(mount) {
                     <span aria-hidden="true"></span>
                     <button class="hb-command-center-toggle" type="button" data-toggle-command-center-chat aria-label="${state.commandCenterChatCollapsed ? 'Expand chat' : 'Collapse chat'}" title="${state.commandCenterChatCollapsed ? 'Expand chat' : 'Collapse chat'}">${state.commandCenterChatCollapsed ? '^' : 'v'}</button>
                 </div>
-                <div class="hb-command-center-chat ${state.commandCenterChatCollapsed ? 'hb-command-center-chat-collapsed' : ''}">${chatMarkup({ compact: true, messageListId: 'hb-command-center-chat-messages' })}</div>
+                <div class="hb-command-center-chat ${state.commandCenterChatCollapsed ? 'hb-command-center-chat-collapsed' : ''}" data-tour-target="command-center-chat">${chatMarkup({ compact: true, messageListId: 'hb-command-center-chat-messages' })}</div>
             </section>`;
     }
 
@@ -3969,6 +4485,7 @@ export function mountHeyBeanWebApp(mount) {
         shell?.style.setProperty('--hb-command-center-chat-size', `${(chatRatio * 100).toFixed(1)}%`);
         agendaDivider?.setAttribute('aria-valuenow', String(Math.round(agendaRatio * 100)));
         chatDivider?.setAttribute('aria-valuenow', String(Math.round(chatRatio * 100)));
+        scheduleOnboardingTourLayout();
     }
 
     function bindCommandCenterResize() {
@@ -5522,13 +6039,44 @@ export function mountHeyBeanWebApp(mount) {
 
     function bindCommonActions() {
         mount.querySelectorAll('[data-auth-mode]').forEach((button) => button.addEventListener('click', () => {
-            state.authMode = button.dataset.authMode;
+            const nextMode = button.dataset.authMode;
+            state.authMode = nextMode;
             state.error = '';
             state.notice = '';
-            history.pushState({}, '', state.authMode === 'register' ? '/register' : state.authMode === 'forgot' ? '/forgot-password' : '/login');
+            if (nextMode === 'register') {
+                startGuidedSignup();
+                return;
+            }
+            state.phase = 'signedOut';
+            history.pushState({}, '', nextMode === 'forgot' ? '/forgot-password' : '/login');
             render();
         }));
-        mount.querySelectorAll('form[data-action="login"], form[data-action="register"], form[data-action="forgot"]').forEach((form) => form.addEventListener('submit', submitAuth));
+        mount.querySelectorAll('form[data-action="login"], form[data-action="forgot"]').forEach((form) => form.addEventListener('submit', submitAuth));
+        mount.querySelector('[data-action="guided-onboarding"]')?.addEventListener('submit', submitGuidedOnboarding);
+        mount.querySelectorAll('[data-guided-theme-mode]').forEach((button) => button.addEventListener('click', () => {
+            if (state.busy) return;
+            selectGuidedThemeMode(button.dataset.guidedThemeMode || '');
+        }));
+        mount.querySelectorAll('[data-guided-personality]').forEach((button) => button.addEventListener('click', () => {
+            if (state.busy) return;
+            selectGuidedPersonality(button.dataset.guidedPersonality || '');
+        }));
+        mount.querySelectorAll('[data-guided-location]').forEach((button) => button.addEventListener('click', () => {
+            if (state.busy) return;
+            if (button.dataset.guidedLocation === 'allow') {
+                allowGuidedLocation();
+            } else {
+                skipGuidedLocation();
+            }
+        }));
+        mount.querySelectorAll('[data-guided-tour-choice]').forEach((button) => button.addEventListener('click', () => {
+            if (state.busy) return;
+            if (button.dataset.guidedTourChoice === 'tour') {
+                launchGuidedOnboardingTour();
+            } else {
+                goToGuidedPlan(true);
+            }
+        }));
         mount.querySelectorAll('[data-dismiss-plan-limit-error]').forEach((button) => button.addEventListener('click', () => {
             state.error = '';
             render();
@@ -5700,7 +6248,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
         });
         mount.querySelector('[data-onboarding-tour-next]')?.addEventListener('click', () => {
-            state.onboardingTourStep = Math.min(state.onboardingTourStep + 1, onboardingTourSteps.length - 1);
+            activateOnboardingTourStep(state.onboardingTourStep + 1);
             render();
         });
         mount.querySelector('[data-onboarding-tour-skip]')?.addEventListener('click', () => {
@@ -14006,6 +14554,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function notesEnabled() {
+        if (state.onboardingTourActive) return true;
         if (userIsAdmin()) return true;
         const limits = currentPlanLimits();
         const noteLimit = limits.note_limit ?? limits.noteLimit;
@@ -14453,6 +15002,79 @@ export function mountHeyBeanWebApp(mount) {
                 || document.getElementById('hb-command-center-chat-messages');
             if (scroller) scroller.scrollTop = scroller.scrollHeight;
         });
+    }
+
+    function scheduleOnboardingTourLayout() {
+        window.cancelAnimationFrame(onboardingTourLayoutFrame);
+        onboardingTourLayoutFrame = window.requestAnimationFrame(updateOnboardingTourLayout);
+    }
+
+    function scrollGuidedOnboardingThread() {
+        window.requestAnimationFrame(() => {
+            const thread = mount.querySelector('[data-guided-thread]') || mount.querySelector('.hb-guided-onboarding-thread');
+            if (!thread) return;
+            thread.scrollTop = thread.scrollHeight;
+            const input = mount.querySelector('.hb-guided-onboarding-input');
+            input?.focus?.({ preventScroll: true });
+        });
+    }
+
+    function updateOnboardingTourLayout() {
+        onboardingTourLayoutFrame = 0;
+        const overlay = mount.querySelector('[data-onboarding-tour-overlay]');
+        if (!overlay) return;
+        const highlight = overlay.querySelector('[data-tour-highlight]');
+        const topScrim = overlay.querySelector('[data-tour-scrim="top"]');
+        const leftScrim = overlay.querySelector('[data-tour-scrim="left"]');
+        const rightScrim = overlay.querySelector('[data-tour-scrim="right"]');
+        const bottomScrim = overlay.querySelector('[data-tour-scrim="bottom"]');
+        const target = mount.querySelector(onboardingTourStep().selector);
+        if (!highlight || !topScrim || !leftScrim || !rightScrim || !bottomScrim || !target) {
+            overlay.classList.add('hb-onboarding-tour-no-target');
+            return;
+        }
+
+        const rect = target.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+            overlay.classList.add('hb-onboarding-tour-no-target');
+            return;
+        }
+
+        overlay.classList.remove('hb-onboarding-tour-no-target');
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const padding = 10;
+        const left = Math.max(8, rect.left - padding);
+        const top = Math.max(8, rect.top - padding);
+        const right = Math.min(viewportWidth - 8, rect.right + padding);
+        const bottom = Math.min(viewportHeight - 8, rect.bottom + padding);
+        const width = Math.max(0, right - left);
+        const height = Math.max(0, bottom - top);
+
+        highlight.style.left = `${left}px`;
+        highlight.style.top = `${top}px`;
+        highlight.style.width = `${width}px`;
+        highlight.style.height = `${height}px`;
+
+        topScrim.style.left = '0px';
+        topScrim.style.top = '0px';
+        topScrim.style.width = `${viewportWidth}px`;
+        topScrim.style.height = `${top}px`;
+
+        leftScrim.style.left = '0px';
+        leftScrim.style.top = `${top}px`;
+        leftScrim.style.width = `${left}px`;
+        leftScrim.style.height = `${height}px`;
+
+        rightScrim.style.left = `${right}px`;
+        rightScrim.style.top = `${top}px`;
+        rightScrim.style.width = `${Math.max(0, viewportWidth - right)}px`;
+        rightScrim.style.height = `${height}px`;
+
+        bottomScrim.style.left = '0px';
+        bottomScrim.style.top = `${bottom}px`;
+        bottomScrim.style.width = `${viewportWidth}px`;
+        bottomScrim.style.height = `${Math.max(0, viewportHeight - bottom)}px`;
     }
 
     function scrollTimelineToSelected() {

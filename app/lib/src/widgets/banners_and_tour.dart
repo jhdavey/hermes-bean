@@ -274,40 +274,124 @@ class _BetaFeedbackThanksDialog extends StatelessWidget {
   );
 }
 
+enum _OnboardingTourTarget {
+  commandCenterChat,
+  commandCenterAgenda,
+  createMenu,
+  calendarControls,
+  tasksView,
+  remindersView,
+  notesView,
+}
+
+class _OnboardingTourStepConfig {
+  const _OnboardingTourStepConfig({
+    required this.title,
+    required this.caption,
+    required this.destination,
+    required this.targets,
+  });
+
+  final String title;
+  final String caption;
+  final _HomeDestination destination;
+  final List<_OnboardingTourTarget> targets;
+}
+
+const List<_OnboardingTourStepConfig> _appOnboardingTourSteps = [
+  _OnboardingTourStepConfig(
+    title: 'Command center',
+    caption:
+        "This is your command center. I'm always here to help, just tell me what you need.",
+    destination: _HomeDestination.bean,
+    targets: [_OnboardingTourTarget.commandCenterChat],
+  ),
+  _OnboardingTourStepConfig(
+    title: 'Today at a glance',
+    caption:
+        "Above the chat, you'll see today's events, tasks, and reminders in one running list.",
+    destination: _HomeDestination.bean,
+    targets: [_OnboardingTourTarget.commandCenterAgenda],
+  ),
+  _OnboardingTourStepConfig(
+    title: 'Create items',
+    caption:
+        'Use the plus button to create new events, tasks, reminders, or notes from anywhere in the app.',
+    destination: _HomeDestination.bean,
+    targets: [_OnboardingTourTarget.createMenu],
+  ),
+  _OnboardingTourStepConfig(
+    title: 'Calendar views',
+    caption:
+        'These controls bring you back to today or open the current month without losing your place.',
+    destination: _HomeDestination.today,
+    targets: [_OnboardingTourTarget.calendarControls],
+  ),
+  _OnboardingTourStepConfig(
+    title: 'Tasks',
+    caption:
+        'Tasks are for things you need to complete. Bean can create them from a sentence, and you can check them off when done.',
+    destination: _HomeDestination.tasks,
+    targets: [_OnboardingTourTarget.tasksView],
+  ),
+  _OnboardingTourStepConfig(
+    title: 'Reminders',
+    caption:
+        'Reminders are lightweight nudges. Use them for quick time-based follow-up without cluttering your task list.',
+    destination: _HomeDestination.reminders,
+    targets: [_OnboardingTourTarget.remindersView],
+  ),
+  _OnboardingTourStepConfig(
+    title: 'Notes',
+    caption:
+        'Notes hold plans, lists, and longer writing. Keep longer work here when chat needs to turn into something durable.',
+    destination: _HomeDestination.notes,
+    targets: [_OnboardingTourTarget.notesView],
+  ),
+];
+
 class _OnboardingTourOverlay extends StatelessWidget {
   const _OnboardingTourOverlay({
+    required this.stepIndex,
     required this.step,
+    required this.targetKeys,
+    required this.primaryLabel,
     required this.onNext,
     required this.onSkip,
     required this.onFinish,
   });
 
-  final int step;
+  final int stepIndex;
+  final _OnboardingTourStepConfig step;
+  final Map<_OnboardingTourTarget, GlobalKey> targetKeys;
+  final String primaryLabel;
   final VoidCallback onNext;
   final VoidCallback onSkip;
   final VoidCallback onFinish;
 
-  String get _caption => switch (step) {
-    0 => 'Hold for voice to text, or tap to type',
-    1 => 'Create new events, tasks, and reminders here',
-    2 =>
-      "Your critical count includes today's critical events, and tasks that have been marked critical, or are overdue",
-    _ => 'These will snap you back to the current day or month at any point',
-  };
+  bool get _isLast => stepIndex >= _appOnboardingTourSteps.length - 1;
 
-  String get _highlightKey => switch (step) {
-    0 => 'bean',
-    1 => 'create',
-    2 => 'critical',
-    _ => 'date-month',
-  };
+  Rect? _highlightRect() {
+    Rect? rect;
+    for (final target in step.targets) {
+      final context = targetKeys[target]?.currentContext;
+      final renderObject = context?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
+      final origin = renderObject.localToGlobal(Offset.zero);
+      final nextRect = origin & renderObject.size;
+      rect = rect == null ? nextRect : rect.expandToInclude(nextRect);
+    }
+    return rect?.inflate(10);
+  }
 
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final safe = media.padding;
     final dockBottomPadding = safe.bottom > 0 ? safe.bottom + 2 : 6.0;
-    final bottomMenuHeight = 78.0 + dockBottomPadding;
+    final bottomMenuHeight = 74.0 + dockBottomPadding;
+    final highlight = _highlightRect();
+    final borderRadius = BorderRadius.circular(24);
 
     return Positioned.fill(
       key: const Key('onboarding-tour-overlay'),
@@ -315,58 +399,33 @@ class _OnboardingTourOverlay extends StatelessWidget {
         color: Colors.transparent,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final size = constraints.biggest;
-            final topCenterY = safe.top + 28.0;
-            final highlight = switch (step) {
-              0 => Rect.fromCenter(
-                center: Offset(
-                  size.width / 2,
-                  size.height - bottomMenuHeight + 56,
-                ),
-                width: 96,
-                height: 96,
-              ),
-              1 => Rect.fromCenter(
-                center: Offset(size.width - 36, topCenterY),
-                width: 58,
-                height: 58,
-              ),
-              2 => Rect.fromCenter(
-                center: Offset(size.width - 82, topCenterY),
-                width: 58,
-                height: 58,
-              ),
-              _ => Rect.fromLTWH(
-                10,
-                safe.top + 6,
-                math.min(248, math.max(210, size.width - 128)),
-                48,
-              ),
-            };
-            final captionTop = step == 0 ? null : highlight.bottom + 18;
-            final captionBottom = step == 0
-                ? math.max(bottomMenuHeight + 92, safe.bottom + 174)
-                : null;
-
             return Stack(
               children: [
-                Positioned.fill(
-                  child: ModalBarrier(
-                    color: Colors.black.withValues(alpha: .52),
-                    dismissible: false,
+                if (highlight != null)
+                  _TourSpotlightScrim(rect: highlight, borderRadius: borderRadius)
+                else
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: .58),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-                _TourHighlight(rect: highlight, targetKey: _highlightKey),
+                if (highlight != null)
+                  _TourHighlight(rect: highlight, borderRadius: borderRadius),
                 Positioned(
                   left: 22,
                   right: 22,
-                  top: captionTop == null
-                      ? null
-                      : math.min(captionTop, size.height - 224),
-                  bottom: captionBottom,
+                  bottom: math.max(bottomMenuHeight + 18, safe.bottom + 12),
                   child: _TourCaptionCard(
-                    caption: _caption,
-                    isLast: step >= 3,
+                    title: step.title,
+                    progressLabel:
+                        '${stepIndex + 1}/${_appOnboardingTourSteps.length}',
+                    caption: step.caption,
+                    isLast: _isLast,
+                    primaryLabel: primaryLabel,
                     onNext: onNext,
                     onSkip: onSkip,
                     onFinish: onFinish,
@@ -381,22 +440,90 @@ class _OnboardingTourOverlay extends StatelessWidget {
   }
 }
 
-class _TourHighlight extends StatelessWidget {
-  const _TourHighlight({required this.rect, required this.targetKey});
+class _TourSpotlightScrim extends StatelessWidget {
+  const _TourSpotlightScrim({
+    required this.rect,
+    required this.borderRadius,
+  });
 
   final Rect rect;
-  final String targetKey;
+  final BorderRadius borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    final screen = MediaQuery.of(context).size;
+    final scrimColor = Colors.black.withValues(alpha: .58);
+    final topHeight = rect.top.clamp(0.0, screen.height);
+    final leftWidth = rect.left.clamp(0.0, screen.width);
+    final rightLeft = rect.right.clamp(0.0, screen.width);
+    final holeHeight = rect.height.clamp(0.0, screen.height);
+    final bottomTop = rect.bottom.clamp(0.0, screen.height);
+
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            height: topHeight,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: scrimColor),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            width: leftWidth,
+            top: topHeight,
+            height: holeHeight,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: scrimColor),
+            ),
+          ),
+          Positioned(
+            left: rightLeft,
+            right: 0,
+            top: topHeight,
+            height: holeHeight,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: scrimColor),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: bottomTop,
+            bottom: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: scrimColor),
+            ),
+          ),
+          Positioned.fromRect(
+            rect: rect,
+            child: DecoratedBox(
+              decoration: BoxDecoration(borderRadius: borderRadius),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TourHighlight extends StatelessWidget {
+  const _TourHighlight({required this.rect, required this.borderRadius});
+
+  final Rect rect;
+  final BorderRadius borderRadius;
 
   @override
   Widget build(BuildContext context) => Positioned.fromRect(
     rect: rect,
     child: IgnorePointer(
       child: Container(
-        key: Key('onboarding-tour-highlight-$targetKey'),
+        key: const Key('onboarding-tour-highlight'),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(
-            targetKey == 'date-month' ? 18 : 999,
-          ),
+          borderRadius: borderRadius,
           border: Border.all(color: Colors.white, width: 3),
           boxShadow: [
             BoxShadow(
@@ -413,15 +540,21 @@ class _TourHighlight extends StatelessWidget {
 
 class _TourCaptionCard extends StatelessWidget {
   const _TourCaptionCard({
+    required this.title,
+    required this.progressLabel,
     required this.caption,
     required this.isLast,
+    required this.primaryLabel,
     required this.onNext,
     required this.onSkip,
     required this.onFinish,
   });
 
+  final String title;
+  final String progressLabel;
   final String caption;
   final bool isLast;
+  final String primaryLabel;
   final VoidCallback onNext;
   final VoidCallback onSkip;
   final VoidCallback onFinish;
@@ -445,6 +578,31 @@ class _TourCaptionCard extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: HeyBeanTheme.text,
+                  decoration: TextDecoration.none,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            Text(
+              progressLabel,
+              style: TextStyle(
+                color: HeyBeanTheme.muted,
+                decoration: TextDecoration.none,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
         Text(
           caption,
           key: const Key('onboarding-tour-caption'),
@@ -470,7 +628,7 @@ class _TourCaptionCard extends StatelessWidget {
                 isLast ? 'onboarding-tour-finish' : 'onboarding-tour-next',
               ),
               onPressed: isLast ? onFinish : onNext,
-              child: Text(isLast ? 'Finish' : 'Next'),
+              child: Text(primaryLabel),
             ),
           ],
         ),

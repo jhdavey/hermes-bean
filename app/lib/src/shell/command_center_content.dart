@@ -42,6 +42,8 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
     required this.onSelectDestination,
+    required this.onboardingTourTargetKeys,
+    required this.allowNotesPreview,
     required this.onTaskCompleted,
     required this.pendingTaskIds,
     required this.onTaskSaved,
@@ -118,6 +120,8 @@ class _CommandCenterContent extends StatelessWidget {
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
   final ValueChanged<_HomeDestination> onSelectDestination;
+  final Map<_OnboardingTourTarget, GlobalKey> onboardingTourTargetKeys;
+  final bool allowNotesPreview;
   final Future<void> Function(HermesTask task) onTaskCompleted;
   final Set<int> pendingTaskIds;
   final Future<void> Function(
@@ -281,6 +285,7 @@ class _CommandCenterContent extends StatelessWidget {
         );
         final noteLimit = user.planLimits.noteLimit;
         final notesEnabled =
+            allowNotesPreview ||
             user.isAdmin ||
             user.planLimits.notesEnabled ||
             noteLimit == null ||
@@ -312,18 +317,21 @@ class _CommandCenterContent extends StatelessWidget {
             onEventCategorySaved: onEventCategorySaved,
             onEventCategoryDeleted: onEventCategoryDeleted,
           ),
-          _HomeDestination.tasks => _TaskListCard(
-            tasks: tasks,
-            pastTasks: pastTasks,
-            loading: dashboardDataLoading,
-            eventCategories: eventCategories,
-            pendingTaskIds: pendingTaskIds,
-            onTaskCompleted: onTaskCompleted,
-            onTaskSaved: onTaskSaved,
-            onTaskDeleted: onTaskDeleted,
-            onEventCategorySaved: onEventCategorySaved,
-            workspaces: user.workspaces,
-            activeWorkspaceId: user.activeWorkspace?.id,
+          _HomeDestination.tasks => KeyedSubtree(
+            key: onboardingTourTargetKeys[_OnboardingTourTarget.tasksView],
+            child: _TaskListCard(
+              tasks: tasks,
+              pastTasks: pastTasks,
+              loading: dashboardDataLoading,
+              eventCategories: eventCategories,
+              pendingTaskIds: pendingTaskIds,
+              onTaskCompleted: onTaskCompleted,
+              onTaskSaved: onTaskSaved,
+              onTaskDeleted: onTaskDeleted,
+              onEventCategorySaved: onEventCategorySaved,
+              workspaces: user.workspaces,
+              activeWorkspaceId: user.activeWorkspace?.id,
+            ),
           ),
           _HomeDestination.bean => _CommandCenterHome(
             tasks: tasks,
@@ -331,6 +339,10 @@ class _CommandCenterContent extends StatelessWidget {
             calendar: calendar,
             loading: dashboardDataLoading,
             chat: beanPanel,
+            agendaPanelKey:
+                onboardingTourTargetKeys[_OnboardingTourTarget.commandCenterAgenda],
+            chatPanelKey:
+                onboardingTourTargetKeys[_OnboardingTourTarget.commandCenterChat],
             chatCollapsed: beanChatCollapsed,
             onChatCollapsedChanged: onBeanChatCollapsedChanged,
             eventCategories: eventCategories,
@@ -347,29 +359,36 @@ class _CommandCenterContent extends StatelessWidget {
             onEventCategorySaved: onEventCategorySaved,
             onEventCategoryDeleted: onEventCategoryDeleted,
           ),
-          _HomeDestination.reminders => _ReminderListCard(
-            reminders: reminders,
-            loading: dashboardDataLoading,
-            eventCategories: eventCategories,
-            onReminderSaved: onReminderSaved,
-            onReminderCompleted: onReminderCompleted,
-            onReminderDeleted: onReminderDeleted,
-            onEventCategorySaved: onEventCategorySaved,
-            workspaces: user.workspaces,
-            activeWorkspaceId: user.activeWorkspace?.id,
+          _HomeDestination.reminders => KeyedSubtree(
+            key:
+                onboardingTourTargetKeys[_OnboardingTourTarget.remindersView],
+            child: _ReminderListCard(
+              reminders: reminders,
+              loading: dashboardDataLoading,
+              eventCategories: eventCategories,
+              onReminderSaved: onReminderSaved,
+              onReminderCompleted: onReminderCompleted,
+              onReminderDeleted: onReminderDeleted,
+              onEventCategorySaved: onEventCategorySaved,
+              workspaces: user.workspaces,
+              activeWorkspaceId: user.activeWorkspace?.id,
+            ),
           ),
           _HomeDestination.notes =>
             notesEnabled
-                ? _NotesView(
-                    folders: noteFolders,
-                    notes: notes,
-                    workspaces: user.workspaces,
-                    activeWorkspaceId: user.activeWorkspace?.id,
-                    openNoteId: noteToOpenId,
-                    onFolderCreated: onNoteFolderCreated,
-                    onFolderDeleted: onNoteFolderDeleted,
-                    onNoteSaved: onNoteSaved,
-                    onNoteDeleted: onNoteDeleted,
+                ? KeyedSubtree(
+                    key: onboardingTourTargetKeys[_OnboardingTourTarget.notesView],
+                    child: _NotesView(
+                      folders: noteFolders,
+                      notes: notes,
+                      workspaces: user.workspaces,
+                      activeWorkspaceId: user.activeWorkspace?.id,
+                      openNoteId: noteToOpenId,
+                      onFolderCreated: onNoteFolderCreated,
+                      onFolderDeleted: onNoteFolderDeleted,
+                      onNoteSaved: onNoteSaved,
+                      onNoteDeleted: onNoteDeleted,
+                    ),
                   )
                 : _PlanLimitErrorBanner(
                     message:

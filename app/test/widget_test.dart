@@ -3838,27 +3838,64 @@ void main() {
     await tester.tap(find.byKey(const Key('guided-tour-start')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('guided-tour-next')), findsOneWidget);
-    expect(find.byKey(const Key('guided-tour-panel-skip')), findsNothing);
+    expect(find.byKey(const Key('onboarding-tour-overlay')), findsOneWidget);
+    expect(find.byKey(const Key('guided-tour-next')), findsNothing);
     expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
     expect(find.text('Command center'), findsOneWidget);
+    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+    expect(
+      find.text(
+        "This is your command center. I'm always here to help, just tell me what you need.",
+      ),
+      findsOneWidget,
+    );
     final tourNext = tester.widget<FilledButton>(
-      find.byKey(const Key('guided-tour-next')),
+      find.byKey(const Key('onboarding-tour-next')),
     );
     expect(tourNext.onPressed, isNotNull);
+    expect(find.byKey(const Key('signup-plan-base')), findsNothing);
 
-    await tester.tap(find.byKey(const Key('guided-tour-next')));
-    await tester.pump(const Duration(milliseconds: 120));
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
     expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
     await tester.pumpAndSettle();
-    expect(find.text('Calendar views'), findsOneWidget);
+    expect(find.text('Today at a glance'), findsOneWidget);
+    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
 
-    for (var i = 0; i < 4; i++) {
-      await tester.ensureVisible(find.byKey(const Key('guided-tour-next')));
-      await tester.tap(find.byKey(const Key('guided-tour-next')));
-      await tester.pumpAndSettle();
-    }
-    await tester.pump(const Duration(seconds: 6));
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Create items'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Calendar views'), findsOneWidget);
+    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Tasks are for things you need to complete.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('tasks-view')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Reminders are lightweight nudges.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('reminders-view')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Notes hold plans, lists, and longer writing.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('notes-view')), findsOneWidget);
+    expect(find.byKey(const Key('onboarding-tour-finish')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-finish')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('signup-plan-base')), findsOneWidget);
@@ -12044,6 +12081,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   }) async {
     registeredUsers.add({'name': name, 'email': email, 'password': password});
     bearerToken = 'fake-token';
+    currentSubscriptionStatus = 'incomplete';
     return HermesAuthResult(
       token: 'fake-token',
       user: _user(name: name, email: email, subscriptionStatus: 'incomplete'),
