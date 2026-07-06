@@ -4908,8 +4908,8 @@ export function mountHeyBeanWebApp(mount) {
                         ${criticalToggleMarkup(item)}
                         ${editing && !taskParentId(item) ? `<button class="hb-button-ghost hb-inline-action" type="button" data-create-subtask="${item.id}">Add sub-task</button>` : ''}
                     `) : ''}
-                    ${isEvent ? formSectionMarkup('Event details', 'Location, notes, and status', eventDetailFieldsMarkup(item)) : ''}
-                    ${formSectionMarkup('Organize', 'Category, color, and workspace', `
+                    ${isEvent ? formSectionMarkup('', '', eventDetailFieldsMarkup(item)) : ''}
+                    ${formSectionMarkup(isEvent ? '' : 'Organize', isEvent ? '' : 'Category, color, and workspace', `
                         <div class="hb-field-row hb-compact-field-row">
                             ${categorySelectMarkup(item)}
                             ${labelInput('Color', 'color', 'color', itemColor(item))}
@@ -4918,7 +4918,7 @@ export function mountHeyBeanWebApp(mount) {
                         ${!isReminder && !isTask ? criticalToggleMarkup(item) : ''}
                     `)}
                     ${workspaceConnectionsMarkup(kind, item, workspaceId, editing)}
-                    ${formSectionMarkup('Repeat', 'Make this repeat when it should come back', recurrenceFieldsMarkup(kind, item))}
+                    ${formSectionMarkup(isEvent ? '' : 'Repeat', isEvent ? '' : 'Make this repeat when it should come back', recurrenceFieldsMarkup(kind, item))}
                     ${isEvent ? eventReminderFieldsMarkup() : ''}
                     <div class="hb-modal-actions">
                         ${editing ? `<button class="hb-button-danger" type="button" data-modal-delete="${kind}" data-id="${item.id}">Delete</button>` : ''}
@@ -4930,12 +4930,15 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function formSectionMarkup(title, subtitle, content) {
+        const heading = title || subtitle
+            ? `<div class="hb-form-section-head">
+                    ${title ? `<strong>${escapeHtml(title)}</strong>` : ''}
+                    ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ''}
+                </div>`
+            : '';
         return `
             <section class="hb-form-section">
-                <div class="hb-form-section-head">
-                    <strong>${escapeHtml(title)}</strong>
-                    ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ''}
-                </div>
+                ${heading}
                 <div class="hb-form-section-body">${content}</div>
             </section>`;
     }
@@ -5011,7 +5014,7 @@ export function mountHeyBeanWebApp(mount) {
             [120, '2 hours before'],
             [1440, '1 day before'],
         ];
-        return formSectionMarkup('Create reminder', 'Optionally remind me before this event or every event in this series', `
+        return formSectionMarkup('', '', `
             <label class="hb-switch-row hb-form-switch">
                 <input type="checkbox" name="createEventReminder" data-event-reminder-toggle>
                 <span><strong>Create reminder</strong><small>Reminder timing follows this event's repeat pattern.</small></span>
@@ -5095,12 +5098,15 @@ export function mountHeyBeanWebApp(mount) {
         const allWorkspaces = workspaces();
         const sourceWorkspace = allWorkspaces.find((workspace) => String(workspace.id) === sourceWorkspaceId);
         const title = kind === 'event' ? 'Connections' : 'Workspaces';
+        const heading = kind === 'event'
+            ? ''
+            : `<div class="hb-form-section-head">
+                    <strong>${title}</strong>
+                    <span>Choose where this item belongs</span>
+                </div>`;
         return `
             <section class="hb-form-section hb-event-connections hb-workspace-picker" data-workspace-picker>
-                <div class="hb-form-section-head">
-                    <strong>${title}</strong>
-                    <span>${kind === 'event' ? 'Workspace sync and Google Calendar export' : 'Choose where this item belongs'}</span>
-                </div>
+                ${heading}
                 <div class="hb-form-section-body">
                 <label class="hb-label">Primary workspace
                     <select class="hb-select" name="workspaceId" data-primary-workspace-select ${editing ? 'disabled' : ''}>
