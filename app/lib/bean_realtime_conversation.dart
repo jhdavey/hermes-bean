@@ -917,6 +917,10 @@ class BeanRealtimeConversation {
     if (raw.isEmpty || _transcriptLooksSynthetic(raw)) return;
     final command = _commandAfterWakePhrase(raw);
     if (!_conversationActive && command == null) return;
+    final visibleDraft = (command ?? raw).trim();
+    if (visibleDraft.isNotEmpty) {
+      onTranscript?.call('user_draft', visibleDraft);
+    }
     onStatus?.call('listening');
   }
 
@@ -1349,9 +1353,7 @@ class BeanRealtimeConversation {
     _lastAssistantText = text;
     _firstAssistantSignalAt ??= DateTime.now();
     _recordSpokenSegment(text);
-    if (!_voiceOnlyAssistant) {
-      onTranscript?.call('assistant', text);
-    }
+    onTranscript?.call('assistant', text);
   }
 
   void _handleAssistantAudioDone(Map<String, Object?> payload) {

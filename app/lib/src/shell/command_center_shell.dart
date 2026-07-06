@@ -1689,6 +1689,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         if (!mounted || text.trim().isEmpty) return;
         setState(() {
           final trimmed = text.trim();
+          if (role == 'user_draft') {
+            _beanVoiceDraft = trimmed;
+            _chatRunState = 'Listening';
+            return;
+          }
           if (role == 'user') {
             final command = _normalizedVoiceCommand(trimmed);
             if (_beanVoiceListening && _voiceCommandIsCancel(command)) {
